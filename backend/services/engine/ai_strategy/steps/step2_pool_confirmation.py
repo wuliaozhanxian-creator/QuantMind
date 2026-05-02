@@ -194,15 +194,31 @@ def _execute_raw_selection_sql(sql: str) -> tuple[list[PoolItem], date | None]:
         # 强制清除 LLM 可能生成的 LIMIT 限制，确保返回足够多的股票
         normalized_sql = re.sub(r"limit\s+\d+", "", normalized_sql, flags=re.IGNORECASE).strip()
         max_rows = _query_pool_limit()
-        if not normalized_sql.lower().endswith(f"limit {max_rows}"):
-            normalized_sql += f" LIMIT {max_rows}"
 
         with get_db() as session:
             target_columns = _get_table_columns(session, target_table)
             hs300_col = _resolve_hs300_column(target_columns)
             normalized_sql = _normalize_index_flag_columns(normalized_sql, hs300_col)
 
+            # 获取最新交易日期
             as_of_date = session.execute(text(f"select max(trade_date) from {target_table}")).scalar()
+
+            # 如果 SQL 中没有 WHERE 子句，添加日期筛选
+            # 如果有 WHERE 子句，在 WHERE 后添加日期条件
+            if "where" not in normalized_sql.lower():
+                normalized_sql = normalized_sql.rstrip(";").rstrip() + f" WHERE trade_date = '{as_of_date}'"
+            else:
+                # 在现有 WHERE 子句后添加日期条件
+                normalized_sql = re.sub(
+                    r"\bWHERE\b",
+                    f"WHERE trade_date = '{as_of_date}' AND ",
+                    normalized_sql,
+                    flags=re.IGNORECASE
+                )
+
+            # 添加 LIMIT
+            if not normalized_sql.lower().endswith(f"limit {max_rows}"):
+                normalized_sql += f" LIMIT {max_rows}"
 
             result = session.execute(text(normalized_sql)).fetchall()
 
