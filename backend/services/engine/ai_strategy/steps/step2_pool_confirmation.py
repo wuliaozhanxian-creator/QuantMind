@@ -73,12 +73,15 @@ def _get_table_columns(session, table_name: str) -> set[str]:
 
 
 def _resolve_hs300_column(columns: set[str]) -> str:
+    """解析沪深300指数成分列名，优先使用 idx_hs300。"""
+    if "idx_hs300" in columns:
+        return "idx_hs300"
     if "is_hs300" in columns:
         return "is_hs300"
     if "is_csi300" in columns:
         return "is_csi300"
     # 回退默认值，保持兼容
-    return "is_hs300"
+    return "idx_hs300"
 
 
 def _normalize_index_flag_columns(sql: str, hs300_col: str) -> str:
@@ -270,10 +273,15 @@ def _query_stock_pool(
             where_clauses = ["trade_date = :d"]
 
             # 3. 翻译 DSL 条件
-            flag_cols = {"is_st", "is_hs300", "is_csi300", "is_csi1000"}
+            # stock_daily_latest 表中的指数/概念标签列
+            flag_cols = {
+                "is_st", "idx_hs300", "idx_zz500", "idx_zz1000",
+                "idx_margin", "idx_chinext", "idx_all",
+                "concept_ai", "concept_chip", "concept_new_energy",
+            }
             for idx, cond in enumerate(conditions):
                 col = _map_factor(cond["factor"])
-                if col in {"is_hs300", "is_csi300"}:
+                if col in {"idx_hs300", "is_hs300", "is_csi300"}:
                     col = hs300_col
                 param_key = f"p{idx}"
                 op = "=" if cond["op"] == "==" else cond["op"]
@@ -303,13 +311,13 @@ def _query_stock_pool(
             # 5. 执行最终查询 (全量返回，最高支持 10000 只股票)
             sql = f"""
             SELECT
-                code as symbol,
+                symbol,
                 stock_name as name,
                 total_mv as market_cap,
                 pe_ttm as pe_ratio,
                 pb as pb_ratio,
                 close,
-                turnover,
+                amount,
                 volume
             FROM {LATEST_TABLE}
             WHERE {final_where}
@@ -399,7 +407,7 @@ def _is_full_market_query(text: str) -> bool:
 
 def _build_full_market_sql() -> str:
     return (
-        "SELECT code as symbol, stock_name as name, close, total_mv as market_cap, pe_ttm as pe_ratio\n"
+        "SELECT symbol, stock_name as name, close, total_mv as market_cap, pe_ttm as pe_ratio\n"
         "FROM stock_daily_latest"
     )
 
