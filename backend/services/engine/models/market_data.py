@@ -16,10 +16,10 @@ class MarketDataDaily(Base):
     - 增强字段 (8):  b_volume/s_volume/market_value/retindex/clsindex/rv/bv/risk_premium1
     - 兼容字段 (1):  features JSONB（保留，向后兼容旧数据管道）
     """
-    __tablename__ = "market_data_daily"
+    __tablename__ = "stock_daily_latest"
 
     # 复合主键
-    date = Column(Date, primary_key=True, nullable=False, comment="交易日期")
+    trade_date = Column(Date, primary_key=True, nullable=False, comment="交易日期")
     symbol = Column(String(32), primary_key=True, nullable=False, comment="股票代码 (e.g. sh600519)")
 
     # ── 基础行情字段 ─────────────────────────────────────────────────────────

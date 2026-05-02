@@ -417,12 +417,12 @@ def run_strategy_backtest_loop(self, task_id: str, request_payload: dict[str, An
         )
         raise
 @celery_app.task(
-    name="engine.tasks.sync_market_data_daily_task",
+    name="engine.tasks.sync_stock_daily_latest_task",
     max_retries=0,
 )
-def sync_market_data_daily_task(target_date: str | None = None, max_symbols: int = 0, apply: bool = True) -> dict[str, Any]:
+def sync_stock_daily_latest_task(target_date: str | None = None, max_symbols: int = 0, apply: bool = True) -> dict[str, Any]:
     """
-    Celery 任务：从 Baostock 同步基础行情到 market_data_daily。
+    Celery 任务：从 Baostock 同步基础行情到 stock_daily_latest。
     解决 Admin UI 手动触发时的 Gateway Timeout 问题。
     """
     import subprocess
@@ -658,7 +658,7 @@ def get_data_status_task() -> dict[str, Any]:
 
     db_info = {"trade_date": trade_date, "latest_trade_date": None, "latest_updated_at": None, "today_rows": 0, "feature_column_count": 0}
 
-    # feature_snapshots 检测（替代 market_data_daily）
+    # feature_snapshots 检测（替代 stock_daily_latest）
     feature_snapshots_info: dict[str, Any] = {
         "exists": False,
         "snapshot_dir": str(Path(os.getcwd()) / "db" / "feature_snapshots"),

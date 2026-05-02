@@ -44,7 +44,7 @@ class WebSocketService {
   private url: string;
   private status: WebSocketStatus = WebSocketStatus.DISCONNECTED;
   private reconnectAttempts = 0;
-  private reconnectDelay = 30000;
+  private reconnectDelay = 3000;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private manualDisconnect = false;
   private heartbeatInterval: ReturnType<typeof setInterval> | null = null;

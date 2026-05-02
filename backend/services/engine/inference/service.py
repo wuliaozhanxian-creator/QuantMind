@@ -6,7 +6,7 @@ import logging
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
@@ -16,6 +16,7 @@ from .data_adapter import DataAdapter
 from .history_buffer import HistoryBuffer
 from .model_loader import ModelLoader
 from .neutralizer import Neutralizer
+from backend.shared.stock_utils import StockCodeUtil
 
 logger = logging.getLogger(__name__)
 
@@ -232,7 +233,7 @@ class InferenceService:
                 raise ValueError(f"feature dim mismatch: got {seq_arr.shape[2]}, expect {len(feature_columns)}")
             raw_symbols = data.get("symbols") or []
             if isinstance(raw_symbols, list) and len(raw_symbols) == seq_arr.shape[0]:
-                symbols = [str(s) for s in raw_symbols]
+                symbols = [StockCodeUtil.to_prefix(str(s)) for s in raw_symbols]
             else:
                 symbols = [f"SEQ_{i}" for i in range(seq_arr.shape[0])]
         else:

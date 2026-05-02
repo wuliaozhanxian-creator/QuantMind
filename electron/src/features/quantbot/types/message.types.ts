@@ -30,7 +30,7 @@ export interface MessageAttachment {
   file_name?: string;
   file_size?: number;
   content_type?: string;
-  copaw_path?: string;
+  file_path?: string;
   uploaded_at?: string;
 }
 

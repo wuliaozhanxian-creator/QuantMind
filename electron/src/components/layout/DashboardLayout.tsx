@@ -4,7 +4,6 @@ import { selectCurrentTab } from '../../store/slices/aiStrategySlice';
 import { ModuleGrid } from './ModuleGrid';
 import { NewBacktestCenterPage } from '../../pages/NewBacktestCenterPage';
 import UserCenterPage from '../../features/user-center/pages/UserCenterPage';
-import { CommunityHub } from '../community/CommunityHub';
 import RealTradingPage from '../../pages/trading/RealTradingPage';
 import QuantBotPage from '../../features/quantbot/pages/QuantBotPage';
 import { MarketWeatherBackground } from './MarketWeatherBackground';
@@ -16,7 +15,6 @@ interface DashboardLayoutProps {
 
 export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ modules, onLayoutChange }) => {
   const activeTab = useSelector(selectCurrentTab);
-  const isCommunityTab = activeTab === 'community';
 
   console.log('DashboardLayout: 当前activeTab', activeTab);
   console.log('DashboardLayout: 渲染内容区域，activeTab =', activeTab);
@@ -46,12 +44,6 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ modules, onLay
         return (
           <div className="w-full h-full">
             <RealTradingPage />
-          </div>
-        );
-      case 'community':
-        return (
-          <div className="w-full h-full flex items-center justify-center">
-            <CommunityHub />
           </div>
         );
       case 'profile':

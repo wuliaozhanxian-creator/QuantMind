@@ -515,32 +515,33 @@ const RealTradingPage: React.FC = () => {
 
                     {/* Bottom Help Center + Mode Switch */}
                     <div className="p-4 border-t border-gray-200 relative">
-                        <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center justify-between gap-1">
                             <a
                                 href="https://www.quantmindai.cn/help"
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="inline-flex items-center justify-center w-11 h-11 rounded-2xl text-gray-600 hover:text-blue-600 hover:bg-blue-50 transition-colors"
-                                title="帮助中心"
+                                className="inline-flex items-center gap-1 px-2 py-2 rounded-xl text-gray-600 hover:text-blue-600 hover:bg-blue-50 transition-colors flex-shrink-0"
+                                title="查看操作手册与帮助文档"
                             >
-                                <HelpCircle className="w-5 h-5" />
+                                <HelpCircle size={16} className="text-gray-600" />
+                                <span className="text-[11px] font-black text-gray-600 tracking-tight whitespace-nowrap">帮助中心</span>
                             </a>
                             <button
                                 onClick={() => handleModeSwitch(tradingMode === 'simulation' ? 'real' : 'simulation')}
-                                className="flex items-center gap-2 px-3 py-2.5 rounded-2xl border border-gray-200 text-gray-600 hover:text-blue-600 hover:border-blue-200 hover:bg-blue-50 transition-colors"
+                                className="flex items-center gap-1.5 px-2 py-2 rounded-xl border border-gray-200 text-gray-600 hover:text-blue-600 hover:border-blue-200 hover:bg-blue-50 transition-colors flex-shrink-0"
                                 title="切换实盘/模拟盘"
                             >
-                                <span className="text-sm whitespace-nowrap">
-                                    {tradingMode === 'simulation' ? '模拟盘' : '实盘'}
+                                <span className="text-xs font-bold whitespace-nowrap">
+                                    {tradingMode === 'simulation' ? '模拟' : '实盘'}
                                 </span>
                                 <span
-                                    className={`relative inline-flex items-center h-5 w-9 rounded-full transition-colors duration-200 ${
+                                    className={`relative inline-flex items-center h-4 w-7 rounded-full transition-colors duration-200 ${
                                         tradingMode === 'simulation' ? 'bg-blue-600' : 'bg-gray-300'
                                     }`}
                                 >
                                     <span
-                                        className={`inline-block w-3.5 h-3.5 rounded-full bg-white shadow transform transition-transform duration-200 ${
-                                            tradingMode === 'simulation' ? 'translate-x-[18px]' : 'translate-x-[3px]'
+                                        className={`inline-block w-2.5 h-2.5 rounded-full bg-white shadow transform transition-transform duration-200 ${
+                                            tradingMode === 'simulation' ? 'translate-x-[14px]' : 'translate-x-[2px]'
                                         }`}
                                     />
                                 </span>
@@ -688,8 +689,24 @@ const RealTradingPage: React.FC = () => {
                                         label: (
                                             <div className="flex items-center gap-2">
                                                 <span className="text-sm font-medium">{item.label}</span>
-                                                <Tag color={item.ok ? 'success' : 'error'}>
-                                                    {item.ok ? '通过' : '阻断'}
+                                                <Tag color={(() => {
+                                                    if (!item.ok) return 'error';
+                                                    if (preflightMode === 'SIMULATION' && (
+                                                        item.message?.includes('观察态') || 
+                                                        item.message?.includes('observe_only') ||
+                                                        item.details?.trading_permission === 'observe_only'
+                                                    )) return 'warning';
+                                                    return 'success';
+                                                })()}>
+                                                    {(() => {
+                                                        if (!item.ok) return '阻断';
+                                                        if (preflightMode === 'SIMULATION' && (
+                                                            item.message?.includes('观察态') || 
+                                                            item.message?.includes('observe_only') ||
+                                                            item.details?.trading_permission === 'observe_only'
+                                                        )) return '警告';
+                                                        return '通过';
+                                                    })()}
                                                 </Tag>
                                             </div>
                                         ),
@@ -748,8 +765,24 @@ const RealTradingPage: React.FC = () => {
                                         label: (
                                             <div className="flex items-center gap-2">
                                                 <span className="text-sm">{item.label}</span>
-                                                <Tag color={item.ok ? 'success' : (item.required ? 'error' : 'warning')}>
-                                                    {item.ok ? '通过' : (item.required ? '阻断' : '警告')}
+                                                <Tag color={(() => {
+                                                    if (!item.ok) return item.required ? 'error' : 'warning';
+                                                    if (preflightMode === 'SIMULATION' && (
+                                                        item.message?.includes('观察态') || 
+                                                        item.message?.includes('observe_only') ||
+                                                        item.details?.trading_permission === 'observe_only'
+                                                    )) return 'warning';
+                                                    return 'success';
+                                                })()}>
+                                                    {(() => {
+                                                        if (!item.ok) return item.required ? '阻断' : '警告';
+                                                        if (preflightMode === 'SIMULATION' && (
+                                                            item.message?.includes('观察态') || 
+                                                            item.message?.includes('observe_only') ||
+                                                            item.details?.trading_permission === 'observe_only'
+                                                        )) return '警告';
+                                                        return '通过';
+                                                    })()}
                                                 </Tag>
                                             </div>
                                         ),

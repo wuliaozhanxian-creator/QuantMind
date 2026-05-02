@@ -9,12 +9,12 @@ import {
   LineChart,
   MessagesSquare,
   Orbit,
+  Search,
   ShieldCheck,
   SquareTerminal
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useSelector } from 'react-redux';
-import { useCapabilities } from '../../hooks/useCapabilities';
 
 interface FloatingNavBarProps {
   current?: string;
@@ -30,9 +30,8 @@ interface NavItemConfig {
 export const FloatingNavBar: React.FC<FloatingNavBarProps> = ({ current, onChange }) => {
   const user = useSelector((state: any) => state.auth.user);
   const isAdmin = user?.is_admin || false;
-  const { hasFeature, isOSS } = useCapabilities();
 
-  const allNavItems: NavItemConfig[] = [
+  const navItems: NavItemConfig[] = [
     { id: 'dashboard', label: '仪表盘', icon: LayoutDashboard },
     { id: 'strategy', label: '智能策略', icon: LineChart },
     { id: 'ai-ide', label: 'AI-IDE', icon: SquareTerminal },
@@ -40,18 +39,10 @@ export const FloatingNavBar: React.FC<FloatingNavBarProps> = ({ current, onChang
     { id: 'backtest', label: '回测中心', icon: FlaskConical },
     { id: 'agent', label: 'QuantBot', icon: Orbit },
     { id: 'model-registry', label: '模型管理', icon: Boxes },
+    { id: 'research', label: '投研平台', icon: Search },
     { id: 'trading', label: '实盘交易', icon: ArrowLeftRight },
-    { id: 'community', label: '策略社区', icon: MessagesSquare },
     { id: 'profile', label: '个人中心', icon: CircleUserRound }
   ];
-
-  // 根据版本功能过滤
-  const navItems = allNavItems.filter(item => {
-    if (item.id === 'community' && !hasFeature('community')) return false;
-    // 实盘交易在 OSS 版由于缺乏行情也暂且隐藏或标注
-    // if (item.id === 'trading' && isOSS) return false;
-    return true;
-  });
 
   if (isAdmin) {
     navItems.push({ id: 'admin', label: '后台管理', icon: ShieldCheck });
@@ -59,7 +50,7 @@ export const FloatingNavBar: React.FC<FloatingNavBarProps> = ({ current, onChang
 
   const groupedNavItems: NavItemConfig[][] = [
     navItems.filter((item) => ['dashboard', 'strategy', 'ai-ide', 'model-training', 'backtest'].includes(item.id)),
-    navItems.filter((item) => ['agent', 'model-registry', 'trading', 'community'].includes(item.id)),
+    navItems.filter((item) => ['agent', 'model-registry', 'research', 'trading'].includes(item.id)),
     navItems.filter((item) => ['profile', 'admin'].includes(item.id))
   ].filter((group) => group.length > 0);
 
@@ -92,9 +83,10 @@ export const FloatingNavBar: React.FC<FloatingNavBarProps> = ({ current, onChang
                         <motion.div
                           animate={{
                             scale: isActive ? 1.08 : 1,
-                            y: isActive ? -1 : 0,
+                            y: isActive ? -2 : 0,
                             color: isActive ? 'var(--primary-blue)' : 'var(--slate-600)'
                           }}
+                          whileHover={{ scale: 1.15, y: -4 }}
                           transition={{ type: 'spring', stiffness: 320, damping: 22 }}
                           className="flex flex-col items-center gap-1"
                         >

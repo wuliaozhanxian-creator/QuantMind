@@ -29,7 +29,7 @@ export interface SessionAttachment {
   file_name: string;
   file_size: number;
   content_type: string;
-  copaw_path: string;
+  file_path: string;
   uploaded_at?: string;
 }
 
@@ -42,7 +42,7 @@ export interface OpenClawHealthResponse {
       status: 'healthy' | 'degraded' | 'unhealthy';
       latency_ms?: number;
     };
-    copaw: {
+    qwenpaw: {
       status: 'healthy' | 'degraded' | 'unhealthy' | 'unreachable';
       latency_ms?: number;
       error?: string | null;
@@ -584,7 +584,7 @@ class QuantBotApiService {
         service: 'openclaw-gateway',
         components: {
           api: { status: 'unhealthy' },
-          copaw: { status: 'unreachable', error: 'health request failed' },
+          qwenpaw: { status: 'unreachable', error: 'health request failed' },
         },
       };
     }

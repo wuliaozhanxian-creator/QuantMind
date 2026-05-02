@@ -9,7 +9,7 @@ import {
   MessageOutlined 
 } from '@ant-design/icons';
 import { motion, AnimatePresence } from 'framer-motion';
-import { CopawClient, ChatMessage, ChatSession } from '../../services/copaw-client';
+import { QwenPawClient, ChatMessage, ChatSession } from '../../services/qwenpaw-client';
 
 const { TextArea } = Input;
 
@@ -26,13 +26,13 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ userId }) => {
   const [currentChatId, setCurrentChatId] = useState<string | undefined>();
   const [isInitializing, setIsInitializing] = useState(true);
   
-  const clientRef = useRef(new CopawClient(userId));
+  const clientRef = useRef(new QwenPawClient(userId));
   const scrollRef = useRef<HTMLDivElement>(null);
   const messagesRef = useRef<ChatMessage[]>([]);
 
   // 初始化
   useEffect(() => {
-    clientRef.current = new CopawClient(userId);
+    clientRef.current = new QwenPawClient(userId);
     initData();
   }, [userId]);
 

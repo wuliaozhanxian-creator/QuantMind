@@ -16,9 +16,9 @@
 - `api` 代理到 `trade`：`/api/v1/orders/*`、`/api/v1/trades/*`、`/api/v1/portfolios/*`、`/api/v1/simulation/*`、`/api/v1/real-trading/*`。
 - `api` 代理到 `trade`：已补充 `/api/v1/internal/strategy/*`（用于 Agent 下载与内部策略网关转发）。
 - `OpenClaw` 旧后端模块已下线：`quantmind-api` 不再挂载历史 `/api/openclaw/*` 本地路由。
-- 当前测试接入方式：`quantmind-api` 新增 QuantBot 适配层，对前端统一暴露 `/api/v1/openclaw/*`，由网关转发到 `COPAW_BASE_URL`。当前代码默认值与生产建议值均为容器网络地址 `http://quantbot:8088`，避免回退到历史外网端口。
+- 当前测试接入方式：`quantmind-api` 新增 CoPaw 适配层，对前端统一暴露 `/api/v1/openclaw/*`，由网关转发到 `COPAW_BASE_URL`。当前代码默认值与生产建议值均为容器网络地址 `http://copaw:8088`，避免回退到历史外网端口。
 - 当前测试范围仅包含聊天、会话、历史消息与健康检查；不接入 cron jobs、模型、技能、工具、工作空间等管理能力。
-- 当前测试阶段不配置上游访问密钥，若后续 QuantBot 增加鉴权，统一在网关适配层补充，不由前端直连处理。
+- 当前测试阶段不配置上游访问密钥，若后续 CoPaw 增加鉴权，统一在网关适配层补充，不由前端直连处理。
 - 官网联系表单 `POST /api/v1/inquiry` 已直连 `quantmind-api`，提交内容会落到 `data/inquiries.json`，无需额外部署 website-server。
 - 管理员仪表盘 `GET /api/v1/admin/dashboard/metrics` 现会聚合 `quantmind-api`、`quantmind-trade`、`quantmind-engine`、`quantmind-stream` 的真实 `/health` 状态生成 `health_score`，并结合 API 启动时间计算 `uptime_days`；如探测全部失败则降级为 `0` 分和 `degraded` 状态。
 - 禁止范围：`api` 不直接承载计算引擎、交易撮合与行情推送实现。
@@ -80,9 +80,13 @@
 - 新增管理员预测查询接口：
   - `GET /api/v1/admin/models/predictions`：按预测日/租户/用户/run_id 查询预测批次；
   - `GET /api/v1/admin/models/predictions/{run_id}`：查看批次内 symbol 分数明细。
+- 2026-04-20 管理端预测查询口径切换：
+  - `GET /api/v1/admin/models/predictions` 已统一读取 `qm_model_inference_runs`（与用户“推理中心”一致），支持按 `prediction_date / inference_date / tenant_id / user_id / run_id / model_id / status` 过滤；
+  - 不传 `tenant_id/user_id` 时默认可查看管理员权限范围内全部用户推理批次；
+  - `GET /api/v1/admin/models/predictions/{run_id}` 与 `/export` 统一按 `run_id(+tenant_id/user_id/date)` 拉取批次，并从 `engine_signal_scores` 输出 symbol 明细。
 - “明日信号生成”触发入口统一为两种：管理员手动触发 `POST /api/v1/admin/models/run-inference` 与 Celery Beat 08:55 自动兜底（`engine.tasks.auto_inference_if_needed`）。
 - `run-inference` 返回体新增标准字段：`fallback_used`、`fallback_reason`、`failure_stage`，用于标记是否走 alpha158 兜底及失败阶段。
-- `run-inference` 返回体补充字段：`active_model_id`、`active_data_source`，用于标记本次实际生效模型与数据源（`model_qlib/db/qlib_data` 或 `alpha158/db/Alpha158_bin`）。
+- `run-inference` 返回体补充字段：`active_model_id`、`active_data_source`，用于标记本次实际生效模型与数据源（`model_qlib/db/qlib_data` 或 `alpha158/db/qlib_data`）。
 - 管理仪表盘 `GET /api/v1/admin/dashboard/metrics` 在空库/缺表场景下会自动降级为 0 指标，避免后台页面出现 500 与连带的浏览器 CORS 误报。
 - 新增特征字典接口：`GET /api/v1/admin/models/feature-catalog`，优先读取 `qm_feature_set_*` 注册表（`qm_feature_category/qm_feature_definition/qm_feature_set_version/qm_feature_set_item`），若注册表不可用则回退 `config/features/model_training_feature_catalog_v1.json`。
 - 短信发送失败错误语义增强：`/api/v1/sms/send` 与 `/api/v1/users/me/phone/send-code` 在短信 SDK/配置缺失时返回 `503` 且给出明确错误（如“短信服务依赖未安装”），避免统一 400 导致排障困难。
@@ -92,6 +96,12 @@
 - 管理端推理交易日历接入（2026-04-07）：
   - `GET /api/v1/admin/models/precheck-inference` 与 `POST /api/v1/admin/models/run-inference` 已改为通过交易日历中心解析 `data_trade_date/prediction_trade_date`；
   - 返回新增 `requested_inference_date`、`calendar_adjusted`，用于标记候选日期是否被自动校正为最近交易日。
+
+## 用户态模型推理更新（2026-04-27）
+
+- `POST /api/v1/models/inference/run` 在推理成功后会同步计算当前模型“近30天方向正确率”，并写入 `qm_model_inference_runs.result_json.recent_direction_accuracy`。
+- 统计口径保持轻量：按历史已完成批次逐日取 Top20 排名标的，使用 `prediction_trade_date -> 下一交易日` 的收盘方向做多数判定，再汇总最近 30 个可评估交易日的正确率。
+- Celery 自动生产批次与用户手动推理已统一回写该字段，避免“推理中心”和“自动生产批次”展示口径分裂。
 
 ## 管理端训练任务更新（2026-04-03）
 
@@ -116,6 +126,41 @@
 - 训练页前端请求已按后端契约统一，不再提交旧字段 `selectedFeatures/timePeriods/params`，避免字段口径不一致导致训练任务使用默认参数或空特征。
 - 训练状态查询 `GET /api/v1/models/training-runs/{run_id}`（及 admin 同名接口）已支持合并回测 Redis 实时日志快照：容器运行期的增量日志与进度优先从 Redis 读取，避免仅依赖 DB 尾日志导致“进度卡住”。
 
+## 投研聚合接口（2026-04-30）
+
+- 新增用户态投研聚合接口：
+  - `GET /api/v1/research/overview`
+  - `GET /api/v1/research/candidates/{symbol}?run_id=...`
+- 接口直接读取 `qm_research_candidate_snapshot`，不再要求前端自行拼接 `qm_model_inference_runs / engine_signal_scores / stock_*` 多张表。
+- `overview` 会统一返回当前用户隔离范围内的模型列表、批次列表、候选摘要、行业/概念过滤项以及候选明细，适合作为投研平台首页的 BFF 聚合入口。
+- 所有查询均按 `tenant_id + user_id` 强制隔离，避免不同用户之间看到彼此候选池。
+- 当前排序字段支持：`score/latest_change/amount/turnover_rate/consecutive_limit_up_days/updated_at`。
+- `overview` 返回体新增 `pagination(limit/offset/returned/total/hasMore)`，前端可直接使用总量与翻页元信息构建分页或“加载更多”。
+- `overview` 候选明细新增稳定排名回填逻辑：当 `score_rank` 为空时，接口会按当前排序实时计算 `display_rank`（`row_number + offset`）并回传给前端，避免列表出现 `#0`。
+- `overview` 的 `latestChange` 已统一为“百分比口径”返回：若库内是小数（如 `0.199823`），接口会标准化为 `19.9823`，前端显示不再出现 `0.20%` 与实际 `20%` 偏差。
+- `stock_daily_latest` 联表已兼容新快照结构（2026-05-01）：
+  - 连接键优先使用 `symbol`，同时兼容 `SH/SZ` 前缀与裸代码；
+  - 成交额字段使用 `amount`（不再依赖旧字段 `turnover`）；
+  - `rsi` 回填口径改为 `rsi_14 -> rsi_6`；
+  - 对快照表不存在的旧字段（如 `code/concept_tags/city/is_hs300/is_csi1000`）统一使用安全默认值，避免查询报错导致投研列表空白。
+- `overview` 模型列表显示口径修复（2026-05-01）：
+  - `models[].name` 优先读取 `qm_user_models.metadata_json.display_name/model_name`，用于前端“研究模型”下拉与标题展示真实模型名称；
+  - 当元数据缺失时，才回退到 `model_id` 的人类可读格式。
+- `overview` 数值单位口径修复（2026-05-01）：
+  - 候选明细 `marketCap` 统一按“亿元”返回，修复 `total_mv` 误按“万元”换算导致前端总市值筛选误杀的问题；
+  - 候选明细 `amount` 统一按“亿元”返回，并兼容输入已是“亿元”或“元”两种来源口径。
+- `overview` 概念/指数筛选增强（2026-05-01）：
+  - 概念筛选项 `filters.concepts` 改为按当前用户候选快照实时聚合，不再返回空数组占位；
+ - 新增指数筛选项 `filters.indices`，当前由 `stock_daily_latest` 的指数归属标签聚合生成；
+  - 新增查询参数 `indices`（可重复传参），并在候选过滤阶段与 `concepts` 一起生效；
+  - 候选明细补充 `conceptTags/indexTags`，便于前端回显标签与做二次过滤。
+ - 投研轻量接口与简称兜底（2026-05-02）：
+  - 新增 `GET /api/v1/research/models`（仅返回模型列表）与 `GET /api/v1/research/runs?model_id=...`（仅返回批次列表），用于前端首屏快速加载，避免 `overview` 重查询阻塞模型下拉；
+  - `overview`/候选详情中的 `stock_name` 为空时，会使用 `data/stocks/stocks_index.json` 做 symbol/code 映射兜底，修复部分股票仅显示代码不显示简称的问题。
+- 投研候选池查询性能修复（2026-05-02）：
+  - `stock_daily_latest` 联表条件改为直接使用 `sdl.symbol = 转换后的快照 symbol`，避免 `UPPER(sdl.symbol)` 使 `symbol/trade_date` 索引失效；
+  - 修复 `GET /api/v1/research/universe?run_id=...` 在 2600+ 候选批次上耗时数分钟、导致前端 30 秒超时的问题。
+
 ## 用户态模型训练闭环（2026-04-04）
 
 - 新增用户态训练主入口（登录态可访问）：
@@ -134,6 +179,7 @@
   - `label_formula`、`effective_trade_date`、`training_window`
   - `early_stopping_rounds`
   - `context(initial_capital/benchmark/commission_rate/slippage/deal_price)`
+    - `deal_price` 默认值已从 `close` 调整为 `open`（2026-04-28），以统一训练与快速回测的默认成交口径；
   - `explain(enable_shap/shap_split/shap_sample_rows)`（默认 `true/valid/30000`，`shap_sample_rows` 范围 `1000~100000`）
   - `feature_categories`、`generated_at`
 - 训练编排器 `config.yaml` 已新增 `label/context/early_stopping_rounds` 配置，并将回调地址切换到用户态路径 `/api/v1/models/training-runs/{run_id}/complete`。
@@ -164,6 +210,8 @@
 - 自动推理配置已服务端持久化；前端只负责读写和展示，不再依赖 `localStorage` 保存正式配置。
 - `POST /api/v1/models/inference/run` 现会先完成用户态模型解析，再将 `resolved_model` 透传给引擎执行器，避免后台线程里再次发起异步 DB 解析导致 500。
 - 管理员手动推理入口 `POST /api/v1/admin/models/run-inference` 也同步采用同样的 `resolved_model` 透传方式，避免 `run_in_executor` + `asyncio.run()` 的事件循环冲突。
+- 修复（2026-04-20）：`POST /api/v1/models/inference/run` 在 `use_default_model=true` 且未显式传 `model_id` 时，不再将默认模型回填为显式 ID 解析；改为走默认模型链路解析，确保产出的 `model_source` 为 `user_default`（而非 `explicit_model_id`），与自动托管就绪度口径一致。
+- 修复（2026-04-20）：当 `POST /api/v1/models/inference/run` 显式传入 `model_id`，且该 ID 实际就是当前默认模型时，接口会将来源口径归一为 `user_default`，避免“手动推理覆盖最新批次后自动托管误判为非生产批次”。
 - 推理返回值中若缺少 `model_source/effective_model_id`，API 会自动回退到已解析的模型上下文，保证返回契约稳定。
 - `model_qlib` / LightGBM 推理脚本属于运行时依赖，模型推理 / 训练 / runner 统一使用 `quantmind-ml-runtime:latest`。
 
@@ -194,6 +242,22 @@
   - `GET/PUT/DELETE /api/v1/admin/models/user-models/strategy-bindings/{strategy_id}`
 - 训练镜像回调契约更新为结构化对象（`metrics/artifacts/summary/metadata/error`），并继续兼容旧字段归一化。
 - 新增迁移脚本：`scripts/migrate_user_model_registry.py`（建表+索引+存量用户 `model_qlib` 回填）。
+
+## 个人中心默认资产同步（2026-04-17）
+
+- 用户注册（邮箱/手机号）成功后，`AuthService` 会自动补齐个人中心默认资产：
+  - 策略模板：固定同步前 10 个系统模板（按模板加载顺序）；
+  - 系统模型：补齐 `alpha158` 与 `model_qlib` 两个模型记录（展示名分别为 `Alpha158_Base`、`Qlib_Base_Signal`）。
+- 存量用户同步策略：
+  - 登录成功后同样会执行一次幂等补齐，确保历史账号自动追平默认资产。
+  - 策略列表接口 `GET /api/v1/strategies` 在无筛选参数时也会触发模板补齐（幂等）。
+- 新增全量补齐脚本（一次性运维）：
+  - `backend/services/api/scripts/sync_user_personal_center_assets.py`
+  - 执行方式：
+    ```bash
+    source .venv/bin/activate
+    python backend/services/api/scripts/sync_user_personal_center_assets.py
+    ```
 
 ## 社区关注关系更新（2026-03-09）
 - 社区路由新增作者关注接口：
@@ -256,17 +320,21 @@ python backend/services/api/scripts/build_stock_index.py
   - `POST /api/v1/api-keys/qmt-agent/bootstrap`
   - `POST /api/v1/api-keys/{access_key}/rotate-secret`
 - `bootstrap` 为幂等接口：若当前用户已有默认交易 Key，则返回最新一条 `access_key`；仅首次创建时返回明文 `secret_key`。
+- `GET /api/v1/api-keys` 与 `POST /api/v1/api-keys/qmt-agent/bootstrap` 响应已增加 `is_default_for_qmt` 字段，用于前端明确标记“实盘连接中心当前默认跟随的 Key”，避免多 Key 场景下仅靠名称推断。
+- `GET /api/v1/api-keys` 与 `POST /api/v1/api-keys/qmt-agent/bootstrap` 现支持返回当前用户可见的 `secret_key`（从 `api_keys.secret_ciphertext` 解密得到），用于“其他设置/实盘连接中心”直接展示最新私钥，减少重复重置。
+- 由于历史数据只保存 `secret_hash` 不可逆，旧 key 若未写入 `secret_ciphertext` 将无法回溯明文；该类 key 需手动重置一次，后续即可长期直接展示。
+- 数据库变更脚本：`scripts/db_init/add_api_keys_secret_ciphertext.sql`（幂等）。
 - `rotate-secret` 会重置指定 `access_key` 的 `secret_key`，前端只在本次响应中展示一次。
 
-## OpenClaw QuantBot 接入（2026-03-18）
-- 新增 `backend/services/api/routers/quantbot_proxy.py`：QuantBot 适配代理路由，通过 `httpx` 将前端请求转发到 `COPAW_BASE_URL`。生产环境通过 `docker-compose.server.yml` 显式注入 `http://quantbot:8088`。
+## OpenClaw CoPaw 接入（2026-03-18）
+- 新增 `backend/services/api/routers/copaw_proxy.py`：CoPaw 适配代理路由，通过 `httpx` 将前端请求转发到 `COPAW_BASE_URL`。生产环境通过 `docker-compose.server.yml` 显式注入 `http://copaw:8088`。
 - 对外暴露 `/api/v1/openclaw/*` 共 11 个接口：`/chat`、`/push-messages`、`/sessions`（CRUD）、`/files/upload`、`/files`、`/files/{session_id}/{file_id}`、`/health`。
-- `/api/v1/openclaw/chat` 当前直接透传 QuantBot 的 SSE 响应给前端；前端不再依赖短轮询窗口模拟”流式”。
-- `/api/v1/openclaw/health` 当前固定返回 `components.api` 与 `components.quantbot` 两段状态，前端不再依赖兼容分支推断网关或上游状态。
-- QuantBot 附件上传不走 COS，而是直接写入 `COPAW_SHARED_FILES_DIR` 指向的共享目录，并向 QuantBot 传递容器内可见路径 `COPAW_SHARED_VISIBLE_DIR/...`。
-- 生产环境推荐将 `quantbot-data` volume 同时挂载到 `quantmind-api:/quantbot-shared` 与 `quantbot:/app/working`，保证 QuantBot 可直接读取用户上传的 PDF、Word、Excel、PPT、CSV、TXT、Markdown 等文件。
+- `/api/v1/openclaw/chat` 当前直接透传 CoPaw 的 SSE 响应给前端；前端不再依赖短轮询窗口模拟“流式”。
+- `/api/v1/openclaw/health` 当前固定返回 `components.api` 与 `components.copaw` 两段状态，前端不再依赖兼容分支推断网关或上游状态。
+- QuantBot 附件上传不走 COS，而是直接写入 `COPAW_SHARED_FILES_DIR` 指向的共享目录，并向 CoPaw 传递容器内可见路径 `COPAW_SHARED_VISIBLE_DIR/...`。
+- 生产环境推荐将 `copaw-data` volume 同时挂载到 `quantmind-api:/copaw-shared` 与 `copaw:/app/working`，保证 CoPaw 可直接读取用户上传的 PDF、Word、Excel、PPT、CSV、TXT、Markdown 等文件。
 - 当前测试阶段启用范围：聊天、会话管理、历史消息、健康检查；不接入 cron jobs、模型、技能、工具、工作空间等管理能力。
-- 测试阶段不配置上游访问密钥；如 QuantBot 后续增加鉴权，统一在 `quantbot_proxy.py` 适配，不由前端承担。
+- 测试阶段不配置上游访问密钥；如 CoPaw 后续增加鉴权，统一在 `copaw_proxy.py` 适配，不由前端承担。
 - 相关环境变量：`COPAW_BASE_URL`、`COPAW_CHANNEL`（默认 `console`）、`COPAW_TIMEOUT_SECONDS`（默认 `60`）、`COPAW_SHARED_FILES_DIR`（默认 `/copaw-shared`）、`COPAW_SHARED_VISIBLE_DIR`（默认 `/app/working`）、`OPENCLAW_MAX_FILE_SIZE_BYTES`（默认 `52428800`）。
 
 ## 管理端数据管理（2026-03-20）

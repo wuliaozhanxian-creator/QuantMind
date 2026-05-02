@@ -5,6 +5,18 @@
 ## 说明
 - 归属路径：electron\src\pages
 - 修改本目录代码后请同步更新本 README
+- `ResearchPlatformPage.tsx` 已接入真实投研聚合接口 `GET /api/v1/research/overview`：模型/批次/候选/摘要/行业概念筛选项均由后端返回，页面保留本地 mock 作为接口异常时的降级兜底；同时候选列表已按后端 `pagination` 元信息展示总量与返回条数。
+- `ResearchPlatformPage.tsx` 模型下拉已对齐模型管理数据源：优先使用用户模型元数据中的 `display_name/model_name` 显示友好名称，不再直接展示 `mdl_train_*` 原始模型 ID。
+- `ResearchPlatformPage.tsx` 的“行情量能”筛选区间已收敛为：`成交额 0-10 亿`、`换手率 0-30%`；对应快速模板中的区间参数也已同步压缩到同一范围内，避免模板切换后出现越界值。
+- `ResearchPlatformPage.tsx` 的候选列表展示已微调：排名列去除 `#` 前缀；“信号”列从表格中移除；“成交额”改为按“万元”显示且不保留小数位（原始数据为元）。
+- `ResearchPlatformPage.tsx` 右侧“社区发布预览”模块已整体移除，不再展示标题建议、摘要建议与导出/保存操作按钮。
+- `ResearchPlatformPage.tsx` 左侧条件区已新增高覆盖字段筛选（`PB`、`总市值`、`流通市值`、`上市天数`、`3日收益率`、`10/20日乖离`、`RSI14`、`20日量比`），并新增“高级筛选（低覆盖字段）”开关承载 `PE(TTM)` 等低覆盖口径，默认关闭以避免误过滤。
+- `ResearchPlatformPage.tsx` 交互修复（2026-05-01）：候选表列宽与横向滚动已加大并统一 `whitespace-nowrap`，避免数值列换行；详情弹窗的 `ROE` 增加异常值保护（超出合理区间显示 `-`），同时 K 线请求前统一将代码规范化为 `000001.SZ/600000.SH` 口径，修复“无 K 线数据”问题。
+- `ResearchPlatformPage.tsx` 快速模板阈值已按 `docs/stock_daily_latest_field_stats.md` 放宽：`白马蓝筹` 调整为 ROE≥5 且总市值≥80 亿，`低位反弹` 调整为 20 日乖离≤-0.03 且 RSI≤45，避免模板口径过严导致 0 命中。
+- `ResearchPlatformPage.tsx` 的量化研究条件默认值已统一为“全量候选”宽松口径，避免初始进入页面时被成交额、换手率、ROE、PB、市值、乖离等隐藏条件预先过滤；候选池市值与主力流入也改为尊重后端已标准化单位，避免重复除以 `1e8`。
+- `ResearchPlatformPage.tsx` 的股票详情弹窗已将“量化研究结论”改为“量化研究指标”，只展示模型分数、连板天数、成交额、换手率、涨跌幅、收益、行业、概念、指数、市值等客观字段，不再渲染结论性文本。
+- `ModelTrainingPage.tsx` 在训练任务返回 `failed` 时也会进入第五步“结果入库”页并展示后端错误原因，避免训练后处理或模型注册失败时页面停留在第四步造成无跳转误判。
+- `BacktestCenterPage.tsx` 的旧版本地“收益分布直方图”已修复最后一个分箱右边界漏计问题，并在无收益样本时直接跳过渲染，避免 legacy 页面把最大单日收益漏掉 1 个样本。
 - `AIIDEPage.tsx` 的接口请求为“网关优先 + 直连回退”：生产默认先走 `SERVICE_ENDPOINTS.API_GATEWAY`（可由 `VITE_AI_IDE_API_BASE_URL` 覆盖），当 AI-IDE 核心接口出现 404/5xx 或网络失败时自动回退到 `VITE_AI_IDE_DIRECT_BASE_URL`（默认 `http://127.0.0.1:8010/api/v1`）。
 - `RealTradingPage.tsx` / `StrategyManagement.tsx` 依赖的 `realTradingService` 也已支持“网关优先 + 直连回退”：当主网关不可达或返回 5xx 时，会自动尝试 `VITE_REAL_TRADING_DIRECT_URL`（默认 `http://127.0.0.1:8000/api/v1/real-trading`），便于本地调试或网关短暂抖动时继续启动。
 - 开发模式（`import.meta.env.DEV` 或 `VITE_DEV=1`）下，`AIIDEPage.tsx` 会优先直连本地 `8010`，减少网关未暴露 AI-IDE 时的 `503 ai_ide upstream unavailable` 控制台噪音。
@@ -13,6 +25,9 @@
 - `AIIDEPage.tsx` 日志区“复制”按钮已接入实际复制逻辑，可复制当前选中的运行日志或错误日志。
 - `AIIDEPage.tsx` 的“发送选中代码”现已支持本地文件与远程策略两种标签页；请求会通过 `selection`/`current_code` 结构化传给 `/api/v1/ai/chat`，不再仅将选区拼接进自然语言文本。
 - `AIIDEPage.tsx` 的“填入选中代码”会把选区先写入右侧输入框，用户可在输入框内补充需求后再发送；右侧 AI 智能助手同时会注入固定开发规范上下文，要求先结论后细节、优先最小改动、信息不足先提问。
+- `AIIDEPage.tsx` 已对齐统一规范文档 `docs/AI_IDE_提示词与策略规范.md`：
+  - 传入后端的 `assistant_rules` 已收敛为简化口径；
+  - 新增硬性规则：传统策略默认仅使用“当前默认模型最近一次推理数据”作为选股依据（`signal="<PRED>"`）。
 - `AIIDEPage.tsx` 右侧开发规范已统一为标准口径，并强调“前端显式参数优先、后端自动补全与兼容修复”的当前回测与 AI 辅助原则。
 - `AIIDEPage.tsx` 在 Electron 打包运行时会优先直连本机 AI-IDE 后端（`http://127.0.0.1:8010/api/v1`）；当网关返回 `401/403/404/5xx` 时也会自动回退到本机直连，降低 EXE 场景下 AI 对话不可用概率。
 - `AIIDEPage.tsx` 的 LLM 对话失败现在会在界面中显示明确错误提示（toast + 聊天消息位错误文本），避免“发送后无响应”。
@@ -43,6 +58,11 @@
   - macOS: `AI-IDE_完整依赖安装说明_macOS.md`
   - Linux: `AI-IDE_完整依赖安装说明_Linux.md`
 - `ModelRegistryPage.tsx` 已继续拆分：页面主文件仅保留状态与路由编排，模型注册纯函数迁入 `modelRegistryUtils.ts`，详情/训练溯源/推理中心/通用卡片迁入 `modelRegistryPanels.tsx`。
+- 训练与回测默认价格口径已统一切换为开盘价（2026-04-28）：
+  - `ModelTrainingPage.tsx` 依赖的 `trainingUtils.DEFAULT_CONTEXT.dealPrice` 已从 `close` 调整为 `open`；
+  - 训练标签公式默认值已从 `close(T+N)/close(T)-1` 调整为 `open(T+N)/open(T)-1`；
+  - `AIIDEPage.tsx` 自动构建的默认 Qlib 回测参数 `deal_price` 已改为 `open`。
+- `modelRegistryUtils.ts` 已修复模型名称显示回退顺序：优先使用 `MODEL_ID_NAME_MAP` 命中，其次使用 `metadata_json.display_name`，最后才回退 `model_id`，避免新训练模型在资产库页只显示 ID。
 - `ModelRegistryPage.tsx` 新增“归因分析”页签（位于“训练溯源”与“推理中心”之间），用于展示训练后 SHAP 因子贡献榜；页面会调用用户态接口读取 `shap_summary.csv` 并按 `mean_abs_shap` 列表排序展示，并支持按因子名搜索与“按当前筛选结果导出 CSV”。
 - `ModelRegistryPage.tsx` 的“归因分析”页签已复用模型训练页特征字典：因子贡献榜优先展示中文解释，保留原始字段名作为辅助信息；搜索与 CSV 导出同时包含字段名和中文解释。
 - `modelRegistryPanels.tsx` 的 SHAP 因子列已锁定宽度并启用单行截断，长中文解释通过悬浮提示查看，避免撑开贡献榜表格。
@@ -52,6 +72,7 @@
 - `ModelTrainingPage.tsx` 的结果区已明确区分三层特征口径：提交特征数、训练脚本自动补充的基础特征、实际入模特征数；自动补充特征会在结果元数据中以标签形式展示，避免“提交 59 维但落库 62 维”的口径歧义。
 - `trading/tabs/StrategyManagement.tsx` 调整了底部留白：未选择策略时缩小底部 padding，避免内容不足时仍出现右侧滚动条。
 - `trading/RealTradingPage.tsx` 启动策略前接入 `preflight` 自检，关键依赖未就绪时会阻断启动并展示缺失项。
+- `trading/RealTradingPage.tsx` 已移除“个人中心”标签页入口，交易页菜单收敛为“策略管理 / 手动任务 / 持仓监控 / 交易记录 / 设置”。
 - `trading/RealTradingPage.tsx` 的账户资产概览已统一消费后端 PostgreSQL 视图结果：`position_count` 与 `today_pnl/daily_pnl` 会优先从快照视图中解析，避免只依赖 `positions` 空壳或 Redis 旧数据。
 - `trading/RealTradingPage.tsx` 的账户资产概览已新增“初始资金”展示，统一读取后端 PostgreSQL 基线表 `initial_equity`，避免页面上初始资金口径与历史快照漂移。
 - `trading/tabs/TradingHistory.tsx` 的时间列与导出时间已统一走后端时间解析辅助函数：无时区时间按 UTC 解释后再转上海时区，避免页面与导出出现 8 小时偏移。
@@ -59,7 +80,9 @@
 - `trading/RealTradingPage.tsx` 与 `trading/tabs/StrategyManagement.tsx` 新增“次日预测排名准备度”门禁：
   - 点击启动后，`REAL/SHADOW` 会先弹窗执行 `/api/v1/real-trading/trading-precheck`，按检查项逐条展示交易准备度；
   - 交易准备度检测只保留精简项：模型、推理数据库、Kubernetes/执行镜像、实时行情，以及 `REAL` 模式下的 QMT Agent 心跳与账户快照上报；
-  - `SIMULATION` 会先执行最小准备度检测（保留 `Redis / PostgreSQL / 内部密钥 / 用户标识`，并额外校验 `模型推理数据库已准备就绪 / 模拟盘进程池 / 实时行情服务已就绪`），随后再进入原有 `/api/v1/real-trading/preflight` 启动前自检；
+  - `SIMULATION` 会先执行最小准备度检测（保留 `Redis / PostgreSQL / 内部密钥 / 用户权限`，并额外校验 `模型推理数据库已准备就绪 / 模拟盘进程池 / 实时行情服务已就绪`），随后再进入原有 `/api/v1/real-trading/preflight` 启动前自检；
+  - 交易准备度中的“实时行情服务已就绪”现为硬门禁，行情探针不通过会直接阻断启动。
+  - 第二阶段 `/preflight` 同步改为展示 `用户权限`（替代 `用户标识`），并移除 `latest_signal_run` 检查项，避免两阶段门禁口径不一致。
   - 若启动接口仍返回 `precheck_failed`，页面会回填到同一弹窗流展示失败项。
 - `trading/RealTradingPage.tsx` 的模拟盘第二阶段“启动前自检详情”直接展示后端 `/preflight` 返回的 `模型推理数据库已准备就绪`，不再依赖前端拼接第一阶段结果。
 - `trading/RealTradingPage.tsx` 新增“启动前自检详情”弹窗：自检失败时自动弹出，按检查项展示通过/阻断/警告及详细说明。
@@ -67,6 +90,7 @@
 - `trading/RealTradingPage.tsx` 自检详情弹窗已设置为居中显示（`Modal centered`），避免在高分辨率下偏上。
 - `trading/tabs/SettingsCenter.tsx` 的 QMT Agent 下载已改为先调用后端 `/api/v1/internal/strategy/bridge/download/agent/release` 获取 COS 预签名地址，再跳转下载 Windows 安装器，前端不再硬编码 COS 链接。
 - `trading/tabs/SettingsCenter.tsx` 的下载动作现在通过 Electron 主进程 `shell.openExternal` 打开系统默认浏览器，避免在渲染进程里用 `a.click()` 被 Electron 拦截为应用内导航/下载。
+- `trading/tabs/SettingsCenter.tsx` 已补充首屏加载骨架动画：凭证和在线状态在首次拉取期间展示占位卡片，减少空白闪烁。
 - `trading/RealTradingPage.tsx` 自检详情弹窗新增 `checks[].details` 展示区，用于查看 Stream 闭环探针明细（series 新鲜度、quote 落库速率、kline 可用性）。
 - `trading/RealTradingPage.tsx` 账户查询改为优先按 `status.mode` 选路：`SIMULATION` 状态走模拟账户接口，避免误请求实盘 `/account` 触发 404 刷屏。
 - `trading/RealTradingPage.tsx` 账户读取策略已更新为“实盘优先，模拟兜底”：同时探测实盘与模拟账户，若实盘可用则优先展示实盘资产，否则自动回退展示模拟盘。
@@ -148,6 +172,13 @@
   - 提高了 Drawer 的 `zIndex` 到 `20000`；
   - 按钮显式声明了 `window-no-drag` 属性。
 - `ModelRegistryPage.tsx` 的排名结果支持按级别分桶解析日志：`splitInferenceLogs` 纯函数现已上线，可从标准流与错误流中精准分离业务 INFO 与运行时 ERROR，大幅提升排障效率。
+- `ModelRegistryPage.tsx` 的排名结果摘要区已将“兜底”替换为“近30天正确率”：
+  - 前端直接读取后端回写的 `recent_direction_accuracy`，不在页面侧重复计算；
+  - 无可评估样本时显示“暂无”，样本数少于 10 天时额外提示“样本偏少”；
+  - `fallback_used/fallback_reason` 仍保留在诊断信息折叠区，不再占用摘要区主指标位。
+- `modelRegistryPanels.tsx` 的历史推理列表也已补充“近30天正确率”列：
+  - 列内主值展示正确率百分比，副文案展示 `正确天数/评估天数`；
+  - 方便在批次列表里直接横向比较近期质量，而不必逐条点进详情抽屉。
 - `ModelRegistryPage.tsx` 的导出 CSV 功能增强：
   - 新增 `rankingExporting` 忙态控制与 Tooltip 提示；
   - 采用了健壮的单元格转义方案，文件名统一为 `ranking_日期_批次.csv`；
@@ -155,8 +186,11 @@
 - `trading/RealTradingPage.tsx` 已新增左侧功能菜单入口“手动任务”，对应独立页面 `trading/tabs/ManualTaskPage.tsx`；原 `StrategyManagement.tsx` 内的“手动执行调试”已改为跳转入口，不再作为主操作面板。
 - `ModelRegistryPage.tsx` 推理中心新增“当前生效推理批次”卡片：
   - 通过后端 `/models/inference/latest` 读取交易侧当前生效 `run_id`；
-  - 会同步展示 `run_id / model_id / prediction_trade_date`，并提示是否与当前页面模型匹配；
-  - 自动推理的“上次执行”区域也会回显对应 `run_id`，便于与交易侧版本对齐。
+  - 会同步展示 `run_id / model_id / prediction_trade_date`，并提示是否与当前页面模型匹配；当前批次模型若与页面当前选中模型一致，则优先展示该模型的 `display_name`，手动推理卡片也沿用同一显示名称；
+  - 自动推理区域已按“自动生产批次”重新命名，语义上等价于定时执行“生成生产批次”；
+  - 自动生产批次的“上次生产批次”区域会回显对应 `run_id`，便于与交易侧版本对齐。
+  - 自动生产批次卡片的时间展示已改为与后端 `schedule_desc / next_run_at` 保持一致：顶部不再写死扫描窗口，“下次生产计划”优先按原始 `next_run_at` 做本地时区格式化，避免与执行时机或时区口径不一致。
+  - 当前自动生产批次的业务语义已调整为“交易日当天 00:00 起进入队列，08:00 前等待 146 维数据更新完成，再为当日策略生成排名”；若首次失败，后端会在 08:00 前继续自动补跑。
 - `ModelRegistryPage.tsx` 页面结构微调：
   - 排名列表的得分列回归中性色，避免视觉过载；
   - 详情抽屉的标题与日期标签增加了 `truncate` 溢出处理。
@@ -169,3 +203,6 @@
   - 目标日期计算改为调用 `/api/v1/market-calendar/next-trading-day`；
   - 执行推理前会先调用交易日历校验基准日期，若选中非交易日会自动回退到最近上一交易日并提示；
   - 前置检查结果中的 `prediction_trade_date` 优先作为页面目标日期展示，确保与后端执行口径一致。
+  - 若当前选中模型就是用户默认模型，推理中心会额外显示“生成生产批次”按钮；该入口调用 `/models/inference/run` 时通过 `use_default_model=true` 让后端按默认模型链路解析，从而生成 `user_default` 来源的推理批次，可直接参与自动托管准入。
+  - 原有按钮已改名为“生成调试批次”，仍保留显式指定当前模型执行语义，生成的批次来源保持为 `explicit_model_id`，用于调试与手动比对。
+  - 开关提示与成功 toast 也已统一改用“自动生产批次 / 生产批次生成完成”术语，不再混用“自动推理 / 默认模型身份推理”。

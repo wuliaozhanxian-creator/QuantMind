@@ -92,7 +92,7 @@ class Settings(BaseSettings):
     MIN_LOT_STAR_BOARD: int = int(os.getenv("MIN_LOT_STAR_BOARD", "200"))
     MIN_LOT_BJ_BOARD: int = int(os.getenv("MIN_LOT_BJ_BOARD", "100"))
     ENABLE_MARGIN_TRADING: bool = (
-        os.getenv("ENABLE_MARGIN_TRADING", "false").lower() == "true"
+        os.getenv("ENABLE_MARGIN_TRADING", "true").lower() == "true"
     )
     ENABLE_SHORT_SELLING_REAL: bool = (
         os.getenv("ENABLE_SHORT_SELLING_REAL", "false").lower() == "true"

@@ -189,7 +189,8 @@ class AdminService {
 
     async getDataStatus(refresh = false): Promise<AdminDataStatusResult> {
         const resp = await this.axiosInstance.get<AdminDataStatusResult>('/admin/models/data-status', {
-            params: { refresh }
+            params: { refresh },
+            timeout: 120000, // 增加超时到 2 分钟，确保扫描大目录不超时
         });
         return resp.data;
     }

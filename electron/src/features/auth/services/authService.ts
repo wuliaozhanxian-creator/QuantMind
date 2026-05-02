@@ -221,9 +221,10 @@ class AuthService {
     const config = error.config;
     if (!config) return Promise.reject(this.handleError(error));
 
-    const shouldSuppressErrorLog = !!config._suppressAuthErrorLog && error.response?.status === 401;
+    const status = error.response?.status;
+    const shouldSuppressErrorLog = !!config._suppressAuthErrorLog && status === 401;
     if (!shouldSuppressErrorLog) {
-      console.error(`[Auth] 处理错误: ${config.url}`, error.response?.status);
+      console.error(`[Auth] 处理错误: ${config.url}`, status || error.code || error.message);
     }
 
     const isRefreshRequest = this.isRefreshRequest(config.url);

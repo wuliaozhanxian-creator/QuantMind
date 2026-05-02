@@ -37,7 +37,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 
 import exchange_calendars as xcals
 from sqlalchemy import create_engine, text
@@ -47,8 +47,13 @@ from backend.services.engine.services.event_stream import EngineSignalStreamPubl
 
 logger = logging.getLogger(__name__)
 
-# 默认超时 600 秒（10 分钟），可通过环境变量覆盖
-_SCRIPT_TIMEOUT_SEC = int(os.getenv("INFERENCE_SCRIPT_TIMEOUT_SEC", "600"))
+_PARQUET_TEMPLATE_MARKERS = (
+    "QuantMind Parquet 数据源推理脚本 (inference.py 模板)",
+    "QuantMind Parquet 数据源推理脚本\n=================================\n由训练流水线自动生成",
+)
+
+# 默认超时 3600 秒（1 小时），可通过环境变量覆盖
+_SCRIPT_TIMEOUT_SEC = int(os.getenv("INFERENCE_SCRIPT_TIMEOUT_SEC", "3600"))
 _DEFAULT_FEATURE_DIM = int(os.getenv("INFERENCE_DEFAULT_FEATURE_DIM", "48"))
 _MIN_READY_SYMBOLS = int(os.getenv("INFERENCE_MIN_READY_SYMBOLS", "3000"))
 _MIN_READY_RATIO = float(os.getenv("INFERENCE_MIN_READY_RATIO", "0.9"))
@@ -71,9 +76,6 @@ class ExecutionResult:
     signals: list[dict] = field(default_factory=list)
     fallback_used: bool = False  # True = alpha158 兜底脚本实际执行
     fallback_reason: str = ""  # 触发兜底的原因描述
-    execution_mode: str = ""  # independent_model/system_chain
-    model_switch_used: bool = False
-    model_switch_reason: str = ""
     failure_stage: str = ""  # main_script/fallback_script/output_parse
     active_model_id: str = ""
     active_data_source: str = ""
@@ -88,7 +90,7 @@ class InferenceScriptRunner:
     1. 主模型推理脚本（默认 inference.py）
        - exit 0 → 成功
        - exit 1 → 致命失败，返回错误
-         - exit 2 → 数据质量不足；若允许跨模型 fallback，则执行兜底模型脚本
+       - exit 2 → 数据质量不足，自动执行兜底模型脚本
     2. 兜底模型推理脚本（默认 inference.py）
        - exit 0 → 兜底成功，结果标记 fallback_used=True
        - 非 0   → 兜底失败，返回错误
@@ -111,6 +113,7 @@ class InferenceScriptRunner:
         fallback_script_name: str | None = None,
         enable_fallback: bool = True,
     ):
+        self.enable_fallback = enable_fallback
         # `models_production` 为历史兼容参数，等价于 primary_model_dir。
         resolved_primary = (
             primary_model_dir
@@ -125,7 +128,7 @@ class InferenceScriptRunner:
             )
         )
         self.primary_data_dir = self._normalize_provider_uri(
-            str(primary_data_dir or os.getenv("QLIB_PRIMARY_DATA_PATH", "db/feature_snapshots"))
+            str(primary_data_dir or os.getenv("QLIB_PRIMARY_DATA_PATH", "db/qlib_data"))
         )
         self.fallback_data_dir = self._normalize_provider_uri(
             str(
@@ -147,39 +150,6 @@ class InferenceScriptRunner:
             fallback_script_name
             or os.getenv("INFERENCE_FALLBACK_SCRIPT", "inference.py")
         )
-        self.enable_fallback = bool(enable_fallback)
-
-    def _fallback_disabled_result(
-        self,
-        *,
-        date: str,
-        run_id: str,
-        stderr: str,
-        error: str,
-        exit_code: int,
-        prediction_trade_date: str,
-    ) -> ExecutionResult:
-        return ExecutionResult(
-            success=False,
-            exit_code=exit_code,
-            stdout="",
-            stderr=stderr,
-            error=error,
-            run_id=run_id,
-            fallback_used=False,
-            failure_stage="main_script",
-            active_model_id=self.primary_model_id,
-            active_data_source=self.primary_data_dir,
-            data_trade_date=date,
-            prediction_trade_date=prediction_trade_date,
-        )
-
-    def _log_independent_failure(self, run_id: str, reason: str) -> None:
-        logger.warning(
-            "[InferenceScriptRunner] 独立模型执行未通过，直接返回失败, run_id=%s, reason=%s",
-            run_id,
-            reason,
-        )
 
     @staticmethod
     def _normalize_provider_uri(
@@ -191,7 +161,7 @@ class InferenceScriptRunner:
         规则：
         1) 若能在候选路径中命中真实目录，返回该绝对路径；
         2) 相对路径默认转换为 /app/<path>；
-        3) alpha158 兜底场景优先尝试 /app/db/qlib_data。
+        3) prefer_alpha158 时在候选列表头部追加 metadata 中的默认路径。
         """
         raw = str(provider_uri or "").strip()
         if not raw:
@@ -204,13 +174,6 @@ class InferenceScriptRunner:
         else:
             candidates.append(Path("/app") / p)
             candidates.append(p)
-
-        if prefer_alpha158:
-            candidates = [
-                Path("/app/db/qlib_data"),
-                Path("db/qlib_data"),
-                *candidates,
-            ]
 
         seen = set()
         for c in candidates:
@@ -319,58 +282,6 @@ class InferenceScriptRunner:
                 pass
         return {}
 
-    def _is_managed_parquet_template(self, script_path: Path) -> bool:
-        """
-        判断 inference.py 是否为平台托管的 parquet 模板。
-
-        识别两类脚本：
-        1. 新版模板：标题含 "QuantMind Parquet 数据源推理脚本 (inference.py 模板)"
-        2. 旧版自动生成：标题含 "QuantMind Parquet 数据源推理脚本" 且说明含 "由训练流水线自动生成"
-        """
-        if not script_path.is_file():
-            return False
-        try:
-            content = script_path.read_text(encoding="utf-8", errors="ignore")[:2000]
-            # 新版模板标记
-            if "inference.py 模板" in content:
-                return True
-            # 旧版自动生成标记
-            if (
-                "QuantMind Parquet 数据源推理脚本" in content
-                and "由训练流水线自动生成" in content
-            ):
-                return True
-            return False
-        except Exception:
-            return False
-
-    def _refresh_parquet_template(self, script_path: Path) -> bool:
-        """
-        将旧版托管脚本覆盖为最新模板。
-
-        成功返回 True，失败返回 False。
-        """
-        template_path = Path(__file__).parent / "templates" / "inference_parquet.py"
-        if not template_path.is_file():
-            logger.warning(
-                "[InferenceScriptRunner] parquet 推理模板不存在: %s", template_path
-            )
-            return False
-        try:
-            script_path.write_text(
-                template_path.read_text(encoding="utf-8"), encoding="utf-8"
-            )
-            logger.info(
-                "[InferenceScriptRunner] 已刷新 parquet 推理脚本为最新模板: %s",
-                script_path,
-            )
-            return True
-        except Exception as exc:
-            logger.warning(
-                "[InferenceScriptRunner] 刷新推理脚本失败: %s", exc
-            )
-            return False
-
     def _try_deploy_parquet_template(self, script_path: Path) -> bool:
         """
         当 parquet 模型缺少 inference.py 时，自动从内置模板写入。
@@ -394,6 +305,36 @@ class InferenceScriptRunner:
         except Exception as exc:
             logger.warning("[InferenceScriptRunner] 自动写入推理脚本失败: %s", exc)
             return False
+
+    @staticmethod
+    def _is_managed_parquet_template(script_path: Path) -> bool:
+        if not script_path.is_file():
+            return False
+        try:
+            text = script_path.read_text(encoding="utf-8", errors="ignore")
+            return any(marker in text for marker in _PARQUET_TEMPLATE_MARKERS)
+        except Exception:
+            return False
+
+    def _ensure_parquet_template_script(self, script_path: Path) -> bool:
+        """为平台托管的 parquet inference.py 同步最新模板。"""
+        if not script_path.is_file():
+            return self._try_deploy_parquet_template(script_path)
+
+        if not self._is_managed_parquet_template(script_path):
+            return True
+
+        return self._try_deploy_parquet_template(script_path)
+
+    @staticmethod
+    def _resolve_primary_active_data_source(primary_meta: dict[str, object]) -> str:
+        data_source = str(primary_meta.get("data_source") or "").lower()
+        if data_source == "parquet":
+            return str(
+                primary_meta.get("data_dir")
+                or os.getenv("MODEL_TRAINING_DATA_DIR", "/app/db/feature_snapshots")
+            )
+        return str(os.getenv("QLIB_PRIMARY_DATA_PATH", "db/qlib_data"))
 
     def _query_parquet_readiness(self, trade_date: str) -> dict:
         """
@@ -506,81 +447,31 @@ class InferenceScriptRunner:
             return (dt + timedelta(days=1)).strftime("%Y-%m-%d")
 
     def _query_dimension_readiness(self, trade_date: str, expected_dim: int) -> dict:
-        # shared.database 的 SessionLocal 在 asyncpg URL 下会触发 greenlet 错误，
-        # 这里显式构造一个同步驱动会话，仅用于就绪度查询链路。
+        # 使用同步驱动进行就绪度查询
         sync_db_url = os.getenv("DATABASE_URL", "")
         if "+asyncpg" in sync_db_url:
             sync_db_url = sync_db_url.replace("+asyncpg", "+psycopg2")
         if not sync_db_url.startswith("postgresql"):
             sync_db_url = (
-                "postgresql+psycopg2://postgres:password@localhost:5432/quantmind"
+                "postgresql+psycopg2://quantmind:quantmind2026@localhost:5432/quantmind"
             )
         sync_engine = create_engine(sync_db_url, pool_pre_ping=True, future=True)
         SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=sync_engine)
 
         db = SessionLocal()
         try:
-            schema_columns = (
-                db.execute(
-                    text(
-                        """
-                        SELECT column_name
-                        FROM information_schema.columns
-                        WHERE table_schema = 'public'
-                          AND table_name = 'market_data_daily'
-                        """
-                    )
-                )
-                .mappings()
-                .all()
-            )
-            column_names = {
-                str((row or {}).get("column_name") or "") for row in schema_columns
-            }
-            has_features_json = "features" in column_names
-            feature_columns = sorted(
-                [c for c in column_names if re.fullmatch(r"feature_\d+", c)],
-                key=lambda c: int(c.split("_", 1)[1]),
-            )
-            feature_cols_count = len(feature_columns)
-
-            dim_expr_candidates: list[str] = []
-            if has_features_json:
-                dim_expr_candidates.append(
-                    "CASE WHEN jsonb_typeof(features) = 'array' THEN jsonb_array_length(features) ELSE 0 END"
-                )
-            if feature_columns:
-                cols_dim_expr = " + ".join(
-                    [
-                        f"(CASE WHEN {col} IS NULL THEN 0 ELSE 1 END)"
-                        for col in feature_columns
-                    ]
-                )
-                dim_expr_candidates.append(f"({cols_dim_expr})")
-
-            if len(dim_expr_candidates) >= 2:
-                dim_source = "features_json+feature_columns"
-                dim_expr = f"GREATEST({', '.join(dim_expr_candidates)})"
-            elif len(dim_expr_candidates) == 1:
-                dim_source = "features_json" if has_features_json else "feature_columns"
-                dim_expr = dim_expr_candidates[0]
-            else:
-                dim_source = "none"
-                dim_expr = "0"
-
-            dim_condition = f"({dim_expr}) >= :expected_dim"
-
+            # 切换为查询 stock_daily_latest，只要有基础行情数据即视为就绪
             row = (
                 db.execute(
                     text(
-                        f"""
+                        """
                         SELECT
-                            COUNT(*) FILTER (WHERE date = :trade_date) AS total_rows,
-                            COUNT(*) FILTER (WHERE date = :trade_date AND ({dim_condition})) AS ready_rows
-                        FROM market_data_daily
+                            COUNT(*) FILTER (WHERE trade_date = :trade_date) AS total_rows,
+                            COUNT(*) FILTER (WHERE trade_date = :trade_date AND close > 0) AS ready_rows
+                        FROM stock_daily_latest
                         """
                     ),
-                    {"trade_date": trade_date, "expected_dim": expected_dim},
+                    {"trade_date": trade_date},
                 )
                 .mappings()
                 .first()
@@ -591,11 +482,9 @@ class InferenceScriptRunner:
             required_ready = self._resolve_ready_threshold(total_rows)
             ready = total_rows > 0 and ready_rows >= required_ready
             detail = (
-                f"trade_date={trade_date}, expected_dim>={expected_dim}, "
+                f"trade_date={trade_date}, table=stock_daily_latest, "
                 f"total_rows={total_rows}, ready_rows={ready_rows}, "
-                f"required_ready={required_ready}, min_ready_symbols={_MIN_READY_SYMBOLS}, "
-                f"min_ready_ratio={_MIN_READY_RATIO:.2f}, min_ready_floor={_MIN_READY_FLOOR}, "
-                f"feature_cols_count={feature_cols_count}, features_json={has_features_json}, dim_source={dim_source}"
+                f"required_ready={required_ready}"
             )
             return {"ready": ready, "detail": detail}
         except Exception as exc:
@@ -704,33 +593,34 @@ class InferenceScriptRunner:
                 "import sys, os; print(f'SUB_PATH: {sys.path}'); import qlib; print(f'QLIB_OK: {qlib.__file__}')",
             ]
             diag_proc = subprocess.run(
-                diag_cmd, capture_output=True, text=True, env=env, timeout=10
+                diag_cmd, capture_output=True, text=False, env=env, timeout=10
             )
             logger.info(
-                f"[InferenceScriptRunner] 子进程环境诊断: stdout={diag_proc.stdout.strip()}, stderr={diag_proc.stderr.strip()}"
+                f"[InferenceScriptRunner] 子进程环境诊断: stdout={diag_proc.stdout.decode('utf-8', errors='replace').strip()}, stderr={diag_proc.stderr.decode('utf-8', errors='replace').strip()}"
             )
 
+            cmd = [
+                python_exec,
+                str(fallback_path),
+                "--date",
+                date,
+                "--output",
+                str(out_file),
+            ]
             proc = subprocess.run(
-                [
-                    python_exec,
-                    str(fallback_path),
-                    "--date",
-                    date,
-                    "--output",
-                    str(out_file),
-                ],
+                cmd,
                 capture_output=True,
-                text=True,
-                timeout=_SCRIPT_TIMEOUT_SEC,
-                env=env,
+                text=False,
                 cwd=str(self.fallback_model_dir),
+                env=env,
+                timeout=_SCRIPT_TIMEOUT_SEC,
             )
         except subprocess.TimeoutExpired as exc:
             return ExecutionResult(
                 success=False,
                 exit_code=-1,
-                stdout=exc.stdout or "",
-                stderr=exc.stderr or "",
+                stdout=(exc.stdout or b"").decode("utf-8", errors="replace"),
+                stderr=(exc.stderr or b"").decode("utf-8", errors="replace"),
                 error=f"alpha158 兜底脚本超时 ({_SCRIPT_TIMEOUT_SEC}s)",
                 run_id=run_id,
                 fallback_used=True,
@@ -758,9 +648,9 @@ class InferenceScriptRunner:
                 prediction_trade_date=prediction_trade_date,
             )
 
-        fb_stdout = proc.stdout or ""
+        fb_stdout = (proc.stdout or b"").decode("utf-8", errors="replace")
         fb_stderr = (
-            v10_stderr + "\n--- alpha158 fallback ---\n" + (proc.stderr or "")
+            v10_stderr + "\n--- alpha158 fallback ---\n" + (proc.stderr or b"").decode("utf-8", errors="replace")
         ).strip()
         fb_exitcode = proc.returncode
 
@@ -806,7 +696,13 @@ class InferenceScriptRunner:
             f"[InferenceScriptRunner] alpha158 兜底成功，{len(signals)} 条信号, run_id={run_id}"
         )
         self._persist_and_publish(
-            run_id, prediction_trade_date, tenant_id, user_id, signals
+            run_id,
+            prediction_trade_date,
+            tenant_id,
+            user_id,
+            signals,
+            active_model_id=self.fallback_model_id,
+            data_trade_date=date,
         )
 
         if redis_client is not None:
@@ -854,10 +750,11 @@ class InferenceScriptRunner:
         """
         script_path = self.primary_model_dir / self.primary_script_name
         prediction_trade_date = self._resolve_prediction_trade_date(date)
+        primary_meta = self._read_primary_metadata()
+        data_source = str(primary_meta.get("data_source") or "").lower()
+        active_data_source = self._resolve_primary_active_data_source(primary_meta)
         if not script_path.is_file():
             # parquet 数据源模型：自动写入模板脚本，无需手动部署
-            primary_meta = self._read_primary_metadata()
-            data_source = str(primary_meta.get("data_source") or "").lower()
             if data_source == "parquet" and self._try_deploy_parquet_template(
                 script_path
             ):
@@ -868,21 +765,22 @@ class InferenceScriptRunner:
             else:
                 run_id = f"run_{date.replace('-', '')}_{uuid.uuid4().hex[:8]}"
                 fallback_reason = f"主模型推理脚本不存在: {script_path}"
-                if not self.enable_fallback:
-                    self._log_independent_failure(run_id, fallback_reason)
-                    return self._fallback_disabled_result(
-                        date=date,
-                        run_id=run_id,
-                        stderr=fallback_reason,
-                        error=fallback_reason,
-                        exit_code=1,
-                        prediction_trade_date=prediction_trade_date,
-                    )
                 logger.warning(
                     "[InferenceScriptRunner] 主模型脚本缺失，触发 alpha158 兜底, run_id=%s, reason=%s",
                     run_id,
                     fallback_reason,
                 )
+                if not self.enable_fallback:
+                    return ExecutionResult(
+                        success=False,
+                        exit_code=1,
+                        stdout="",
+                        stderr="",
+                        error=fallback_reason,
+                        run_id=run_id,
+                        failure_stage="main_script",
+                        active_model_id=self.primary_model_id,
+                    )
                 return self._execute_fallback(
                     date=date,
                     tenant_id=tenant_id,
@@ -894,12 +792,13 @@ class InferenceScriptRunner:
                     prediction_trade_date=prediction_trade_date,
                 )
 
-        # 检查并刷新旧版托管 parquet 模板
-        primary_meta = self._read_primary_metadata()
-        data_source = str(primary_meta.get("data_source") or "").lower()
-        if data_source == "parquet" and self._is_managed_parquet_template(script_path):
-            # 托管模板：检查是否需要刷新为最新版本
-            self._refresh_parquet_template(script_path)
+        if data_source == "parquet" and not self._ensure_parquet_template_script(
+            script_path
+        ):
+            logger.warning(
+                "[InferenceScriptRunner] parquet 模型模板同步失败，继续使用现有脚本: %s",
+                script_path,
+            )
 
         run_id = f"run_{date.replace('-', '')}_{uuid.uuid4().hex[:8]}"
         logger.info(
@@ -909,17 +808,6 @@ class InferenceScriptRunner:
         expected_dim = self._resolve_expected_feature_dim()
 
         # 判断数据源：针对不同存储引擎执行对应的就绪检查
-        primary_meta = self._read_primary_metadata()
-        data_source = str(primary_meta.get("data_source") or "").lower()
-
-        # 解析实际数据目录（用于审计）
-        actual_data_source = self.primary_data_dir
-        if data_source == "parquet":
-            actual_data_source = str(
-                primary_meta.get("data_dir")
-                or os.getenv("MODEL_TRAINING_DATA_DIR", "/app/db/feature_snapshots")
-            )
-
         if data_source == "parquet":
             readiness = self._query_parquet_readiness(trade_date=date)
         elif data_source in ("qlib", "qlib_bin", "bin"):
@@ -939,21 +827,22 @@ class InferenceScriptRunner:
 
         if not readiness.get("ready", False):
             fallback_reason = f"主模型维度门禁未通过: {readiness.get('detail', 'N/A')}"
-            if not self.enable_fallback:
-                self._log_independent_failure(run_id, fallback_reason)
-                return self._fallback_disabled_result(
-                    date=date,
-                    run_id=run_id,
-                    stderr=fallback_reason,
-                    error=fallback_reason,
-                    exit_code=self._EXIT_DATA_QUALITY,
-                    prediction_trade_date=prediction_trade_date,
-                )
             logger.warning(
                 "[InferenceScriptRunner] 主模型数据维度不足，触发 alpha158 兜底, run_id=%s, reason=%s",
                 run_id,
                 fallback_reason,
             )
+            if not self.enable_fallback:
+                return ExecutionResult(
+                    success=False,
+                    exit_code=1,
+                    stdout="",
+                    stderr="",
+                    error=fallback_reason,
+                    run_id=run_id,
+                    failure_stage="main_script",
+                    active_model_id=self.primary_model_id,
+                )
             return self._execute_fallback(
                 date=date,
                 tenant_id=tenant_id,
@@ -979,21 +868,23 @@ class InferenceScriptRunner:
         # 执行子进程
         out_file = self.primary_model_dir / f"main_{run_id}.json"
         python_exec = self._get_python_executable()
+        model_dir = self.primary_model_dir
         try:
+            cmd = [
+                python_exec,
+                str(script_path),
+                "--date",
+                date,
+                "--output",
+                str(out_file),
+            ]
             proc = subprocess.run(
-                [
-                    python_exec,
-                    str(script_path),
-                    "--date",
-                    date,
-                    "--output",
-                    str(out_file),
-                ],
+                cmd,
                 capture_output=True,
-                text=True,
-                timeout=_SCRIPT_TIMEOUT_SEC,
+                text=False,
+                cwd=str(model_dir),
                 env=env,
-                cwd=str(self.primary_model_dir),
+                timeout=_SCRIPT_TIMEOUT_SEC,
             )
         except subprocess.TimeoutExpired as exc:
             logger.error(
@@ -1002,8 +893,8 @@ class InferenceScriptRunner:
             return ExecutionResult(
                 success=False,
                 exit_code=-1,
-                stdout=exc.stdout or "",
-                stderr=exc.stderr or "",
+                stdout=(exc.stdout or b"").decode("utf-8", errors="replace"),
+                stderr=(exc.stderr or b"").decode("utf-8", errors="replace"),
                 error=f"脚本执行超时（{_SCRIPT_TIMEOUT_SEC}s）",
                 run_id=run_id,
                 failure_stage="main_script",
@@ -1024,8 +915,8 @@ class InferenceScriptRunner:
                 active_data_source=self.primary_data_dir,
             )
 
-        stdout = proc.stdout or ""
-        stderr = proc.stderr or ""
+        stdout = (proc.stdout or b"").decode("utf-8", errors="replace")
+        stderr = (proc.stderr or b"").decode("utf-8", errors="replace")
         exit_code = proc.returncode
 
         if exit_code != 0:
@@ -1036,19 +927,20 @@ class InferenceScriptRunner:
                     if stderr.strip()
                     else "v10 数据质量不足"
                 )
-                if not self.enable_fallback:
-                    self._log_independent_failure(run_id, fallback_reason)
-                    return self._fallback_disabled_result(
-                        date=date,
-                        run_id=run_id,
-                        stderr=stderr,
-                        error=fallback_reason,
-                        exit_code=exit_code,
-                        prediction_trade_date=prediction_trade_date,
-                    )
                 logger.warning(
                     f"[InferenceScriptRunner] v10 数据质量不足 (exit=2)，启动 alpha158 兜底, run_id={run_id}"
                 )
+                if not self.enable_fallback:
+                    return ExecutionResult(
+                        success=False,
+                        exit_code=exit_code,
+                        stdout=stdout,
+                        stderr=stderr,
+                        error=fallback_reason,
+                        run_id=run_id,
+                        failure_stage="main_script",
+                        active_model_id=self.primary_model_id,
+                    )
                 return self._execute_fallback(
                     date=date,
                     tenant_id=tenant_id,
@@ -1098,7 +990,13 @@ class InferenceScriptRunner:
 
         # 写库 + 发布 Redis Stream
         self._persist_and_publish(
-            run_id, prediction_trade_date, tenant_id, user_id, signals
+            run_id,
+            prediction_trade_date,
+            tenant_id,
+            user_id,
+            signals,
+            active_model_id=self.primary_model_id,
+            data_trade_date=date,
         )
 
         # 写 Redis 完成标记
@@ -1123,7 +1021,7 @@ class InferenceScriptRunner:
             run_id=run_id,
             signals=signals,
             active_model_id=self.primary_model_id,
-            active_data_source=actual_data_source,
+            active_data_source=active_data_source,
             data_trade_date=date,
             prediction_trade_date=prediction_trade_date,
         )
@@ -1162,6 +1060,18 @@ class InferenceScriptRunner:
                     pass
         return valid if valid else None
 
+    @staticmethod
+    def _normalize_model_bucket(model_id: str | None) -> str:
+        raw = str(model_id or "").strip().lower()
+        if not raw:
+            return "inference_script"
+        slug = re.sub(r"[^a-z0-9_]+", "_", raw).strip("_")
+        return slug[:48] if slug else "inference_script"
+
+    @classmethod
+    def _resolve_feature_version(cls, model_id: str | None) -> str:
+        return f"script_v1_{cls._normalize_model_bucket(model_id)}"
+
     def _persist_and_publish(
         self,
         run_id: str,
@@ -1169,16 +1079,25 @@ class InferenceScriptRunner:
         tenant_id: str,
         user_id: str,
         signals: list[dict],
+        *,
+        active_model_id: str | None = None,
+        data_trade_date: str | None = None,
     ) -> None:
         """
         将推理结果写入 engine_signal_scores 并发布到 Redis Stream。
 
-        存储策略：**覆盖**——先删除同一预测交易日的旧数据，再写入本次结果。
-        保证每个交易日只保留最新一次推理，下游查询始终得到单一一致的信号集。
+        存储策略：按模型桶覆盖（同 tenant/user/date/model），保证同日不同模型可并存。
+
+        Args:
+            data_trade_date: 推理日期（数据截止日期），若不传则默认等于 prediction_trade_date
         """
         symbols = [s["symbol"] for s in signals]
         scores = [s["score"] for s in signals]
         feature_dim = max(1, self._resolve_expected_feature_dim())
+        model_name = str(active_model_id or self.primary_model_id or "inference_script")
+        feature_version = self._resolve_feature_version(model_name)
+        # 推理日期默认等于预测日期（兼容旧调用）
+        inference_date = data_trade_date or prediction_trade_date
 
         # shared.database 的 SessionLocal 在 asyncpg URL 下会触发 greenlet 错误，
         # 这里显式构造一个同步驱动会话，仅用于脚本写库链路。
@@ -1206,11 +1125,13 @@ class InferenceScriptRunner:
                     WHERE tenant_id = :tenant_id
                       AND user_id = :user_id
                       AND model_version = 'inference_script'
+                      AND feature_version = :feature_version
                       AND trade_date < :retention_floor
                 """),
                 {
                     "tenant_id": tenant_id,
                     "user_id": user_id,
+                    "feature_version": feature_version,
                     "retention_floor": retention_floor,
                 },
             )
@@ -1220,11 +1141,13 @@ class InferenceScriptRunner:
                     WHERE tenant_id = :tenant_id
                       AND user_id = :user_id
                       AND source = 'inference_script'
+                      AND feature_version = :feature_version
                       AND trade_date < :retention_floor
                 """),
                 {
                     "tenant_id": tenant_id,
                     "user_id": user_id,
+                    "feature_version": feature_version,
                     "retention_floor": retention_floor,
                 },
             )
@@ -1237,11 +1160,13 @@ class InferenceScriptRunner:
                       AND tenant_id    = :tenant_id
                       AND user_id      = :user_id
                       AND model_version = 'inference_script'
+                      AND feature_version = :feature_version
                 """),
                 {
                     "trade_date": prediction_trade_date,
                     "tenant_id": tenant_id,
                     "user_id": user_id,
+                    "feature_version": feature_version,
                 },
             )
             # 同步清除旧 feature_runs 记录（保留最新 run_id）
@@ -1252,15 +1177,17 @@ class InferenceScriptRunner:
                       AND tenant_id  = :tenant_id
                       AND user_id    = :user_id
                       AND source     = 'inference_script'
+                      AND feature_version = :feature_version
                 """),
                 {
                     "trade_date": prediction_trade_date,
                     "tenant_id": tenant_id,
                     "user_id": user_id,
+                    "feature_version": feature_version,
                 },
             )
             logger.info(
-                f"[InferenceScriptRunner] 已清除 {prediction_trade_date} 旧推理数据, run_id={run_id}"
+                f"[InferenceScriptRunner] 已清除 {prediction_trade_date} 旧推理数据(模型桶={feature_version}), run_id={run_id}"
             )
 
             # ── Step 1: 写入本次 feature run 记录 ────────────────────────
@@ -1272,11 +1199,13 @@ class InferenceScriptRunner:
                         source, created_at, updated_at
                     ) VALUES (
                         :run_id, :tenant_id, :user_id, :trade_date,
-                        'inference_script', 'inference_script',
-                        'script_v1', :feature_dim, 'signal_ready',
+                        :model_name, 'inference_script',
+                        :feature_version, :feature_dim, 'signal_ready',
                         :n, :n, 'inference_script', NOW(), NOW()
                     )
                     ON CONFLICT (run_id) DO UPDATE SET
+                        model_name = EXCLUDED.model_name,
+                        feature_version = EXCLUDED.feature_version,
                         status = 'signal_ready', updated_at = NOW()
                 """),
                 {
@@ -1285,6 +1214,8 @@ class InferenceScriptRunner:
                     "user_id": user_id,
                     "trade_date": prediction_trade_date,
                     "n": len(signals),
+                    "model_name": model_name,
+                    "feature_version": feature_version,
                     "feature_dim": feature_dim,
                 },
             )
@@ -1292,16 +1223,16 @@ class InferenceScriptRunner:
             # ── Step 2: 批量写入信号评分（含 signal_side 和 expected_price）──────────
             import redis as redis_lib
 
-            redis_host = os.getenv("REDIS_HOST", "quantmind-redis")
-            redis_port = int(os.getenv("REDIS_PORT", "6379"))
-            redis_password = os.getenv("REDIS_PASSWORD", "")
-            redis_db = int(os.getenv("REDIS_DB_MARKET", "3"))
+            redis_host = os.getenv("REMOTE_QUOTE_REDIS_HOST", "quantmind-market-redis")
+            redis_port = int(os.getenv("REMOTE_QUOTE_REDIS_PORT", "6379"))
+            redis_password = os.getenv(
+                "REMOTE_QUOTE_REDIS_PASSWORD", "quantmind_market_2026"
+            )
             try:
                 quote_redis = redis_lib.Redis(
                     host=redis_host,
                     port=redis_port,
                     password=redis_password,
-                    db=redis_db,
                     decode_responses=True,
                     socket_timeout=2,
                 )
@@ -1323,7 +1254,7 @@ class InferenceScriptRunner:
                     signal_side, expected_price, created_at
                 ) VALUES (
                     :run_id, :tenant_id, :user_id, :trade_date, :symbol,
-                    'inference_script', 'script_v1',
+                    'inference_script', :feature_version,
                     NULL, NULL, :score, 1.0, 'normal',
                     :signal_side, :expected_price, NOW()
                 )
@@ -1333,7 +1264,7 @@ class InferenceScriptRunner:
                     signal_side = EXCLUDED.signal_side,
                     expected_price = EXCLUDED.expected_price
             """)
-            for sym, score in zip(symbols, scores):
+            for sym, score in zip(symbols, scores, strict=True):
                 expected_price = None
                 signal_side = "BUY" if score > 0 else "HOLD"
                 if quote_redis:
@@ -1364,6 +1295,7 @@ class InferenceScriptRunner:
                         "user_id": user_id,
                         "trade_date": prediction_trade_date,
                         "symbol": sym,
+                        "feature_version": feature_version,
                         "score": score,
                         "signal_side": signal_side,
                         "expected_price": expected_price,
@@ -1374,6 +1306,89 @@ class InferenceScriptRunner:
                     quote_redis.close()
                 except Exception:
                     pass
+            # ── Step 3: 写入投研平台候选池快照 ────────────────────────────────
+            # 同步写入 qm_research_candidate_snapshot，使推理结果立即在投研平台可见
+            # 先删除同 run_id 的旧数据（覆盖策略）
+            db.execute(
+                text("""
+                    DELETE FROM qm_research_candidate_snapshot
+                    WHERE run_id = :run_id
+                      AND tenant_id = :tenant_id
+                      AND user_id = :user_id
+                """),
+                {
+                    "run_id": run_id,
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                },
+            )
+
+            # 计算分数排名（分数越高排名越靠前）
+            scored_signals = sorted(
+                [(sym, score) for sym, score in zip(symbols, scores, strict=True)],
+                key=lambda x: x[1],
+                reverse=True,
+            )
+            rank_map = {sym: idx + 1 for idx, (sym, score) in enumerate(scored_signals)}
+
+            candidate_sql = text("""
+                INSERT INTO qm_research_candidate_snapshot (
+                    tenant_id, user_id, run_id, model_id,
+                    data_trade_date, prediction_trade_date,
+                    symbol, fusion_score, score_rank,
+                    signal_side, expected_price, universe_tag,
+                    confidence_level, created_at, updated_at
+                ) VALUES (
+                    :tenant_id, :user_id, :run_id, :model_id,
+                    :data_trade_date, :prediction_trade_date,
+                    :symbol, :fusion_score, :score_rank,
+                    :signal_side, :expected_price, :universe_tag,
+                    :confidence_level, NOW(), NOW()
+                )
+            """)
+            for sym, score in zip(symbols, scores, strict=True):
+                signal_side = "BUY" if score > 0 else "HOLD"
+                confidence_level = "high" if score > 0.5 else ("medium" if score > 0.2 else "watch")
+                # 获取 expected_price（从之前 Redis 查询的结果）
+                expected_price_val = None
+                if quote_redis:
+                    try:
+                        raw_sym = sym.replace("SH", "").replace("SZ", "").replace("BJ", "")
+                        if sym.startswith("SH"):
+                            redis_key = f"stock:{raw_sym}.SH"
+                        elif sym.startswith("SZ"):
+                            redis_key = f"stock:{raw_sym}.SZ"
+                        elif sym.startswith("BJ") or sym.startswith("920"):
+                            redis_key = f"stock:{raw_sym}.BJ"
+                        else:
+                            redis_key = f"stock:{sym}"
+                        now_price = quote_redis.hget(redis_key, "Now")
+                        if now_price:
+                            expected_price_val = float(now_price)
+                    except Exception:
+                        pass
+                db.execute(
+                    candidate_sql,
+                    {
+                        "tenant_id": tenant_id,
+                        "user_id": user_id,
+                        "run_id": run_id,
+                        "model_id": model_name,
+                        "data_trade_date": inference_date,  # 推理日期（数据截止日期）
+                        "prediction_trade_date": prediction_trade_date,
+                        "symbol": sym,
+                        "fusion_score": score,
+                        "score_rank": rank_map.get(sym, 999999),
+                        "signal_side": signal_side,
+                        "expected_price": expected_price_val,
+                        "universe_tag": "默认候选池",
+                        "confidence_level": confidence_level,
+                    },
+                )
+            logger.info(
+                f"[InferenceScriptRunner] 写入 {len(signals)} 条投研候选池快照, run_id={run_id}"
+            )
+
             db.commit()
             logger.info(
                 f"[InferenceScriptRunner] 写入 {len(signals)} 条信号, run_id={run_id}"
@@ -1399,7 +1414,7 @@ class InferenceScriptRunner:
                     "quantity": 100,
                     "price": 0.0,
                 }
-                for idx, (sym, score) in enumerate(zip(symbols, scores))
+                for idx, (sym, score) in enumerate(zip(symbols, scores, strict=True))
             ]
             publisher = EngineSignalStreamPublisher()
             publisher.mark_latest_run(

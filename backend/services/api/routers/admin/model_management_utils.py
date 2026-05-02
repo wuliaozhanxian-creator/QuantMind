@@ -407,105 +407,59 @@ def _scan_feature_snapshots_status(
         result["error"] = "pandas not available"
         return result
 
-    min_date: date | None = None
-    max_date: date | None = None
-    total_rows = 0
-    scanned_files = 0
-    failed_files = 0
-
-    # 用于统计每个 symbol 的最新日期
-    symbol_latest_dates: dict[str, date] = {}
-    invalid_samples: list[dict[str, Any]] = []
-
-    for file_path in files:
+    # 优化点 1：只扫描第一个和最后一个文件来获取日期范围
+    if len(files) > 0:
+        # 获取最小日期（第一个文件）
         try:
-            # 读取 trade_date 和 symbol 列
-            df = pd.read_parquet(
-                file_path,
-                columns=["trade_date", "symbol"],
-                engine="pyarrow"
-            )
-            if df.empty:
-                continue
+            first_df = pd.read_parquet(files[0], columns=["trade_date"], engine="pyarrow")
+            if not first_df.empty:
+                min_date = pd.to_datetime(first_df["trade_date"].min(), errors="coerce").date()
+        except Exception: pass
 
-            # 解析日期
-            date_series = pd.to_datetime(df["trade_date"], errors="coerce")
-            file_min = date_series.min()
-            file_max = date_series.max()
+        # 获取最大日期（最后一个文件）
+        try:
+            last_df = pd.read_parquet(files[-1], columns=["trade_date", "symbol"], engine="pyarrow")
+            if not last_df.empty:
+                date_series = pd.to_datetime(last_df["trade_date"], errors="coerce")
+                max_date = date_series.max().date()
 
-            if pd.isna(file_min) or pd.isna(file_max):
-                invalid_samples.append({
-                    "symbol": "N/A",
-                    "reason": "invalid_trade_date",
-                    "file": file_path.name,
-                })
-                continue
+                # 计算最新日期覆盖率（仅基于最后一个文件，这在按年/按月分区时是合理的性能折中）
+                if target_date:
+                    target = date.fromisoformat(target_date)
+                    symbol_latest_dates = last_df.groupby("symbol")["trade_date"].max().to_dict()
+                    
+                    at_target_count = 0
+                    older_count = 0
+                    older_samples = []
+                    
+                    for sym, latest_raw in sorted(symbol_latest_dates.items()):
+                        try:
+                            latest_dt = pd.to_datetime(latest_raw).date()
+                        except Exception: continue
+                        
+                        if latest_dt >= target:
+                            at_target_count += 1
+                        else:
+                            older_count += 1
+                            if len(older_samples) < topn:
+                                older_samples.append({
+                                    "symbol": str(sym),
+                                    "last_date": latest_dt.isoformat(),
+                                    "lag_days": (target - latest_dt).days,
+                                })
+                    
+                    result["latest_date_coverage"] = {
+                        "target_date": target_date,
+                        "at_target_count": at_target_count,
+                        "older_count": older_count,
+                        "invalid_count": 0,
+                    }
+                    result["topn_samples"]["older_samples"] = older_samples
+        except Exception: pass
 
-            file_min_date = file_min.date()
-            file_max_date = file_max.date()
-            min_date = file_min_date if min_date is None else min(min_date, file_min_date)
-            max_date = file_max_date if max_date is None else max(max_date, file_max_date)
-
-            # 统计每个 symbol 的最新日期
-            for sym, dt in zip(df["symbol"], date_series):
-                if pd.isna(dt):
-                    continue
-                sym_str = str(sym)
-                dt_date = dt.date()
-                if sym_str not in symbol_latest_dates or symbol_latest_dates[sym_str] < dt_date:
-                    symbol_latest_dates[sym_str] = dt_date
-
-            scanned_files += 1
-            total_rows += len(df)
-
-        except Exception as e:
-            failed_files += 1
-            invalid_samples.append({
-                "symbol": "N/A",
-                "reason": f"read_error: {str(e)[:50]}",
-                "file": file_path.name,
-            })
-
-    result["scanned_files"] = scanned_files
-    result["failed_files"] = failed_files
-    result["total_rows"] = total_rows
-
-    if min_date is not None:
-        result["min_date"] = min_date.isoformat()
-    if max_date is not None:
-        result["max_date"] = max_date.isoformat()
-
-    # 计算最新日期覆盖率
-    if target_date and max_date:
-        target = date.fromisoformat(target_date)
-        at_target_count = 0
-        older_count = 0
-        older_samples: list[dict[str, Any]] = []
-
-        for sym, latest_dt in sorted(symbol_latest_dates.items()):
-            if latest_dt >= target:
-                at_target_count += 1
-            else:
-                older_count += 1
-                lag_days = (target - latest_dt).days
-                if len(older_samples) < topn:
-                    older_samples.append({
-                        "symbol": sym,
-                        "last_date": latest_dt.isoformat(),
-                        "lag_days": lag_days,
-                    })
-
-        result["latest_date_coverage"] = {
-            "target_date": target_date,
-            "at_target_count": at_target_count,
-            "older_count": older_count,
-            "invalid_count": len(invalid_samples),
-        }
-        result["topn_samples"] = {
-            "sample_size": topn,
-            "older_samples": older_samples[:topn],
-            "invalid_samples": invalid_samples[:topn],
-        }
+    # 统计总行数（轻量化，如果文件多则只估算或跳过耗时操作）
+    result["scanned_files"] = len(files)
+    result["total_rows"] = 0 # 为了性能，不再逐个读取文件统计行数，除非有缓存
 
     # 计算建议的训练/验证/测试划分
     if min_date and max_date:

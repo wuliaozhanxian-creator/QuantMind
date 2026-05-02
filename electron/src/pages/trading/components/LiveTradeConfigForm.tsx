@@ -14,14 +14,14 @@ const WEEKDAYS: TradeWeekday[] = ['MON', 'TUE', 'WED', 'THU', 'FRI'];
 const SESSIONS: TradingSession[] = ['AM', 'PM'];
 
 const SESSION_RANGES: Record<TradingSession, [string, string]> = {
-  AM: ['09:30', '11:30'],
+  AM: ['09:00', '11:30'],
   PM: ['13:00', '15:00'],
 };
 
 const SESSION_DEFAULTS: Record<string, { sell_time: string; buy_time: string }> = {
-  AM: { sell_time: '10:00', buy_time: '10:30' },
+  AM: { sell_time: '09:00', buy_time: '09:05' },
   PM: { sell_time: '14:30', buy_time: '14:45' },
-  'AM,PM': { sell_time: '14:30', buy_time: '14:45' },
+  'AM,PM': { sell_time: '09:00', buy_time: '09:05' },
 };
 
 function isTimeInSessions(time: string, sessions: TradingSession[]): boolean {
@@ -200,7 +200,7 @@ const LiveTradeConfigForm: React.FC<Props> = ({
               type="time"
               className={`${controlClassName} ${!isTimeInSessions(liveTradeConfig.sell_time, liveTradeConfig.enabled_sessions) ? 'border-red-500 bg-red-50' : ''}`}
               value={liveTradeConfig.sell_time}
-              min={liveTradeConfig.enabled_sessions.includes('AM') ? '09:30' : '13:00'}
+              min={liveTradeConfig.enabled_sessions.includes('AM') ? '09:00' : '13:00'}
               max={liveTradeConfig.enabled_sessions.includes('PM') ? '15:00' : '11:30'}
               onChange={(e) => {
                 const val = e.target.value;
@@ -221,7 +221,7 @@ const LiveTradeConfigForm: React.FC<Props> = ({
               type="time"
               className={`${controlClassName} ${!isTimeInSessions(liveTradeConfig.buy_time, liveTradeConfig.enabled_sessions) ? 'border-red-500 bg-red-50' : ''}`}
               value={liveTradeConfig.buy_time}
-              min={liveTradeConfig.enabled_sessions.includes('AM') ? '09:30' : '13:00'}
+              min={liveTradeConfig.enabled_sessions.includes('AM') ? '09:00' : '13:00'}
               max={liveTradeConfig.enabled_sessions.includes('PM') ? '15:00' : '11:30'}
               onChange={(e) => {
                 const val = e.target.value;

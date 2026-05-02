@@ -6,11 +6,12 @@ Data Adapter - Converts real-time market data to Qlib-compatible format.
 """
 
 import logging
-from typing import Any, Dict, List
+from typing import Any
 
 import pandas as pd
 
 from .history_buffer import HistoryBuffer
+from backend.shared.stock_utils import StockCodeUtil
 
 logger = logging.getLogger(__name__)
 
@@ -62,14 +63,15 @@ class DataAdapter:
             if "timestamp" in df.columns:
                 df["datetime"] = pd.to_datetime(df["timestamp"])
 
-            # Add instrument column if symbol exists
             if "symbol" in df.columns:
-                df["instrument"] = df["symbol"]
+                df["instrument"] = df["symbol"].apply(StockCodeUtil.to_prefix)
+            elif "instrument" in df.columns:
+                df["instrument"] = df["instrument"].apply(StockCodeUtil.to_prefix)
 
             # Process each row: append to history buffer and compute indicators
             for idx in range(len(df)):
                 row = df.iloc[idx]
-                symbol = row.get("instrument") or row.get("symbol", "unknown")
+                symbol = StockCodeUtil.to_prefix(row.get("instrument") or row.get("symbol", "unknown"))
 
                 # Build bar dict for history buffer
                 bar = {}

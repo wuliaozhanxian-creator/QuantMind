@@ -12622,3 +12622,790 @@ GRANT USAGE ON SCHEMA public TO quantmind;
 --
 
 \unrestrict 6HaFnYZTWVb23E8pSK8ALZndAEpS7c6qdQhVMbig8ccaxYPrUgD3bxGh86WK08E
+--
+-- PostgreSQL database dump
+--
+
+\restrict nUgqU9dJXFJGYnXu8VPYiAHYudwPGIXaTMSCIN1hUQCtujL1aYzAtcy0vfYOAaz
+
+-- Dumped from database version 18.3
+-- Dumped by pg_dump version 18.3
+
+SET statement_timeout = 0;
+SET lock_timeout = 0;
+SET idle_in_transaction_session_timeout = 0;
+SET transaction_timeout = 0;
+SET client_encoding = 'UTF8';
+SET standard_conforming_strings = on;
+SELECT pg_catalog.set_config('search_path', '', false);
+SET check_function_bodies = false;
+SET xmloption = content;
+SET client_min_messages = warning;
+SET row_security = off;
+
+SET default_tablespace = '';
+
+--
+-- Name: stock_daily_latest; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.stock_daily_latest (
+    trade_date date CONSTRAINT stock_daily_new_trade_date_not_null NOT NULL,
+    symbol character varying(32) CONSTRAINT stock_daily_new_symbol_not_null NOT NULL,
+    stock_name text,
+    open double precision,
+    high double precision,
+    low double precision,
+    close double precision,
+    volume double precision,
+    amount double precision,
+    pct_change double precision,
+    turnover_rate double precision,
+    pe_ttm double precision,
+    pb double precision,
+    total_mv double precision,
+    float_mv double precision,
+    listed_days integer,
+    is_st smallint,
+    listing_market character varying(16),
+    industry text,
+    province text,
+    consecutive_limit_up_days integer,
+    limit_up_today smallint,
+    limit_down_today smallint,
+    return_1d double precision,
+    return_3d double precision,
+    return_5d double precision,
+    return_10d double precision,
+    return_20d double precision,
+    return_60d double precision,
+    ma5 double precision,
+    ma10 double precision,
+    ma20 double precision,
+    ma60 double precision,
+    ma_gap_5 double precision,
+    ma_gap_10 double precision,
+    ma_gap_20 double precision,
+    rsi_6 double precision,
+    rsi_14 double precision,
+    kdj_k double precision,
+    kdj_d double precision,
+    kdj_j double precision,
+    macd_dif double precision,
+    macd_dea double precision,
+    macd_hist double precision,
+    vol_std_5 double precision,
+    vol_std_20 double precision,
+    vol_std_60 double precision,
+    vol_atr_14 double precision,
+    volume_ratio_5 double precision,
+    volume_ratio_20 double precision,
+    volume_ma_5 double precision,
+    amount_ma_5 double precision,
+    bp double precision,
+    ep_ttm double precision,
+    ln_mv_total double precision,
+    beta_20 double precision,
+    label double precision,
+    ind_code_l1 text,
+    ind_code_l2 text,
+    micro_effective_spread double precision,
+    micro_imbalance_volume double precision,
+    micro_jump_flag smallint,
+    roe double precision,
+    volume_trend_3d boolean,
+    adj_factor double precision DEFAULT 1.0,
+    volume_ma_3 double precision,
+    idx_all integer DEFAULT 1,
+    idx_hs300 integer DEFAULT 0,
+    idx_zz500 integer DEFAULT 0,
+    idx_zz1000 integer DEFAULT 0,
+    idx_margin integer DEFAULT 0,
+    concept_ai integer DEFAULT 0,
+    concept_chip integer DEFAULT 0,
+    concept_new_energy integer DEFAULT 0,
+    concept_ev integer DEFAULT 0,
+    concept_pv integer DEFAULT 0,
+    concept_lithium integer DEFAULT 0,
+    concept_semiconductor integer DEFAULT 0,
+    concept_military integer DEFAULT 0,
+    concept_medical integer DEFAULT 0,
+    concept_cyber integer DEFAULT 0,
+    concept_fintech integer DEFAULT 0,
+    concept_consumption integer DEFAULT 0,
+    concept_real_estate integer DEFAULT 0,
+    concept_infrastructure integer DEFAULT 0,
+    concept_state_owned integer DEFAULT 0,
+    main_flow double precision,
+    inst_ownership double precision,
+    profit_growth double precision,
+    idx_chinext integer DEFAULT 1
+)
+PARTITION BY RANGE (trade_date);
+
+
+--
+-- Name: TABLE stock_daily_latest; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.stock_daily_latest IS '股票最新日频特征宽表：按交易日与股票代码保存行情、估值、市值、技术指标、指数/概念标签、资金流和模型标签，供投研筛选、模型推理与行情展示使用。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.trade_date; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.trade_date IS '交易日期，日频数据所属交易日。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.symbol; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.symbol IS '股票代码，统一使用后缀格式，如 600000.SH、000001.SZ、830001.BJ。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.stock_name; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.stock_name IS '股票简称。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.open; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.open IS '开盘价，后复权价格口径。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.high; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.high IS '最高价，后复权价格口径。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.low; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.low IS '最低价，后复权价格口径。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.close; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.close IS '收盘价，后复权价格口径。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.volume; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.volume IS '成交量，原始数据源口径，通常为股/手之一，使用前需确认来源单位。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.amount; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.amount IS '成交额，当前投研接口统一按亿元口径展示；历史源数据可能存在元/亿元混合，消费端需做单位兼容。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.pct_change; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.pct_change IS '当日涨跌幅，百分比数值口径，如 1.23 表示上涨 1.23%。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.turnover_rate; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.turnover_rate IS '换手率，百分比数值口径，如 2.5 表示 2.5%。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.pe_ttm; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.pe_ttm IS '市盈率 TTM。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.pb; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.pb IS '市净率 PB。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.total_mv; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.total_mv IS '总市值，当前投研接口统一按亿元口径展示；历史源数据可能存在元/亿元混合，消费端需做单位兼容。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.float_mv; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.float_mv IS '流通市值，当前投研接口统一按亿元口径展示；历史源数据可能存在元/亿元混合，消费端需做单位兼容。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.listed_days; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.listed_days IS '上市天数，按 trade_date 相对上市日期计算。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.is_st; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.is_st IS 'ST 标记，1 表示 ST 或退市风险，0 表示非 ST。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.listing_market; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.listing_market IS '上市市场/板块，如主板、创业板、科创板、北交所等。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.industry; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.industry IS '所属行业名称。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.province; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.province IS '注册地或所属省份。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.consecutive_limit_up_days; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.consecutive_limit_up_days IS '连续涨停天数。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.limit_up_today; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.limit_up_today IS '当日涨停标记，1 表示涨停，0 表示未涨停。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.limit_down_today; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.limit_down_today IS '当日跌停标记，1 表示跌停，0 表示未跌停。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.return_1d; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.return_1d IS '近 1 个交易日收益率，百分比或小数口径依生成脚本而定，消费前需确认。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.return_3d; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.return_3d IS '近 3 个交易日收益率，百分比或小数口径依生成脚本而定，消费前需确认。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.return_5d; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.return_5d IS '近 5 个交易日收益率，百分比或小数口径依生成脚本而定，消费前需确认。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.return_10d; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.return_10d IS '近 10 个交易日收益率，百分比或小数口径依生成脚本而定，消费前需确认。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.return_20d; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.return_20d IS '近 20 个交易日收益率，百分比或小数口径依生成脚本而定，消费前需确认。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.return_60d; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.return_60d IS '近 60 个交易日收益率，百分比或小数口径依生成脚本而定，消费前需确认。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.ma5; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.ma5 IS '5 日移动平均价，后复权价格口径。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.ma10; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.ma10 IS '10 日移动平均价，后复权价格口径。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.ma20; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.ma20 IS '20 日移动平均价，后复权价格口径。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.ma60; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.ma60 IS '60 日移动平均价，后复权价格口径。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.ma_gap_5; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.ma_gap_5 IS '收盘价相对 5 日均线偏离度，通常为小数比例口径，如 0.03 表示约 3%。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.ma_gap_10; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.ma_gap_10 IS '收盘价相对 10 日均线偏离度，通常为小数比例口径，如 0.03 表示约 3%。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.ma_gap_20; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.ma_gap_20 IS '收盘价相对 20 日均线偏离度，通常为小数比例口径，如 -0.03 表示约 -3%。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.rsi_6; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.rsi_6 IS 'RSI 6 日指标，范围通常为 0-100。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.rsi_14; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.rsi_14 IS 'RSI 14 日指标，范围通常为 0-100。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.kdj_k; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.kdj_k IS 'KDJ 指标 K 值。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.kdj_d; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.kdj_d IS 'KDJ 指标 D 值。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.kdj_j; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.kdj_j IS 'KDJ 指标 J 值。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.macd_dif; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.macd_dif IS 'MACD DIF 线。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.macd_dea; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.macd_dea IS 'MACD DEA 线。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.macd_hist; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.macd_hist IS 'MACD 柱状值。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.vol_std_5; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.vol_std_5 IS '近 5 日收益或成交波动率，依生成脚本口径。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.vol_std_20; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.vol_std_20 IS '近 20 日收益或成交波动率，依生成脚本口径。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.vol_std_60; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.vol_std_60 IS '近 60 日收益或成交波动率，依生成脚本口径。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.vol_atr_14; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.vol_atr_14 IS '14 日 ATR 平均真实波幅。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.volume_ratio_5; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.volume_ratio_5 IS '5 日量比，当前成交量相对 5 日均量的倍数。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.volume_ratio_20; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.volume_ratio_20 IS '20 日量比，当前成交量相对 20 日均量的倍数。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.volume_ma_5; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.volume_ma_5 IS '5 日平均成交量。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.amount_ma_5; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.amount_ma_5 IS '5 日平均成交额。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.bp; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.bp IS '账面市值比或 PB 的倒数，依因子生成口径。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.ep_ttm; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.ep_ttm IS '盈利收益率 TTM，通常为 PE(TTM) 的倒数。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.ln_mv_total; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.ln_mv_total IS '总市值对数因子。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.beta_20; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.beta_20 IS '20 日市场 Beta。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.label; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.label IS '模型训练/评估标签，通常为未来收益或分类目标。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.ind_code_l1; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.ind_code_l1 IS '一级行业代码。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.ind_code_l2; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.ind_code_l2 IS '二级行业代码。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.micro_effective_spread; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.micro_effective_spread IS '微观结构有效价差指标。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.micro_imbalance_volume; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.micro_imbalance_volume IS '微观结构成交量不平衡指标，通常范围 -1 到 1。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.micro_jump_flag; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.micro_jump_flag IS '微观结构跳空/跳跃标记，1 表示存在跳跃，0 表示不存在。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.roe; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.roe IS '净资产收益率 ROE；后端投研接口会按需要转换为百分比展示。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.volume_trend_3d; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.volume_trend_3d IS '3 日量能趋势标记，TRUE 表示近 3 日量能增强。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.adj_factor; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.adj_factor IS '复权因子，用于将后复权价格换算回实际价格。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.volume_ma_3; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.volume_ma_3 IS '3 日平均成交量。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.idx_all; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.idx_all IS '指数筛选列：全市场标记，1 表示纳入全市场股票池，0 表示未纳入。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.idx_hs300; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.idx_hs300 IS '指数筛选列：沪深300成分标记，1 表示属于沪深300股票池，0 表示不属于。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.idx_zz500; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.idx_zz500 IS '指数筛选列：中证500成分标记，1 表示属于中证500股票池，0 表示不属于。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.idx_zz1000; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.idx_zz1000 IS '指数筛选列：中证1000成分标记，1 表示属于中证1000股票池，0 表示不属于。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.idx_margin; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.idx_margin IS '指数筛选列：两融标的标记，1 表示属于融资融券标的股票池，0 表示不属于。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.concept_ai; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.concept_ai IS '概念标签列：AI 概念，1 表示属于该概念，0 表示不属于。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.concept_chip; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.concept_chip IS '概念标签列：芯片概念，1 表示属于该概念，0 表示不属于。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.concept_new_energy; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.concept_new_energy IS '概念标签列：新能源概念，1 表示属于该概念，0 表示不属于。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.concept_ev; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.concept_ev IS '概念标签列：电动车概念，1 表示属于该概念，0 表示不属于。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.concept_pv; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.concept_pv IS '概念标签列：光伏概念，1 表示属于该概念，0 表示不属于。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.concept_lithium; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.concept_lithium IS '概念标签列：锂电概念，1 表示属于该概念，0 表示不属于。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.concept_semiconductor; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.concept_semiconductor IS '概念标签列：半导体概念，1 表示属于该概念，0 表示不属于。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.concept_military; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.concept_military IS '概念标签列：军工概念，1 表示属于该概念，0 表示不属于。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.concept_medical; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.concept_medical IS '概念标签列：医药概念，1 表示属于该概念，0 表示不属于。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.concept_cyber; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.concept_cyber IS '概念标签列：网络安全概念，1 表示属于该概念，0 表示不属于。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.concept_fintech; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.concept_fintech IS '概念标签列：金融科技概念，1 表示属于该概念，0 表示不属于。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.concept_consumption; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.concept_consumption IS '概念标签列：消费概念，1 表示属于该概念，0 表示不属于。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.concept_real_estate; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.concept_real_estate IS '概念标签列：地产概念，1 表示属于该概念，0 表示不属于。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.concept_infrastructure; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.concept_infrastructure IS '概念标签列：基建概念，1 表示属于该概念，0 表示不属于。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.concept_state_owned; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.concept_state_owned IS '概念标签列：国企改革概念，1 表示属于该概念，0 表示不属于。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.main_flow; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.main_flow IS '主力净流入，原始数据源金额口径；后端投研详情按百万/亿元格式化展示。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.inst_ownership; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.inst_ownership IS '机构持股比例，百分比或小数口径依数据源而定，当前覆盖率较低。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.profit_growth; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.profit_growth IS '利润增长率，百分比或小数口径依数据源而定，当前覆盖率较低。';
+
+
+--
+-- Name: COLUMN stock_daily_latest.idx_chinext; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.stock_daily_latest.idx_chinext IS '指数筛选列：创业板指数成分标记，1 表示属于创业板指数股票池，0 表示不属于；当前按测试口径默认填充为 1。';
+
+
+--
+-- Name: stock_daily_latest stock_daily_new_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.stock_daily_latest
+    ADD CONSTRAINT stock_daily_new_pkey PRIMARY KEY (trade_date, symbol);
+
+
+--
+-- Name: stock_daily_new_symbol_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX stock_daily_new_symbol_idx ON ONLY public.stock_daily_latest USING btree (symbol);
+
+
+--
+-- Name: stock_daily_new_trade_date_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX stock_daily_new_trade_date_idx ON ONLY public.stock_daily_latest USING btree (trade_date);
+
+
+--
+-- PostgreSQL database dump complete
+--
+
+\unrestrict nUgqU9dJXFJGYnXu8VPYiAHYudwPGIXaTMSCIN1hUQCtujL1aYzAtcy0vfYOAaz
+

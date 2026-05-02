@@ -221,8 +221,8 @@ async def get_data_status(
         "message": "数据正在后台扫描中，请稍后刷新" if not refresh else "已触发强制刷新任务"
     }
 
-@router.post("/sync-market-data-daily", summary="手动触发 Baostock 同步基础行情到 market_data_daily")
-async def sync_market_data_daily(
+@router.post("/sync-stock-daily-latest", summary="手动触发 Baostock 同步基础行情到 stock_daily_latest")
+async def sync_stock_daily_latest(
     target_date: str | None = Query(None, description="目标日期 YYYY-MM-DD，默认今天"),
     max_symbols: int = Query(0, ge=0, le=10000, description="仅处理前 N 个标的（0=全部）"),
     apply: bool = Query(True, description="是否执行写入（false=dry-run）"),
@@ -230,7 +230,7 @@ async def sync_market_data_daily(
     current_user: dict = Depends(require_admin),
 ):
     """
-    通过脚本触发从 Baostock 拉取基础日线并回填 market_data_daily。
+    通过脚本触发从 Baostock 拉取基础日线并回填 stock_daily_latest。
     """
     _ = current_user
 
@@ -458,10 +458,10 @@ async def precheck_inference(
         async with get_session(read_only=True) as session:
             stat_sql = text("""
                 SELECT
-                    MAX(date) AS latest_trade_date,
+                    MAX(trade_date) AS latest_trade_date,
                     MAX(updated_at) AS latest_updated_at,
-                    COUNT(*) FILTER (WHERE date = :trade_date) AS today_rows
-                FROM market_data_daily
+                    COUNT(*) FILTER (WHERE trade_date = :trade_date) AS today_rows
+                FROM stock_daily_latest
                 """)
             row = (
                 (
@@ -485,7 +485,7 @@ async def precheck_inference(
                             SELECT column_name
                             FROM information_schema.columns
                             WHERE table_schema = 'public'
-                              AND table_name = 'market_data_daily'
+                              AND table_name = 'stock_daily_latest'
                             """
                         )
                     )
@@ -531,9 +531,9 @@ async def precheck_inference(
                         text(
                             f"""
                             SELECT COUNT(*) FILTER (
-                                WHERE date = :trade_date AND ({dim_condition})
+                                WHERE trade_date = :trade_date AND ({dim_condition})
                             ) AS dim_ready_rows
-                            FROM market_data_daily
+                            FROM stock_daily_latest
                             """
                         ),
                         {
@@ -579,7 +579,7 @@ async def precheck_inference(
                 "detail": (
                     f"rows={today_rows}"
                     if today_rows > 0
-                    else f"market_data_daily 未发现 {data_trade_date_str} 数据"
+                    else f"stock_daily_latest 未发现 {data_trade_date_str} 数据"
                 ),
             }
         )

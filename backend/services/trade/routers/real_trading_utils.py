@@ -1003,6 +1003,108 @@ def _get_stream_series_redis_client():
     return client, host, port
 
 
+def check_stream_series_freshness(redis_client=None) -> dict[str, Any]:
+    """
+    统一的 Stream 行情时序新鲜度检测逻辑。
+    返回 {ok, message, details}
+    """
+    stream_symbols = _resolve_preflight_symbols()
+    stream_redis, stream_redis_host, stream_redis_port = _get_stream_series_redis_client()
+    threshold_sec = int(os.getenv("PREFLIGHT_SERIES_STALE_THRESHOLD_SEC", "300"))
+
+    matched_symbol = None
+    latest_age_sec = None
+    try:
+        stream_redis.ping()
+        for symbol in stream_symbols:
+            key = f"market:series:{symbol}"
+            latest = stream_redis.zrevrange(key, 0, 0, withscores=True)
+            if latest:
+                _, score = latest[0]
+                age = max(0, int(time.time() - float(score)))
+                if latest_age_sec is None or age < latest_age_sec:
+                    matched_symbol = symbol
+                    latest_age_sec = age
+    except Exception as e:
+        # 降级：尝试本地/交易 Redis
+        if redis_client:
+            try:
+                for symbol in stream_symbols:
+                    key = f"market:series:{symbol}"
+                    latest = redis_client.zrevrange(key, 0, 0, withscores=True)
+                    if latest:
+                        _, score = latest[0]
+                        age = max(0, int(time.time() - float(score)))
+                        if latest_age_sec is None or age < latest_age_sec:
+                            matched_symbol = symbol
+                            latest_age_sec = age
+            except Exception:
+                pass
+
+    ok = latest_age_sec is not None and latest_age_sec < threshold_sec
+    message = (
+        f"行情新鲜（{matched_symbol} 延迟 {latest_age_sec}s）"
+        if ok
+        else (
+            f"行情延迟过高（{matched_symbol} 延迟 {latest_age_sec}s > {threshold_sec}s）"
+            if matched_symbol
+            else "未发现可用行情序列"
+        )
+    )
+
+    return {
+        "ok": ok,
+        "message": message,
+        "details": {
+            "matched_symbol": matched_symbol,
+            "age_seconds": latest_age_sec,
+            "threshold_seconds": threshold_sec,
+            "series_redis": f"{stream_redis_host}:{stream_redis_port}",
+        },
+    }
+
+
+def check_stream_quote_persist_rate(redis_client=None) -> dict[str, Any]:
+    """
+    统一的 Stream 行情落库速率检测逻辑。
+    """
+    try:
+        # 获取落库监控 Key (由 stream 服务定时写入)
+        key = "market:stream:persist_stats"
+        stats_raw = None
+        if redis_client:
+            stats_raw = redis_client.get(key)
+
+        if not stats_raw:
+            # 尝试从行情 Redis 获取
+            stream_redis, _, _ = _get_stream_series_redis_client()
+            stats_raw = stream_redis.get(key)
+
+        if not stats_raw:
+            return {"ok": False, "message": "未检测到行情落库统计信息", "details": {}}
+
+        stats = json.loads(stats_raw)
+        rps = float(stats.get("quotes_per_sec", 0))
+        last_update = float(stats.get("ts", 0))
+        age = max(0, int(time.time() - last_update))
+
+        ok = rps > 0 and age < 60
+        message = (
+            f"行情落库正常 ({rps:.1f} qps)"
+            if ok
+            else f"行情落库异常 (qps={rps:.1f}, age={age}s)"
+        )
+
+        return {
+            "ok": ok,
+            "message": message,
+            "details": stats,
+        }
+    except Exception as e:
+        return {"ok": False, "message": f"行情落库检测异常: {e}", "details": {}}
+
+
+
 def _local_today_for_preflight():
     tz_name = os.getenv("PREFLIGHT_SNAPSHOT_TZ", "Asia/Shanghai")
     try:

@@ -47,14 +47,15 @@ def init_table():
         is_st INTEGER,
         is_hs300 INTEGER,
         is_csi1000 INTEGER,
-        listing_market VARCHAR(50), 
-        market_type VARCHAR(50),    
-        industry VARCHAR(100),      
-        corp_nature VARCHAR(100)    
+        idx_chinext INTEGER DEFAULT 0,
+        listing_market VARCHAR(50),
+        industry VARCHAR(100),
+        nindnme VARCHAR(200),
+        corp_nature VARCHAR(100)
     );
     CREATE INDEX idx_sdl_pe ON stock_daily_latest(pe_ttm);
     CREATE INDEX idx_sdl_industry ON stock_daily_latest(industry);
-    CREATE INDEX idx_sdl_market_type ON stock_daily_latest(market_type);
+    CREATE INDEX idx_sdl_nindnme ON stock_daily_latest(nindnme);
     """
     with engine.connect() as conn:
         conn.execute(text(sql))
@@ -123,8 +124,8 @@ def fetch_and_sync():
         )
 
         # 2. 识别市场和类型
-        processed_df[["listing_market", "market_type"]] = processed_df.apply(
-            lambda x: pd.Series(get_market_info(x["code"])), axis=1
+        processed_df["listing_market"] = processed_df.apply(
+            lambda x: get_market_info(x["code"])[0], axis=1
         )
 
         # 3. 抓取行业分类 (通过东财行业板块接口)
@@ -181,9 +182,18 @@ def fetch_and_sync():
             processed_df["is_csi1000"] = processed_df["code"].apply(
                 lambda x: 1 if x in csi1000 else 0
             )
+            chinext = set(
+                ak.index_stock_cons(symbol="399006")["品种代码"]
+                .apply(fix_code)
+                .tolist()
+            )
+            processed_df["idx_chinext"] = processed_df["code"].apply(
+                lambda x: 1 if x in chinext else 0
+            )
         except:
             processed_df["is_hs300"] = 0
             processed_df["is_csi1000"] = 0
+            processed_df["idx_chinext"] = 0
 
         # 清洗
         processed_df["total_mv"] = processed_df["total_mv"] / 10000.0

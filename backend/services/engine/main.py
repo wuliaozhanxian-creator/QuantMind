@@ -63,34 +63,6 @@ async def lifespan(app: FastAPI):
         app.state.startup_healthy = False
         logger.error(f"❌ Model registry table ensure failed: {e}")
 
-    warmup_enabled = os.getenv("AI_STRATEGY_WARMUP", "true").strip().lower() not in (
-        "0",
-        "false",
-        "no",
-        "off",
-    )
-    if warmup_enabled:
-        timeout_raw = os.getenv("AI_STRATEGY_WARMUP_TIMEOUT_SECONDS", "60").strip()
-        try:
-            warmup_timeout_seconds = max(1.0, float(timeout_raw))
-        except ValueError:
-            warmup_timeout_seconds = 60.0
-        try:
-            await asyncio.wait_for(
-                asyncio.to_thread(_run_ai_strategy_warmup_sync),
-                timeout=warmup_timeout_seconds,
-            )
-            logger.info("✅ AI Strategy Warmup completed")
-        except asyncio.TimeoutError:
-            logger.warning(
-                "⚠️ AI Strategy Warmup timeout after %.1fs; startup continues",
-                warmup_timeout_seconds,
-            )
-            # Timeout is not critical - service can still function
-        except Exception as e:
-            logger.warning(f"⚠️ AI Strategy Warmup skipped: {e}")
-            # Missing API key or other non-critical error - service can still function
-
     set_service_health("quantmind-engine", bool(getattr(app.state, "startup_healthy", True)))
 
     # 启动 VectorizedMatcher（受 ENABLE_VECTORIZED_MATCHER 环境变量控制）
@@ -104,8 +76,37 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"⚠️ VectorizedMatcher startup skipped: {e}")
 
+    # --- 此处 Yield，之后代码在启动后运行 ---
     yield
 
+    # 后台预热逻辑（不阻塞启动）
+    warmup_enabled = os.getenv("AI_STRATEGY_WARMUP", "true").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
+    )
+    if warmup_enabled:
+        async def _warmup_task():
+            timeout_raw = os.getenv("AI_STRATEGY_WARMUP_TIMEOUT_SECONDS", "120").strip()
+            try:
+                warmup_timeout_seconds = max(1.0, float(timeout_raw))
+            except ValueError:
+                warmup_timeout_seconds = 120.0
+            try:
+                await asyncio.wait_for(
+                    asyncio.to_thread(_run_ai_strategy_warmup_sync),
+                    timeout=warmup_timeout_seconds,
+                )
+                logger.info("✅ AI Strategy Warmup completed in background")
+            except asyncio.TimeoutError:
+                logger.warning(f"⚠️ AI Strategy Warmup timeout after {warmup_timeout_seconds}s")
+            except Exception as e:
+                logger.warning(f"⚠️ AI Strategy Warmup failed: {e}")
+        
+        asyncio.create_task(_warmup_task(), name="ai_strategy_warmup")
+
+    # --- 停止逻辑 ---
     if vm_task and not vm_task.done():
         try:
             app.state.vectorized_matcher.stop()

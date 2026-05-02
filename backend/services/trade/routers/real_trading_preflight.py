@@ -421,197 +421,50 @@ async def preflight_check(
 
     # 8~10) Stream 探针：REAL/SHADOW/SIMULATION 均检测行情质量
     if mode in {"REAL", "SHADOW", "SIMULATION"}:
-        # 模拟盘也需要行情来计算成交金额，否则会用随机价格导致金额错误
-        is_trading_hours = _is_cn_trading_hours()
-        stream_required = is_trading_hours
-        stream_symbols = _resolve_preflight_symbols()
-        series_threshold_sec = int(os.getenv("PREFLIGHT_SERIES_STALE_THRESHOLD_SEC", "180"))
+        # 1. Stream时序序列 (始终阻断)
         try:
-            stream_redis, stream_redis_host, stream_redis_port = _get_stream_series_redis_client()
-            # 显式 ping，确保不是惰性连接误判
-            stream_redis.ping()
-            matched_symbol = None
-            matched_key = None
-            latest_age_sec = None
-            data_source = "remote_quote_redis"
-            for symbol in stream_symbols:
-                key = f"market:series:{symbol}"
-                latest = stream_redis.zrevrange(key, 0, 0, withscores=True)
-                if not latest:
-                    continue
-                _, score = latest[0]
-                age = max(0, int(time.time() - float(score)))
-                matched_symbol = symbol
-                matched_key = key
-                latest_age_sec = age
-                break
-            if latest_age_sec is None:
-                passed = not is_trading_hours  # 交易时段无数据则失败
-                add_check(
-                    "stream_series_freshness",
-                    "Stream时序序列",
-                    passed,
-                    stream_required,
-                    (
-                        f"[WARNING] 未发现可用序列: sample_symbols={stream_symbols}"
-                        + (f" (交易时段阻断)" if is_trading_hours else " (非交易时段放行)")
-                    ),
-                    {
-                        "sample_symbols": stream_symbols,
-                        "stale_threshold_sec": series_threshold_sec,
-                        "series_redis": f"{stream_redis_host}:{stream_redis_port}",
-                        "source": data_source,
-                        "is_trading_hours": is_trading_hours,
-                    },
-                )
-            else:
-                ok = latest_age_sec <= series_threshold_sec
-                passed = ok if is_trading_hours else True
-                add_check(
-                    "stream_series_freshness",
-                    "Stream时序序列",
-                    passed,
-                    stream_required,
-                    (
-                        f"时序序列新鲜度正常（{latest_age_sec}s）"
-                        if ok
-                        else f"[WARNING] 时序序列延迟过高（{latest_age_sec}s）"
-                        + (f" (交易时段阻断)" if is_trading_hours else " (非交易时段放行)")
-                    ),
-                    {
-                        "symbol": matched_symbol,
-                        "series_key": matched_key,
-                        "latest_age_sec": latest_age_sec,
-                        "stale_threshold_sec": series_threshold_sec,
-                        "series_redis": f"{stream_redis_host}:{stream_redis_port}",
-                        "source": data_source,
-                        "is_trading_hours": is_trading_hours,
-                    },
-                )
+            res = check_stream_series_freshness(redis_client=trade_redis)
+            add_check(
+                "stream_series_freshness",
+                "Stream时序序列",
+                res["ok"],
+                True,
+                res["message"],
+                res["details"],
+            )
         except Exception as e:
-            # 回退：尝试交易 Redis，避免 remote Redis 临时不可用时完全失明
-            try:
-                matched_symbol = None
-                matched_key = None
-                latest_age_sec = None
-                for symbol in stream_symbols:
-                    key = f"market:series:{symbol}"
-                    latest = redis.client.zrevrange(key, 0, 0, withscores=True)
-                    if not latest:
-                        continue
-                    _, score = latest[0]
-                    age = max(0, int(time.time() - float(score)))
-                    matched_symbol = symbol
-                    matched_key = key
-                    latest_age_sec = age
-                    break
-                if latest_age_sec is None:
-                    add_check(
-                        "stream_series_freshness",
-                        "Stream时序序列",
-                        False,
-                        stream_required,
-                        "未发现可用的行情时序序列，请检查 Stream quote->series 写入链路",
-                        {
-                            "sample_symbols": stream_symbols,
-                            "stale_threshold_sec": series_threshold_sec,
-                            "fallback": "trade_redis",
-                            "remote_probe_error": str(e),
-                        },
-                    )
-                else:
-                    ok = latest_age_sec <= series_threshold_sec
-                    add_check(
-                        "stream_series_freshness",
-                        "Stream时序序列",
-                    True,  # 警告：不阻断启动
-                    stream_required,
-                    (
-                        f"时序序列新鲜度正常（{latest_age_sec}s）"
-                        if ok
-                        else f"[WARNING] 时序序列延迟过高（{latest_age_sec}s）"
-                    ),
-                        {
-                            "symbol": matched_symbol,
-                            "series_key": matched_key,
-                            "latest_age_sec": latest_age_sec,
-                            "stale_threshold_sec": series_threshold_sec,
-                            "source": "trade_redis(fallback)",
-                            "remote_probe_error": str(e),
-                        },
-                    )
-            except Exception as fallback_error:
-                add_check(
-                    "stream_series_freshness",
-                    "Stream时序序列",
-                    False,
-                    stream_required,
-                    f"时序序列检测失败: {fallback_error}",
-                    {"remote_probe_error": str(e)},
-                )
+            add_check(
+                "stream_series_freshness",
+                "Stream时序序列",
+                False,
+                True,
+                f"行情检测异常: {e}",
+            )
 
-        # 9) Stream quote 落库速率检测（quotes 表）
-        quote_window_min = int(os.getenv("PREFLIGHT_QUOTE_WINDOW_MINUTES", "5"))
-        quote_min_count = int(os.getenv("PREFLIGHT_QUOTE_MIN_COUNT", "5"))
+        # 2. Stream行情落库 (始终阻断)
         try:
-            quote_time_col = (
-                await db.execute(
-                    text("""
-                    SELECT column_name
-                    FROM information_schema.columns
-                    WHERE table_schema = 'public'
-                      AND table_name = 'quotes'
-                      AND column_name IN ('timestamp', 'trade_time', 'created_at')
-                    ORDER BY CASE column_name
-                        WHEN 'timestamp' THEN 1
-                        WHEN 'trade_time' THEN 2
-                        WHEN 'created_at' THEN 3
-                        ELSE 4
-                    END
-                    LIMIT 1
-                    """)
-                )
-            ).scalar()
-            if quote_time_col not in {"timestamp", "trade_time", "created_at"}:
-                raise RuntimeError("quotes table has no timestamp/trade_time/created_at column")
-            quote_sql = text(f"""
-                SELECT COUNT(1) AS cnt
-                FROM quotes
-                WHERE {quote_time_col} >= NOW() - make_interval(mins => :window)
-                """)
-            quote_cnt = int((await db.execute(quote_sql, {"window": quote_window_min})).scalar() or 0)
-            quote_ok = quote_cnt >= quote_min_count
+            res = check_stream_quote_persist_rate(redis_client=trade_redis)
             add_check(
                 "stream_quote_persist_rate",
                 "Stream行情落库",
-                quote_ok if is_trading_hours else True,
-                stream_required,
-                (
-                    f"最近{quote_window_min}分钟落库 {quote_cnt} 条"
-                    if quote_ok
-                    else f"[WARNING] 最近{quote_window_min}分钟落库过少（{quote_cnt} 条）"
-                ),
-                {
-                    "window_minutes": quote_window_min,
-                    "recent_quote_count": quote_cnt,
-                    "min_required_count": quote_min_count,
-                    "time_column": quote_time_col,
-                    "is_trading_hours": is_trading_hours,
-                },
+                res["ok"],
+                True,
+                res["message"],
+                res["details"],
             )
         except Exception as e:
             add_check(
                 "stream_quote_persist_rate",
                 "Stream行情落库",
-                not is_trading_hours,
-                stream_required,
+                False,
+                True,
                 f"行情落库检测失败: {e}",
             )
             await db.rollback()
 
         # 10) Stream K线拉取可用性（只做可用性探针，默认非阻断）
         kline_required = False
-        kline_symbol = stream_symbols[0]
+        kline_symbol = _resolve_preflight_symbols()[0]
         stream_base_url = str(settings.MARKET_DATA_SERVICE_URL or "http://quantmind-stream:8003").rstrip("/")
         kline_url = f"{stream_base_url}/api/v1/klines/{kline_symbol}"
         try:
@@ -779,7 +632,6 @@ async def preflight_check(
             },
         )
 
-        # 11.4 实时行情服务（SIMULATION 模式也需要）
         try:
             stream_symbols = _resolve_preflight_symbols()
             stream_redis, stream_redis_host, stream_redis_port = _get_stream_series_redis_client()

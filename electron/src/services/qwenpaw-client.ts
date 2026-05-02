@@ -1,6 +1,6 @@
 /**
- * QuantBot AI 助手客户端 (适配 QuantMind 网关)
- * 路径: electron/src/services/copaw-client.ts
+ * QwenPaw AI 助手客户端 (适配 QuantMind 网关)
+ * 路径: electron/src/services/qwenpaw-client.ts
  */
 
 import { authService } from '../features/auth/services/authService';
@@ -26,14 +26,14 @@ export interface ChatSession {
   created_at: string;
 }
 
-export class CopawClient {
+export class QwenPawClient {
   private apiBase: string;
   private userId: string;
   private channel: string;
 
   constructor(userId: string, channel: string = 'quantbot') {
-    // 统一通过 Nginx 网关访问 (已由网关重写为 http://copaw:8088/api/)
-    this.apiBase = '/api/v1/copaw'; 
+    // 统一通过 Nginx 网关访问 (已由网关重写为 http://qwenpaw:8088/api/)
+    this.apiBase = '/api/v1/qwenpaw';
     this.userId = userId;
     this.channel = channel;
   }
@@ -44,13 +44,13 @@ export class CopawClient {
       'X-User-Id': this.userId,
       'X-Channel': this.channel,
     };
-    
+
     // 仅接受经过统一校验的访问令牌
     const token = authService.getAccessToken();
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
     }
-    
+
     return headers;
   }
 
@@ -65,7 +65,7 @@ export class CopawClient {
       if (!res.ok) throw new Error('Failed to list chats');
       return res.json();
     } catch (error) {
-      console.error('QuantBot listChats error:', error);
+      console.error('QwenPaw listChats error:', error);
       return [];
     }
   }
@@ -92,7 +92,7 @@ export class CopawClient {
    */
   async sendMessage(content: string, options: SendMessageOptions) {
     let fullText = '';
-    
+
     try {
       const response = await fetch(`${this.apiBase}/process`, {
         method: 'POST',
@@ -121,14 +121,14 @@ export class CopawClient {
 
         const chunk = decoder.decode(value);
         const lines = chunk.split('\n');
-        
+
         for (const line of lines) {
           const trimmed = line.trim();
           if (!trimmed || !trimmed.startsWith('data: ')) continue;
-          
+
           const data = trimmed.slice(6);
           if (data === '[DONE]') break;
-          
+
           try {
             const parsed = JSON.parse(data);
             if (parsed.text) {
@@ -143,7 +143,7 @@ export class CopawClient {
 
       options.onComplete?.(fullText);
     } catch (error) {
-      console.error('QuantBot sendMessage error:', error);
+      console.error('QwenPaw sendMessage error:', error);
       options.onError?.(error);
     }
   }
@@ -160,7 +160,7 @@ export class CopawClient {
       const data = await res.json();
       return data.messages || [];
     } catch (error) {
-      console.error('QuantBot getChatHistory error:', error);
+      console.error('QwenPaw getChatHistory error:', error);
       return [];
     }
   }

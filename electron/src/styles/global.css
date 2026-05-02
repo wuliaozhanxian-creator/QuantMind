@@ -2,6 +2,8 @@
 @tailwind components;
 @tailwind utilities;
 
+@import './research-next-theme.css';
+
 :root {
   /* 顶级量化平台 - 现代化视觉系统升级 */
   --font-family: 'Outfit', 'Inter', "Noto Sans SC", sans-serif;
@@ -86,13 +88,17 @@ body,
   -webkit-font-smoothing: antialiased;
   width: 100%;
   height: 100%;
-  background: transparent !important; /* 必须透明以显示 app-root 的圆角效果 */
+}
+
+html,
+#root {
+  background: transparent !important; /* 保持外层透明，由 body/app-root 承载实际浅色基底 */
 }
 
 body {
   color: var(--slate-900);
   overflow: hidden;
-  background: var(--bg-main);
+  background: var(--bg-main) !important;
 }
 
 /* Windows 10 圆角需要 body 透明 */

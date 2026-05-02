@@ -12,7 +12,7 @@ from backend.services.engine.models.market_data import MarketDataDaily
 logger = logging.getLogger(__name__)
 
 # 系统保留列，不作为特征列返回
-_SYSTEM_COLUMNS = {"date", "symbol", "updated_at", "features"}
+_SYSTEM_COLUMNS = {"trade_date", "date", "symbol", "stock_name", "industry", "province", "updated_at", "features"}
 
 
 class ETLWorker:
@@ -34,7 +34,7 @@ class ETLWorker:
         """
         try:
             inspector = inspect(self.db.bind)
-            all_cols = [c["name"] for c in inspector.get_columns("market_data_daily")]
+            all_cols = [c["name"] for c in inspector.get_columns("stock_daily_latest")]
             return [c for c in all_cols if c not in _SYSTEM_COLUMNS]
         except Exception:
             # 内省失败时退回到已知基础列
@@ -67,9 +67,9 @@ class ETLWorker:
             try:
                 cols_sql = ", ".join(f'"{c}"' for c in feature_cols)
                 stmt = text(f"""
-                    SELECT symbol, features, {cols_sql}
-                    FROM market_data_daily
-                    WHERE date = :trade_date
+                    SELECT symbol, {cols_sql}
+                    FROM stock_daily_latest
+                    WHERE trade_date = :trade_date
                     """)
                 rows = self.db.execute(stmt, {"trade_date": trade_date}).mappings().all()
             except Exception as e:
@@ -77,10 +77,9 @@ class ETLWorker:
                 logger.warning(f"Fallback to legacy market_data_daily schema: {e}")
                 feature_cols = []
 
-        if not feature_cols:
-            legacy_stmt = select(MarketDataDaily).where(MarketDataDaily.date == trade_date)
-            legacy_results = self.db.execute(legacy_stmt).scalars().all()
-            rows = [{"symbol": row.symbol, "features": row.features} for row in legacy_results]
+            # 如果 stock_daily_latest 为空，不再回退到 MarketDataDaily，因为表结构完全不同
+            logger.warning(f"No data found in stock_daily_latest for {trade_date}")
+            return pd.DataFrame()
 
         if not rows:
             logger.warning(f"No data found for date {trade_date}")

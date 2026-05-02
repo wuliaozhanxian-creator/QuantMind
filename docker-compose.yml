@@ -21,6 +21,8 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    ports:
+      - "5432:5432"
     networks:
       - quantmind-net
 
@@ -48,6 +50,7 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.oss
+    platform: linux/amd64
     container_name: quantmind
     depends_on:
       db:
@@ -163,6 +166,7 @@ services:
   # 4. Celery Worker (Qlib 回测任务)
   celery-worker:
     image: quantmind-oss:latest
+    platform: linux/amd64
     container_name: quantmind-celery
     depends_on:
       db:

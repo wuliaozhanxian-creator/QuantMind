@@ -4,7 +4,7 @@ import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 from collections.abc import Iterable
 from uuid import uuid4
 
@@ -19,22 +19,22 @@ from backend.services.api.routers.proxy_error_mapping import (
 )
 from backend.services.api.user_app.middleware.auth import get_current_user
 
-router = APIRouter(tags=["QuantBot"])
+router = APIRouter(tags=["OpenClaw-QwenPaw"])
 
-COPAW_BASE_URL = os.getenv("COPAW_BASE_URL", "http://copaw:8088").rstrip("/")
-COPAW_CHANNEL = os.getenv("COPAW_CHANNEL", "console")
-COPAW_TIMEOUT_SECONDS = float(os.getenv("COPAW_TIMEOUT_SECONDS", "60"))
-COPAW_SHARED_FILES_DIR = os.getenv("COPAW_SHARED_FILES_DIR", "/copaw-shared").rstrip("/")
-COPAW_SHARED_VISIBLE_DIR = os.getenv("COPAW_SHARED_VISIBLE_DIR", "/app/working").rstrip("/")
+QWENPAW_BASE_URL = os.getenv("QWENPAW_BASE_URL", "http://qwenpaw:8088").rstrip("/")
+QWENPAW_CHANNEL = os.getenv("QWENPAW_CHANNEL", "console")
+QWENPAW_TIMEOUT_SECONDS = float(os.getenv("QWENPAW_TIMEOUT_SECONDS", "60"))
+QWENPAW_SHARED_FILES_DIR = os.getenv("QWENPAW_SHARED_FILES_DIR", "/qwenpaw-shared").rstrip("/")
+QWENPAW_SHARED_VISIBLE_DIR = os.getenv("QWENPAW_SHARED_VISIBLE_DIR", "/app/working").rstrip("/")
 OPENCLAW_MAX_FILE_SIZE_BYTES = int(os.getenv("OPENCLAW_MAX_FILE_SIZE_BYTES", str(50 * 1024 * 1024)))
 
-# QuantBot 上游认证信息
-COPAW_AUTH_USERNAME = os.getenv("COPAW_AUTH_USERNAME", "")
-COPAW_AUTH_PASSWORD = os.getenv("COPAW_AUTH_PASSWORD", "")
+# QwenPaw 上游认证信息
+QWENPAW_AUTH_USERNAME = os.getenv("QWENPAW_AUTH_USERNAME", "")
+QWENPAW_AUTH_PASSWORD = os.getenv("QWENPAW_AUTH_PASSWORD", "")
 
 # 服务间令牌缓存
-_QUANTBOT_TOKEN: str | None = None
-_QUANTBOT_TOKEN_EXPIRY: float = 0
+_QWENPAW_TOKEN: str | None = None
+_QWENPAW_TOKEN_EXPIRY: float = 0
 
 _HOP_HEADERS = {
     "connection",
@@ -85,7 +85,7 @@ class OpenClawAttachment(BaseModel):
     file_name: str
     file_size: int = 0
     content_type: str = "application/octet-stream"
-    quantbot_path: str
+    file_path: str
     uploaded_at: str | None = None
 
 
@@ -129,8 +129,8 @@ def _resolve_user_id(current_user: dict, explicit_user_id: str | None = None) ->
     return str(resolved)
 
 
-def _quantbot_url(path: str) -> str:
-    return f"{COPAW_BASE_URL}{path}"
+def _qwenpaw_url(path: str) -> str:
+    return f"{QWENPAW_BASE_URL}{path}"
 
 
 def _safe_segment(value: str) -> str:
@@ -139,56 +139,55 @@ def _safe_segment(value: str) -> str:
     return sanitized or "unknown"
 
 
-async def _get_quantbot_token() -> str | None:
-    """获取并缓存 QuantBot 系统的 JWT 令牌"""
-    global _QUANTBOT_TOKEN, _QUANTBOT_TOKEN_EXPIRY
+async def _get_qwenpaw_token() -> str | None:
+    """获取并缓存 QwenPaw 系统的 JWT 令牌"""
+    global _QWENPAW_TOKEN, _QWENPAW_TOKEN_EXPIRY
     now = time.time()
 
     # 如果缓存未过期（预留 60 秒缓冲区），直接返回
-    if _QUANTBOT_TOKEN and now < (_QUANTBOT_TOKEN_EXPIRY - 60):
-        return _QUANTBOT_TOKEN
+    if _QWENPAW_TOKEN and now < (_QWENPAW_TOKEN_EXPIRY - 60):
+        return _QWENPAW_TOKEN
 
     # 如果环境变量本身不存在 (None)，则报错；允许空字符串（表示无密码）
-    if COPAW_AUTH_USERNAME is None or COPAW_AUTH_PASSWORD is None:
-        raise HTTPException(
-            status_code=500,
-            detail="COPAW_AUTH_USERNAME or COPAW_AUTH_PASSWORD env vars are not set"
-        )
+    if not QWENPAW_AUTH_USERNAME:
+        # 如果未配置用户名，视作未启用上游认证，返回 None 尝试免密
+        return None
 
-    print(f"[QuantBot] Initiating service login to QuantBot for user: {COPAW_AUTH_USERNAME}")
+    print(f"[OpenClaw] Initiating service login to QwenPaw for user: {QWENPAW_AUTH_USERNAME}")
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(
-                f"{COPAW_BASE_URL}/api/auth/login",
+                f"{QWENPAW_BASE_URL}/api/auth/login",
                 json={
-                    "username": COPAW_AUTH_USERNAME,
-                    "password": COPAW_AUTH_PASSWORD
+                    "username": QWENPAW_AUTH_USERNAME,
+                    "password": QWENPAW_AUTH_PASSWORD
                 }
             )
             if resp.status_code != 200:
-                print(f"[QuantBot] QuantBot login failed: {resp.status_code} {resp.text}")
-                raise HTTPException(status_code=500, detail="QuantBot upstream login failed")
+                print(f"[OpenClaw] QwenPaw login failed: {resp.status_code} {resp.text}")
+                raise HTTPException(status_code=500, detail="QwenPaw upstream login failed")
 
             data = resp.json()
             token = data.get("token")
             if not token:
-                print(f"[QuantBot] QuantBot login returned NO token (Auth may be disabled). Response: {data}")
+                print(f"[OpenClaw] QwenPaw login returned NO token (Auth may be disabled). Response: {data}")
                 # 如果无 Token，返回 None 而不是抛出异常，以便后续尝试免密请求
                 return None
 
-            _QUANTBOT_TOKEN = token
+            _QWENPAW_TOKEN = token
             # 默认缓存 1 小时 (3600s)
-            _QUANTBOT_TOKEN_EXPIRY = now + 3600
-            return _QUANTBOT_TOKEN
+            _QWENPAW_TOKEN_EXPIRY = now + 3600
+            return _QWENPAW_TOKEN
     except Exception as e:
         if isinstance(e, HTTPException):
             raise e
-        print(f"[QuantBot] Error during QuantBot login: {e}")
-        raise HTTPException(status_code=500, detail=f"Internal error authenticating with QuantBot: {str(e)}")
+        print(f"[OpenClaw] Error during QwenPaw login: {e}")
+        # 使用统一的异常映射，而不是强制 500
+        raise map_upstream_http_error("qwenpaw", e) from None
 
 
 def _attachments_root() -> Path:
-    root = Path(COPAW_SHARED_FILES_DIR) / "quantmind_uploads"
+    root = Path(QWENPAW_SHARED_FILES_DIR) / "quantmind_uploads"
     root.mkdir(parents=True, exist_ok=True)
     return root
 
@@ -208,7 +207,7 @@ def _session_attachment_dir(user_id: str, session_id: str) -> Path:
 def _visible_session_dir(user_id: str, session_id: str) -> str:
     return "/".join(
         [
-            COPAW_SHARED_VISIBLE_DIR.rstrip("/"),
+            QWENPAW_SHARED_VISIBLE_DIR.rstrip("/"),
             "quantmind_uploads",
             _safe_segment(user_id),
             _safe_segment(session_id),
@@ -247,7 +246,7 @@ def _normalize_attachment(attachment: dict[str, Any]) -> dict[str, Any]:
         "file_name": str(attachment.get("file_name") or ""),
         "file_size": int(attachment.get("file_size") or 0),
         "content_type": str(attachment.get("content_type") or "application/octet-stream"),
-        "quantbot_path": str(attachment.get("quantbot_path") or ""),
+        "file_path": str(attachment.get("file_path") or ""),
         "uploaded_at": str(attachment.get("uploaded_at") or _now_iso()),
     }
 
@@ -265,7 +264,7 @@ def _build_attachment_prompt(
         lines.append(
 
                 f"- 文件名: {attachment.original_name} | "
-                f"路径: {attachment.quantbot_path} | "
+                f"路径: {attachment.file_path} | "
                 f"类型: {attachment.content_type} | "
                 f"大小: {attachment.file_size} 字节"
 
@@ -285,7 +284,7 @@ def _validate_upload_filename(filename: str) -> str:
     return suffix
 
 
-async def _quantbot_request(
+async def _qwenpaw_request(
     method: str,
     path: str,
     *,
@@ -295,13 +294,13 @@ async def _quantbot_request(
 ) -> httpx.Response:
     request_timeout = timeout or httpx.Timeout(
         connect=5.0,
-        read=COPAW_TIMEOUT_SECONDS,
-        write=COPAW_TIMEOUT_SECONDS,
+        read=QWENPAW_TIMEOUT_SECONDS,
+        write=QWENPAW_TIMEOUT_SECONDS,
         pool=10.0,
     )
 
     # 获取服务间令牌
-    token = await _get_quantbot_token()
+    token = await _get_qwenpaw_token()
 
     try:
         headers = {"Content-Type": "application/json"}
@@ -311,7 +310,7 @@ async def _quantbot_request(
         async with httpx.AsyncClient(timeout=request_timeout) as client:
             response = await client.request(
                 method,
-                _quantbot_url(path),
+                _qwenpaw_url(path),
                 params=params,
                 json=json_body,
                 headers=_sanitize_headers(
@@ -319,22 +318,22 @@ async def _quantbot_request(
                 ),
             )
     except httpx.HTTPError as exc:
-        raise map_upstream_http_error("quantbot", exc)
+        raise map_upstream_http_error("qwenpaw", exc) from None
 
     if response.status_code >= 400:
         body = response.text[:1000]
-        print(f"[QuantBot] QuantBot error {response.status_code}: {body}")
+        print(f"[OpenClaw] QwenPaw error {response.status_code}: {body}")
 
         # 如果是 401，可能是 Token 失效，强制清空缓存以便下次重试
         if response.status_code == 401:
-            global _QUANTBOT_TOKEN
-            _QUANTBOT_TOKEN = None
+            global _QWENPAW_TOKEN
+            _QWENPAW_TOKEN = None
 
         raise HTTPException(
             status_code=response.status_code,
             detail={
-                "message": "quantbot upstream returned error",
-                "service": "quantbot",
+                "message": "qwenpaw upstream returned error",
+                "service": "qwenpaw",
                 "status_code": response.status_code,
                 "body": body,
             },
@@ -343,10 +342,10 @@ async def _quantbot_request(
 
 
 async def _resolve_chat(user_id: str, session_id: str) -> dict[str, Any]:
-    response = await _quantbot_request(
+    response = await _qwenpaw_request(
         "GET",
         "/api/chats",
-        params={"user_id": user_id, "channel": COPAW_CHANNEL},
+        params={"user_id": user_id, "channel": QWENPAW_CHANNEL},
     )
     chats = response.json() or []
     for chat in chats:
@@ -419,7 +418,7 @@ async def openclaw_chat(
     except HTTPException as exc:
         if exc.status_code != 404:
             raise
-    quantbot_payload = {
+    qwenpaw_payload = {
         "input": [
             {
                 "role": "user",
@@ -435,12 +434,12 @@ async def openclaw_chat(
         "user_id": user_id,
         "session_id": session_id,
         "sender_id": user_id,
-        "channel": COPAW_CHANNEL,
+        "channel": QWENPAW_CHANNEL,
         "stream": True,
     }
 
     # 获取服务间令牌
-    token = await _get_quantbot_token()
+    token = await _get_qwenpaw_token()
 
     try:
         client = httpx.AsyncClient(timeout=None)
@@ -450,19 +449,19 @@ async def openclaw_chat(
 
         request = client.build_request(
             "POST",
-            _quantbot_url("/api/agent/process"),
-            json=quantbot_payload,
+            _qwenpaw_url("/api/agent/process"),
+            json=qwenpaw_payload,
             headers=headers
         )
         response = await client.send(request, stream=True)
     except httpx.HTTPError as exc:
-        raise map_upstream_http_error("quantbot", exc)
+        raise map_upstream_http_error("qwenpaw", exc) from None
 
     if response.status_code >= 400:
         # 如果是 401，强制清空 Token 缓存
         if response.status_code == 401:
-            global _QUANTBOT_TOKEN
-            _QUANTBOT_TOKEN = None
+            global _QWENPAW_TOKEN
+            _QWENPAW_TOKEN = None
 
         body = await response.aread()
         await response.aclose()
@@ -470,14 +469,14 @@ async def openclaw_chat(
         raise HTTPException(
             status_code=response.status_code,
             detail={
-                "message": "quantbot upstream returned error",
-                "service": "quantbot",
+                "message": "qwenpaw upstream returned error",
+                "service": "qwenpaw",
                 "status_code": response.status_code,
                 "body": body.decode("utf-8", errors="ignore")[:1000],
             },
         )
 
-    print(f"[QuantBot] Chat request accepted: session_id={session_id}, user_id={user_id}")
+    print(f"[OpenClaw] Chat request accepted: session_id={session_id}, user_id={user_id}")
 
     async def _cleanup() -> None:
         await response.aclose()
@@ -505,7 +504,7 @@ async def upload_openclaw_file(
     current_user: dict = Depends(get_current_user),
 ):
     # 调试日志：记录接收到的字段
-    print(f"[QuantBot] File upload request - session_id: {session_id}, user_id: {user_id}, filename: {file.filename}, content_type: {file.content_type}")
+    print(f"[OpenClaw] File upload request - session_id: {session_id}, user_id: {user_id}, filename: {file.filename}, content_type: {file.content_type}")
 
     resolved_user_id = _resolve_user_id(current_user, user_id)
     _validate_upload_filename(file.filename or "")
@@ -534,14 +533,14 @@ async def upload_openclaw_file(
             "file_name": stored_name,
             "file_size": len(data),
             "content_type": file.content_type or "application/octet-stream",
-            "quantbot_path": (f"{_visible_session_dir(resolved_user_id, session_id)}/" f"{stored_name}"),
+            "file_path": (f"{_visible_session_dir(resolved_user_id, session_id)}/" f"{stored_name}"),
             "uploaded_at": _now_iso(),
         }
     )
     attachments = _load_session_attachments(resolved_user_id, session_id)
     attachments.append(attachment)
     _save_session_attachments(resolved_user_id, session_id, attachments)
-    print(f"[QuantBot] File uploaded successfully - file_id: {file_id}, path: {attachment['quantbot_path']}")
+    print(f"[OpenClaw] File uploaded successfully - file_id: {file_id}, path: {attachment['file_path']}")
     return attachment
 
 
@@ -597,13 +596,13 @@ async def openclaw_push_messages(
     current_user: dict = Depends(get_current_user),
 ):
     user_id = _resolve_user_id(current_user)
-    response = await _quantbot_request(
+    response = await _qwenpaw_request(
         "GET",
         "/api/console/push-messages",
         params={
             "session_id": session_id,
             "user_id": user_id,
-            "channel": COPAW_CHANNEL,
+            "channel": QWENPAW_CHANNEL,
         },
     )
     data = response.json() or {}
@@ -616,19 +615,25 @@ async def list_openclaw_sessions(
     current_user: dict = Depends(get_current_user),
 ):
     user_id = _resolve_user_id(current_user)
-    response = await _quantbot_request(
-        "GET",
-        "/api/chats",
-        params={"user_id": user_id, "channel": COPAW_CHANNEL},
-    )
-    data = response.json()
+    try:
+        response = await _qwenpaw_request(
+            "GET",
+            "/api/chats",
+            params={"user_id": user_id, "channel": QWENPAW_CHANNEL},
+        )
+        data = response.json()
+    except Exception as exc:
+        # 如果上游服务未部署或不可达，返回空列表实现优雅降级
+        print(f"[OpenClaw] Upstream qwenpaw unavailable, returning empty sessions: {exc}")
+        return []
+
     # 兼容处理：如果上游返回的是 {"chats": [...]} 或其他结构
     if isinstance(data, dict) and "chats" in data:
         chats = data["chats"]
     elif isinstance(data, list):
         chats = data
     else:
-        print(f"[QuantBot] Unexpected chats response format for user {user_id}: {type(data)}")
+        print(f"[OpenClaw] Unexpected chats response format for user {user_id}: {type(data)}")
         chats = []
 
     return [_map_session(chat) for chat in chats if isinstance(chat, dict)]
@@ -645,10 +650,10 @@ async def create_openclaw_session(
         "name": payload.title or "新对话",
         "session_id": session_id,
         "user_id": user_id,
-        "channel": COPAW_CHANNEL,
+        "channel": QWENPAW_CHANNEL,
         "meta": {"created_at": _now_iso(), "updated_at": _now_iso()},
     }
-    response = await _quantbot_request("POST", "/api/chats", json_body=request_payload)
+    response = await _qwenpaw_request("POST", "/api/chats", json_body=request_payload)
     return _map_session(response.json() or request_payload)
 
 
@@ -662,7 +667,7 @@ async def get_openclaw_session_messages(
 ):
     user_id = _resolve_user_id(current_user)
     chat = await _resolve_chat(user_id, session_id)
-    response = await _quantbot_request("GET", f"/api/chats/{chat['id']}")
+    response = await _qwenpaw_request("GET", f"/api/chats/{chat['id']}")
     data = response.json() or {}
     return {
         "session_id": session_id,
@@ -681,11 +686,11 @@ async def update_openclaw_session_title(
 ):
     user_id = _resolve_user_id(current_user, payload.user_id)
     chat = await _resolve_chat(user_id, session_id)
-    # QuantBot API 只接受 name 字段，不允许额外字段
+    # QwenPaw API 只接受 name 字段，不允许额外字段
     request_payload = {
         "name": payload.title,
     }
-    await _quantbot_request("PUT", f"/api/chats/{chat['id']}", json_body=request_payload)
+    await _qwenpaw_request("PUT", f"/api/chats/{chat['id']}", json_body=request_payload)
     return {"updated": True, "session_id": session_id, "title": payload.title}
 
 
@@ -699,7 +704,7 @@ async def delete_openclaw_session(
 ):
     user_id = _resolve_user_id(current_user)
     chat = await _resolve_chat(user_id, session_id)
-    await _quantbot_request("DELETE", f"/api/chats/{chat['id']}")
+    await _qwenpaw_request("DELETE", f"/api/chats/{chat['id']}")
     return {"deleted": True, "session_id": session_id}
 
 
@@ -709,37 +714,37 @@ async def openclaw_health(current_user: dict = Depends(get_current_user)):
     started_at = time.perf_counter()
 
     gateway_status = "healthy"
-    quantbot_status = "unhealthy"
-    quantbot_error: str | None = None
+    qwenpaw_status = "unhealthy"
+    qwenpaw_error: str | None = None
     try:
-        response = await _quantbot_request(
+        response = await _qwenpaw_request(
             "GET",
             "/api/chats",
-            params={"channel": COPAW_CHANNEL},
+            params={"channel": QWENPAW_CHANNEL},
             timeout=httpx.Timeout(connect=2.0, read=5.0, write=5.0, pool=2.0),
         )
         if response.status_code == 200:
-            quantbot_status = "healthy"
+            qwenpaw_status = "healthy"
     except Exception as exc:
-        print(f"[QuantBot] Health check upstream check failed: {exc}")
-        quantbot_status = "unreachable"
-        quantbot_error = str(exc)
+        print(f"[OpenClaw] Health check upstream check failed: {exc}")
+        qwenpaw_status = "unreachable"
+        qwenpaw_error = str(exc)
 
     latency_ms = round((time.perf_counter() - started_at) * 1000, 2)
-    overall_status = "healthy" if quantbot_status == "healthy" else "degraded"
+    overall_status = "healthy" if qwenpaw_status == "healthy" else "degraded"
     return {
         "status": overall_status,
-        "service": "quantbot-gateway",
+        "service": "openclaw-gateway",
         "timestamp": _now_iso(),
         "components": {
             "api": {
                 "status": gateway_status,
                 "latency_ms": latency_ms,
             },
-            "quantbot": {
-                "status": quantbot_status,
+            "qwenpaw": {
+                "status": qwenpaw_status,
                 "latency_ms": latency_ms,
-                "error": quantbot_error,
+                "error": qwenpaw_error,
             },
         },
     }

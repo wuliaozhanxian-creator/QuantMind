@@ -11,7 +11,6 @@ from backend.services.api.routers import (
     inquiry,
     notifications,
     profiles,
-    system,
     trading_calendar,
     users,
 )
@@ -19,18 +18,17 @@ from backend.services.api.routers.asset import router as asset_router
 from backend.services.api.routers.admin import admin_router
 from backend.services.api.routers.ai_ide_proxy import router as ai_ide_proxy_router
 from backend.services.api.routers.community.router import router as community_router
-from backend.services.api.routers.quantbot_proxy import router as quantbot_proxy_router
+from backend.services.api.routers.qwenpaw_proxy import router as qwenpaw_proxy_router
 from backend.services.api.routers.engine_proxy import router as engine_proxy_router
 from backend.services.api.routers.files import router as files_router
 from backend.services.api.routers.model_training import router as model_training_router
+from backend.services.api.routers.research import router as research_router
 from backend.services.api.routers.stocks_search import router as stocks_search_router
 from backend.services.api.routers.trade_proxy import router as trade_proxy_router
 from backend.services.api.user_app.api.v1.api_keys import router as api_keys_router
-
-# OSS 版本禁用订阅功能
-# from backend.services.api.user_app.api.v1.subscriptions import (
-#     router as subscriptions_router,
-# )
+from backend.services.api.user_app.api.v1.subscriptions import (
+    router as subscriptions_router,
+)
 from backend.shared.config_manager import init_unified_config
 from backend.shared.cors import resolve_cors_origins
 from backend.shared.database_pool import init_default_databases as init_sync_db_pool
@@ -101,12 +99,7 @@ install_access_log_middleware(app, service_name="quantmind-api")
 os.makedirs("data/uploads", exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="data/uploads"), name="uploads")
 app.include_router(auth.router, prefix="/api/v1", tags=["Auth"])
-app.include_router(system.router)
-
-# OSS 版本禁用社区功能
-# if settings.edition != "oss":
-#     app.include_router(community_router)
-
+app.include_router(community_router)
 app.include_router(users.router, prefix="/api/v1/users", tags=["Users"])
 app.include_router(profiles.router, prefix="/api/v1/profiles", tags=["Profiles"])
 app.include_router(notifications.router, prefix="/api/v1", tags=["Notifications"])
@@ -116,20 +109,20 @@ app.include_router(admin_router, prefix="/api/v1/admin")
 app.include_router(
     model_training_router, prefix="/api/v1/models", tags=["ModelTraining"]
 )
+app.include_router(research_router)
 app.include_router(stocks_search_router)
 app.include_router(trading_calendar.router)
 app.include_router(api_keys_router, prefix="/api/v1")
 app.include_router(asset_router, prefix="/api/v1/asset", tags=["Asset"])
-# OSS 版本禁用订阅功能
-# app.include_router(
-#     subscriptions_router, prefix="/api/v1/subscription", tags=["Subscriptions"]
-# )
+app.include_router(
+    subscriptions_router, prefix="/api/v1/subscription", tags=["Subscriptions"]
+)
 
 # 3. 注册代理路由 (低优先级，兜底捕获)
 app.include_router(engine_proxy_router)
 app.include_router(trade_proxy_router)
 app.include_router(ai_ide_proxy_router)
-app.include_router(quantbot_proxy_router)
+app.include_router(qwenpaw_proxy_router)
 
 # CORS
 app.add_middleware(

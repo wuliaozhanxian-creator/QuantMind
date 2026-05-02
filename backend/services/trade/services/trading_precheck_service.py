@@ -19,7 +19,10 @@ from backend.shared.trade_redis_keys import (
 )
 
 
+
 def _build_check(key: str, label: str, passed: bool, detail: str) -> dict[str, Any]:
+
+
     return {
         "key": key,
         "label": label,
@@ -221,48 +224,7 @@ def _check_inference_model_exists() -> tuple[bool, str]:
     )
 
 
-def _check_stream_series_freshness(redis_client) -> tuple[bool, str]:
-    stream_symbols = _resolve_probe_symbols()
-    series_threshold_sec = int(os.getenv("PREFLIGHT_SERIES_STALE_THRESHOLD_SEC", "180"))
-    try:
-        stream_redis, stream_redis_host, stream_redis_port = (
-            _get_stream_series_redis_client()
-        )
-        stream_redis.ping()
-        for symbol in stream_symbols:
-            key = f"market:series:{symbol}"
-            latest = stream_redis.zrevrange(key, 0, 0, withscores=True)
-            if not latest:
-                continue
-            _, score = latest[0]
-            latest_age_sec = max(0, int(time.time() - float(score)))
-            ok = latest_age_sec <= series_threshold_sec
-            return ok, (
-                f"symbol={symbol}, latest_age_sec={latest_age_sec}, threshold={series_threshold_sec}, "
-                f"source={stream_redis_host}:{stream_redis_port}"
-            )
-    except Exception as exc:
-        remote_error = str(exc)
-        try:
-            for symbol in stream_symbols:
-                key = f"market:series:{symbol}"
-                latest = redis_client.zrevrange(key, 0, 0, withscores=True)
-                if not latest:
-                    continue
-                _, score = latest[0]
-                latest_age_sec = max(0, int(time.time() - float(score)))
-                ok = latest_age_sec <= series_threshold_sec
-                return ok, (
-                    f"symbol={symbol}, latest_age_sec={latest_age_sec}, threshold={series_threshold_sec}, "
-                    f"source=trade_redis, remote_probe_error={remote_error}"
-                )
-        except Exception as fallback_exc:
-            return (
-                False,
-                f"series_probe_error={fallback_exc}, remote_probe_error={remote_error}",
-            )
-
-    return False, f"未发现可用行情序列 sample_symbols={','.join(stream_symbols)}"
+    pass
 
 
 def _parse_snapshot_at(snapshot: dict[str, Any]) -> float | None:
@@ -525,29 +487,14 @@ async def run_trading_readiness_precheck(
                 )
             )
 
-        try:
-            stream_ok, stream_detail = _check_stream_series_freshness(redis_client)
-            # 交易时段（9:15-15:00 工作日）严格检查，非交易时段仅警告
-            now = datetime.now(timezone.utc).replace(tzinfo=None)
-            is_trading_hours = (
-                now.weekday() < 5  # 周一到周五
-                and ((now.hour == 9 and now.minute >= 15) or (now.hour >= 10 and now.hour < 15))
-            )
-            stream_passed = stream_ok if is_trading_hours else True
+            from backend.services.trade.routers.real_trading_utils import check_stream_series_freshness
+            res = check_stream_series_freshness(redis_client=redis_client)
             checks.append(
                 _build_check(
                     "stream_series_freshness",
                     "实时行情服务已就绪",
-                    stream_passed,
-                    (
-                        f"已就绪: {stream_detail}"
-                        if stream_ok
-                        else (
-                            f"[阻断] 行情不新鲜: {stream_detail} (交易时段)"
-                            if is_trading_hours
-                            else f"[WARNING] 行情不新鲜: {stream_detail} (非交易时段)"
-                        )
-                    ),
+                    res["ok"],
+                    res["message"],
                 )
             )
         except Exception as exc:
@@ -631,28 +578,14 @@ async def run_trading_readiness_precheck(
         )
     )
 
-    stream_ok, stream_detail = _check_stream_series_freshness(redis_client)
-    # 交易时段（9:15-15:00 工作日）严格检查，非交易时段仅警告
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-    is_trading_hours = (
-        now.weekday() < 5  # 周一到周五
-        and ((now.hour == 9 and now.minute >= 15) or (now.hour >= 10 and now.hour < 15))
-    )
-    stream_passed = stream_ok if is_trading_hours else True
+    from backend.services.trade.routers.real_trading_utils import check_stream_series_freshness
+    res = check_stream_series_freshness(redis_client=redis_client)
     checks.append(
         _build_check(
             "stream_series_freshness",
             "实时行情服务已就绪",
-            stream_passed,
-            (
-                f"已就绪: {stream_detail}"
-                if stream_ok
-                else (
-                    f"[阻断] 行情不新鲜: {stream_detail} (交易时段)"
-                    if is_trading_hours
-                    else f"[WARNING] 行情不新鲜: {stream_detail} (非交易时段)"
-                )
-            ),
+            res["ok"],
+            res["message"],
         )
     )
 

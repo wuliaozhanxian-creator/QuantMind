@@ -6,7 +6,7 @@ import {
   Layers, Star, RefreshCw, Search, Code, Calendar, Layers2,
   History, Archive, Brain, CheckCircle2, Clock, XCircle,
   ChevronRight, Play, Cpu, TrendingUp, Download, ChevronDown,
-  ChevronUp, Shield, Zap, Activity, ListFilter,
+  ChevronUp, Shield, Zap, Activity, ListFilter, AlertCircle,
 } from 'lucide-react';
 import {
   UserModelRecord,
@@ -631,7 +631,7 @@ export const AttributionAnalysisPanel: React.FC<{
     disabled: { text: '已关闭', cls: 'bg-slate-100 text-slate-600' },
     skipped: { text: '已跳过', cls: 'bg-amber-50 text-amber-700' },
     failed: { text: '失败', cls: 'bg-rose-50 text-rose-700' },
-    missing: { text: '未产出', cls: 'bg-slate-100 text-slate-600' },
+    missing: { text: '暂无数据', cls: 'bg-slate-100 text-slate-600' },
   };
   const currentStatus = statusCfg[status] ?? statusCfg.missing;
   const handleExportCsv = async () => {
@@ -704,8 +704,22 @@ export const AttributionAnalysisPanel: React.FC<{
             平均绝对贡献：因子影响幅度（越大越重要）｜ 平均方向贡献：正负抵消后的净效果（红=推高预测，绿=压低预测）｜ 正向占比：推高预测的样本比例
           </Text>
           {errorText && status !== 'completed' && (
-            <div className="rounded-2xl border border-rose-100 bg-rose-50 px-3 py-2">
-              <Text className="text-[11px] text-rose-700">错误信息：{errorText}</Text>
+            <div className={clsx(
+              "rounded-2xl border px-3 py-2",
+              status === 'failed' ? "border-rose-100 bg-rose-50" : "border-amber-100 bg-amber-50"
+            )}>
+              <div className="flex items-center gap-1.5">
+                <AlertCircle size={12} className={status === 'failed' ? "text-rose-500" : "text-amber-500"} />
+                <Text className={clsx("text-[11px] font-black", status === 'failed' ? "text-rose-700" : "text-amber-700")}>
+                  {status === 'failed' ? '分析失败' : '提示'}：
+                  {errorText === 'shap_summary_not_found' ? '暂无数据' : errorText}
+                </Text>
+              </div>
+              {errorText === 'shap_summary_not_found' && (
+                <Text className="mt-1 block text-[10px] text-amber-600/80 leading-relaxed">
+                  归因分析报告通常在模型训练完成后异步生成。若模型刚完成训练，请稍后刷新。
+                </Text>
+              )}
             </div>
           )}
         </div>
@@ -812,7 +826,7 @@ export const AttributionAnalysisPanel: React.FC<{
               ]}
             />
           ) : (
-            <Empty description={<span className="text-xs text-slate-400">当前模型暂无可展示的 SHAP 因子贡献数据</span>} />
+            <Empty description={<span className="text-xs text-slate-400">暂无数据</span>} />
           )}
         </Spin>
       </Card>

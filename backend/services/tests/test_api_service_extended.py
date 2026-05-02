@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -96,6 +97,146 @@ class TestAPIExtendedIntegration:
             response = client.get("/api/v1/stocks/000001.SZ")
             assert response.status_code == 200
             assert response.json()["symbol"] == "000001.SZ"
+
+    def test_research_overview_integration(self, client):
+        """验证投研聚合路由返回模型、批次和候选结构"""
+        from backend.services.api.main import app
+        from backend.services.api.routers import research as research_router_module
+        from backend.services.api.user_app.middleware.auth import get_current_user
+
+        class _FakeMappingsResult:
+            def __init__(self, rows):
+                self._rows = rows
+
+            def all(self):
+                return self._rows
+
+            def first(self):
+                return self._rows[0] if self._rows else None
+
+        class _FakeScalarResult:
+            def __init__(self, rows):
+                self._rows = rows
+
+            def fetchall(self):
+                return self._rows
+
+        class _FakeResult:
+            def __init__(self, rows, *, mapping=True):
+                self._rows = rows
+                self._mapping = mapping
+
+            def mappings(self):
+                return _FakeMappingsResult(self._rows)
+
+            def fetchall(self):
+                return self._rows
+
+        class _FakeSession:
+            async def execute(self, statement, params=None):
+                sql = str(statement)
+                if "GROUP BY model_id" in sql:
+                    return _FakeResult(
+                        [
+                            {
+                                "model_id": "alpha158",
+                                "run_count": 2,
+                                "latest_prediction_trade_date": datetime(2026, 4, 27, tzinfo=timezone.utc).date(),
+                                "last_updated_at": datetime(2026, 4, 30, 10, 0, tzinfo=timezone.utc),
+                            }
+                        ]
+                    )
+                if "GROUP BY run_id, model_id" in sql:
+                    return _FakeResult(
+                        [
+                            {
+                                "run_id": "run_demo",
+                                "model_id": "alpha158",
+                                "inference_date": datetime(2026, 4, 24, tzinfo=timezone.utc).date(),
+                                "prediction_trade_date": datetime(2026, 4, 27, tzinfo=timezone.utc).date(),
+                                "universe_label": "沪深全市场 · 生产批次",
+                                "stock_count": 3,
+                                "avg_score": 0.71,
+                                "last_updated_at": datetime(2026, 4, 30, 10, 0, tzinfo=timezone.utc),
+                            }
+                        ]
+                    )
+                if "COUNT(*) AS total_count" in sql:
+                    return _FakeResult(
+                        [
+                            {
+                                "total_count": 3,
+                                "avg_score": 0.71,
+                                "high_confidence_count": 1,
+                                "strong_count": 1,
+                                "last_updated_at": datetime(2026, 4, 30, 10, 0, tzinfo=timezone.utc),
+                            }
+                        ]
+                    )
+                if "GROUP BY industry" in sql:
+                    return _FakeResult([("银行",), ("券商",)], mapping=False)
+                if "jsonb_array_elements_text" in sql:
+                    return _FakeResult([("金融科技",), ("中字头",)], mapping=False)
+                return _FakeResult(
+                    [
+                        {
+                            "run_id": "run_demo",
+                            "model_id": "alpha158",
+                            "symbol": "000001",
+                            "stock_name": "平安银行",
+                            "score_rank": 1,
+                            "fusion_score": 0.88,
+                            "signal_side": "BUY",
+                            "latest_change_pct": 2.36,
+                            "consecutive_limit_up_days": 2,
+                            "volume_trend_3d": True,
+                            "volume_trend_5d": True,
+                            "turnover_rate": 4.2,
+                            "amount": 123456789.0,
+                            "total_mv": 2500000.0,
+                            "industry": "银行",
+                            "concept_tags": ["金融科技", "中字头"],
+                            "confidence_level": "high",
+                            "hit_reasons": ["模型高分", "3日量能递增"],
+                            "risk_flags": ["近10日回撤较大"],
+                            "close_price": 12.34,
+                            "thesis_summary": "适合作为投研观察样本",
+                            "updated_at": datetime(2026, 4, 30, 10, 0, tzinfo=timezone.utc),
+                        }
+                    ]
+                )
+
+        @asynccontextmanager
+        async def _fake_get_session(read_only=True):
+            yield _FakeSession()
+
+        app.dependency_overrides[get_current_user] = lambda: {
+            "user_id": "u1",
+            "tenant_id": "default",
+            "is_admin": False,
+        }
+
+        with patch.object(research_router_module, "get_session", _fake_get_session):
+            try:
+                response = client.get("/api/v1/research/overview")
+                assert response.status_code == 200
+                payload = response.json()["data"]
+                assert payload["activeModelId"] == "alpha158"
+                assert payload["activeRunId"] == "run_demo"
+                assert len(payload["models"]) == 1
+                assert len(payload["runs"]) == 1
+                assert payload["summary"]["total"] == 3
+                assert payload["filters"]["sectors"] == ["银行", "券商"]
+                assert payload["filters"]["concepts"] == ["金融科技", "中字头"]
+                assert payload["items"][0]["code"] == "000001"
+                assert payload["items"][0]["concept"] == "金融科技 / 中字头"
+                assert payload["pagination"]["limit"] == 80
+                assert payload["pagination"]["offset"] == 0
+                assert payload["pagination"]["returned"] == 1
+                assert payload["pagination"]["total"] == 3
+                assert payload["pagination"]["hasMore"] is True
+            finally:
+                app.dependency_overrides.clear()
 
     def test_community_integration(self, client):
         """验证社区路由集成"""

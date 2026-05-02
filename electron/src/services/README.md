@@ -14,8 +14,20 @@
 - `backtestService.ts`: 回测任务提交、状态轮询、增量日志拉取、任务停止、报告导出与参数优化（Qlib）。
 - `refreshOrchestrator.ts`: 统一模块刷新协调器（按模块节流、并发去重、全局触发）。
 - `websocketService.ts`: 全局 WebSocket 连接管理（行情/交易/通知订阅、心跳、断线重连）。
+- `researchService.ts`: 投研聚合接口服务，封装 `/api/v1/research/overview` 参数构建、鉴权头透传与用户态租户头透传。
 
 ## 新增服务说明
+
+- `advancedAnalysisService` histogram 边界保留修复（2026-04-27）：
+  - `sanitizeHistogram` 现在会保留标准 histogram 的完整 bin edges（`bins.length === counts.length + 1`）；
+  - 避免基础风险与交易统计图表丢失最后一个边界，便于前端正确生成区间标签和中点参考线。
+
+- `researchService` 投研聚合接入（2026-04-30）：
+  - 新增 `getOverview(query)`，对接 `GET /api/v1/research/overview`；
+  - 查询参数支持 `model/run/keyword/分数/连板/换手/成交额/行业/概念/指数/排序/limit/offset`；
+  - 使用 `URLSearchParams` 以重复 key 方式编码 `sectors`、`concepts` 与 `indices`，避免数组参数被编码为 `[]` 键名导致后端无法解析；
+  - 自动透传 `Authorization` 与 `X-Tenant-Id`，并复用 `authService.handle401Error`。
+  - 新增轻量读取：`getAvailableModels()` 改为调用 `GET /api/v1/research/models`，`getInferenceRuns(modelId)` 改为调用 `GET /api/v1/research/runs?model_id=...`，避免通过 `overview?limit=1` 触发重查询导致模型/批次下拉超时。
 
 - `modelTrainingService` 用户态训练闭环（2026-04-04）：
   - 新增用户态接口适配：`getFeatureCatalog`、`runTraining`、`getTrainingRun`，分别对接 `/api/v1/models/feature-catalog|run-training|training-runs/{run_id}`；
@@ -25,10 +37,10 @@
   - 新增 SHAP 归因读取能力：`getModelShapSummary`，对接 `/api/v1/models/{model_id}/shap-summary`，返回 `feature/mean_abs_shap/mean_shap/positive_ratio` 列表用于归因分析页展示；
   - 新增策略绑定能力：`getStrategyBinding/setStrategyBinding/deleteStrategyBinding`；
   - 训练结果可直接消费后端 `result.model_registration`（`model_id/status/error`）用于前端“同步状态 + 设默认”闭环。
-   - 模型推理中心新增交易日历能力：
-     - `checkTradingDay/nextTradingDay/prevTradingDay` 对接 `/api/v1/market-calendar/*`；
-     - `resolveInferenceDateByCalendar` 用于将非交易日自动校正到最近上一交易日；
-     - `calcTargetDateByCalendar` 用于按真实交易日历计算 `T+N` 目标日期。
+  - 模型推理中心新增交易日历能力：
+    - `checkTradingDay/nextTradingDay/prevTradingDay` 对接 `/api/v1/market-calendar/*`；
+    - `resolveInferenceDateByCalendar` 用于将非交易日自动校正到最近上一交易日；
+    - `calcTargetDateByCalendar` 用于按真实交易日历计算 `T+N` 目标日期。
 
 - `componentCodeGenerator` 性能报告模板文案口径更新（2026-03-09）：
   - 输出文案中的 `胜率` 调整为 `投资胜率`；
@@ -42,6 +54,12 @@
 - `backtestService` 快速导出数量口径修复（2026-04-22）：
   - `buildQuickTradeRows` 改为显式 `price/quantity` 优先，避免已有展示口径被 `adj_* * factor` 再次覆盖；
   - A 股成交量新增整手容差纠偏（容差 `<=2` 股），减少复权因子日间微漂移导致的近整手抖动。
+- `backtestService` 交易明细懒加载上下文补齐（2026-04-22）：
+  - `getTrades` 现在除 `trades/positions` 外，还返回 `initial_capital`、`equity_curve`、`config`；
+  - 供快速回测交易明细弹窗在摘要结果缺少 `config.initial_capital` 时，仍可完成逐笔权益重建。
+- `backtestService` 历史脏权益快照降级（2026-04-23）：
+  - 若同一天多笔 trade 的显式权益字段只有同一个唯一值，则不再将其视为逐笔权益；
+  - 本地 CSV 兜底导出会忽略这类伪逐笔字段，回退到逐笔持仓估值重建。
 - `backtestService` 完成态结果补全（2026-04-08）：
   - `pollStatus` 在 `completed` 状态下改为调用 `getResult(backtestId, false)`，确保回测结果页拿到完整交易明细而不是摘要数据；
   - 这样 `QlibResultDisplay` 的“调仓交易日”统计、交易详情弹窗和 CSV 导出可以复用同一份完整交易行数据。
@@ -186,6 +204,16 @@
 - **CSV 导出口径统一（2026-04-02）**:
   - `exportCSV` 的本地兜底生成逻辑已对齐为“快速回测交易流水 8 列”格式（`日期/代码/方向/成交价/成交量/成交金额/手续费/权益余额`）；
   - 当后端导出路由临时不可用时，历史导出与快速回测导出仍保持同一 CSV 列结构，避免双口径。
+- **逐笔权益口径修复（2026-04-22）**:
+  - `backtestService` 本地 CSV 兜底导出的“权益余额”现优先使用逐笔 `equity_after`；
+
+  ### Model Training Service
+
+  - `InferenceRunRecord` 新增 `recent_direction_accuracy` 字段，承接后端写入的近30天方向正确率摘要。
+  - `normalizeInferenceRun()` 现优先从顶层字段读取；若后端仍按历史兼容格式只回写在 `result_json` 中，也会自动兜底提取。
+  - 推理页面因此可以直接展示“近30天正确率”，而不需要前端再次遍历历史批次或行情数据。
+  - 当逐笔权益缺失时，回退 `cash_after + position_value_after` / `balance`；
+  - 仅在逐笔字段缺失时，才按逐笔持仓与最新成交价重建盘中权益，并用同日 `equity_curve` 日终值做锚定。
 - **默认调仓比例统一（2026-03-29）**:
   - `backtestService` 与 `backtestCenterService` 内置 TopkDropout 默认参数调整为 `topk=50, n_drop=10`；
   - 与策略模板口径保持一致：默认按 20% 调仓比例执行。

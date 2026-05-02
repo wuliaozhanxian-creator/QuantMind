@@ -14,6 +14,7 @@ import { TitleBar } from './components/layout/TitleBar';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { useMenuExport } from './hooks/useMenuExport';
 import { WebSocketProvider } from './contexts/WebSocketContext';
+import { QueryProvider } from './providers/QueryProvider';
 import { selectCurrentTab, setCurrentTab } from './store/slices/aiStrategySlice';
 import type { DashboardTab } from './store/slices/aiStrategySlice';
 import logger from './utils/safeLogger';
@@ -26,7 +27,6 @@ import AppRoutes from './features/auth/AppRoutes';
 import { useAuth } from './features/auth/hooks/useAuth';
 import { ProtectedRoute } from './features/auth/components';
 import { preloadAiIdeResources } from './features/auth/utils/lazyLoad';
-import { useCapabilities } from './hooks/useCapabilities';
 
 import './styles/global.css';
 import './styles/mac-theme.css';
@@ -39,6 +39,8 @@ const QuantBotPage = lazy(() => import('./features/quantbot/pages/QuantBotPage')
 const AIIDEPage = lazy(() => import('./pages/AIIDEPage'));
 const ModelTrainingPage = lazy(() => import('./pages/ModelTrainingPage'));
 const ModelRegistryPage = lazy(() => import('./pages/ModelRegistryPage'));
+const ResearchPlatformPage = lazy(() => import('./pages/ResearchPlatformPage'));
+const RealTradingPage = lazy(() => import('./pages/trading/RealTradingPage'));
 const AdminPage = lazy(() => import('./features/admin/AdminPage'));
 
 // 主题切换hook
@@ -74,10 +76,7 @@ export default function App() {
   const location = useLocation();
   const [modules, setModules] = useState<DashboardModule[]>(defaultModules);
   const { ExportModal } = useMenuExport();
-  const { isAuthenticated, isLoading: isAuthLoading } = useAuth();
-  const { isOSS, isLoading: isCapLoading } = useCapabilities();
-  const isLoading = isAuthLoading || isCapLoading;
-  
+  const { isAuthenticated, isLoading } = useAuth();
   useTheme();
   useTradingModeInitialization();
   
@@ -107,6 +106,8 @@ export default function App() {
       'ai-ide': '/ai-ide',
       'model-training': '/model-training',
       'model-registry': '/model-registry',
+      'research': '/research',
+      'trading': '/trading',
       'profile': '/user-center',
       'admin': '/admin',
     };
@@ -140,6 +141,10 @@ export default function App() {
       dispatch(setCurrentTab('model-training' as DashboardTab));
     } else if (location.pathname.startsWith('/model-registry')) {
       dispatch(setCurrentTab('model-registry' as DashboardTab));
+    } else if (location.pathname.startsWith('/research')) {
+      dispatch(setCurrentTab('research' as DashboardTab));
+    } else if (location.pathname.startsWith('/trading')) {
+      dispatch(setCurrentTab('trading' as DashboardTab));
     } else if (location.pathname.startsWith('/admin')) {
       dispatch(setCurrentTab('admin' as DashboardTab));
     } else if (location.pathname === '/') {
@@ -280,10 +285,10 @@ export default function App() {
           <div style={{ textAlign: 'center', color: 'white' }}>
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
               <div style={{ fontSize: 18, fontWeight: 700, color: 'white', letterSpacing: '-0.02em' }}>
-                QuantMind {isOSS ? 'OSS' : ''}
+                QuantMind
               </div>
               <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)' }}>
-                {isOSS ? '开源量化交易系统' : '企业级量化交易平台'}
+                企业级量化交易平台
               </div>
             </div>
             <div style={{ height: 20 }} />
@@ -315,8 +320,9 @@ export default function App() {
 
   return (
     <RecoilRoot>
-      <WebSocketProvider>
-        <ConfigProvider locale={zhCN}>
+      <QueryProvider>
+        <WebSocketProvider>
+          <ConfigProvider locale={zhCN}>
             <div className="app-root">
             <TitleBar />
             <ErrorBoundary>
@@ -392,6 +398,22 @@ export default function App() {
                     }
                   />
                   <Route
+                    path="/research"
+                    element={
+                      <ProtectedRoute>
+                        <ResearchPlatformPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/trading"
+                    element={
+                      <ProtectedRoute>
+                        <RealTradingPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
                     path="/admin/*"
                     element={
                       <ProtectedRoute requiredRole="admin">
@@ -431,6 +453,7 @@ export default function App() {
           </div>
           </ConfigProvider>
         </WebSocketProvider>
+      </QueryProvider>
     </RecoilRoot>
   );
 }

@@ -57,16 +57,16 @@ async def perform_sync():
         # 字段需手动列出以确保类型和顺序匹配
         insert_sql = f"""
             INSERT INTO stock_daily_latest_tmp (
-                trade_date, code, stock_name, open, high, low, close, 
-                volume, turnover, pct_change, turnover_rate, 
+                trade_date, code, stock_name, open, high, low, close,
+                volume, turnover, pct_change, turnover_rate,
                 pe_ttm, pb, total_mv, is_st, is_hs300, is_csi1000,
-                listing_market, market_type, industry
+                listing_market, industry, nindnme, corp_nature
             )
-            SELECT 
-                trade_date, code, stock_name, open, high, low, close, 
-                volume, turnover, pct_change, turnover_rate, 
+            SELECT
+                trade_date, code, stock_name, open, high, low, close,
+                volume, turnover, pct_change, turnover_rate,
                 pe_ttm, pb, total_mv, is_st, is_hs300, is_csi1000,
-                listing_market, market_type, industry
+                listing_market, industry, nindnme, corp_nature
             FROM stock_daily
             WHERE trade_date = :d
         """
