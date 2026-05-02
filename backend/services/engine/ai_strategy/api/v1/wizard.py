@@ -701,7 +701,7 @@ def _simple_parse_text(text_input: str):
             sql_parts.append(f"({ind_clause})")
         where_clause = " AND ".join(sql_parts) if sql_parts else "true"
         dsl = (
-            "SQL: SELECT code as symbol, stock_name as name, close, "
+            "SQL: SELECT symbol, stock_name as name, close, "
             "total_mv as market_cap, pe_ttm as pe_ratio, pb as pb_ratio "
             f"FROM {LATEST_TABLE} WHERE {where_clause}"
         )
