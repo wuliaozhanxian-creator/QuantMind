@@ -103,15 +103,15 @@ export const AdminDashboard: React.FC = () => {
     if (loading || !metrics) return (
         <div className="w-full flex flex-col items-center justify-center py-32 space-y-4">
             <Spin size="large" />
-            <Text className="text-slate-400 font-bold uppercase tracking-widest text-[10px]">Loading Metrics...</Text>
+            <Text className="text-slate-400 font-bold text-xs">正在加载指标数据...</Text>
         </div>
     );
 
     const serviceStats = [
-        { name: 'api', port: '8000', desc: 'Auth & Gateway', icon: <ApiOutlined />, load: 42, color: 'blue' },
-        { name: 'engine', port: '8001', desc: 'AI Inference', icon: <ThunderboltOutlined />, load: 84, color: 'orange' },
-        { name: 'trade', port: '8002', desc: 'Trading Core', icon: <SwapOutlined />, load: 18, color: 'emerald' },
-        { name: 'stream', port: '8003', desc: 'Real-time Quotes', icon: <GlobalOutlined />, load: 31, color: 'indigo' },
+        { name: 'API 网关', port: '8000', desc: '认证与统一网关', icon: <ApiOutlined />, load: 42, color: 'blue' },
+        { name: '推理引擎', port: '8001', desc: 'AI 推理与回测', icon: <ThunderboltOutlined />, load: 84, color: 'orange' },
+        { name: '交易核心', port: '8002', desc: '订单与持仓管理', icon: <SwapOutlined />, load: 18, color: 'emerald' },
+        { name: '实时行情', port: '8003', desc: '行情接入与推送', icon: <GlobalOutlined />, load: 31, color: 'indigo' },
     ];
 
     return (
@@ -119,15 +119,15 @@ export const AdminDashboard: React.FC = () => {
             {/* Header */}
             <div className="flex items-center justify-between mb-2">
                 <div>
-                    <Title level={4} className="!m-0 !font-black !text-slate-800 uppercase tracking-tight">System Console</Title>
-                    <Text className="text-slate-400 text-xs font-medium">Infrastructure node monitoring and management</Text>
+                    <Title level={4} className="!m-0 !font-black !text-slate-800 text-lg">系统控制台</Title>
+                    <Text className="text-slate-400 text-xs font-medium">基础设施节点监控与管理</Text>
                 </div>
                 <Button 
                     icon={<ThunderboltOutlined />} 
                     onClick={loadMetrics}
                     className="rounded-xl font-bold bg-white text-slate-800 border-slate-200 hover:border-slate-800 hover:text-slate-800 shadow-sm h-10 px-6"
                 >
-                    Refresh
+                    刷新数据
                 </Button>
             </div>
 
@@ -143,17 +143,17 @@ export const AdminDashboard: React.FC = () => {
                                     </div>
                                     <div>
                                         <div className="flex items-center gap-1.5">
-                                            <Text className="font-black text-slate-800 uppercase text-sm tracking-tight">{s.name}</Text>
+                                            <Text className="font-black text-slate-800 text-sm">{s.name}</Text>
                                             <Badge status="processing" color="#10b981" />
                                         </div>
-                                        <Text className="text-[10px] text-slate-400 font-bold uppercase tracking-widest leading-none">Port {s.port}</Text>
+                                        <Text className="text-[10px] text-slate-400 font-bold">端口 {s.port}</Text>
                                     </div>
                                 </div>
-                                <Tag color="success" className="m-0 border-none rounded-full px-2 text-[9px] font-black uppercase bg-emerald-50 text-emerald-600">Active</Tag>
+                                <Tag color="success" className="m-0 border-none rounded-full px-2 text-[9px] font-black bg-emerald-50 text-emerald-600">运行中</Tag>
                             </div>
                             <div className="space-y-1.5">
-                                <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest mb-1">
-                                    <span className="text-slate-400">Load Factor</span>
+                                <div className="flex justify-between items-center text-[10px] font-black mb-1">
+                                    <span className="text-slate-400">负载系数</span>
                                     <span className={s.load > 80 ? "text-rose-500" : "text-slate-800"}>{s.load}%</span>
                                 </div>
                                 <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
@@ -175,18 +175,18 @@ export const AdminDashboard: React.FC = () => {
                 {/* Main Stats */}
                 <Col span={24} lg={16}>
                     <div className="space-y-6">
-                        <Title level={5} className="!m-0 !font-black !text-slate-800 uppercase tracking-widest text-xs opacity-50">Global Statistics</Title>
+                        <Title level={5} className="!m-0 !font-black !text-slate-800 text-xs opacity-50">全局统计</Title>
                         <Row gutter={[20, 20]}>
                             {[
-                                { title: "Total Users", value: metrics.users.total, sub: `${metrics.users.new_today} new today`, icon: <UserOutlined /> },
-                                { title: "Live Portfolios", value: metrics.strategies.live, sub: `${metrics.strategies.total} total items`, icon: <LineChartOutlined /> },
-                                { title: "Data Records", value: metrics.content.posts, sub: "Community interaction", icon: <DatabaseOutlined /> },
-                                { title: "System Uptime", value: metrics.system.uptime_days, suffix: "Days", sub: `Health: ${metrics.system.health_score}%`, icon: <HeartOutlined /> }
+                                { title: "总用户数", value: metrics.users.total, sub: `今日新增 ${metrics.users.new_today} 人`, icon: <UserOutlined /> },
+                                { title: "实盘策略", value: metrics.strategies.live, sub: `共 ${metrics.strategies.total} 个策略`, icon: <LineChartOutlined /> },
+                                { title: "数据记录", value: metrics.content.posts, sub: "社区互动数据", icon: <DatabaseOutlined /> },
+                                { title: "系统运行", value: metrics.system.uptime_days, suffix: "天", sub: `健康度: ${metrics.system.health_score}%`, icon: <HeartOutlined /> }
                             ].map((item, idx) => (
                                 <Col span={12} key={idx}>
                                     <Card className="rounded-2xl border-slate-100 bg-white shadow-sm">
                                         <Statistic 
-                                            title={<span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{item.title}</span>}
+                                            title={<span className="text-[10px] font-black text-slate-400">{item.title}</span>}
                                             value={item.value}
                                             suffix={item.suffix}
                                             valueStyle={{ fontWeight: 900, color: '#1e293b', fontSize: '24px', letterSpacing: '-0.025em' }}
@@ -201,10 +201,10 @@ export const AdminDashboard: React.FC = () => {
                             ))}
                         </Row>
                         
-                        <Card className="rounded-2xl border-slate-100 shadow-sm" title={<span className="text-xs font-black uppercase tracking-widest text-slate-500">Node Performance History</span>}>
+                        <Card className="rounded-2xl border-slate-100 shadow-sm" title={<span className="text-xs font-black text-slate-500">节点性能历史</span>}>
                             <div className="py-12 flex flex-col items-center justify-center bg-slate-50 rounded-xl border border-dashed border-slate-200">
                                 <AreaChartOutlined className="text-slate-300 text-3xl mb-3" />
-                                <Text className="text-slate-400 font-bold text-xs uppercase tracking-widest">Real-time throughput data incoming...</Text>
+                                <Text className="text-slate-400 font-bold text-xs">实时吞吐量数据收集中...</Text>
                             </div>
                         </Card>
                     </div>
@@ -213,17 +213,17 @@ export const AdminDashboard: React.FC = () => {
                 {/* Side Activity */}
                 <Col span={24} lg={8}>
                     <div className="space-y-6">
-                        <Title level={5} className="!m-0 !font-black !text-slate-800 uppercase tracking-widest text-xs opacity-50">Recent Events</Title>
+                        <Title level={5} className="!m-0 !font-black !text-slate-800 text-xs opacity-50">最近事件</Title>
                         <Card className="rounded-2xl border-slate-200 shadow-sm p-2">
                             <List
                                 itemLayout="horizontal"
                                 dataSource={[
-                                    { title: 'New API node joined cluster', time: '2m ago', type: 'success' },
-                                    { title: 'Strategy execution completed', time: '14m ago', type: 'info' },
-                                    { title: 'Market data sync started', time: '45m ago', type: 'info' },
-                                    { title: 'High memory usage: engine', time: '1h ago', type: 'warning' },
-                                    { title: 'System backup finalized', time: '3h ago', type: 'success' },
-                                    { title: 'New user registered', time: '5h ago', type: 'info' },
+                                    { title: '新 API 节点加入集群', time: '2分钟前', type: 'success' },
+                                    { title: '策略执行完成', time: '14分钟前', type: 'info' },
+                                    { title: '市场数据同步开始', time: '45分钟前', type: 'info' },
+                                    { title: '引擎服务内存使用率偏高', time: '1小时前', type: 'warning' },
+                                    { title: '系统备份完成', time: '3小时前', type: 'success' },
+                                    { title: '新用户注册', time: '5小时前', type: 'info' },
                                 ]}
                                 renderItem={(item) => (
                                     <List.Item className="!px-4 !py-3 hover:bg-slate-50 rounded-xl transition-all cursor-pointer">
@@ -235,14 +235,14 @@ export const AdminDashboard: React.FC = () => {
                                                 }`} />
                                             }
                                             title={<span className="text-xs font-bold text-slate-700">{item.title}</span>}
-                                            description={<span className="text-[10px] text-slate-400 font-mono uppercase font-bold">{item.time}</span>}
+                                            description={<span className="text-[10px] text-slate-400 font-bold">{item.time}</span>}
                                         />
                                     </List.Item>
                                 )}
                             />
                             <div className="p-4 pt-2">
                                 <Button block className="rounded-xl border-slate-200 text-slate-500 font-bold text-xs h-10 hover:border-slate-800 hover:text-slate-800">
-                                    Explore Audit Logs
+                                    查看审计日志
                                 </Button>
                             </div>
                         </Card>
@@ -253,15 +253,15 @@ export const AdminDashboard: React.FC = () => {
                                     <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center text-white">
                                         <DeploymentUnitOutlined />
                                     </div>
-                                    <Text className="text-white text-xs font-black uppercase tracking-widest">Network Status</Text>
+                                    <Text className="text-white text-xs font-black">网络状态</Text>
                                 </div>
                                 <div className="flex items-baseline gap-1 mb-1">
                                     <span className="text-3xl font-black tracking-tighter">0.42</span>
                                     <span className="text-white/40 font-bold text-xs">ms</span>
                                 </div>
-                                <Text className="text-white/40 text-[10px] font-bold uppercase tracking-widest block mb-4">Average API Latency</Text>
+                                <Text className="text-white/40 text-[10px] font-bold block mb-4">平均 API 延迟</Text>
                                 <Progress percent={98} size="small" strokeColor="#10b981" trailColor="rgba(255,255,255,0.1)" strokeWidth={4} />
-                                <Text className="text-emerald-400 text-[10px] font-black uppercase tracking-widest block mt-2">Optimal Reliability</Text>
+                                <Text className="text-emerald-400 text-[10px] font-black block mt-2">可靠性极佳</Text>
                              </div>
                              <div className="absolute -bottom-6 -right-6 w-32 h-32 bg-white/5 rounded-full blur-3xl" />
                         </div>

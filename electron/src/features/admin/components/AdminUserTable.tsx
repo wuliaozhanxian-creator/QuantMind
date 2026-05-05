@@ -44,7 +44,7 @@ export const AdminUserTable: React.FC = () => {
 
     const columns = [
         {
-            title: 'USER ID',
+            title: '用户ID',
             dataIndex: 'user_id',
             key: 'user_id',
             render: (id: string) => <code className="text-[10px] text-slate-400">{id}</code>
@@ -66,7 +66,7 @@ export const AdminUserTable: React.FC = () => {
             key: 'is_admin',
             render: (isAdmin: boolean) => (
                 <Tag color={isAdmin ? 'blue' : 'default'} className="font-bold text-[10px]">
-                    {isAdmin ? 'ADMIN' : 'USER'}
+                    {isAdmin ? '管理员' : '普通用户'}
                 </Tag>
             )
         },

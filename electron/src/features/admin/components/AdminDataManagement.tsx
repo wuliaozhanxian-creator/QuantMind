@@ -74,28 +74,28 @@ export const AdminDataManagement: React.FC = () => {
 
     const olderColumns = [
         {
-            title: 'SYMBOL',
+            title: '股票代码',
             dataIndex: 'symbol',
             key: 'symbol',
             width: 100,
             render: (v: string) => <span className="font-mono font-black text-indigo-600">{v}</span>,
         },
         {
-            title: 'LATEST DATE',
+            title: '最新日期',
             dataIndex: 'last_date',
             key: 'last_date',
             width: 120,
             render: (v: string) => <Text className="font-mono text-slate-500">{v}</Text>
         },
         {
-            title: 'LAG DAYS',
+            title: '滞后天数',
             dataIndex: 'lag_days',
             key: 'lag_days',
             width: 100,
             align: 'right' as const,
             render: (v: number) => (
                 <Tag color={v > 60 ? '#f43f5e' : v > 10 ? '#f59e0b' : '#10b981'} className="m-0 border-none font-bold rounded-lg px-2">
-                    {v}d
+                    {v}天
                 </Tag>
             ),
         },
@@ -103,20 +103,20 @@ export const AdminDataManagement: React.FC = () => {
 
     const invalidColumns = [
         {
-            title: 'SYMBOL',
+            title: '股票代码',
             dataIndex: 'symbol',
             key: 'symbol',
             width: 100,
             render: (v: string) => <span className="font-mono font-black text-rose-600">{v}</span>,
         },
         {
-            title: 'REASON',
+            title: '原因',
             dataIndex: 'reason',
             key: 'reason',
             render: (v: string) => <Tag color="error" className="m-0 border-none rounded-md px-2 text-[11px] font-bold uppercase tracking-tight">{v}</Tag>,
         },
         {
-            title: 'FILE PATH',
+            title: '文件路径',
             dataIndex: 'file',
             key: 'file',
             ellipsis: true as const,
@@ -176,11 +176,11 @@ export const AdminDataManagement: React.FC = () => {
             <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6">
                 <div>
                     <Title level={1} className="!m-0 !font-black !text-4xl !tracking-tighter !text-slate-900 uppercase">
-                        Data Management
+                        数据管理
                     </Title>
                     <div className="flex items-center mt-2 space-x-3">
                         <Tag className="rounded-full bg-slate-100 border-none text-slate-500 font-bold px-3">
-                            NODE: QUANT-OSS-01
+                            节点: QUANT-OSS-01
                         </Tag>
                         <Text className="text-slate-400 font-medium text-sm flex items-center">
                             <InfoCircleOutlined className="mr-1.5" />
@@ -196,7 +196,7 @@ export const AdminDataManagement: React.FC = () => {
                         loading={loading}
                         onClick={() => loadDataStatus(true)}
                     >
-                        Force Deep Scan
+                        强制深度扫描
                     </Button>
                     <Button
                         icon={<ReloadOutlined />}
@@ -204,7 +204,7 @@ export const AdminDataManagement: React.FC = () => {
                         loading={loading}
                         onClick={() => loadDataStatus(false)}
                     >
-                        Refresh
+                        刷新
                     </Button>
                 </Space>
             </div>
@@ -215,7 +215,7 @@ export const AdminDataManagement: React.FC = () => {
                     <Card className="rounded-[2rem] border-none shadow-xl shadow-slate-200/40 bg-white group overflow-hidden">
                         <div className="absolute top-0 right-0 w-24 h-24 bg-blue-500 opacity-[0.03] rounded-bl-[4rem]" />
                         <Statistic 
-                            title={<span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Qlib Calendar Last</span>} 
+                            title={<span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Qlib 日历最后日期</span>} 
                             value={qlib?.calendar_last_date || '—'} 
                             valueStyle={{ fontWeight: 900, letterSpacing: '-0.02em', color: '#1e293b' }}
                             prefix={<CompassOutlined className="text-blue-500 mr-2" />}
@@ -226,7 +226,7 @@ export const AdminDataManagement: React.FC = () => {
                     <Card className="rounded-[2rem] border-none shadow-xl shadow-slate-200/40 bg-white group overflow-hidden">
                         <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-500 opacity-[0.03] rounded-bl-[4rem]" />
                         <Statistic 
-                            title={<span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Snapshot Latest</span>} 
+                            title={<span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">快照最新日期</span>} 
                             value={snapshots?.max_date || '—'} 
                             valueStyle={{ fontWeight: 900, letterSpacing: '-0.02em', color: '#1e293b' }}
                             prefix={<LineChartOutlined className="text-indigo-500 mr-2" />}
@@ -237,9 +237,9 @@ export const AdminDataManagement: React.FC = () => {
                     <Card className="rounded-[2rem] border-none shadow-xl shadow-slate-200/40 bg-white group overflow-hidden">
                         <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500 opacity-[0.03] rounded-bl-[4rem]" />
                         <Statistic 
-                            title={<span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Parquet Volume</span>} 
+                            title={<span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Parquet 文件总数</span>} 
                             value={snapshots?.file_count ?? 0} 
-                            suffix="Files"
+                            suffix="个"
                             valueStyle={{ fontWeight: 900, letterSpacing: '-0.02em', color: '#1e293b' }}
                             prefix={<DatabaseOutlined className="text-emerald-500 mr-2" />}
                         />
@@ -248,7 +248,7 @@ export const AdminDataManagement: React.FC = () => {
                 <Col xs={24} sm={12} lg={6}>
                     <Card className="rounded-[2rem] border-none shadow-xl shadow-slate-200/40 bg-white group overflow-hidden">
                         <div className="flex flex-col">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Coverage Efficiency</span>
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">覆盖率</span>
                             <div className="flex items-center space-x-4">
                                 <Progress 
                                     type="circle" 
@@ -260,7 +260,7 @@ export const AdminDataManagement: React.FC = () => {
                                 />
                                 <div>
                                     <div className="text-2xl font-black text-slate-800 tracking-tight">{coverageRate}%</div>
-                                    <div className="text-[10px] font-bold text-emerald-500">OPTIMAL</div>
+                                    <div className="text-[10px] font-bold text-emerald-500">良好</div>
                                 </div>
                             </div>
                         </div>
@@ -278,7 +278,7 @@ export const AdminDataManagement: React.FC = () => {
                                 <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600">
                                     <DatabaseOutlined />
                                 </div>
-                                <span className="font-black text-slate-800 tracking-tight text-lg uppercase">Qlib Infrastructure Details</span>
+                                <span className="font-black text-slate-800 tracking-tight text-lg uppercase">Qlib 基础设施详情</span>
                             </div>
                         }
                         className="rounded-[2.5rem] border-none shadow-2xl shadow-slate-200/30"
@@ -288,19 +288,19 @@ export const AdminDataManagement: React.FC = () => {
                             <Alert
                                 type="error"
                                 showIcon
-                                message={<span className="font-bold">Missing Qlib Directory</span>}
-                                description={<span className="text-xs italic opacity-70">{qlib?.qlib_dir || 'Path undefined'}</span>}
+                                message={<span className="font-bold">Qlib 目录不存在</span>}
+                                description={<span className="text-xs italic opacity-70">{qlib?.qlib_dir || '路径未定义'}</span>}
                                 className="rounded-2xl"
                             />
                         ) : (
                             <div className="grid grid-cols-2 md:grid-cols-3 gap-y-8 gap-x-12">
                                 {[
-                                    { label: 'Qlib Path', value: qlib.qlib_dir, span: 3, full: true },
-                                    { label: 'Total Calendar Days', value: qlib.calendar_total_days },
-                                    { label: 'Calendar Span', value: `${qlib.calendar_start_date} → ${qlib.calendar_last_date}`, span: 2 },
-                                    { label: 'Total Instruments', value: qlib.instruments?.total, highlight: true },
-                                    { label: 'Feature Directories', value: qlib.feature_dirs_total },
-                                    { label: 'Exchange Dist', value: `SH: ${qlib.instruments?.sh} | SZ: ${qlib.instruments?.sz} | BJ: ${qlib.instruments?.bj}`, span: 3, italic: true }
+                                    { label: 'Qlib 路径', value: qlib.qlib_dir, span: 3, full: true },
+                                    { label: '日历总天数', value: qlib.calendar_total_days },
+                                    { label: '日历区间', value: `${qlib.calendar_start_date} → ${qlib.calendar_last_date}`, span: 2 },
+                                    { label: '标的总数', value: qlib.instruments?.total, highlight: true },
+                                    { label: '特征目录数', value: qlib.feature_dirs_total },
+                                    { label: '交易所分布', value: `SH: ${qlib.instruments?.sh} | SZ: ${qlib.instruments?.sz} | BJ: ${qlib.instruments?.bj}`, span: 3, italic: true }
                                 ].map((item, i) => (
                                     <div key={i} className={`flex flex-col space-y-1 ${item.span === 3 ? 'col-span-full' : item.span === 2 ? 'col-span-2' : ''}`}>
                                         <Text className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{item.label}</Text>
@@ -320,22 +320,22 @@ export const AdminDataManagement: React.FC = () => {
                                 <div className="w-8 h-8 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600">
                                     <FileTextOutlined />
                                 </div>
-                                <span className="font-black text-slate-800 tracking-tight text-lg uppercase">Feature Snapshot Analytics</span>
+                                <span className="font-black text-slate-800 tracking-tight text-lg uppercase">特征快照分析</span>
                             </div>
                         }
                         className="rounded-[2.5rem] border-none shadow-2xl shadow-slate-200/30"
                         bodyStyle={{ padding: '32px' }}
                     >
                         {!snapshots?.exists ? (
-                            <Empty description="No Snapshot Data Detected" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                            <Empty description="暂无快照数据" image={Empty.PRESENTED_IMAGE_SIMPLE} />
                         ) : (
                             <div className="space-y-10">
                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-y-8">
                                     {[
-                                        { label: 'Total Rows', value: snapshots.total_rows?.toLocaleString(), color: 'text-indigo-600' },
-                                        { label: 'Scanned Success', value: snapshots.scanned_files, color: 'text-emerald-500' },
-                                        { label: 'Scan Failures', value: snapshots.failed_files, color: 'text-rose-500' },
-                                        { label: 'Data Integrity', value: snapshots.error ? 'CRITICAL' : 'OPTIMAL', color: snapshots.error ? 'text-rose-500' : 'text-emerald-500' }
+                                        { label: '总行数', value: snapshots.total_rows?.toLocaleString(), color: 'text-indigo-600' },
+                                        { label: '扫描成功', value: snapshots.scanned_files, color: 'text-emerald-500' },
+                                        { label: '扫描失败', value: snapshots.failed_files, color: 'text-rose-500' },
+                                        { label: '数据完整性', value: snapshots.error ? '异常' : '正常', color: snapshots.error ? 'text-rose-500' : 'text-emerald-500' }
                                     ].map((item, i) => (
                                         <div key={i} className="flex flex-col">
                                             <Text className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{item.label}</Text>
@@ -348,12 +348,12 @@ export const AdminDataManagement: React.FC = () => {
                                     <div className="p-6 rounded-3xl bg-slate-50 border border-slate-100">
                                         <div className="flex items-center space-x-2 mb-4">
                                             <CompassOutlined className="text-slate-400" />
-                                            <span className="text-xs font-black text-slate-600 uppercase tracking-widest">Recommended Training Periods</span>
+                                            <span className="text-xs font-black text-slate-600 uppercase tracking-widest">推荐训练区间</span>
                                         </div>
                                         <div className="flex flex-wrap gap-4">
                                             {Object.entries(snapshots.suggested_periods).map(([key, period]: [string, any]) => (
                                                 <div key={key} className="flex-1 min-w-[140px] p-4 bg-white rounded-2xl shadow-sm border border-slate-100">
-                                                    <Text className="text-[10px] font-bold text-slate-400 uppercase block mb-1">{key} set</Text>
+                                                    <Text className="text-[10px] font-bold text-slate-400 uppercase block mb-1">{key} 集</Text>
                                                     <Text className="font-mono text-[11px] font-black text-slate-700">{period[0]} ~ {period[1]}</Text>
                                                 </div>
                                             ))}
@@ -374,10 +374,10 @@ export const AdminDataManagement: React.FC = () => {
                         <div className="flex items-center justify-between mb-8">
                             <div className="flex items-center space-x-3">
                                 <CloudSyncOutlined className="text-indigo-400 text-2xl" />
-                                <span className="text-white font-black text-xl uppercase tracking-tight">Sync Engine</span>
+                                <span className="text-white font-black text-xl uppercase tracking-tight">同步引擎</span>
                             </div>
-                            <Tooltip title="Secure Connection Active">
-                                <Tag color="success" className="m-0 bg-emerald-500/20 text-emerald-400 border-none rounded-full px-3 py-0.5 text-[10px] font-bold">SECURE</Tag>
+                            <Tooltip title="安全连接已激活">
+                                <Tag color="success" className="m-0 bg-emerald-500/20 text-emerald-400 border-none rounded-full px-3 py-0.5 text-[10px] font-bold">安全</Tag>
                             </Tooltip>
                         </div>
 
@@ -409,11 +409,11 @@ export const AdminDataManagement: React.FC = () => {
                                 loading={syncLoading}
                                 onClick={handleSyncOfficialData}
                             >
-                                START DATA HYDRATION
+                                启动数据同步
                             </Button>
                             <div className="flex justify-center space-x-4">
                                 <Button type="link" onClick={handleGenerateScript} className="text-indigo-300/60 font-bold text-xs hover:text-white uppercase tracking-widest px-0">
-                                    <CodeOutlined className="mr-1" /> Config Script
+                                    <CodeOutlined className="mr-1" /> 生成配置脚本
                                 </Button>
                             </div>
                         </div>
@@ -421,7 +421,7 @@ export const AdminDataManagement: React.FC = () => {
                         {configScript && (
                             <div className="mt-8 relative animate-in fade-in slide-in-from-top-2">
                                 <div className="absolute top-3 right-3 z-10">
-                                    <Tag className="bg-white/10 border-none text-white/40 text-[9px] font-black uppercase">Shell Script</Tag>
+                                    <Tag className="bg-white/10 border-none text-white/40 text-[9px] font-black uppercase">Shell 脚本</Tag>
                                 </div>
                                 <Input.TextArea
                                     className="bg-black/40 border-none rounded-2xl text-indigo-200 font-mono text-[11px] leading-relaxed p-6"
@@ -437,7 +437,7 @@ export const AdminDataManagement: React.FC = () => {
                     {snapshots?.exists && (olderSamples.length > 0 || invalidSamples.length > 0) && (
                         <div className="space-y-6">
                             <Card 
-                                title={<span className="font-black text-rose-500 tracking-tight uppercase text-sm flex items-center"><WarningFilled className="mr-2" /> Data Lags (Top {sampleSize})</span>}
+                                title={<span className="font-black text-rose-500 tracking-tight uppercase text-sm flex items-center"><WarningFilled className="mr-2" /> 数据滞后（Top {sampleSize}）</span>}
                                 className="rounded-3xl border-none shadow-xl shadow-slate-200/20"
                                 bodyStyle={{ padding: '0 12px 12px' }}
                             >
@@ -448,12 +448,12 @@ export const AdminDataManagement: React.FC = () => {
                                     dataSource={olderSamples}
                                     columns={olderColumns}
                                     className="custom-table"
-                                    locale={{ emptyText: 'No lag detected' }}
+                                    locale={{ emptyText: '无滞后数据' }}
                                     scroll={{ y: 240 }}
                                 />
                             </Card>
                             <Card 
-                                title={<span className="font-black text-slate-400 tracking-tight uppercase text-sm flex items-center"><InfoCircleOutlined className="mr-2" /> Invalid Files</span>}
+                                title={<span className="font-black text-slate-400 tracking-tight uppercase text-sm flex items-center"><InfoCircleOutlined className="mr-2" /> 无效文件</span>}
                                 className="rounded-3xl border-none shadow-xl shadow-slate-200/20"
                                 bodyStyle={{ padding: '0 12px 12px' }}
                             >
@@ -464,7 +464,7 @@ export const AdminDataManagement: React.FC = () => {
                                     dataSource={invalidSamples}
                                     columns={invalidColumns}
                                     className="custom-table"
-                                    locale={{ emptyText: 'All files healthy' }}
+                                    locale={{ emptyText: '所有文件正常' }}
                                     scroll={{ y: 240 }}
                                 />
                             </Card>

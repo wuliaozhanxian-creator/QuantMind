@@ -85,7 +85,7 @@ const AdminPage: React.FC = () => {
                     {!collapsed && (
                         <div className="min-w-0">
                             <Title level={5} className="!m-0 !font-black !tracking-tight !text-slate-800 uppercase text-sm truncate">QuantMind</Title>
-                            <Text className="text-slate-400 text-[10px] font-bold tracking-widest uppercase">Admin</Text>
+                            <Text className="text-slate-400 text-[10px] font-bold tracking-widest uppercase">管理后台</Text>
                         </div>
                     )}
                 </div>
@@ -104,7 +104,7 @@ const AdminPage: React.FC = () => {
                 <div className="p-4 border-t border-slate-100">
                     <div className="bg-slate-50 rounded-xl p-4">
                         <div className="flex items-center justify-between mb-2">
-                            <Text className="text-[10px] font-black text-slate-400 uppercase tracking-wider">System Score</Text>
+                            <Text className="text-[10px] font-black text-slate-400 uppercase tracking-wider">系统评分</Text>
                             <Text className="text-[10px] font-black text-emerald-500">94%</Text>
                         </div>
                         <div className="h-1 w-full bg-slate-200 rounded-full overflow-hidden">
@@ -125,11 +125,11 @@ const AdminPage: React.FC = () => {
                             onClick={() => navigate('/dashboard')}
                             className="text-slate-500 font-bold text-xs flex items-center hover:bg-slate-50 rounded-lg h-9 px-3"
                         >
-                            RETURN TO PLATFORM
+                            返回平台
                         </Button>
                         <Divider type="vertical" className="h-4 border-slate-200" />
                         <div className="flex items-center gap-2">
-                            <Tag color="success" className="m-0 border-none rounded-full px-3 text-[10px] font-black uppercase bg-emerald-50 text-emerald-600">Infrastructure Healthy</Tag>
+                            <Tag color="success" className="m-0 border-none rounded-full px-3 text-[10px] font-black uppercase bg-emerald-50 text-emerald-600">基础设施正常</Tag>
                         </div>
                     </div>
                     
@@ -140,8 +140,8 @@ const AdminPage: React.FC = () => {
                         <Divider type="vertical" className="h-4 border-slate-200" />
                         <div className="flex items-center gap-3 pl-2">
                             <div className="text-right hidden sm:block">
-                                <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none mb-0.5">Superuser</div>
-                                <div className="text-xs font-bold text-slate-800">Administrator</div>
+                                <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none mb-0.5">超级用户</div>
+                                <div className="text-xs font-bold text-slate-800">管理员</div>
                             </div>
                             <Avatar shape="circle" className="bg-slate-100 text-slate-400 border border-slate-200" icon={<UserOutlined />} />
                         </div>
