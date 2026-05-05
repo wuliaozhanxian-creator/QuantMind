@@ -99,6 +99,7 @@ db/qlib_data/**/*.data
 db/qlib_bin/
 db/qlib_csv/
 db/*.tar.gz
+db.tar.gz
 *.bin
 *.pkl
 *.parquet
@@ -176,6 +177,6 @@ data/ai_ide/config.json
 /models/model48
 /models/model_preview
 db/diagram/postgresql_schema.dot
-stock_daily_latest.csv.gz
-db/feature_snapshots/db/backups/*.gz
-db/feature_snapshots/
+db/backups/*.gz
+db/feature_snapshots/*.parquet
+!db/feature_snapshots/*.json
