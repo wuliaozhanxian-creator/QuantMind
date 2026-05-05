@@ -42,6 +42,11 @@ const ModelRegistryPage = lazy(() => import('./pages/ModelRegistryPage'));
 const ResearchPlatformPage = lazy(() => import('./pages/ResearchPlatformPage'));
 const RealTradingPage = lazy(() => import('./pages/trading/RealTradingPage'));
 const AdminPage = lazy(() => import('./features/admin/AdminPage'));
+const AdminDashboard = lazy(() => import('./features/admin/components/AdminDashboard').then(m => ({ default: m.AdminDashboard })));
+const AdminUserTable = lazy(() => import('./features/admin/components/AdminUserTable').then(m => ({ default: m.AdminUserTable })));
+const AdminModelManagement = lazy(() => import('./features/admin/components/AdminModelManagement').then(m => ({ default: m.AdminModelManagement })));
+const AdminDataManagement = lazy(() => import('./features/admin/components/AdminDataManagement').then(m => ({ default: m.AdminDataManagement })));
+const AdminStrategyTemplates = lazy(() => import('./features/admin/components/AdminStrategyTemplates').then(m => ({ default: m.AdminStrategyTemplates })));
 
 // 主题切换hook
 // 主题管理已移除 - 应用统一使用浅色主题
@@ -414,13 +419,26 @@ export default function App() {
                     }
                   />
                   <Route
-                    path="/admin/*"
+                    path="/admin"
                     element={
                       <ProtectedRoute requiredRole="admin">
                         <AdminPage />
                       </ProtectedRoute>
                     }
-                  />
+                  >
+                    <Route index element={<Navigate to="overview" replace />} />
+                    <Route path="overview" element={<Suspense fallback={<Spin size="large" />}><AdminDashboard /></Suspense>} />
+                    <Route path="users" element={<Suspense fallback={<Spin size="large" />}><AdminUserTable /></Suspense>} />
+                    <Route path="models" element={<Suspense fallback={<Spin size="large" />}><AdminModelManagement /></Suspense>} />
+                    <Route path="data" element={<Suspense fallback={<Spin size="large" />}><AdminDataManagement /></Suspense>} />
+                    <Route path="strategies" element={<Suspense fallback={<Spin size="large" />}><AdminStrategyTemplates /></Suspense>} />
+                    {/* 待开发页面占位 */}
+                    <Route path="inference" element={<div className="p-8 text-center text-slate-400">推理监控页面开发中...</div>} />
+                    <Route path="orders" element={<div className="p-8 text-center text-slate-400">订单管理页面开发中...</div>} />
+                    <Route path="risk" element={<div className="p-8 text-center text-slate-400">风险控制页面开发中...</div>} />
+                    <Route path="quotes" element={<div className="p-8 text-center text-slate-400">行情源监控页面开发中...</div>} />
+                    <Route path="settings" element={<div className="p-8 text-center text-slate-400">系统设置页面开发中...</div>} />
+                  </Route>
 
                   {/* 主应用路由 - 仪表盘等 */}
                   <Route
