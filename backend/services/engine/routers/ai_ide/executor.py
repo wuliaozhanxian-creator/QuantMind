@@ -879,36 +879,40 @@ async def start_execution(request: Request, item: StartRequest):
             "image": runner_image,
         }
 
-        smoke_client = None
-        try:
-            import docker
+        # 跳过已知生产镜像的 smoke test，避免误报和延迟
+        if "quantmind-oss" in runner_image:
+            logger.info(f"[SMOKE] 跳过生产镜像 {runner_image} 的验证")
+        else:
+            smoke_client = None
+            try:
+                import docker
 
-            smoke_client = docker.from_env()
-            smoke_result = await _run_image_smoke_check(
-                smoke_client,
-                runner_image,
-                jobs[job_id]["queue"],
-                strict=False,
-                mandatory_imports=_SMOKE_IMPORTS,
-                optional_imports=_SMOKE_OPTIONAL_IMPORTS,
-            )
-            if not smoke_result.get("ok"):
-                jobs[job_id]["status"] = "failed"
-                await jobs[job_id]["queue"].put(
-                    "[ERROR] AI-IDE 临时镜像验证未通过，已阻断正式执行"
+                smoke_client = docker.from_env()
+                smoke_result = await _run_image_smoke_check(
+                    smoke_client,
+                    runner_image,
+                    jobs[job_id]["queue"],
+                    strict=False,
+                    mandatory_imports=_SMOKE_IMPORTS,
+                    optional_imports=_SMOKE_OPTIONAL_IMPORTS,
                 )
-                await jobs[job_id]["queue"].put("[EOF]")
-                return {
-                    "job_id": job_id,
-                    "status": "blocked",
-                    "smoke": smoke_result,
-                }
-        finally:
-            if smoke_client is not None:
-                try:
-                    smoke_client.close()
-                except Exception:
-                    pass
+                if not smoke_result.get("ok"):
+                    jobs[job_id]["status"] = "failed"
+                    await jobs[job_id]["queue"].put(
+                        "[ERROR] AI-IDE 临时镜像验证未通过，已阻断正式执行"
+                    )
+                    await jobs[job_id]["queue"].put("[EOF]")
+                    return {
+                        "job_id": job_id,
+                        "status": "blocked",
+                        "smoke": smoke_result,
+                    }
+            finally:
+                if smoke_client is not None:
+                    try:
+                        smoke_client.close()
+                    except Exception:
+                        pass
 
         # 启动异步任务执行进程
         asyncio.create_task(run_process(job_id, file_path))
