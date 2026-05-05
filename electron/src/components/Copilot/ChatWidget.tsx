@@ -127,7 +127,7 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ userId }) => {
   };
 
   if (isInitializing) {
-    return <div style={{ display: 'flex', justifyContent: 'center', padding: '50px' }}><Spin tip="AI 助手启动中..." /></div>;
+    return <div style={{ display: 'flex', justifyContent: 'center', padding: '50px' }}><Spin /></div>;
   }
 
   return (

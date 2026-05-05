@@ -74,7 +74,7 @@ export const OtherSettings: React.FC<OtherSettingsProps> = ({ userId, tenantId }
     return (
       <div className="w-full pt-1">
         <div className="w-full rounded-xl border border-gray-200 bg-white p-8 flex items-center justify-center min-h-[200px]">
-          <Spin tip="加载中..." />
+          <Spin />
         </div>
       </div>
     );

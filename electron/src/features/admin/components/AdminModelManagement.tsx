@@ -595,7 +595,7 @@ export const AdminModelManagement: React.FC = () => {
                 }
             >
                 {jobDetailLoading ? (
-                    <div className="flex items-center justify-center h-40"><Spin tip="加载中…" /></div>
+                    <div className="flex items-center justify-center h-40"><Spin /></div>
                 ) : jobDetail ? (
                     <div className="space-y-4 mt-4">
                         <Descriptions column={2} size="small" bordered>

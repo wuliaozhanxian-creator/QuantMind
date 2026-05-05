@@ -417,7 +417,7 @@ export const TrainingSourcePanel: React.FC<{
         <div className="flex-1 bg-slate-950/95 p-6 overflow-y-auto font-mono custom-scrollbar">
           {loading ? (
             <div className="h-full flex items-center justify-center">
-              <Spin tip="Loading logs..." />
+              <Spin />
             </div>
           ) : (
             <pre className="text-[11px] leading-relaxed text-slate-300 whitespace-pre-wrap break-all">
