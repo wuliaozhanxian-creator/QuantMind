@@ -466,7 +466,7 @@ export const AttributionAnalysisPanel: React.FC<{
 
   const [searchText, setSearchText] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
-  const pageSize = 10; // 锁定 10 条
+  const pageSize = 10;
 
   const filteredRows = rows.filter(r => 
     r.feature.toLowerCase().includes(searchText.toLowerCase()) || 
@@ -476,126 +476,175 @@ export const AttributionAnalysisPanel: React.FC<{
   const maxAbsShap = Math.max(...rows.map(r => r.mean_abs_shap || 0), 0.0001);
 
   return (
-    <div className="h-[calc(100vh-300px)] flex flex-col space-y-3 overflow-hidden pt-6">
+    <div className="h-[calc(100vh-340px)] flex flex-col space-y-4 overflow-hidden pt-4">
       {/* 头部统计 */}
-      <div className="glass-panel rounded-2xl p-4 border border-slate-100/50 flex items-center justify-between shrink-0">
+      <div className="glass-panel rounded-2xl p-5 border border-slate-200 bg-white shadow-sm flex items-center justify-between shrink-0">
         <div className="flex items-center gap-4">
-          <div className="bg-violet-500/10 p-2 rounded-xl text-violet-600">
-            <Brain size={18} />
+          <div className="bg-violet-500/10 p-2.5 rounded-xl text-violet-600">
+            <Brain size={20} />
           </div>
           <div className="flex flex-col">
-            <Text className="text-xs font-black text-slate-800 uppercase tracking-tight">归因分析</Text>
-            <Text className="text-[10px] text-slate-400 font-medium">{split} · {rowsUsed} 样本</Text>
+            <Text className="text-sm font-black text-slate-800 uppercase tracking-tight">归因分析报告</Text>
+            <Text className="text-[11px] text-slate-400 font-medium">{split} 数据集 · {rowsUsed} 个训练样本</Text>
           </div>
-          <Tag color={status === 'completed' ? 'green' : 'blue'} className="m-0 border-0 text-[8px] font-black uppercase rounded-md h-4 leading-4 px-2">
-            {status === 'completed' ? '已完成' : status}
+          <Tag color={status === 'completed' ? 'green' : 'blue'} className="m-0 border-0 text-[9px] font-black uppercase rounded-md h-5 leading-5 px-3">
+            {status === 'completed' ? '分析就绪' : status}
           </Tag>
         </div>
-        <Button onClick={onRefresh} loading={loading} size="small" className="rounded-full h-7 text-[10px] font-bold border-slate-200 px-4">刷新数据</Button>
+        <Button onClick={onRefresh} loading={loading} size="small" className="rounded-full h-8 text-[11px] font-bold border-slate-300 px-6 hover:border-violet-400 hover:text-violet-600 transition-all">刷新数据</Button>
       </div>
 
-      {/* 因子榜 */}
-      <div className="glass-panel rounded-2xl p-4 border border-slate-100/50 flex flex-col flex-1 overflow-hidden">
-        <div className="flex items-center justify-between mb-4 shrink-0">
-          <Text className="text-[10px] font-black text-slate-400 uppercase tracking-widest opacity-60">影响力排行 (SHAP)</Text>
+      {/* 核心内容区 */}
+      <div className="glass-panel rounded-2xl p-5 border border-slate-200 bg-white shadow-sm flex flex-col flex-1 overflow-hidden">
+        <div className="flex items-center justify-between mb-5 shrink-0">
+          <div className="flex items-center gap-2">
+            <div className="h-4 w-1 bg-slate-300 rounded-full" />
+            <Text className="text-[11px] font-black text-slate-400 uppercase tracking-widest">影响力排行 (SHAP FEATURE IMPORTANCE)</Text>
+          </div>
           <Input
             size="small"
-            placeholder="搜索因子..."
-            prefix={<Search size={10} className="text-slate-400" />}
-            className="w-48 h-7 rounded-lg border-slate-100 bg-slate-50/50 text-[10px]"
+            placeholder="按因子名搜索..."
+            prefix={<Search size={12} className="text-slate-400" />}
+            className="w-56 h-8 rounded-xl border-slate-200 bg-slate-50/80 text-[11px]"
             value={searchText}
             onChange={e => setSearchText(e.target.value)}
           />
         </div>
 
         <div className="flex-1 overflow-hidden">
-          <Table
-            size="small"
-            dataSource={filteredRows.slice((currentPage - 1) * pageSize, currentPage * pageSize)}
-            loading={loading}
-            tableLayout="fixed"
-            pagination={false}
-            rowKey="feature"
-            className="research-table"
-            columns={[
-              {
-                title: <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest text-center block">因子</span>,
-                key: 'feature',
-                width: 160,
-                align: 'center',
-                ellipsis: true,
-                render: (_, r) => (
-                  <div className="text-center px-1">
-                    <Text className="text-[11px] font-black text-slate-800 block truncate leading-tight">{featureLabelMap[r.feature] || r.feature}</Text>
-                    <Text className="text-[8px] text-slate-400 font-mono font-bold block truncate leading-none">{r.feature}</Text>
-                  </div>
-                ),
-              },
-              {
-                title: <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block text-center">平均绝对贡献</span>,
-                dataIndex: 'mean_abs_shap',
-                key: 'mean_abs_shap',
-                width: 180, // 稍微加宽一点以容纳三个组件
-                align: 'center',
-                sorter: (a, b) => (a.mean_abs_shap || 0) - (b.mean_abs_shap || 0),
-                render: (v) => {
-                  const percent = Math.min((v / maxAbsShap) * 100, 100);
-                  return (
-                    <div className="flex items-center w-full px-2 gap-3">
-                      {/* 左图标 */}
-                      <BarChart3 size={14} className="text-violet-400 shrink-0" />
-                      {/* 居中进度条 */}
-                      <div className="flex-1 h-1.5 bg-slate-50 rounded-full overflow-hidden relative">
-                        <div className="h-full bg-violet-500 rounded-full" style={{ width: `${percent}%` }} />
+          <div className="grid grid-cols-12 gap-6 h-full">
+            {/* 左侧：纯数据展示区 */}
+            <div className="col-span-8 flex flex-col overflow-hidden h-full">
+              <Table
+                size="small"
+                dataSource={filteredRows.slice((currentPage - 1) * pageSize, currentPage * pageSize)}
+                loading={loading}
+                tableLayout="fixed"
+                pagination={false}
+                rowKey="feature"
+                className="research-table border border-slate-100 rounded-xl overflow-hidden flex-1"
+                columns={[
+                  {
+                    title: <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest text-center block">因子名称</span>,
+                    key: 'feature',
+                    width: 140,
+                    align: 'center',
+                    ellipsis: true,
+                    render: (_, r) => (
+                      <div className="text-center px-1">
+                        <Text className="text-[11px] font-black text-slate-800 block truncate leading-tight mb-0.5">{featureLabelMap[r.feature] || r.feature}</Text>
+                        <Text className="text-[8px] text-slate-400 font-mono font-bold block truncate leading-none opacity-80">{r.feature}</Text>
                       </div>
-                      {/* 文字右对齐 */}
-                      <Text className="text-[10px] font-mono font-black text-violet-600 shrink-0 w-[60px] text-right">
-                        {Number(v || 0).toFixed(6)}
-                      </Text>
-                    </div>
-                  );
-                },
-              },
-              {
-                title: <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest text-center block">方向</span>,
-                dataIndex: 'mean_shap',
-                key: 'mean_shap',
-                width: 90,
-                align: 'center',
-                render: (v) => (
-                  <div className="flex flex-col items-center leading-none">
-                    <Text className={clsx("text-[10px] font-mono font-black", v >= 0 ? "text-rose-500" : "text-emerald-500")}>
-                      {v >= 0 ? '+' : ''}{Number(v || 0).toFixed(6)}
+                    ),
+                  },
+                  {
+                    title: <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block text-center">平均绝对贡献</span>,
+                    dataIndex: 'mean_abs_shap',
+                    key: 'mean_abs_shap',
+                    width: 180,
+                    align: 'center',
+                    sorter: (a, b) => (a.mean_abs_shap || 0) - (b.mean_abs_shap || 0),
+                    render: (v) => {
+                      const percent = Math.min((v / maxAbsShap) * 100, 100);
+                      return (
+                        <div className="flex items-center w-full px-2 gap-3">
+                          <BarChart3 size={14} className="text-violet-400 shrink-0" />
+                          <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden relative">
+                            <div className="h-full bg-violet-500 rounded-full" style={{ width: `${percent}%` }} />
+                          </div>
+                          <Text className="text-[10px] font-mono font-black text-violet-600 shrink-0 w-[60px] text-right">
+                            {Number(v || 0).toFixed(6)}
+                          </Text>
+                        </div>
+                      );
+                    },
+                  },
+                  {
+                    title: <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest text-center block">方向</span>,
+                    dataIndex: 'mean_shap',
+                    key: 'mean_shap',
+                    width: 90,
+                    align: 'center',
+                    sorter: (a, b) => (a.mean_shap || 0) - (b.mean_shap || 0),
+                    render: (v) => (
+                      <div className="flex flex-col items-center leading-none">
+                        <Text className={clsx("text-[10px] font-mono font-black px-2 py-0.5 rounded", v >= 0 ? "text-rose-600 bg-rose-50" : "text-emerald-600 bg-emerald-50")}>
+                          {v >= 0 ? '+' : ''}{Number(v || 0).toFixed(6)}
+                        </Text>
+                      </div>
+                    ),
+                  },
+                  {
+                    title: <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest text-right block pr-3">正向比</span>,
+                    dataIndex: 'positive_ratio',
+                    key: 'positive_ratio',
+                    width: 80,
+                    align: 'right',
+                    render: (v) => (
+                      <div className="pr-3 text-right">
+                        <Text className="text-[11px] font-black text-slate-700">{(Number(v || 0) * 100).toFixed(1)}%</Text>
+                      </div>
+                    ),
+                  },
+                ]}
+              />
+            </div>
+
+            {/* 右侧：说明 + 操作区 */}
+            <div className="col-span-4 flex flex-col gap-4">
+              <div className="bg-slate-50 rounded-2xl p-5 border border-slate-200 flex flex-col shadow-inner">
+                <div className="flex items-center gap-2 mb-4 text-violet-600">
+                  <Info size={16} />
+                  <Text className="text-xs font-black uppercase tracking-widest">说明</Text>
+                </div>
+
+                <div className="space-y-4 mb-4">
+                  <div className="relative pl-3 border-l-2 border-violet-400">
+                    <Text className="text-[11px] font-black text-slate-700 block mb-1">平均绝对贡献 (影响力)</Text>
+                    <Text className="text-[10px] text-slate-500 leading-tight block">
+                      代表因子的“话语权”。数值越高，说明该因子在模型判断中说话分量越重。
                     </Text>
                   </div>
-                ),
-              },
-              {
-                title: <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest text-right block pr-2">正向比</span>,
-                dataIndex: 'positive_ratio',
-                key: 'positive_ratio',
-                width: 80,
-                align: 'right',
-                render: (v) => (
-                  <div className="pr-2 text-right">
-                    <Text className="text-[10px] font-black text-slate-700">{(Number(v || 0) * 100).toFixed(1)}%</Text>
+                  <div className="relative pl-3 border-l-2 border-rose-400">
+                    <Text className="text-[11px] font-black text-slate-700 block mb-1">方向 (因子脾气)</Text>
+                    <Text className="text-[10px] text-slate-500 leading-tight block">
+                      <span className="text-rose-600 font-bold">正向</span> 表示因子越大模型越看好；<span className="text-emerald-600 font-bold">负向</span> 则相反。
+                    </Text>
                   </div>
-                ),
-              },
-            ]}
-          />
-        </div>
+                  <div className="relative pl-3 border-l-2 border-emerald-400">
+                    <Text className="text-[11px] font-black text-slate-700 block mb-1">正向比 (靠谱度)</Text>
+                    <Text className="text-[10px] text-slate-500 leading-tight block">
+                      反映逻辑一致性。越高说明因子在不同样本下表现越稳健，不容易失效。
+                    </Text>
+                  </div>
+                </div>
 
-        <div className="mt-auto pt-2 flex justify-end shrink-0">
-          <Pagination
-            current={currentPage}
-            pageSize={pageSize}
-            total={filteredRows.length}
-            onChange={setCurrentPage}
-            size="small"
-            showSizeChanger={false}
-            className="research-pagination"
-          />
+
+                <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-sm">
+                  <div className="flex items-start gap-2">
+                    <Zap size={12} className="text-amber-500 mt-0.5 shrink-0" />
+                    <Text className="text-[10px] text-slate-600 leading-normal italic">
+                      选股建议仅供参考，实盘请结合市场环境判断。
+                    </Text>
+                  </div>
+                </div>
+              </div>
+
+              {/* 翻页操作 */}
+              <div className="mt-auto py-3 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200 flex justify-center items-center shadow-inner">
+                <Pagination
+                  current={currentPage}
+                  pageSize={pageSize}
+                  total={filteredRows.length}
+                  onChange={setCurrentPage}
+                  size="small"
+                  showSizeChanger={false}
+                  className="research-pagination"
+                />
+              </div>
+            </div>
+          </div>
+
         </div>
       </div>
     </div>
