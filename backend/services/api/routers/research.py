@@ -80,7 +80,7 @@ _SDL_SELECT = """
     COALESCE(sdl_latest.is_st, 0) <> 0 AS is_st,
     COALESCE(sdl_latest.idx_hs300, 0) <> 0 AS is_hs300,
     COALESCE(sdl_latest.idx_zz1000, 0) <> 0 AS is_csi1000,
-    COALESCE(sdl_base.pct_change * 100, 0) AS latest_change_pct,
+    COALESCE(sdl_base.pct_change, sdl_latest.pct_change, 0) * 100 AS latest_change_pct,
     COALESCE(sdl_next.close / NULLIF(sdl_base.close, 0) - 1, 0) AS return_1d,
     COALESCE(sdl_3d.close / NULLIF(sdl_base.close, 0) - 1, 0) AS return_3d,
     COALESCE(sdl_latest.ma5, 0) AS ma5,
