@@ -177,3 +177,4 @@ data/ai_ide/config.json
 /models/model_preview
 db/diagram/postgresql_schema.dot
 stock_daily_latest.csv.gz
+db/feature_snapshots/

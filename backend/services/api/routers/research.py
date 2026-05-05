@@ -13,6 +13,13 @@ from backend.shared.database_manager_v2 import get_session
 from backend.shared.stock_utils import StockCodeUtil
 
 router = APIRouter(prefix="/api/v1/research", tags=["Research"])
+async def ensure_research_tables():
+    """确保投研平台相关表存在 - 已禁用自动建表"""
+    # 表结构由 quantmind_init.sql 初始化
+    pass
+
+
+
 
 class SymbolsFeaturesRequest(BaseModel):
     symbols: list[str]
@@ -41,90 +48,80 @@ _SDL_JOIN_CONDITION = """
         WHEN snap.symbol ~ '^[0-9]{6}$' THEN 'SZ' || snap.symbol
         ELSE UPPER(snap.symbol)
     END
-    AND sdl.trade_date = (
-        SELECT MAX(s2.trade_date)
-        FROM stock_daily_latest s2
-        WHERE s2.symbol = sdl.symbol
-    )
 )
 """
 
 # 带实时 return 计算的 stock_daily_latest 子查询
 _SDL_WITH_RET = """
     SELECT s.*,
-        COALESCE(s.return_1d, s.close / NULLIF(LAG(s.close) OVER (PARTITION BY s.symbol ORDER BY s.trade_date), 0) - 1, 0) AS return_1d_calc,
-        COALESCE(s.return_3d, s.close / NULLIF(LAG(s.close, 3) OVER (PARTITION BY s.symbol ORDER BY s.trade_date), 0) - 1, 0) AS return_3d_calc
+        LEAD(s.trade_date) OVER (PARTITION BY s.symbol ORDER BY s.trade_date) AS next_date,
+        LEAD(s.trade_date, 3) OVER (PARTITION BY s.symbol ORDER BY s.trade_date) AS date_3d,
+        MAX(s.trade_date) OVER (PARTITION BY s.symbol) as latest_date
     FROM stock_daily_latest s
+    WHERE s.volume > 0
 """
 
 _SDL_SELECT = """
-    COALESCE(sdl.stock_name, '') AS stock_name,
-    COALESCE(sdl.industry, '') AS industry,
-    COALESCE(sdl.close, 0) AS close_price,
-    COALESCE(sdl.pe_ttm, 0) AS pe,
-    COALESCE(sdl.pb, 0) AS pb,
-    COALESCE(sdl.roe, 0) AS roe,
-    CASE WHEN COALESCE(sdl.float_mv, 0) > 0 THEN sdl.volume * sdl.close / sdl.float_mv / 10000.0 ELSE 0 END AS turnover_rate,
-    COALESCE(sdl.amount, 0) AS amount,
-    COALESCE(sdl.total_mv, 0) AS total_mv,
-    COALESCE(sdl.float_mv, 0) AS float_mv,
-    COALESCE(sdl.listed_days, 0) AS listed_days,
-    COALESCE(sdl.is_st, 0) <> 0 AS is_st,
-    COALESCE(sdl.idx_hs300, 0) <> 0 AS is_hs300,
-    COALESCE(sdl.idx_zz500, 0) <> 0 AS is_csi500,
-    COALESCE(sdl.idx_zz1000, 0) <> 0 AS is_csi1000,
-    COALESCE(sdl.return_1d_calc * 100, 0) AS latest_change_pct,
-    COALESCE(sdl.return_1d_calc, 0) AS return_1d,
-    COALESCE(sdl.return_3d_calc, 0) AS return_3d,
-    COALESCE(sdl.ma5, 0) AS ma5,
-    COALESCE(sdl.ma10, 0) AS ma10,
-    COALESCE(sdl.ma_gap_5, 0) AS ma_gap_5,
-    COALESCE(sdl.ma_gap_10, 0) AS ma_gap_10,
-    COALESCE(sdl.ma_gap_20, 0) AS ma_gap_20,
-    COALESCE(sdl.rsi_14, sdl.rsi_6, 0) AS rsi,
-    COALESCE(sdl.rsi_14, 0) AS rsi_14,
-    COALESCE(sdl.vol_atr_14, 0) AS atr,
-    COALESCE(sdl.macd_hist, 0) AS macd_hist,
-    COALESCE(sdl.volume_ratio_5, 0) AS volume_ratio_5,
-    COALESCE(sdl.volume_ratio_20, 0) AS volume_ratio_20,
-    COALESCE(sdl.volume_trend_3d, FALSE) AS volume_trend_3d,
-    COALESCE(sdl.main_flow, 0) AS main_flow,
-    COALESCE(sdl.flow_net_amount, 0) AS flow_net_amount,
-    COALESCE(sdl.inst_ownership, 0) AS inst_ownership,
-    COALESCE(sdl.profit_growth, 0) AS profit_growth,
+    COALESCE(sdl_latest.stock_name, sdl_base.stock_name, '') AS stock_name,
+    COALESCE(sdl_latest.industry, sdl_base.industry, '') AS industry,
+    COALESCE(sdl_latest.close, 0) AS close_price,
+    COALESCE(sdl_latest.pe_ttm, 0) AS pe,
+    COALESCE(sdl_latest.pb, 0) AS pb,
+    COALESCE(sdl_latest.roe, 0) AS roe,
+    COALESCE(sdl_latest.turnover_rate, 0) AS turnover_rate,
+    COALESCE(sdl_latest.amount, 0) AS amount,
+    COALESCE(sdl_latest.total_mv, 0) AS total_mv,
+    COALESCE(sdl_latest.float_mv, 0) AS float_mv,
+    COALESCE(sdl_latest.listed_days, 0) AS listed_days,
+    COALESCE(sdl_latest.is_st, 0) <> 0 AS is_st,
+    COALESCE(sdl_latest.idx_hs300, 0) <> 0 AS is_hs300,
+    COALESCE(sdl_latest.idx_zz1000, 0) <> 0 AS is_csi1000,
+    COALESCE(sdl_base.pct_change * 100, 0) AS latest_change_pct,
+    COALESCE(sdl_next.close / NULLIF(sdl_base.close, 0) - 1, 0) AS return_1d,
+    COALESCE(sdl_3d.close / NULLIF(sdl_base.close, 0) - 1, 0) AS return_3d,
+    COALESCE(sdl_latest.ma5, 0) AS ma5,
+    COALESCE(sdl_latest.ma10, 0) AS ma10,
+    COALESCE(sdl_latest.ma_gap_5, 0) AS ma_gap_5,
+    COALESCE(sdl_latest.ma_gap_10, 0) AS ma_gap_10,
+    COALESCE(sdl_latest.ma_gap_20, 0) AS ma_gap_20,
+    COALESCE(sdl_latest.rsi_14, sdl_latest.rsi_6, 0) AS rsi,
+    COALESCE(sdl_latest.rsi_14, 0) AS rsi_14,
+    COALESCE(sdl_latest.vol_atr_14, 0) AS atr,
+    COALESCE(sdl_latest.macd_hist, 0) AS macd_hist,
+    COALESCE(sdl_latest.volume_ratio_5, 0) AS volume_ratio_5,
+    COALESCE(sdl_latest.volume_ratio_20, 0) AS volume_ratio_20,
+    COALESCE(sdl_latest.volume_trend_3d, FALSE) AS volume_trend_3d,
+    COALESCE(sdl_latest.main_flow, 0) AS main_flow,
+    COALESCE(sdl_latest.flow_net_amount, 0) AS flow_net_amount,
+    COALESCE(sdl_latest.inst_ownership, 0) AS inst_ownership,
+    COALESCE(sdl_latest.profit_growth, 0) AS profit_growth,
     COALESCE(
       to_jsonb(array_remove(ARRAY[
-        CASE WHEN COALESCE(sdl.concept_ai, 0) <> 0 THEN 'AI' END,
-        CASE WHEN COALESCE(sdl.concept_chip, 0) <> 0 THEN '芯片' END,
-        CASE WHEN COALESCE(sdl.concept_new_energy, 0) <> 0 THEN '新能源' END,
-        CASE WHEN COALESCE(sdl.concept_ev, 0) <> 0 THEN '电动车' END,
-        CASE WHEN COALESCE(sdl.concept_pv, 0) <> 0 THEN '光伏' END,
-        CASE WHEN COALESCE(sdl.concept_lithium, 0) <> 0 THEN '锂电' END,
-        CASE WHEN COALESCE(sdl.concept_semiconductor, 0) <> 0 THEN '半导体' END,
-        CASE WHEN COALESCE(sdl.concept_military, 0) <> 0 THEN '军工' END,
-        CASE WHEN COALESCE(sdl.concept_medical, 0) <> 0 THEN '医药' END,
-        CASE WHEN COALESCE(sdl.concept_cyber, 0) <> 0 THEN '网络安全' END,
-        CASE WHEN COALESCE(sdl.concept_fintech, 0) <> 0 THEN '金融科技' END,
-        CASE WHEN COALESCE(sdl.concept_consumption, 0) <> 0 THEN '消费' END,
-        CASE WHEN COALESCE(sdl.concept_real_estate, 0) <> 0 THEN '地产' END,
-        CASE WHEN COALESCE(sdl.concept_infrastructure, 0) <> 0 THEN '基建' END,
-        CASE WHEN COALESCE(sdl.concept_state_owned, 0) <> 0 THEN '国企改革' END
+        CASE WHEN COALESCE(sdl_latest.concept_ai, 0) <> 0 THEN 'AI' END,
+        CASE WHEN COALESCE(sdl_latest.concept_chip, 0) <> 0 THEN '芯片' END,
+        CASE WHEN COALESCE(sdl_latest.concept_new_energy, 0) <> 0 THEN '新能源' END,
+        CASE WHEN COALESCE(sdl_latest.concept_pv, 0) <> 0 THEN '光伏' END,
+        CASE WHEN COALESCE(sdl_latest.concept_lithium, 0) <> 0 THEN '锂电' END,
+        CASE WHEN COALESCE(sdl_latest.concept_military, 0) <> 0 THEN '军工' END,
+        CASE WHEN COALESCE(sdl_latest.concept_medical, 0) <> 0 THEN '医药' END,
+        CASE WHEN COALESCE(sdl_latest.concept_fintech, 0) <> 0 THEN '金融科技' END,
+        CASE WHEN COALESCE(sdl_latest.concept_consumption, 0) <> 0 THEN '消费' END,
+        CASE WHEN COALESCE(sdl_latest.concept_state_owned, 0) <> 0 THEN '国企改革' END
       ]::text[], NULL)),
       '[]'::jsonb
     ) AS concept_tags,
     COALESCE(
       to_jsonb(array_remove(ARRAY[
-        CASE WHEN COALESCE(sdl.idx_hs300, 0) <> 0 THEN '沪深300' END,
-        CASE WHEN COALESCE(sdl.idx_zz500, 0) <> 0 THEN '中证500' END,
-        CASE WHEN COALESCE(sdl.idx_zz1000, 0) <> 0 THEN '中证1000' END,
-        CASE WHEN COALESCE(sdl.idx_chinext, 0) <> 0 THEN '创业板指数' END,
-        CASE WHEN COALESCE(sdl.idx_margin, 0) <> 0 THEN '两融标的' END,
-        CASE WHEN COALESCE(sdl.idx_all, 0) <> 0 THEN '全市场' END
+        CASE WHEN COALESCE(sdl_latest.idx_hs300, 0) <> 0 THEN '沪深300' END,
+        CASE WHEN COALESCE(sdl_latest.idx_zz1000, 0) <> 0 THEN '中证1000' END,
+        CASE WHEN COALESCE(sdl_latest.idx_chinext, 0) <> 0 THEN '创业板指数' END,
+        CASE WHEN COALESCE(sdl_latest.idx_margin, 0) <> 0 THEN '两融标的' END,
+        CASE WHEN COALESCE(sdl_latest.idx_all, 0) <> 0 THEN '全市场' END
       ]::text[], NULL)),
       '[]'::jsonb
     ) AS index_tags,
-    sdl.trade_date AS latest_trade_date,
-    COALESCE(sdl.consecutive_limit_up_days, 0) AS consecutive_limit_up_days_sdl
+    sdl_latest.trade_date AS latest_trade_date,
+    COALESCE(sdl_latest.consecutive_limit_up_days, 0) AS consecutive_limit_up_days_sdl
 """
 
 def _serialize_date(d: Any) -> str | None:
@@ -151,7 +148,7 @@ def _format_candidate_record(row: dict[str, Any]) -> dict[str, Any]:
 
     def to_yi(v):
         val = _serialize_float(v) or 0.0
-        return val / 10000.0 if val > 1_000_000 else val  # 万元 → 亿元
+        return val / 100000000.0  # 元 → 亿元
 
     def parse_json(v):
         if not v: return []
@@ -207,8 +204,8 @@ def _format_candidate_record(row: dict[str, Any]) -> dict[str, Any]:
         "return3d": return_3d_pct,
         "nextDayReturn": return_1d_pct,
         "day3Return": return_3d_pct,
-        "mainFlow": _serialize_float(row.get("main_flow")) or 0.0,
-        "flowNetAmount": _serialize_float(row.get("flow_net_amount")) or 0.0,
+        "mainFlow": (_serialize_float(row.get("main_flow")) or 0.0) / 1000000.0,
+        "flowNetAmount": (_serialize_float(row.get("flow_net_amount")) or 0.0) / 1000000.0,
         "instOwnership": _serialize_float(row.get("inst_ownership")) or 0.0,
         "profitGrowth": _serialize_float(row.get("profit_growth")) or 0.0,
         "isSt": bool(row.get("is_st")),
@@ -216,7 +213,6 @@ def _format_candidate_record(row: dict[str, Any]) -> dict[str, Any]:
         "thesis": row.get("thesis_summary") or "",
         "updatedAt": _serialize_date(row.get("updated_at")),
         "isHs300": bool(row.get("is_hs300")),
-        "isCsi500": bool(row.get("is_csi500")),
         "isCsi1000": bool(row.get("is_csi1000")),
     }
 
@@ -226,11 +222,23 @@ async def _fetch_summary(session, where: str, params: dict[str, Any]) -> dict[st
             f"""
             SELECT
                 COUNT(*) AS total_count,
+                COUNT(*) FILTER (WHERE (sdl.close > 0)) AS tradable_count,
+                COUNT(*) FILTER (WHERE (sdl.idx_hs300 <> 0)) AS hs300_count,
+                COUNT(*) FILTER (WHERE (sdl.idx_zz1000 <> 0)) AS zz1000_count,
+                COUNT(*) FILTER (WHERE (sdl.idx_margin <> 0)) AS margin_count,
+                COUNT(*) FILTER (WHERE (sdl.idx_chinext <> 0)) AS chinext_count,
                 AVG(COALESCE(snap.fusion_score, 0)) AS avg_score,
                 COUNT(*) FILTER (WHERE COALESCE(snap.confidence_level, 'watch') = 'high') AS high_confidence_count,
                 COUNT(*) FILTER (WHERE COALESCE(snap.fusion_score, 0) >= 0.05) AS strong_count,
                 MAX(snap.updated_at) AS last_updated_at
             FROM qm_research_candidate_snapshot snap
+            LEFT JOIN stock_daily_latest sdl ON (
+                sdl.symbol = CASE
+                    WHEN snap.symbol ~* '^(SH|SZ|BJ)[0-9]{6}$' THEN UPPER(snap.symbol)
+                    ELSE snap.symbol
+                END
+                AND sdl.trade_date = snap.prediction_trade_date
+            )
             WHERE {where}
             """
         ),
@@ -248,6 +256,11 @@ async def _fetch_summary(session, where: str, params: dict[str, Any]) -> dict[st
     payload = dict(row)
     return {
         "total": _serialize_int(payload.get("total_count")) or 0,
+        "totalMarket": _serialize_int(payload.get("tradable_count")) or 0,
+        "hs300": _serialize_int(payload.get("hs300_count")) or 0,
+        "zz1000": _serialize_int(payload.get("zz1000_count")) or 0,
+        "margin": _serialize_int(payload.get("margin_count")) or 0,
+        "chinext": _serialize_int(payload.get("chinext_count")) or 0,
         "avgScore": round(_serialize_float(payload.get("avg_score")) or 0.0, 4),
         "highConfidenceCount": _serialize_int(payload.get("high_confidence_count")) or 0,
         "strongCount": _serialize_int(payload.get("strong_count")) or 0,
@@ -261,8 +274,14 @@ async def _do_get_overview(tid: str, uid: str, model_id: str | None, run_id: str
     if run_id: where += " AND snap.run_id = :rid"; params["rid"] = run_id
 
     async with get_session(read_only=True) as session:
-        sql = f"""WITH sdl_with_ret AS ({_SDL_WITH_RET})
-        SELECT snap.*, {_SDL_SELECT} FROM qm_research_candidate_snapshot snap LEFT JOIN sdl_with_ret sdl ON {_SDL_JOIN_CONDITION} WHERE {where} ORDER BY snap.score_rank ASC LIMIT :limit OFFSET :offset"""
+        sql = f"""WITH sdl_with_ret AS NOT MATERIALIZED ({_SDL_WITH_RET})
+        SELECT snap.*, {_SDL_SELECT} 
+        FROM qm_research_candidate_snapshot snap 
+        LEFT JOIN sdl_with_ret sdl_base ON ({_SDL_JOIN_CONDITION.replace('sdl', 'sdl_base')}) AND sdl_base.next_date = snap.prediction_trade_date
+        LEFT JOIN sdl_with_ret sdl_latest ON ({_SDL_JOIN_CONDITION.replace('sdl', 'sdl_latest')}) AND sdl_latest.trade_date = sdl_base.latest_date
+        LEFT JOIN sdl_with_ret sdl_next ON ({_SDL_JOIN_CONDITION.replace('sdl', 'sdl_next')}) AND sdl_next.trade_date = sdl_base.next_date
+        LEFT JOIN sdl_with_ret sdl_3d ON ({_SDL_JOIN_CONDITION.replace('sdl', 'sdl_3d')}) AND sdl_3d.trade_date = sdl_base.date_3d
+        WHERE {where} ORDER BY snap.score_rank ASC LIMIT :limit OFFSET :offset"""
         result = await session.execute(text(sql), params)
         items = [_format_candidate_record(dict(r)) for r in result.mappings()]
         summary = await _fetch_summary(session, where, params)
@@ -413,7 +432,7 @@ async def get_symbols_features(req: SymbolsFeaturesRequest, current_user: dict =
 
     sql = f"""
         WITH sym_list(raw_symbol) AS (VALUES {vals}),
-        sdl_with_ret AS ({_SDL_WITH_RET}),
+        sdl_with_ret AS NOT MATERIALIZED ({_SDL_WITH_RET}),
         pool_norm AS (
             SELECT symbol, features_snapshot, ({norm}) AS prefix_symbol
             FROM qm_user_research_pool WHERE tenant_id = :tid AND user_id = :uid
@@ -425,6 +444,7 @@ async def get_symbols_features(req: SymbolsFeaturesRequest, current_user: dict =
         snap AS (
             SELECT sym_list.raw_symbol AS symbol,
                    COALESCE(s.run_id, 'history') as run_id,
+                   s.prediction_trade_date,
                    COALESCE(s.fusion_score, (ps.features_snapshot->>'score')::double precision, (ws.features_snapshot->>'score')::double precision) as fusion_score,
                    COALESCE(s.risk_flags, (ps.features_snapshot->'riskFlags')::jsonb, (ws.features_snapshot->'riskFlags')::jsonb) as risk_flags,
                    COALESCE(s.thesis_summary, (ps.features_snapshot->>'thesis')::text, (ws.features_snapshot->>'thesis')::text) as thesis_summary,
@@ -434,7 +454,13 @@ async def get_symbols_features(req: SymbolsFeaturesRequest, current_user: dict =
             LEFT JOIN watchlist_norm ws ON ws.prefix_symbol = sym_list.raw_symbol
             LEFT JOIN qm_research_candidate_snapshot s ON ({norm_s}) = sym_list.raw_symbol AND s.tenant_id = :tid AND s.user_id = :uid
         )
-        SELECT snap.*, {_SDL_SELECT} FROM snap LEFT JOIN sdl_with_ret sdl ON {_SDL_JOIN_CONDITION} WHERE snap.rn = 1
+        SELECT snap.*, {_SDL_SELECT} 
+        FROM snap 
+        LEFT JOIN sdl_with_ret sdl_base ON ({_SDL_JOIN_CONDITION.replace('sdl', 'sdl_base')}) AND sdl_base.next_date = snap.prediction_trade_date
+        LEFT JOIN sdl_with_ret sdl_latest ON ({_SDL_JOIN_CONDITION.replace('sdl', 'sdl_latest')}) AND sdl_latest.trade_date = COALESCE(sdl_base.latest_date, (SELECT MAX(trade_date) FROM stock_daily_latest WHERE symbol = snap.symbol))
+        LEFT JOIN sdl_with_ret sdl_next ON ({_SDL_JOIN_CONDITION.replace('sdl', 'sdl_next')}) AND sdl_next.trade_date = sdl_base.next_date
+        LEFT JOIN sdl_with_ret sdl_3d ON ({_SDL_JOIN_CONDITION.replace('sdl', 'sdl_3d')}) AND sdl_3d.trade_date = sdl_base.date_3d
+        WHERE snap.rn = 1
     """
     async with get_session(read_only=True) as session:
         res = await session.execute(text(sql), {"tid": tid, "uid": uid})
@@ -444,8 +470,40 @@ async def get_symbols_features(req: SymbolsFeaturesRequest, current_user: dict =
 @router.get("/kline/{symbol}")
 async def get_stock_kline(symbol: str, days: int = Query(60), current_user: dict = Depends(get_current_user)):
     s = StockCodeUtil.to_prefix(symbol)
+    cache_key = f"qm:research:kline:{s}:{days}"
+    
+    # 1. 尝试从缓存读取
+    from backend.shared.market_data.stock_daily_latest_cache import stock_latest_cache
+    cached = stock_latest_cache.redis.get(cache_key)
+    if cached:
+        try:
+            return {"code": 200, "data": {"symbol": s, "items": json.loads(cached), "cached": True}}
+        except: pass
+
+    # 2. 缓存未命中则查询数据库
     async with get_session(read_only=True) as session:
-        res = await session.execute(text(f"SELECT trade_date, open, high, low, close, volume FROM stock_daily_latest WHERE symbol = (CASE WHEN :s ~* '^(SH|SZ|BJ)[0-9]{6}$' THEN SUBSTRING(:s FROM 3) || '.' || UPPER(LEFT(:s, 2)) ELSE :s END) ORDER BY trade_date DESC LIMIT :l"), {"s": s, "l": days})
-        items = [{"date": str(r[0]), "open": float(r[1]), "high": float(r[2]), "low": float(r[3]), "close": float(r[4]), "volume": float(r[5])} for r in res]
+        # 针对 stock_daily_latest 的查询优化
+        res = await session.execute(
+            text(f"SELECT trade_date, open, high, low, close, volume, adj_factor FROM stock_daily_latest WHERE symbol = :s ORDER BY trade_date DESC LIMIT :l"), 
+            {"s": s, "l": days}
+        )
+        items = []
+        for r in res:
+            f = float(r[6]) if r[6] else 1.0
+            items.append({
+                "date": str(r[0]), 
+                "open": round(float(r[1]) / f, 2), 
+                "high": round(float(r[2]) / f, 2), 
+                "low": round(float(r[3]) / f, 2), 
+                "close": round(float(r[4]) / f, 2), 
+                "volume": float(r[5])
+            })
         items.reverse()
+        
+    # 3. 写入缓存 (1小时有效)
+    if items:
+        try:
+            stock_latest_cache.redis.set(cache_key, json.dumps(items), ex=3600)
+        except: pass
+        
     return {"code": 200, "data": {"symbol": s, "items": items}}

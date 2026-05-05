@@ -16,6 +16,7 @@ import { ContextAwareAssistant } from './ContextAwareAssistant';
 import QlibParamsConfig from './QlibParamsConfig';
 import QlibValidatorAndSave from './QlibValidatorAndSave';
 import { useWizardStore } from '../store/wizardStore';
+import { PAGE_LAYOUT } from '../../../config/pageLayout';
 import { generateQlib, getActivePoolFile, previewPoolFile } from '../services/wizardService';
 import { getWizardUserId } from '../utils/userId';
 import { resolveRebalanceDays } from '../../../shared/qlib/rebalance';
@@ -191,7 +192,8 @@ const SmartStrategyStudio: React.FC = () => {
   const nextDisabled = !canProceed(currentStep);
 
   return (
-    <div className="w-full h-full bg-[#f8fafc] p-6 overflow-hidden">
+    <div className={PAGE_LAYOUT.outerClass}>
+      <div className={PAGE_LAYOUT.frameClass}>
       <Modal
         title={
           <div style={{ textAlign: 'center', fontWeight: 800, letterSpacing: 0.3 }}>
@@ -268,25 +270,13 @@ const SmartStrategyStudio: React.FC = () => {
           width: '100%',
           height: '100%',
           background: '#fff',
-          borderRadius: '32px',
           overflow: 'hidden',
-          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.05)',
-          border: '1px solid #e2e8f0',
           display: 'flex',
           flexDirection: 'column'
         }}
       >
         {/* 顶部工具栏 - 对齐回测中心 */}
-        <Header style={{
-          display: 'flex',
-          alignItems: 'center',
-          background: '#fff',
-          borderBottom: '1px solid #e2e8f0',
-          padding: '0 24px',
-          height: 60,
-          zIndex: 100,
-          flexShrink: 0
-        }}>
+        <Header className={PAGE_LAYOUT.headerClass} style={{ height: PAGE_LAYOUT.headerHeight, padding: '0 24px', zIndex: 100 }}>
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-500 rounded-xl flex items-center justify-center shadow-md">
               <span className="text-white font-bold text-base">S</span>
@@ -463,6 +453,7 @@ const SmartStrategyStudio: React.FC = () => {
         </Layout>
       </Layout>
     </div>
+  </div>
   );
 };
 

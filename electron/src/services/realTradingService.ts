@@ -800,9 +800,8 @@ export const realTradingService = {
         if (bindingStatus && !bindingStatus.account_id) {
             return buildUnavailableRealAccount('unbound', '当前账户未绑定实盘交易账号', bindingStatus);
         }
-        if (bindingStatus?.account_id && !bindingStatus.account_reported_at) {
-            return buildUnavailableRealAccount('not_reported', '实盘账号尚未上报账户快照，请启动 QMT Agent', bindingStatus);
-        }
+        // 移除对 account_reported_at 的提前检查，让后端 API 从数据库获取历史快照
+        // 后端会根据数据库中的快照数据决定是否返回，并设置 is_online 和 stale_reason
 
         try {
             return await requestRealTradingWithFallback<AccountInfo>({

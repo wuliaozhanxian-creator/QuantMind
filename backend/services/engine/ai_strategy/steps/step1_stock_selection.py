@@ -154,7 +154,7 @@ LATEST_TABLE = "stock_daily_latest"
 
 # total_mv 列口径可配置：默认“万元”（1亿=10000）。
 # 若你的数据库是“千元”，可通过环境变量 AI_STRATEGY_TOTAL_MV_PER_YI=100000 覆盖。
-MARKET_CAP_YI_TO_DB_UNIT = float(os.getenv("AI_STRATEGY_TOTAL_MV_PER_YI", "10000"))
+MARKET_CAP_YI_TO_DB_UNIT = float(os.getenv("AI_STRATEGY_TOTAL_MV_PER_YI", "100000000.0"))
 
 
 def _condition_to_dsl(cond: Condition) -> str:
@@ -162,7 +162,7 @@ def _condition_to_dsl(cond: Condition) -> str:
     if t == "numeric":
         factor = cond["factor"]
         threshold = cond["threshold"]
-        if factor == "market_cap":
+        if factor in ("market_cap", "float_mv"):
             threshold = float(threshold) * MARKET_CAP_YI_TO_DB_UNIT
         return f"SELECT symbol WHERE {factor} {cond['operator']} {threshold}"
     if t == "trend":

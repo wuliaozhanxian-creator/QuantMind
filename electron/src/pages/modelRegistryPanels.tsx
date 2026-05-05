@@ -773,20 +773,44 @@ export const InferenceCenterPanel: React.FC<{
            <div className="glass-panel rounded-2xl p-4 border border-slate-100/50 bg-gradient-to-br from-white to-emerald-50/10">
               <div className="flex items-center justify-between mb-3">
                  <Text className="text-[9px] font-black text-slate-400 uppercase tracking-widest">当前实盘生效</Text>
-                 <Badge status="processing" text={<span className="text-[9px] font-black text-emerald-500 uppercase">Active</span>} />
+                 {(() => {
+                    const todayStr = dayjs().format('YYYY-MM-DD');
+                    const isEffective = latestInferenceRun?.run_id && 
+                                      latestInferenceRun.prediction_trade_date && 
+                                      latestInferenceRun.prediction_trade_date >= todayStr;
+                    
+                    return isEffective ? (
+                      <Badge status="processing" text={<span className="text-[9px] font-black text-emerald-500 uppercase">Active</span>} />
+                    ) : (
+                      <Badge status="default" text={<span className="text-[9px] font-black text-slate-400 uppercase">Inactive</span>} />
+                    );
+                 })()}
               </div>
               <Spin spinning={latestInferenceRunLoading}>
-                {latestInferenceRun?.run_id ? (
-                   <div className="bg-white/60 rounded-xl p-3 border border-emerald-100/30">
-                      <Text className="text-[10px] font-mono font-black text-slate-800 break-all leading-tight block mb-2">
-                         {latestInferenceRun.run_id.slice(0, 24)}...
-                      </Text>
-                      <div className="flex items-center gap-2">
-                        <Tag className="m-0 bg-emerald-500 text-white border-0 text-[8px] font-black px-1.5">{latestInferenceRun.prediction_trade_date}</Tag>
-                        <Text className="text-[8px] text-slate-400 font-mono italic">{dayjs(latestInferenceRun.updated_at).format('HH:mm')}</Text>
-                      </div>
-                   </div>
-                ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} className="m-0" description={<span className="text-[9px]">无数据</span>} />}
+                {(() => {
+                  const todayStr = dayjs().format('YYYY-MM-DD');
+                  const isEffective = latestInferenceRun?.run_id && 
+                                    latestInferenceRun.prediction_trade_date && 
+                                    latestInferenceRun.prediction_trade_date >= todayStr;
+
+                  return isEffective ? (
+                    <div className="bg-white/60 rounded-xl p-3 border border-emerald-100/30">
+                        <Text className="text-[10px] font-mono font-black text-slate-800 break-all leading-tight block mb-2">
+                           {latestInferenceRun.run_id.slice(0, 24)}...
+                        </Text>
+                        <div className="flex items-center gap-2">
+                          <Tag className="m-0 bg-emerald-500 text-white border-0 text-[8px] font-black px-1.5">{latestInferenceRun.prediction_trade_date}</Tag>
+                          <Text className="text-[8px] text-slate-400 font-mono italic">{dayjs(latestInferenceRun.updated_at).format('HH:mm')}</Text>
+                        </div>
+                    </div>
+                  ) : (
+                    <div className="py-4 flex flex-col items-center justify-center bg-slate-50/50 rounded-xl border border-dashed border-slate-200">
+                      <Clock size={16} className="text-slate-300 mb-2" />
+                      <Text className="text-[9px] text-slate-400 font-bold">暂无当前生效推理</Text>
+                      <Text className="text-[8px] text-slate-300 mt-0.5">请手动执行最新行情推理</Text>
+                    </div>
+                  );
+                })()}
               </Spin>
            </div>
 
@@ -795,7 +819,7 @@ export const InferenceCenterPanel: React.FC<{
                 <RefreshCw size={14} className={clsx("text-blue-500", autoSettings?.enabled && "animate-spin-slow")} />
                 <div>
                   <Text className="text-[11px] font-bold text-slate-700 block leading-tight">自动调度</Text>
-                  <Text className="text-[9px] text-slate-400">16:30 自动执行</Text>
+                  <Text className="text-[9px] text-slate-400">22:00 自动执行</Text>
                 </div>
               </div>
               <Switch size="small" checked={autoSettings?.enabled} loading={autoSaving} onChange={onToggleAuto} className={autoSettings?.enabled ? 'bg-blue-600' : ''} />
@@ -813,7 +837,7 @@ export const InferenceCenterPanel: React.FC<{
                   value={historyStatusFilter}
                   onChange={onHistoryStatusFilterChange}
                   className="w-24 h-7 text-[10px]"
-                  popupClassName="rounded-xl text-[11px]"
+                  classNames={{ popup: { root: "rounded-xl text-[11px]" } }}
                 >
                   <Select.Option value="all">全部批次</Select.Option>
                   <Select.Option value="completed">推理成功</Select.Option>

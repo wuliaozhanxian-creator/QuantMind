@@ -84,10 +84,10 @@ AUTO_INFERENCE_ENABLED = os.getenv("AUTO_INFERENCE_ENABLED", "true").lower() == 
 beat_schedule = {}
 if AUTO_INFERENCE_ENABLED:
     beat_schedule = {
-        # 交易日 3:00-8:00 间每 15 分钟触发一次自动推理扫描，支持多策略依次执行
+        # 交易日 22:00 触发自动推理扫描，支持多策略依次执行
         "auto-inference-window-scan-weekdays": {
             "task": "engine.tasks.auto_inference_if_needed",
-            "schedule": crontab(minute="*/15", hour="3-7", day_of_week="1-5"),
+            "schedule": crontab(minute="*/15", hour="22", day_of_week="1-5"),
         },
     }
 

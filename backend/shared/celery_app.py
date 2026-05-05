@@ -86,17 +86,9 @@ celery_app.conf.update(
             "task": "backend.tasks.maintenance_tasks.health_check",
             "schedule": crontab(minute="*/5"),  # 每5分钟健康检查
         },
-        # 每日权重生成：盘前（08:00）生成全市场 Alpha 信号并广播至 Redis
-        "generate-global-signals-daily": {
-            "task": "engine.tasks.generate_global_signals",
-            "schedule": crontab(hour=8, minute=0, day_of_week="1-5"),  # 交易日08:00生成
-            "kwargs": {"universe": "all", "mock": False},
-        },
-        # 每日自动推理保底：08:00 检查当日推理是否已完成，若未完成则自动执行 inference.py
-        # 手动推理（管理后台"生成明日信号"）优先；本任务仅在手动未完成时兜底
-        "auto-inference-before-open": {
-            "task": "engine.tasks.auto_inference_if_needed",
-            "schedule": crontab(hour=8, minute=0, day_of_week="1-5"),  # 交易日08:00检查
+        "warmup-stock-latest-cache-daily": {
+            "task": "engine.tasks.warmup_stock_latest_cache",
+            "schedule": crontab(hour=22, minute=30, day_of_week="1-5"),  # 交易日 22:30 预热最新行情缓存
         },
     },
 )

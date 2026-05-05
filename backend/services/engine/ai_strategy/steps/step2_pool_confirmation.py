@@ -53,11 +53,9 @@ from .step1_stock_selection import (
 )
 
 logger = logging.getLogger(__name__)
-TOTAL_MV_PER_YI = float(os.getenv("AI_STRATEGY_TOTAL_MV_PER_YI", "10000"))
-# 当数据库存储单位为亿元时，TOTAL_MV_PER_YI=1，返回给前端时无需换算
-# 当数据库存储单位为万元时，TOTAL_MV_PER_YI=10000，需要乘以 100000000/10000=10000 转为元
-# 前端期望单位为亿元，所以这里不再做转换，直接返回数据库原值
-TOTAL_MV_TO_YI = 1.0  # 直接返回亿元
+TOTAL_MV_PER_YI = float(os.getenv("AI_STRATEGY_TOTAL_MV_PER_YI", "100000000.0"))
+# 换算系数：从数据库单位（元）转为前端展示单位（亿元）
+TOTAL_MV_TO_YI = 1.0 / 100000000.0
 
 
 def _serialize_float(v: Any) -> float | None:
@@ -427,9 +425,9 @@ def _build_pool_summary(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     total = len(items)
     caps = [x.metrics.get("market_cap", 0) for x in items]
-    bucket_lt_100 = sum(1 for v in caps if v < 100e8)
-    bucket_100_200 = sum(1 for v in caps if 100e8 <= v < 200e8)
-    bucket_gte_200 = sum(1 for v in caps if v >= 200e8)
+    bucket_lt_100 = sum(1 for v in caps if v < 100)
+    bucket_100_200 = sum(1 for v in caps if 100 <= v < 200)
+    bucket_gte_200 = sum(1 for v in caps if v >= 200)
     denom = int(universe_total) if universe_total and universe_total > 0 else 0
     # 防止出现 >100% 的覆盖率（例如分母写死/分母小于实际候选数）
     match_rate = 0.0

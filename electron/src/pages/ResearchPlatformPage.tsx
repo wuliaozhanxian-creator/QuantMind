@@ -921,9 +921,8 @@ export const ResearchPlatformPage: React.FC = () => {
 
         // 财务/估值筛选
         if (isMatch) {
-          const roeRange = appliedFilters.roeRange || [-100, 100];
-          if (roeRange[0] > -100 && item.roe < roeRange[0]) isMatch = false;
-          else if (item.roe > roeRange[1]) isMatch = false;
+          const roeRange = appliedFilters.roeRange || [-1000, 1000];
+          if (item.roe < roeRange[0] || item.roe > roeRange[1]) isMatch = false;
         }
         
         if (isMatch) {
@@ -932,23 +931,22 @@ export const ResearchPlatformPage: React.FC = () => {
         }
         
         if (isMatch) {
-          const pbRange = appliedFilters.pbRange || [-50, 100];
-          if (pbRange[0] > 0 && (item.pb || 0) < pbRange[0]) isMatch = false;
-          else if ((item.pb || 0) > pbRange[1]) isMatch = false;
+          const pbRange = appliedFilters.pbRange || [0, 100];
+          if ((item.pb || 0) < pbRange[0] || (item.pb || 0) > pbRange[1]) isMatch = false;
         }
         
         if (isMatch) {
-          const totalMvRange = appliedFilters.totalMvRange || [0, 100000];
+          const totalMvRange = appliedFilters.totalMvRange || [0, 1000000];
           if ((item.totalMv || 0) < totalMvRange[0] || (item.totalMv || 0) > totalMvRange[1]) isMatch = false;
         }
         
         if (isMatch) {
-          const floatMvRange = appliedFilters.floatMvRange || [0, 100000];
+          const floatMvRange = appliedFilters.floatMvRange || [0, 1000000];
           if ((item.floatMv || 0) < floatMvRange[0] || (item.floatMv || 0) > floatMvRange[1]) isMatch = false;
         }
         
         if (isMatch) {
-          const listedDaysRange = appliedFilters.listedDaysRange || [0, 20000];
+          const listedDaysRange = appliedFilters.listedDaysRange || [0, 30000];
           if ((item.listedDays || 0) < listedDaysRange[0] || (item.listedDays || 0) > listedDaysRange[1]) isMatch = false;
         }
         
@@ -960,12 +958,11 @@ export const ResearchPlatformPage: React.FC = () => {
         // 技术指标筛选
         if (isMatch) {
           const rsiRange = appliedFilters.rsiRange || [0, 100];
-          if (rsiRange[0] > 0 && item.rsi < rsiRange[0]) isMatch = false;
-          else if (item.rsi > rsiRange[1]) isMatch = false;
+          if (item.rsi < rsiRange[0] || item.rsi > rsiRange[1]) isMatch = false;
         }
         
         if (isMatch) {
-          const mainFlowRange = appliedFilters.mainFlowRange || [-10000, 10000];
+          const mainFlowRange = appliedFilters.mainFlowRange || [-100000, 100000];
           if (item.mainFlow < mainFlowRange[0] || item.mainFlow > mainFlowRange[1]) isMatch = false;
         }
         
@@ -984,7 +981,7 @@ export const ResearchPlatformPage: React.FC = () => {
             isDelisting
           ) isMatch = false;
         }
-        if (isMatch && appliedFilters.marketType !== 'all') {
+        if (isMatch && appliedFilters.marketType && appliedFilters.marketType !== 'all' && appliedFilters.marketType !== '全市场') {
           const idxTags = item.indexTags || [];
           if (appliedFilters.marketType === 'hs300' && !idxTags.includes('沪深300')) isMatch = false;
           if (appliedFilters.marketType === 'zz500' && !idxTags.includes('中证500')) isMatch = false;
@@ -1004,12 +1001,14 @@ export const ResearchPlatformPage: React.FC = () => {
         
         if (isMatch) {
           const maGap20Range = appliedFilters.maGap20Range || [-100, 100];
-          const gap20 = (item as any).maGap20 || 0;
+          const gap20 = (item as any).maGap20 || item.maGap20 || 0;
           if (gap20 < maGap20Range[0] || gap20 > maGap20Range[1]) isMatch = false;
         }
-        if (isMatch && appliedFilters.advancedFiltersEnabled) {
-          const peRange = appliedFilters.peRange || [0, 10000];
-          if (item.pe > 0 && (item.pe < peRange[0] || item.pe > peRange[1])) isMatch = false;
+        
+        if (isMatch) {
+          const peRange = appliedFilters.peRange || [0, 100000];
+          // 强制执行 PE 过滤，不再依赖 advancedFiltersEnabled 开关
+          if (item.pe < peRange[0] || item.pe > peRange[1]) isMatch = false;
         }
       }
 
@@ -1212,18 +1211,31 @@ export const ResearchPlatformPage: React.FC = () => {
   }, [candidatePool, overview]);
 
   const availableIndexOptions = React.useMemo(() => {
-    if (overview?.filters?.indices?.length) {
-      return overview.filters.indices.map((name: string) => ({ value: name, label: name }));
-    }
+    // 优先从后端 summary 获取精准全局统计
+    const summary = overview?.summary;
+    const items = [
+      { name: '全市场', count: summary?.totalMarket || 0 },
+      { name: '沪深300', count: summary?.hs300 || 0 },
+      { name: '中证1000', count: summary?.zz1000 || 0 },
+      { name: '两融标的', count: summary?.margin || 0 },
+      { name: '创业板指数', count: summary?.chinext || 0 },
+    ];
+
+    // 如果 summary 里没数据，回退到本地统计
     const counter = new Map<string, number>();
     candidatePool.forEach((item) => {
       (item.indexTags || []).forEach((tag: string) => {
         counter.set(tag, (counter.get(tag) || 0) + 1);
       });
     });
-    return Array.from(counter.entries())
-      .map(([name, count]) => ({ value: name, label: `${name} (${count})` }))
-      .sort((left, right) => right.label.localeCompare(left.label));
+
+    return items.map(idx => {
+      const globalCount = idx.count;
+      const localCount = counter.get(idx.name) || 0;
+      // 如果全局有数显示全局，否则显示本地
+      const displayCount = globalCount > 0 ? globalCount : localCount;
+      return { value: idx.name, label: `${idx.name} (${displayCount})` };
+    }).filter(opt => opt.label.indexOf('(0)') === -1);
   }, [candidatePool, overview]);
 
   const avgScore = React.useMemo(() => {

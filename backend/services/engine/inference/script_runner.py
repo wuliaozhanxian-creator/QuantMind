@@ -1053,6 +1053,25 @@ class InferenceScriptRunner:
         for item in data:
             if isinstance(item, dict) and "symbol" in item and "score" in item:
                 try:
+                    symbol = str(item["symbol"]).strip().upper()
+                    # 1. 排除 B 股: 上海 B (900xxx), 深圳 B (200xxx)
+                    if symbol.startswith("SH900") or symbol.startswith("SZ200"):
+                        continue
+                    if ".SH" in symbol and symbol.startswith("900"):
+                        continue
+                    if ".SZ" in symbol and symbol.startswith("200"):
+                        continue
+                    # 处理无前缀的纯数字
+                    if symbol.isdigit() and len(symbol) == 6:
+                        if symbol.startswith("900") or symbol.startswith("200"):
+                            continue
+                    
+                    # 2. 排除北交所: BJ 前缀或 .BJ 后缀，或数字开头 (43, 83, 87, 88)
+                    if symbol.startswith("BJ") or ".BJ" in symbol:
+                        continue
+                    if symbol.startswith(("43", "83", "87", "88")):
+                        continue
+
                     valid.append(
                         {"symbol": str(item["symbol"]), "score": float(item["score"])}
                     )

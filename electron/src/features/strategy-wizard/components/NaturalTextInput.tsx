@@ -26,7 +26,7 @@ export const NaturalTextInput: React.FC<{ onNext: () => void }> = ({ onNext }) =
     { label: '排除ST', value: '排除ST和*ST股票' },
     { label: '沪深300', value: '沪深300成分股' },
     { label: '中证1000', value: '中证1000成分股' },
-    { label: '小市值', value: '总市值在100亿到300亿之间' },
+    { label: '小市值', value: '总市值在10亿到100亿之间' },
     { label: '金融股', value: '金融股' },
     { label: '低估值', value: '市盈率小于20，市净率小于2' }
   ];

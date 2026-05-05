@@ -101,7 +101,7 @@ def run_pipeline_run(self, run_id: str) -> dict[str, Any]:
 )
 def auto_inference_if_needed() -> dict[str, Any]:
     """
-    Celery Beat 定时任务：每日 03:00-08:00 自动扫描并执行所有活跃策略的推理。
+    Celery Beat 定时任务：每日 22:00 自动扫描并执行所有活跃策略的推理。
 
     逻辑：
     1. 获取所有处于 'running' 状态且绑定了策略的投资组合。
@@ -725,3 +725,20 @@ def get_data_status_task() -> dict[str, Any]:
         logger.warning("Failed to cache data status to Redis: %s", e)
 
     return result
+
+
+@celery_app.task(name="engine.tasks.warmup_stock_latest_cache")
+def warmup_stock_latest_cache_task():
+    """Celery 任务：预热 stock_daily_latest 表的 Redis 缓存。"""
+    from backend.shared.market_data.stock_daily_latest_cache import stock_latest_cache
+    import asyncio
+
+    logger.info("[CacheWarmup] 正在启动 stock_daily_latest 缓存预热...")
+    try:
+        # 由于当前环境可能在同步的 Celery worker 中运行，使用 asyncio.run 或直接调用
+        count = asyncio.run(stock_latest_cache.warmup_cache())
+        logger.info(f"[CacheWarmup] 预热完成，共缓存 {count} 只股票行情。")
+        return {"status": "success", "count": count}
+    except Exception as e:
+        logger.error(f"[CacheWarmup] 预热失败: {e}")
+        return {"status": "failed", "error": str(e)}

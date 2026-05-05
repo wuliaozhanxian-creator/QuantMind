@@ -136,8 +136,8 @@ from ..schemas import (  # Stock Pool; Backtest; Text Parse; Remote
 )
 
 logger = logging.getLogger(__name__)
-TOTAL_MV_PER_YI = float(os.getenv("AI_STRATEGY_TOTAL_MV_PER_YI", "10000"))
-TOTAL_MV_TO_YUAN = 100000000.0 / TOTAL_MV_PER_YI
+TOTAL_MV_PER_YI = float(os.getenv("AI_STRATEGY_TOTAL_MV_PER_YI", "100000000.0"))
+TOTAL_MV_TO_YUAN = 1.0  # 已经是元口径，无需二次换算
 
 router = APIRouter(prefix="/strategy", tags=["strategy-wizard"])
 router.include_router(validation_router)
@@ -323,6 +323,7 @@ def _simple_parse_text(text_input: str):
     suggestions = []
     pe_range = None
     pb_range = None
+    roe_range = None
     cap_range = None
     industry_list: list[str] = []
     local_hit = False
@@ -331,13 +332,13 @@ def _simple_parse_text(text_input: str):
     def _sql_quote(val: str) -> str:
         return (val or "").replace("'", "''")
 
-    # total_mv 单位可配置，默认“万元”：1亿=10000。
-    # 如数据库存“千元”，可设置 AI_STRATEGY_TOTAL_MV_PER_YI=100000。
+    # total_mv 单位可配置，默认“元”：1亿=100,000,000.0。
+    # 若数据库存“万元”，可设置 AI_STRATEGY_TOTAL_MV_PER_YI=10000。
     cap_unit_multiplier = 1.0
     if "亿" in s:
         cap_unit_multiplier = TOTAL_MV_PER_YI
 
-    def _cap_to_wanyuan(num_text: str, unit_text: str | None) -> float:
+    def _cap_to_yuan(num_text: str, unit_text: str | None) -> float:
         n = float(num_text)
         u = (unit_text or "").strip()
         if u == "亿":
@@ -346,56 +347,60 @@ def _simple_parse_text(text_input: str):
             return n * (TOTAL_MV_PER_YI / 10000.0)
         return n * cap_unit_multiplier
 
+    # 支持总市值和流通市值
     m_cap_range = re.search(
-        r"(?:总?市值)(?:区间|范围)?(?:在)?(\d+(?:\.\d+)?)(亿|万)?(?:到|至|~|-|—|和)(\d+(?:\.\d+)?)(亿|万)?(?:之间|区间|范围内|以内)?",
+        r"(?:总?市值|流通市值|流通盘)(?:区间|范围)?(?:在)?(\d+(?:\.\d+)?)(亿|万)?(?:到|至|~|-|—|和)(\d+(?:\.\d+)?)(亿|万)?(?:之间|区间|范围内|以内)?",
         s,
     )
+    is_float_cap = "流通" in s
+    cap_factor = "float_mv" if is_float_cap else "market_cap"
+    
     if m_cap_range:
-        low_val = _cap_to_wanyuan(m_cap_range.group(1), m_cap_range.group(2))
-        high_val = _cap_to_wanyuan(m_cap_range.group(3), m_cap_range.group(4))
+        low_val = _cap_to_yuan(m_cap_range.group(1), m_cap_range.group(2))
+        high_val = _cap_to_yuan(m_cap_range.group(3), m_cap_range.group(4))
         if low_val > high_val:
             low_val, high_val = high_val, low_val
             loose_mode_hits.append("市值区间已自动纠正为从小到大")
         cap_range = (low_val, high_val)
-        factors.append("market_cap")
+        factors.append(cap_factor)
         local_hit = True
     else:
         m_cap = re.search(
-            r"(?:总?市值)(?:[≥>=]|大于等于|不少于|不低于|不小于|大于|高于|超过|以上|至少)(\d+(?:\.\d+)?)(亿|万)?",
+            r"(?:总?市值|流通市值|流通盘)(?:[≥>=]|大于等于|不少于|不低于|不小于|大于|高于|超过|以上|至少)(\d+(?:\.\d+)?)(亿|万)?",
             s,
         )
         if m_cap:
-            cap_range = (_cap_to_wanyuan(m_cap.group(1), m_cap.group(2)), None)
-            factors.append("market_cap")
+            cap_range = (_cap_to_yuan(m_cap.group(1), m_cap.group(2)), None)
+            factors.append(cap_factor)
             local_hit = True
         else:
             m_cap_rev = re.search(
-                r"(?:总?市值)(?:[≤<=]|小于等于|不高于|不超过|不大于|小于|低于|以下|以内|至多)(\d+(?:\.\d+)?)(亿|万)?",
+                r"(?:总?市值|流通市值|流通盘)(?:[≤<=]|小于等于|不高于|不超过|不大于|小于|低于|以下|以内|至多)(\d+(?:\.\d+)?)(亿|万)?",
                 s,
             )
             if m_cap_rev:
-                cap_range = (None, _cap_to_wanyuan(m_cap_rev.group(1), m_cap_rev.group(2)))
-                factors.append("market_cap")
+                cap_range = (None, _cap_to_yuan(m_cap_rev.group(1), m_cap_rev.group(2)))
+                factors.append(cap_factor)
                 local_hit = True
             else:
                 m_cap_approx = re.search(
-                    r"(?:总?市值)(?:约|大约|大概|大致)?(\d+(?:\.\d+)?)(亿|万)?(?:左右|附近)?",
+                    r"(?:总?市值|流通市值|流通盘)(?:约|大约|大概|大致)?(\d+(?:\.\d+)?)(亿|万)?(?:左右|附近)?",
                     s,
                 )
                 if m_cap_approx:
-                    center = _cap_to_wanyuan(m_cap_approx.group(1), m_cap_approx.group(2))
+                    center = _cap_to_yuan(m_cap_approx.group(1), m_cap_approx.group(2))
                     # 宽松查询：近似值按 ±20% 区间处理
                     cap_range = (center * 0.8, center * 1.2)
-                    factors.append("market_cap")
+                    factors.append(cap_factor)
                     local_hit = True
                     loose_mode_hits.append("市值“约/左右”已按±20%宽松区间处理")
 
     if cap_range is None and (("小市值" in s) or ("小盘" in s) or ("微盘" in s)):
-        # 默认小市值阈值：500亿（按 total_mv 口径）
-        cap_range = (None, 500.0 * TOTAL_MV_PER_YI)
+        # 默认小市值阈值：10亿-100亿（按 total_mv 口径）
+        cap_range = (10.0 * TOTAL_MV_PER_YI, 100.0 * TOTAL_MV_PER_YI)
         factors.append("market_cap")
         local_hit = True
-        suggestions.append("已按“小市值≤500亿”默认阈值处理，可手动指定市值范围提升精度")
+        suggestions.append("已按“小市值10亿-100亿”默认阈值处理，可手动指定市值范围提升精度")
 
     m_pe_range = re.search(
         r"(?:PE|市盈率)(?:区间|范围)?(?:在|是)?(\d+(?:\.\d+)?)(?:到|至|~|-|—|和)(\d+(?:\.\d+)?)(?:之间|区间|范围内|以内)?",
@@ -447,6 +452,49 @@ def _simple_parse_text(text_input: str):
                     factors.append("pe")
                     local_hit = True
                     loose_mode_hits.append("PE“约/左右”已按±20%宽松区间处理")
+
+    # 4. ROE 过滤 (单位：百分比，如 15 代表 15%)
+    m_roe_range = re.search(
+        r"(?:ROE|净资产收益率)(?:区间|范围)?(?:在|是)?(\d+(?:\.\d+)?)(?:到|至|~|-|—|和)(\d+(?:\.\d+)?)(?:之间|区间|范围内|以内)?",
+        s,
+        re.IGNORECASE,
+    )
+    if m_roe_range:
+        roe_low = float(m_roe_range.group(1))
+        roe_high = float(m_roe_range.group(2))
+        if roe_low > roe_high:
+            roe_low, roe_high = roe_high, roe_low
+        roe_range = (roe_low, roe_high)
+        factors.append("roe")
+        local_hit = True
+    else:
+        m_roe = (
+            re.search(r"ROE[≥>=](\d+(?:\.\d+)?)", s, re.IGNORECASE)
+            or re.search(r"净资产收益率[≥>=](\d+(?:\.\d+)?)", s)
+            or re.search(
+                r"(?:ROE|净资产收益率)(?:大于等于|不少于|不低于|不小于|大于|高于|超过|以上|至少)(\d+(?:\.\d+)?)",
+                s,
+                re.IGNORECASE,
+            )
+        )
+        if m_roe:
+            roe_range = (float(m_roe.group(1)), None)
+            factors.append("roe")
+            local_hit = True
+        else:
+            m_roe_le = (
+                re.search(r"ROE[≤<=](\d+(?:\.\d+)?)", s, re.IGNORECASE)
+                or re.search(r"净资产收益率[≤<=](\d+(?:\.\d+)?)", s)
+                or re.search(
+                    r"(?:ROE|净资产收益率)(?:小于等于|不高于|不超过|不大于|小于|低于|以下|以内|至多)(\d+(?:\.\d+)?)",
+                    s,
+                    re.IGNORECASE,
+                )
+            )
+            if m_roe_le:
+                roe_range = (None, float(m_roe_le.group(1)))
+                factors.append("roe")
+                local_hit = True
 
     m_pb_range = re.search(
         r"(?:PB|市净率)(?:区间|范围)?(?:在)?(\d+(?:\.\d+)?)(?:到|至|~|-|—|和)(\d+(?:\.\d+)?)(?:之间|区间|范围内|以内)?",
@@ -592,6 +640,17 @@ def _simple_parse_text(text_input: str):
         elif high is not None:
             parts.append(f"pb <= {high}")
 
+    if roe_range:
+        low, high = roe_range
+        # 数据库中 roe 通常是小数，如 0.15 代表 15%。
+        # 用户输入 15，需除以 100 换算。
+        if low is not None and high is not None:
+            parts.append(f"roe >= {low/100.0} AND roe <= {high/100.0}")
+        elif low is not None:
+            parts.append(f"roe >= {low/100.0}")
+        elif high is not None:
+            parts.append(f"roe <= {high/100.0}")
+
     if is_st_flag is not None:
         parts.append(f"is_st == {is_st_flag}")
     if hs300_flag is not None:
@@ -618,6 +677,12 @@ def _simple_parse_text(text_input: str):
                 sql_parts.append(f"pb >= {low}")
             if high is not None:
                 sql_parts.append(f"pb <= {high}")
+        if roe_range:
+            low, high = roe_range
+            if low is not None:
+                sql_parts.append(f"roe >= {low/100.0}")
+            if high is not None:
+                sql_parts.append(f"roe <= {high/100.0}")
         if is_st_flag is not None:
             sql_parts.append(f"is_st = {is_st_flag}")
         if hs300_flag is not None:
