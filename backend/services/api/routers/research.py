@@ -292,7 +292,7 @@ async def _do_get_overview(tid: str, uid: str, model_id: str | None, run_id: str
         sql = f"""WITH sdl_latest AS ({_SDL_LATEST_SIMPLE})
         SELECT snap.*, {_SDL_SELECT_SIMPLE} 
         FROM qm_research_candidate_snapshot snap 
-        LEFT JOIN sdl_latest ON ({_SDL_JOIN_CONDITION.replace('sdl', 'sdl')})
+        LEFT JOIN sdl_latest ON ({_SDL_JOIN_CONDITION.replace('sdl', 'sdl_latest')})
         WHERE {where} ORDER BY snap.score_rank ASC LIMIT :limit OFFSET :offset"""
         result = await session.execute(text(sql), params)
         items = [_format_candidate_record(dict(r)) for r in result.mappings()]
@@ -468,7 +468,7 @@ async def get_symbols_features(req: SymbolsFeaturesRequest, current_user: dict =
         )
         SELECT snap.*, {_SDL_SELECT_SIMPLE} 
         FROM snap 
-        LEFT JOIN sdl_latest ON ({_SDL_JOIN_CONDITION.replace('sdl', 'sdl')})
+        LEFT JOIN sdl_latest ON ({_SDL_JOIN_CONDITION.replace('sdl', 'sdl_latest')})
         WHERE snap.rn = 1
     """
     async with get_session(read_only=True) as session:
