@@ -3,6 +3,8 @@
  * 通过后端 API 上传文件到本地存储
  */
 
+import { SERVICE_URLS } from '../config/services';
+
 export interface UploadOptions {
   fileName: string;
   fileContent: string | Blob;
@@ -25,7 +27,7 @@ class LocalUploadService {
   private baseUrl: string;
 
   constructor(baseUrl?: string) {
-    this.baseUrl = baseUrl || import.meta.env.VITE_API_BASE_URL || '/api/v1';
+    this.baseUrl = baseUrl || SERVICE_URLS.API_GATEWAY || '/api/v1';
   }
 
   private getApiBaseUrl(): string {

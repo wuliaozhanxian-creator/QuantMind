@@ -605,16 +605,11 @@ class BacktestService {
   constructor() {
     this.baseUrl = `${SERVICE_URLS.QLIB_SERVICE}/api/v1/qlib`;
 
-    // 优先从环境变量获取 WebSocket 基址，否则根据 QLIB_SERVICE 自动推导
-    const envWsUrl = (import.meta as any).env?.VITE_WS_BASE_URL;
-    if (envWsUrl) {
-      this.wsUrl = envWsUrl.replace(/\/+$/, '');
-    } else {
-      const qlibUrl = SERVICE_URLS.QLIB_SERVICE;
-      const wsProtocol = qlibUrl.startsWith('https') ? 'wss' : 'ws';
-      const hostPath = qlibUrl.replace(/^https?:\/\//, '');
-      this.wsUrl = `${wsProtocol}://${hostPath}`;
-    }
+    // 始终从运行时 QLIB 服务地址推导 WebSocket 基址，避免环境变量锁定 localhost
+    const qlibUrl = SERVICE_URLS.QLIB_SERVICE;
+    const wsProtocol = qlibUrl.startsWith('https') ? 'wss' : 'ws';
+    const hostPath = qlibUrl.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    this.wsUrl = `${wsProtocol}://${hostPath}`;
 
     // 创建 Axios 实例
     this.client = axios.create({

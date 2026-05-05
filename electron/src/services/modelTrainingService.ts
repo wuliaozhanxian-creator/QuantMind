@@ -211,11 +211,15 @@ class ModelTrainingService {
 
   constructor() {
     this.client = axios.create({
-      baseURL: this.baseURL,
       timeout: 30000,
       headers: {
         'Content-Type': 'application/json',
       },
+    });
+
+    this.client.interceptors.request.use((config) => {
+      config.baseURL = String((import.meta as any).env?.VITE_USER_API_URL || SERVICE_ENDPOINTS.USER_SERVICE);
+      return config;
     });
 
     this.client.interceptors.request.use((config) => {

@@ -15,7 +15,7 @@ from typing import Any, Dict, Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.shared.auth import decode_jwt_token
+from backend.shared.auth import auth_manager, decode_jwt_token
 from backend.shared.cors import resolve_cors_origins
 from backend.shared.database_manager_v2 import get_session
 from backend.shared.qmt_bridge_auth import verify_bridge_session_token
@@ -63,7 +63,10 @@ async def _extract_ws_auth_metadata(websocket: WebSocket) -> dict[str, Any]:
                     }
         except Exception:
             pass
-        payload = decode_jwt_token(token)
+        try:
+            payload = auth_manager.verify_token(token)
+        except Exception:
+            payload = decode_jwt_token(token)
         tenant_id = tenant_id or str(payload.get("tenant_id") or "").strip()
         user_id = user_id or str(payload.get("sub") or payload.get("user_id") or "").strip()
 

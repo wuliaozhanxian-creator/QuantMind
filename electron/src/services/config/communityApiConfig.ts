@@ -15,7 +15,7 @@ import { SERVICE_URLS, normalizeBaseUrl } from '../../config/services';
  */
 export const COMMUNITY_API_CONFIG = {
   // API基础地址
-  BASE_URL: normalizeBaseUrl(import.meta.env.VITE_API_BASE_URL) || SERVICE_URLS.API_GATEWAY,
+  BASE_URL: SERVICE_URLS.API_GATEWAY,
 
   // API版本
   API_VERSION: 'v1',

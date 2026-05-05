@@ -8,13 +8,11 @@
  */
 
 import { APIClient, createAPIClient, APIClientConfig } from './api-client';
-import { normalizeBaseUrl, SERVICE_URLS } from '../config/services';
 
 /**
  * 默认API配置
  */
-const DEFAULT_CONFIG: APIClientConfig = {
-  baseURL: normalizeBaseUrl(import.meta.env.VITE_API_BASE_URL) || SERVICE_URLS.API_GATEWAY,
+const DEFAULT_CONFIG: Partial<APIClientConfig> = {
   timeout: 30000,
   retries: 3,
   retryDelay: 1000,
@@ -30,7 +28,7 @@ let apiClientInstance: APIClient | null = null;
  */
 export function getAPIClient(): APIClient {
   if (!apiClientInstance) {
-    apiClientInstance = createAPIClient(DEFAULT_CONFIG);
+    apiClientInstance = createAPIClient(DEFAULT_CONFIG as APIClientConfig);
   }
   return apiClientInstance;
 }
@@ -47,7 +45,7 @@ export function resetServices(): void {
  */
 export function createServices(config: Partial<APIClientConfig>) {
   const fullConfig = { ...DEFAULT_CONFIG, ...config };
-  const client = createAPIClient(fullConfig);
+  const client = createAPIClient(fullConfig as APIClientConfig);
 
   return {
     apiClient: client,

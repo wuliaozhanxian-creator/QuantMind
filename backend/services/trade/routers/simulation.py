@@ -213,17 +213,65 @@ async def list_simulation_fund_snapshots(
         user_id=str(auth.user_id),
         days=days,
     )
-    return [
-        SimulationFundSnapshotResponse(
-            snapshot_date=s.snapshot_date,
-            total_asset=s.total_asset,
-            available_balance=s.available_balance,
-            frozen_balance=s.frozen_balance,
-            market_value=s.market_value,
-            initial_capital=s.initial_capital,
-            total_pnl=s.total_pnl,
-            today_pnl=s.today_pnl,
-            source=s.source,
+
+    def _to_response(snapshot) -> SimulationFundSnapshotResponse:
+        snapshot_date = getattr(snapshot, "snapshot_date", None)
+        if hasattr(snapshot_date, "date"):
+            snapshot_date = snapshot_date.date()
+
+        total_asset = getattr(snapshot, "total_asset", None)
+        if total_asset is None:
+            total_asset = getattr(snapshot, "total_assets", None)
+        if total_asset is None:
+            total_asset = 0
+
+        available_balance = getattr(snapshot, "available_balance", None)
+        if available_balance is None:
+            available_balance = getattr(snapshot, "cash", None)
+        if available_balance is None:
+            available_balance = 0
+
+        frozen_balance = getattr(snapshot, "frozen_balance", None)
+        if frozen_balance is None:
+            frozen_balance = 0
+
+        market_value = getattr(snapshot, "market_value", None)
+        if market_value is None:
+            market_value = 0
+
+        initial_capital = getattr(snapshot, "initial_capital", None)
+        if initial_capital is None:
+            initial_capital = total_asset
+
+        total_pnl = getattr(snapshot, "total_pnl", None)
+        if total_pnl is None:
+            total_pnl = total_asset - initial_capital
+
+        today_pnl = getattr(snapshot, "today_pnl", None)
+        if today_pnl is None:
+            today_pnl = getattr(snapshot, "today_pnl_raw", None)
+        if today_pnl is None:
+            today_pnl = 0
+
+        source = getattr(snapshot, "source", None)
+        if source is None:
+            source = getattr(snapshot, "data", {}).get("source") if getattr(snapshot, "data", None) else None
+        if not source:
+            source = "redis_simulation_account"
+
+        return SimulationFundSnapshotResponse(
+            snapshot_date=snapshot_date,
+            total_asset=total_asset,
+            available_balance=available_balance,
+            frozen_balance=frozen_balance,
+            market_value=market_value,
+            initial_capital=initial_capital,
+            total_pnl=total_pnl,
+            today_pnl=today_pnl,
+            source=source,
         )
+
+    return [
+        _to_response(s)
         for s in snapshots
     ]

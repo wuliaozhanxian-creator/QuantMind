@@ -54,11 +54,13 @@ export interface APIResponse<T = unknown> {
 export class APIClient {
   private client: AxiosInstance;
   private config: Required<APIClientConfig>;
+  private baseURLOverride: string | undefined;
   private token: string | null = null;
   private retryCount: Map<string, number> = new Map();
   private tenantId: string | null = null;
 
   constructor(config: APIClientConfig) {
+    this.baseURLOverride = config.baseURL?.trim() || undefined;
     this.config = {
       timeout: config.timeout || 30000,
       retries: config.retries || 3,
@@ -68,7 +70,7 @@ export class APIClient {
     };
 
     this.client = axios.create({
-      baseURL: this.config.baseURL,
+      baseURL: this.resolveBaseURL(),
       timeout: this.config.timeout,
       headers: {
         'Content-Type': 'application/json',
@@ -90,6 +92,13 @@ export class APIClient {
     } catch { }
     const fromEnv = String((import.meta as any).env?.VITE_TENANT_ID || '').trim();
     return fromEnv || 'default';
+  }
+
+  private resolveBaseURL(): string {
+    return (
+      this.baseURLOverride ||
+      SERVICE_URLS.API_GATEWAY
+    );
   }
 
   /**
@@ -360,7 +369,6 @@ export class APIClient {
  * 默认配置
  */
 export const DEFAULT_API_CONFIG: Partial<APIClientConfig> = {
-  baseURL: normalizeBaseUrl(import.meta.env.VITE_API_BASE_URL) || SERVICE_URLS.API_GATEWAY,
   timeout: 30000,
   retries: 3,
   retryDelay: 1000,

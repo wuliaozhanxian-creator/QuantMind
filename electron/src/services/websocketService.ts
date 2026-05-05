@@ -41,7 +41,6 @@ export interface SubscriptionConfig {
 class WebSocketService {
   private ws: WebSocket | null = null;
   private connectPromise: Promise<void> | null = null;
-  private url: string;
   private status: WebSocketStatus = WebSocketStatus.DISCONNECTED;
   private reconnectAttempts = 0;
   private reconnectDelay = 3000;
@@ -60,8 +59,16 @@ class WebSocketService {
   }
 
   constructor(url?: string) {
-    // 使用统一端口配置
-    this.url = url || SERVICE_URLS.WEBSOCKET_MARKET;
+    // 允许外部覆盖；默认值在 connect 时动态解析
+    if (url) {
+      this.customUrl = url;
+    }
+  }
+
+  private customUrl?: string;
+
+  private resolveWebSocketUrl(): string {
+    return this.customUrl || SERVICE_URLS.WEBSOCKET_MARKET;
   }
 
   // 连接WebSocket
@@ -94,7 +101,7 @@ class WebSocketService {
 
       this.setStatus(WebSocketStatus.CONNECTING);
 
-      let wsUrl = this.url;
+      let wsUrl = this.resolveWebSocketUrl();
       try {
         const urlObj = new URL(wsUrl);
         const token = this.getStoredToken();
@@ -298,7 +305,7 @@ class WebSocketService {
   getConnectionInfo() {
     return {
       status: this.status,
-      url: this.url,
+      url: this.resolveWebSocketUrl(),
       subscriptions: [...this.symbolSubscriptions, ...this.channelSubscriptions],
       reconnectAttempts: this.reconnectAttempts,
       isConnected: this.status === WebSocketStatus.CONNECTED

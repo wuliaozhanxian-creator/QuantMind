@@ -1,24 +1,26 @@
 #!/bin/bash
 #===============================================================================
-# QuantMind 一键部署脚本 v4.2
+# QuantMind 一键部署脚本 v5.0
 # 适用于 Ubuntu 22.04/24.04
 #
 # 特性:
-#   - 国内镜像加速 (Docker/Node.js/npm)
+#   - 国内镜像加速 (Docker)
 #   - 支持断点续传
-#   - 支持独立部署后端/前端
 #   - 自动健康检查
 #
 # 使用方式:
 #   chmod +x deploy.sh
-#   sudo ./deploy.sh                    # 完整部署
-#   sudo ./deploy.sh 192.168.1.100      # 指定访问地址显示
+#   sudo ./deploy.sh                    # 完整部署（后端服务）
+#   sudo ./deploy.sh 192.168.1.100      # 指定服务器地址显示
 #   sudo ./deploy.sh --yes              # 自动确认，无需交互
-#   sudo ./deploy.sh --backend-only     # 仅部署后端
-#   sudo ./deploy.sh --frontend-only    # 仅部署前端
+#   sudo ./deploy.sh --backend-only     # 仅部署后端（等同于完整部署）
 #   sudo ./deploy.sh --resume           # 从断点继续
 #   sudo ./deploy.sh --reset            # 重置进度重新部署
 #   sudo ./deploy.sh --force-sync       # 强制同步代码（覆盖本地修改）
+#
+# 注意:
+#   前端已集成到桌面客户端，部署完成后请下载客户端配置服务器地址使用
+#   客户端下载: https://oss.quantmindai.cn/desktop-download.html
 #===============================================================================
 
 # 自动添加执行权限（如果当前脚本没有执行权限）
@@ -1011,18 +1013,15 @@ step16_health_check() {
     docker compose -f "$PROJECT_DIR/docker-compose.yml" ps
 
     echo ""
-    log_info "PM2 服务状态:"
-    pm2 status
-
-    echo ""
     log_info "端口监听:"
-    ss -tlnp | grep -E ':(80|3000|8000|8001|8002|8003|5432|6379)' || true
+    ss -tlnp | grep -E ':(8000|8001|8002|8003|5432|6379)' || true
 
     echo ""
     log_info "服务测试:"
-    curl -s http://localhost:8000/health > /dev/null && log_info "后端 API: ✅" || log_warn "后端 API: ❌"
-    curl -s http://localhost:3000 > /dev/null && log_info "前端服务: ✅" || log_warn "前端服务: ❌"
-    curl -s http://localhost > /dev/null && log_info "Nginx: ✅" || log_warn "Nginx: ❌"
+    curl -s http://localhost:8000/health > /dev/null && log_info "API 服务 (8000): ✅" || log_warn "API 服务 (8000): ❌"
+    curl -s http://localhost:8001/health > /dev/null && log_info "引擎服务 (8001): ✅" || log_warn "引擎服务 (8001): ❌"
+    curl -s http://localhost:8002/health > /dev/null && log_info "交易服务 (8002): ✅" || log_warn "交易服务 (8002): ❌"
+    curl -s http://localhost:8003/health > /dev/null && log_info "推送服务 (8003): ✅" || log_warn "推送服务 (8003): ❌"
 
     log_done "Step 16"
     save_progress "16"
@@ -1036,8 +1035,10 @@ step17_firewall() {
 
     if command -v ufw &> /dev/null; then
         ufw allow 22/tcp comment 'SSH'
-        ufw allow 80/tcp comment 'HTTP'
-        ufw allow 443/tcp comment 'HTTPS'
+        ufw allow 8000/tcp comment 'QuantMind API'
+        ufw allow 8001/tcp comment 'QuantMind Engine'
+        ufw allow 8002/tcp comment 'QuantMind Trade'
+        ufw allow 8003/tcp comment 'QuantMind Stream'
         ufw --force enable
         ufw status
     else
@@ -1054,23 +1055,28 @@ step17_firewall() {
 show_info() {
     echo ""
     echo -e "${GREEN}╔══════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}║                    🎉 QuantMInd 部署成功！                       ║${NC}"
+    echo -e "${GREEN}║                    🎉 QuantMind 部署成功！                       ║${NC}"
     echo -e "${GREEN}╚══════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
-    echo -e "${YELLOW}📌 访问入口${NC}"
-    echo -e "   前端应用:  ${BLUE}http://${SERVER_IP}${NC}"
+    echo -e "${YELLOW}📌 后端服务${NC}"
     echo -e "   API 文档:  ${BLUE}http://${SERVER_IP}:8000/docs${NC}"
+    echo -e "   引擎服务:  ${BLUE}http://${SERVER_IP}:8001${NC}"
+    echo -e "   交易服务:  ${BLUE}http://${SERVER_IP}:8002${NC}"
+    echo -e "   推送服务:  ${BLUE}http://${SERVER_IP}:8003${NC}"
+    echo ""
+    echo -e "${YELLOW}🖥️ 桌面客户端${NC}"
+    echo -e "   QuantMind 采用桌面客户端 + 后端服务架构，请下载桌面客户端"
+    echo -e "   并配置服务器地址 ${BLUE}${SERVER_IP}${NC} 即可体验完整功能。"
+    echo ""
+    echo -e "   下载地址: ${BLUE}https://oss.quantmindai.cn/desktop-download.html${NC}"
     echo ""
     echo -e "${YELLOW}🔑 默认管理员账号${NC}"
     echo -e "   用户名: ${GREEN}admin${NC}"
     echo -e "   密码:   ${GREEN}admin123${NC}"
     echo ""
-    echo -e "${YELLOW}🖥️ 桌面应用${NC}"
-    echo -e "   当前为 Web 浏览器访问模式，如需更完整的桌面体验（如本地文件管理、"
-    echo -e "   系统托盘、全局快捷键等），建议构建 Electron 桌面应用。"
-    echo ""
     echo -e "${YELLOW}📁 目录信息${NC}"
     echo -e "   部署目录: $PROJECT_DIR"
+    echo -e "   数据目录: $DATA_DIR"
     echo ""
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
@@ -1124,8 +1130,10 @@ show_welcome() {
     echo "   • PostgreSQL 数据库"
     echo "   • Redis 缓存"
     echo "   • 后端 API 服务 (4个微服务)"
-    echo "   • 前端 Web 应用"
-    echo "   • Nginx 反向代理"
+    echo ""
+    echo -e "${YELLOW}🖥️ 访问方式${NC}"
+    echo "   部署完成后，请下载桌面客户端并配置服务器地址即可使用。"
+    echo "   客户端下载: https://oss.quantmindai.cn/desktop-download.html"
     echo ""
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
@@ -1192,12 +1200,9 @@ main() {
 
     # 根据部署模式执行步骤
     if $FRONTEND_ONLY; then
-        log_info "仅部署前端..."
-        ensure_frontend_prereqs
-        step12_install_frontend
-        step13_build_frontend
-        step14_start_frontend
-        step15_config_nginx
+        log_warn "前端已集成到桌面客户端，不再支持独立 Web 部署"
+        log_info "请下载桌面客户端: https://oss.quantmindai.cn/desktop-download.html"
+        exit 0
     elif $BACKEND_ONLY; then
         log_info "仅部署后端..."
         [[ $CURRENT_STEP -lt 1 ]] && step1_update_system
@@ -1209,22 +1214,15 @@ main() {
         [[ $CURRENT_STEP -lt 10 ]] && step10_init_database
         [[ $CURRENT_STEP -lt 11 ]] && step11_start_backend
     else
-        # 完整部署
+        # 完整部署（仅后端服务）
         [[ $CURRENT_STEP -lt 1 ]] && step1_update_system
         [[ $CURRENT_STEP -lt 2 ]] && step2_install_docker
-        [[ $CURRENT_STEP -lt 3 ]] && step3_install_nodejs
-        [[ $CURRENT_STEP -lt 4 ]] && step4_install_pm2
-        [[ $CURRENT_STEP -lt 5 ]] && step5_install_nginx
         [[ $CURRENT_STEP -lt 6 ]] && step6_clone_code
         [[ $CURRENT_STEP -lt 7 ]] && step7_config_environment
         [[ $CURRENT_STEP -lt 8 ]] && step8_build_docker
         [[ $CURRENT_STEP -lt 9 ]] && step9_start_database
         [[ $CURRENT_STEP -lt 10 ]] && step10_init_database
         [[ $CURRENT_STEP -lt 11 ]] && step11_start_backend
-        [[ $CURRENT_STEP -lt 12 ]] && step12_install_frontend
-        [[ $CURRENT_STEP -lt 13 ]] && step13_build_frontend
-        [[ $CURRENT_STEP -lt 14 ]] && step14_start_frontend
-        [[ $CURRENT_STEP -lt 15 ]] && step15_config_nginx
         [[ $CURRENT_STEP -lt 16 ]] && step16_health_check
         [[ $CURRENT_STEP -lt 17 ]] && step17_firewall
     fi

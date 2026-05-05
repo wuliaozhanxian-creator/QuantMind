@@ -42,11 +42,15 @@ class AuthService {
     this.baseURL = baseURL;
     this.apiPrefix = apiPrefix;
     this.axiosInstance = axios.create({
-      baseURL: this.baseURL,
       timeout: 30000,
       headers: {
         'Content-Type': 'application/json',
       },
+    });
+
+    this.axiosInstance.interceptors.request.use((config) => {
+      config.baseURL = this.getRuntimeBaseURL();
+      return config;
     });
 
     this.setupInterceptors();
@@ -89,6 +93,14 @@ class AuthService {
     } catch {
       return { baseURL: url.replace(/\/$/, ''), apiPrefix: '' };
     }
+  }
+
+  private getRuntimeBaseURL(): string {
+    return this.normalizeBaseURL(String((import.meta as any).env?.VITE_USER_API_URL || SERVICE_ENDPOINTS.USER_SERVICE)).baseURL;
+  }
+
+  private getResolvedRequestUrl(path: string): string {
+    return `${this.getRuntimeBaseURL()}${this.buildApiPath(path)}`;
   }
 
   /**
@@ -428,7 +440,7 @@ class AuthService {
       // 记录性能指标
       if (performanceMonitor['isMonitoring']) {
         performanceMonitor.recordApiRequest(
-          this.baseURL + this.buildApiPath('/register'),
+          this.getResolvedRequestUrl('/register'),
           'POST',
           startTime,
           endTime,
@@ -452,7 +464,7 @@ class AuthService {
       // 记录性能指标
       if (performanceMonitor['isMonitoring']) {
         performanceMonitor.recordApiRequest(
-          this.baseURL + this.buildApiPath('/register'),
+          this.getResolvedRequestUrl('/register'),
           'POST',
           startTime,
           endTime,
@@ -532,7 +544,7 @@ class AuthService {
       // 记录性能指标
       if (performanceMonitor['isMonitoring']) {
         performanceMonitor.recordApiRequest(
-          this.baseURL + this.buildApiPath('/login'),
+          this.getResolvedRequestUrl('/login'),
           'POST',
           startTime,
           endTime,
@@ -556,7 +568,7 @@ class AuthService {
       // 记录性能指标
       if (performanceMonitor['isMonitoring']) {
         performanceMonitor.recordApiRequest(
-          this.baseURL + this.buildApiPath('/login'),
+          this.getResolvedRequestUrl('/login'),
           'POST',
           startTime,
           endTime,

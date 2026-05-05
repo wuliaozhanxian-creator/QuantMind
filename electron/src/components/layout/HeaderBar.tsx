@@ -5,6 +5,7 @@ import { useRealtimeData } from '../../hooks/useRealtimeData';
 import { Wifi, ShieldCheck } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { selectCurrentTab } from '../../store/slices/aiStrategySlice';
+import { SERVICE_URLS } from '../../config/services';
 
 export const HeaderBar: React.FC = () => {
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -26,8 +27,7 @@ export const HeaderBar: React.FC = () => {
     const checkLatency = async () => {
       const start = Date.now();
       try {
-        const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api/v1';
-        const healthUrl = baseUrl.split('/api/v1')[0] + '/health';
+        const healthUrl = `${SERVICE_URLS.API_GATEWAY}/health`;
 
         await fetch(healthUrl, { mode: 'no-cors', cache: 'no-cache' });
         const end = Date.now();

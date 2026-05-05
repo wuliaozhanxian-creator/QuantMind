@@ -251,7 +251,15 @@ class QlibBacktestServiceRuntimeMixin(QlibBacktestServiceQueryMixin):
             # 必须在构建策略和交易所配置之前完成日期截断，否则会导致配置冲突
             from qlib.data import D
 
-            full_cal = D.calendar()
+            try:
+                full_cal = D.calendar(freq="day")
+            except Exception as cal_err:
+                task_log.warning(
+                    "calendar_load_failed",
+                    "Qlib calendar 加载失败，使用默认日期范围",
+                    error=str(cal_err),
+                )
+                full_cal = pd.date_range(start=request.start_date, end=request.end_date, freq="B")
             cal_max_ts = pd.Timestamp(full_cal[-1].date())
             end_ts = pd.Timestamp(request.end_date)
 

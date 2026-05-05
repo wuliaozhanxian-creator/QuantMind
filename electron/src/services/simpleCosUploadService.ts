@@ -157,7 +157,7 @@ export const cosUploadService = new SimpleCosUploadService({
   secretKey: process.env.COS_SECRET_KEY || 'your-secret-key',
   bucket: process.env.COS_BUCKET || 'quantmind-ai-results',
   region: process.env.COS_REGION || 'ap-beijing',
-  baseUrl: import.meta.env.VITE_API_BASE_URL || '',
+  baseUrl: '',
 });
 
 export default SimpleCosUploadService;

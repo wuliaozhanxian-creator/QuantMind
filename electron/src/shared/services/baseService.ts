@@ -9,7 +9,7 @@ export class APIClient {
   private defaultHeaders: Record<string, string>;
 
   constructor(baseURL?: string) {
-    this.baseURL = baseURL || normalizeBaseUrl(String((import.meta as any).env?.VITE_API_BASE_URL || '')) || SERVICE_URLS.API_GATEWAY;
+    this.baseURL = baseURL || normalizeBaseUrl(SERVICE_URLS.API_GATEWAY) || SERVICE_URLS.API_GATEWAY;
     this.defaultHeaders = {
       'Content-Type': 'application/json',
     };

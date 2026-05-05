@@ -264,15 +264,19 @@ const LoginPage: React.FC = () => {
 
     setConfigLoading(true);
     try {
+      setDynamicServerUrl(fullUrl);
+
       if (isElectron && (window as any).electronAPI) {
         const result = await (window as any).electronAPI.setServerUrl(fullUrl);
         if (result.success) {
-          setDynamicServerUrl(fullUrl);
           message.success('服务器地址已保存');
           setShowServerConfig(false);
         } else {
           message.error('保存失败：' + (result.error || '未知错误'));
         }
+      } else {
+        message.success('服务器地址已保存');
+        setShowServerConfig(false);
       }
     } catch (e) {
       message.error('保存配置时发生错误');

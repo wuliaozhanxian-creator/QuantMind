@@ -3,6 +3,8 @@
  * 云存储已禁用，使用本地存储
  */
 
+import { SERVICE_URLS } from './services';
+
 export interface StorageConfig {
   baseUrl: string;
   enabled: boolean;
@@ -12,7 +14,7 @@ export interface StorageConfig {
  * 获取本地存储配置
  */
 export const getStorageConfig = (): StorageConfig => {
-  const baseUrl = import.meta.env.VITE_API_BASE_URL || '';
+  const baseUrl = SERVICE_URLS.API_GATEWAY || '';
   return {
     baseUrl,
     enabled: true
