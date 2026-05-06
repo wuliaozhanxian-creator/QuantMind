@@ -266,6 +266,7 @@ npx vitest run src/services/
 - 心跳协议与后端 `ws_core` 对齐：客户端发送 `type: "ping"`，服务端返回 `type: "pong"`。
 - 连接建立采用并发保护：同一时刻重复调用 `connect()` 会复用同一 Promise，避免创建多条并发连接导致状态抖动。
 - 鉴权前置：若本地不存在 `access_token/auth_token`，客户端会跳过 WS 建连（不触发 403 重连风暴）。
+- 鉴权补连：若首次进入时 token 尚未就绪，`websocketService` 会保持 `RECONNECTING` 并按退避间隔持续补连，直到 token 可用。
 - 自动重连（2026-04-11）：全局 `websocketService` 在非主动断链场景下会每 30 秒重试一次，并在重连成功后自动补发已登记的 `symbols/channels` 订阅，避免页面刷新前行情主题丢失。
 
 - `aiStrategyService.ts` 已继续拆分为 `aiStrategyClients.ts`、`aiStrategyServiceHelpers.ts`、`aiStrategyServiceFiles.ts`，主服务仅保留生成/回测/核心查询逻辑。

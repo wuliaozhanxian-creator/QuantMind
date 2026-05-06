@@ -45,6 +45,8 @@ class WebSocketService {
   private reconnectAttempts = 0;
   private reconnectDelay = 3000;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private authReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private authReconnectAttempts = 0;
   private manualDisconnect = false;
   private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
   private symbolSubscriptions = new Set<string>();
@@ -79,23 +81,27 @@ class WebSocketService {
 
     this.manualDisconnect = false;
     this.clearReconnectTimer();
+    this.clearAuthReconnectTimer();
 
-    this.connectPromise = new Promise((resolve, reject) => {
+    let shouldClearConnectPromise = false;
+    const connectPromise = new Promise<void>((resolve, reject) => {
       const disableWebSocket =
         String((import.meta as any).env?.VITE_DISABLE_WEBSOCKET || '').toLowerCase() === 'true';
       if (disableWebSocket) {
         this.setStatus(WebSocketStatus.DISCONNECTED);
-        this.connectPromise = null;
+        shouldClearConnectPromise = true;
         console.info('WebSocket已禁用，跳过连接');
         resolve();
         return;
       }
       if (this.ws?.readyState === WebSocket.OPEN) {
-        this.connectPromise = null;
+        shouldClearConnectPromise = true;
         resolve();
         return;
       }
       if (this.ws?.readyState === WebSocket.CONNECTING) {
+        shouldClearConnectPromise = true;
+        resolve();
         return;
       }
 
@@ -107,8 +113,8 @@ class WebSocketService {
         const token = this.getStoredToken();
         if (!token) {
           console.info('未检测到 access token，跳过 WebSocket 连接');
-          this.setStatus(WebSocketStatus.DISCONNECTED);
-          this.connectPromise = null;
+          this.scheduleAuthReconnect();
+          shouldClearConnectPromise = true;
           resolve();
           return;
         }
@@ -141,6 +147,8 @@ class WebSocketService {
           console.log('WebSocket连接成功');
           this.setStatus(WebSocketStatus.CONNECTED);
           this.reconnectAttempts = 0;
+          this.authReconnectAttempts = 0;
+          this.clearAuthReconnectTimer();
           this.startHeartbeat();
           this.resubscribeAll();
           this.connectPromise = null;
@@ -177,13 +185,16 @@ class WebSocketService {
         reject(error);
       }
     });
-    return this.connectPromise;
+    this.connectPromise = shouldClearConnectPromise ? null : connectPromise;
+    return connectPromise;
   }
 
   // 断开连接
   disconnect(): void {
     this.manualDisconnect = true;
     this.clearReconnectTimer();
+    this.clearAuthReconnectTimer();
+    this.authReconnectAttempts = 0;
     if (this.ws) {
       this.ws.close(1000, '主动断开连接');
       this.ws = null;
@@ -405,6 +416,39 @@ class WebSocketService {
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
+    }
+  }
+
+  private scheduleAuthReconnect(): void {
+    const disableWebSocket =
+      String((import.meta as any).env?.VITE_DISABLE_WEBSOCKET || '').toLowerCase() === 'true';
+    if (disableWebSocket || this.manualDisconnect) {
+      this.setStatus(WebSocketStatus.DISCONNECTED);
+      return;
+    }
+
+    if (this.authReconnectTimer) {
+      return;
+    }
+
+    this.authReconnectAttempts += 1;
+    this.setStatus(WebSocketStatus.RECONNECTING);
+
+    const delay = Math.min(this.reconnectDelay * Math.max(1, this.authReconnectAttempts), 15000);
+    console.log(`WebSocket鉴权未就绪，将在 ${delay}ms 后第 ${this.authReconnectAttempts} 次重试`);
+
+    this.authReconnectTimer = setTimeout(() => {
+      this.authReconnectTimer = null;
+      this.connect().catch(error => {
+        console.error('WebSocket鉴权补连失败:', error);
+      });
+    }, delay);
+  }
+
+  private clearAuthReconnectTimer(): void {
+    if (this.authReconnectTimer) {
+      clearTimeout(this.authReconnectTimer);
+      this.authReconnectTimer = null;
     }
   }
 

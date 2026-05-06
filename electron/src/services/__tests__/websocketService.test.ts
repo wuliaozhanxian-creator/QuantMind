@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebSocketService, WebSocketStatus } from '../websocketService';
+import { authService } from '../../features/auth/services/authService';
 
 vi.mock('../../features/auth/services/authService', () => ({
   authService: {
@@ -48,6 +49,7 @@ describe('WebSocketService', () => {
     FakeWebSocket.instances = [];
     vi.stubGlobal('WebSocket', FakeWebSocket as unknown as typeof WebSocket);
     localStorage.clear();
+    vi.mocked(authService.getAccessToken).mockReturnValue('test-token');
   });
 
   afterEach(() => {
@@ -55,7 +57,7 @@ describe('WebSocketService', () => {
     vi.unstubAllGlobals();
   });
 
-  it('断链后应在 30 秒后重试连接', async () => {
+  it('断链后应在 3 秒后重试连接', async () => {
     const service = new WebSocketService('ws://example.test/ws');
     const connectPromise = service.connect();
 
@@ -68,7 +70,7 @@ describe('WebSocketService', () => {
     FakeWebSocket.instances[0].close(1006, 'network error', false);
     expect(service.getStatus()).toBe(WebSocketStatus.RECONNECTING);
 
-    vi.advanceTimersByTime(29999);
+    vi.advanceTimersByTime(2999);
     expect(FakeWebSocket.instances).toHaveLength(1);
 
     vi.advanceTimersByTime(1);
@@ -119,5 +121,25 @@ describe('WebSocketService', () => {
         expect.objectContaining({ topic: 'trade.updates.1001' }),
       ])
     );
+  });
+
+  it('首次鉴权未就绪时应自动补连', async () => {
+    vi.mocked(authService.getAccessToken)
+      .mockReturnValueOnce(null)
+      .mockReturnValue('test-token');
+
+    const service = new WebSocketService('ws://example.test/ws');
+    const connectPromise = service.connect();
+
+    await connectPromise;
+    expect(service.getStatus()).toBe(WebSocketStatus.RECONNECTING);
+    expect(FakeWebSocket.instances).toHaveLength(0);
+    expect(vi.getTimerCount()).toBe(1);
+
+    await vi.runOnlyPendingTimersAsync();
+    expect(FakeWebSocket.instances).toHaveLength(1);
+
+    FakeWebSocket.instances[0].open();
+    expect(service.getStatus()).toBe(WebSocketStatus.CONNECTED);
   });
 });
