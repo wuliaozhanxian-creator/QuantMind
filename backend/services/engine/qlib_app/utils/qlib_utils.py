@@ -150,6 +150,10 @@ def safe_backtest(*args, **kwargs):
         task_logger.debug("safe_backtest_filter_legacy", "过滤掉 legacy 参数 server")
         kwargs.pop("server")
 
+    if "freq" in kwargs:
+        task_logger.debug("safe_backtest_filter_legacy", "过滤掉不兼容参数 freq")
+        kwargs.pop("freq")
+
     task_logger.info(
         "safe_backtest_call",
         "执行 safe_backtest",
