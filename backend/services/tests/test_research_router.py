@@ -1,0 +1,126 @@
+import os
+from contextlib import asynccontextmanager
+
+import pytest
+
+os.environ["DEBUG"] = "false"
+os.environ["debug"] = "false"
+
+from backend.services.api.routers import research
+
+
+class _FakeMappingsResult:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def __iter__(self):
+        return iter(self._rows)
+
+    def all(self):
+        return self._rows
+
+    def first(self):
+        return self._rows[0] if self._rows else None
+
+
+class _FakeResult:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def mappings(self):
+        return _FakeMappingsResult(self._rows)
+
+
+def test_format_candidate_record_keeps_missing_returns_nullable():
+    payload = research._format_candidate_record(  # noqa: SLF001
+        {
+            "symbol": "SH605006",
+            "run_id": "run_demo",
+            "fusion_score": 0.1,
+            "return_1d": None,
+            "return_3d": None,
+        }
+    )
+
+    assert payload["nextDayReturn"] is None
+    assert payload["day3Return"] is None
+
+
+@pytest.mark.asyncio
+async def test_do_get_overview_uses_prediction_date_market_snapshot(monkeypatch):
+    captured = {"sql": ""}
+
+    class _FakeSession:
+        async def execute(self, statement, params=None):
+            sql = str(statement)
+            if "COUNT(*) AS total_count" in sql:
+                return _FakeResult(
+                    [
+                        {
+                            "total_count": 1,
+                            "tradable_count": 1,
+                            "hs300_count": 0,
+                            "zz1000_count": 1,
+                            "margin_count": 0,
+                            "chinext_count": 0,
+                            "avg_score": 0.0629,
+                            "high_confidence_count": 0,
+                            "strong_count": 1,
+                            "last_updated_at": None,
+                        }
+                    ]
+                )
+
+            captured["sql"] = sql
+            return _FakeResult(
+                [
+                    {
+                        "run_id": "run_20260401_4b8db856",
+                        "model_id": "mdl_demo",
+                        "symbol": "SH605006",
+                        "score_rank": 6,
+                        "fusion_score": 0.0629,
+                        "stock_name": "山东玻纤",
+                        "industry": "制造业",
+                        "latest_change_pct": -1.96,
+                        "turnover_rate": 9.04,
+                        "amount": 514795284.0,
+                        "total_mv": 922090646.95,
+                        "float_mv": 500000000.0,
+                        "listed_days": 800,
+                        "close_price": 12.127,
+                        "return_1d": -0.0196443007,
+                        "return_3d": -0.0509,
+                        "concept_tags": ["玻纤"],
+                        "index_tags": ["中证1000"],
+                        "risk_flags": [],
+                        "is_st": False,
+                        "is_hs300": False,
+                        "is_csi1000": True,
+                    }
+                ]
+            )
+
+    @asynccontextmanager
+    async def _fake_get_session(read_only=True):
+        yield _FakeSession()
+
+    monkeypatch.setattr(research, "get_session", _fake_get_session)
+
+    result = await research._do_get_overview(  # noqa: SLF001
+        tid="default",
+        uid="10000001",
+        model_id=None,
+        run_id="run_20260401_4b8db856",
+        limit=1000,
+        offset=0,
+    )
+
+    item = result["items"][0]
+    assert item["latestChange"] == pytest.approx(-1.96)
+    assert item["nextDayReturn"] == pytest.approx(-1.96443007)
+    assert item["day3Return"] == pytest.approx(-5.09)
+    assert "LEAD(sdl.close, 1)" in captured["sql"]
+    assert "LEAD(sdl.close, 3)" in captured["sql"]
+    assert "sdl_target.trade_date = snap.prediction_trade_date" in captured["sql"]
+    assert "DISTINCT ON (symbol)" not in captured["sql"]

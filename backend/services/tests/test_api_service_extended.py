@@ -133,6 +133,8 @@ class TestAPIExtendedIntegration:
                 return self._rows
 
         class _FakeSession:
+            overview_sql = ""
+
             async def execute(self, statement, params=None):
                 sql = str(statement)
                 if "GROUP BY model_id" in sql:
@@ -177,6 +179,8 @@ class TestAPIExtendedIntegration:
                     return _FakeResult([("银行",), ("券商",)], mapping=False)
                 if "jsonb_array_elements_text" in sql:
                     return _FakeResult([("金融科技",), ("中字头",)], mapping=False)
+                if "WITH snap_page AS" in sql:
+                    self.overview_sql = sql
                 return _FakeResult(
                     [
                         {
@@ -200,15 +204,21 @@ class TestAPIExtendedIntegration:
                             "hit_reasons": ["模型高分", "3日量能递增"],
                             "risk_flags": ["近10日回撤较大"],
                             "close_price": 12.34,
+                            "return_1d": 0.0236,
+                            "return_3d": 0.0512,
                             "thesis_summary": "适合作为投研观察样本",
                             "updated_at": datetime(2026, 4, 30, 10, 0, tzinfo=timezone.utc),
                         }
                     ]
                 )
 
+        session_ref = {"value": None}
+
         @asynccontextmanager
         async def _fake_get_session(read_only=True):
-            yield _FakeSession()
+            session = _FakeSession()
+            session_ref["value"] = session
+            yield session
 
         app.dependency_overrides[get_current_user] = lambda: {
             "user_id": "u1",
@@ -230,11 +240,15 @@ class TestAPIExtendedIntegration:
                 assert payload["filters"]["concepts"] == ["金融科技", "中字头"]
                 assert payload["items"][0]["code"] == "000001"
                 assert payload["items"][0]["concept"] == "金融科技 / 中字头"
+                assert payload["items"][0]["nextDayReturn"] == pytest.approx(2.36)
+                assert payload["items"][0]["day3Return"] == pytest.approx(5.12)
                 assert payload["pagination"]["limit"] == 80
                 assert payload["pagination"]["offset"] == 0
                 assert payload["pagination"]["returned"] == 1
                 assert payload["pagination"]["total"] == 3
                 assert payload["pagination"]["hasMore"] is True
+                assert "LEAD(sdl.close, 1)" in session_ref["value"].overview_sql
+                assert "sdl_target.trade_date = snap.prediction_trade_date" in session_ref["value"].overview_sql
             finally:
                 app.dependency_overrides.clear()
 
