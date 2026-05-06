@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 task_logger = StructuredTaskLogger(logger, "CeleryTasks")
 
 # 配置回调地址
-API_BASE_URL = os.getenv("BACKTEST_PROGRESS_URL", "http://quantmind-engine:8001")
+API_BASE_URL = os.getenv("BACKTEST_PROGRESS_URL", "http://127.0.0.1:8001")
 # Redis 配置
 REDIS_HOST = os.getenv("REDIS_HOST", "quantmind-redis")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))

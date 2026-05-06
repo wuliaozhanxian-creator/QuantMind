@@ -136,11 +136,11 @@ class K8sManager:
                 # runner/main.py 读取 ENGINE_SERVICE_INTERNAL_URL（保留 ENGINE_SERVICE_URL 兼容）
                 "ENGINE_SERVICE_INTERNAL_URL": os.getenv(
                     "ENGINE_SERVICE_INTERNAL_URL",
-                    "http://quantmind-engine:8001/api/v1",
+                    "http://127.0.0.1:8001/api/v1",
                 ),
                 "ENGINE_SERVICE_URL": os.getenv(
                     "ENGINE_SERVICE_URL",
-                    "http://quantmind-engine:8001",
+                    "http://127.0.0.1:8001",
                 ),
                 "PYTHONPATH": "/app",
                 "TZ": os.getenv("TZ", "Asia/Shanghai"),
@@ -263,7 +263,7 @@ class K8sManager:
                 client.V1EnvVar(
                     name="ENGINE_SERVICE_URL",
                     value=os.getenv(
-                        "ENGINE_SERVICE_URL", "http://quantmind-engine:8001"
+                        "ENGINE_SERVICE_URL", "http://127.0.0.1:8001"
                     ),
                 ),
                 client.V1EnvVar(

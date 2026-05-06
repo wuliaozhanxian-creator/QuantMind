@@ -423,7 +423,7 @@ async def preflight_check(
     if mode in {"REAL", "SHADOW", "SIMULATION"}:
         # 1. Stream时序序列 (始终阻断)
         try:
-            res = check_stream_series_freshness(redis_client=trade_redis)
+            res = check_stream_series_freshness(redis_client=redis.client)
             add_check(
                 "stream_series_freshness",
                 "Stream时序序列",
@@ -443,7 +443,7 @@ async def preflight_check(
 
         # 2. Stream行情落库 (始终阻断)
         try:
-            res = check_stream_quote_persist_rate(redis_client=trade_redis)
+            res = check_stream_quote_persist_rate(redis_client=redis.client)
             add_check(
                 "stream_quote_persist_rate",
                 "Stream行情落库",

@@ -31,10 +31,10 @@ class ApiResponse(BaseModel):
 
 
 CORE_SERVICE_HEALTH_URLS = {
-    "api": os.getenv("ADMIN_DASHBOARD_API_HEALTH_URL", "http://quantmind-api:8000/health"),
-    "trade": os.getenv("ADMIN_DASHBOARD_TRADE_HEALTH_URL", "http://quantmind-trade:8002/health"),
-    "engine": os.getenv("ADMIN_DASHBOARD_ENGINE_HEALTH_URL", "http://quantmind-engine:8001/health"),
-    "stream": os.getenv("ADMIN_DASHBOARD_STREAM_HEALTH_URL", "http://quantmind-stream:8003/health"),
+    "api": os.getenv("ADMIN_DASHBOARD_API_HEALTH_URL", "http://127.0.0.1:8000/health"),
+    "trade": os.getenv("ADMIN_DASHBOARD_TRADE_HEALTH_URL", "http://127.0.0.1:8002/health"),
+    "engine": os.getenv("ADMIN_DASHBOARD_ENGINE_HEALTH_URL", "http://127.0.0.1:8001/health"),
+    "stream": os.getenv("ADMIN_DASHBOARD_STREAM_HEALTH_URL", "http://127.0.0.1:8003/health"),
 }
 
 
