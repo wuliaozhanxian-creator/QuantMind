@@ -119,7 +119,6 @@ function createMenu() {
       submenu: [
         { label: '重新加载', accelerator: 'CmdOrCtrl+R', click: () => mainWindow?.reload() },
         { label: '强制重新加载', accelerator: 'CmdOrCtrl+Shift+R', click: () => mainWindow?.webContents.reloadIgnoringCache() },
-        { label: '开发者工具', accelerator: process.platform === 'darwin' ? 'Cmd+Option+I' : 'Ctrl+Shift+I', click: () => mainWindow?.webContents.toggleDevTools() },
         { type: 'separator' },
         { label: '实际大小', accelerator: 'CmdOrCtrl+0', role: 'resetZoom' },
         { label: '放大', accelerator: 'CmdOrCtrl+Plus', role: 'zoomIn' },
@@ -258,10 +257,13 @@ function createWindow() {
   Menu.setApplicationMenu(null);
   mainWindow.setMenuBarVisibility(false);
 
-  // [Optimization] Windows 恢复强制刷新功能 (Ctrl+R / Ctrl+Shift+R)
+  // [Optimization] 恢复强制刷新功能 (Cmd/Ctrl+R)
   // 即使禁用了原生菜单，我们仍允许开发/调试时的刷新操作
   mainWindow.webContents.on('before-input-event', (event, input) => {
-    if (input.control && input.key.toLowerCase() === 'r') {
+    const isControlOrMeta = process.platform === 'darwin' ? input.meta : input.control;
+    
+    // 刷新逻辑
+    if (isControlOrMeta && input.key.toLowerCase() === 'r') {
       if (input.shift) {
         console.log('[main] Triggering forced reload (ignoring cache)');
         mainWindow?.webContents.reloadIgnoringCache();

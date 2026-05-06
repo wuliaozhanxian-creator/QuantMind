@@ -1,0 +1,28 @@
+{
+  "version": "1.0.0",
+  "lastUpdated": "2026-05-06",
+  "downloads": {
+    "windows": {
+      "version": "1.0.4",
+      "size": "约 200MB",
+      "url": "https://github.com/qusong0627/quantmind/releases",
+      "requirements": "Windows 10/11",
+      "filename": "QuantMind-Setup-1.0.4.exe"
+    },
+    "linux": {
+      "version": "1.0.4",
+      "size": "约 180MB",
+      "url": "https://github.com/qusong0627/quantmind/releases",
+      "requirements": "Ubuntu 20.04+ / Debian 11+",
+      "filename": "QuantMind-1.0.4.AppImage"
+    },
+    "macos": {
+      "version": "1.0.4",
+      "size": "约 220MB",
+      "url": "https://github.com/qusong0627/quantmind/releases",
+      "requirements": "macOS 11+ (Intel/Apple Silicon)",
+      "filename": "QuantMind-1.0.4.dmg"
+    }
+  },
+  "releaseNotes": "https://github.com/qusong0627/quantmind/releases"
+}
