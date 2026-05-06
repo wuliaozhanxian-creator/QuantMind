@@ -99,9 +99,12 @@ services:
       - TRADE_PORT=8002
       - STREAM_PORT=8003
 
-      # 服务 Workers 配置 (多核并发)
+      # 服务 Workers 配置
+      # AI-IDE 执行日志状态当前保存在 engine worker 进程内存中，
+      # OSS 部署需保持单 worker，避免 /start 与 /execute/logs/{job_id}
+      # 落到不同 worker 时出现 "Job not found"。
       - API_WORKERS=1
-      - ENGINE_WORKERS=4
+      - ENGINE_WORKERS=${ENGINE_WORKERS:-1}
       - TRADE_WORKERS=1
       - STREAM_WORKERS=1
 

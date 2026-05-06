@@ -30,10 +30,12 @@ logger = logging.getLogger(__name__)
 def get_workers_config() -> dict:
     """获取各服务的 worker 数量配置"""
     import os
-    # 默认: Engine 服务需要更多 workers 处理回测，其他服务单 worker
+    # OSS 默认保持 engine 单 worker。
+    # 原因：AI-IDE 执行任务状态保存在进程内存中，多 worker 会导致
+    # /start 与 /execute/logs/{job_id} 命中不同进程，返回 404 Job not found。
     default_workers = {
         "api": 1,
-        "engine": 4,  # 回测引擎需要多 worker
+        "engine": 1,
         "trade": 1,
         "stream": 1,
     }
