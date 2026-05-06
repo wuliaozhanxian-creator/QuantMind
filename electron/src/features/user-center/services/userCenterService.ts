@@ -1,6 +1,6 @@
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
 import { authService } from '../../auth/services/authService';
-import { SERVICE_ENDPOINTS } from '../../../config/services';
+import { SERVICE_ENDPOINTS, SERVICE_URLS } from '../../../config/services';
 import { getConfiguredStorageDomain } from '../constants/avatar';
 import type {
   UserProfile,
@@ -49,6 +49,9 @@ class BaseApiClient {
     // 请求拦截器
     this.axiosInstance.interceptors.request.use(
       (config) => {
+        config.baseURL = this.getRuntimeBaseURL();
+        this.axiosInstance.defaults.baseURL = config.baseURL;
+
         // 添加认证Token（如果本地有）
         const token = localStorage.getItem('access_token');
         if (token) {
@@ -87,6 +90,10 @@ class BaseApiClient {
         return Promise.reject(this.handleError(error));
       }
     );
+  }
+
+  protected getRuntimeBaseURL(): string {
+    return this.baseURL;
   }
 
   /**
@@ -178,6 +185,18 @@ class BaseApiClient {
  * 用户中心API服务类
  */
 export class UserCenterService extends BaseApiClient {
+  protected override getRuntimeBaseURL(): string {
+    const envBase =
+      import.meta.env.VITE_USER_CENTER_API_URL ||
+      import.meta.env.VITE_USER_API_URL ||
+      SERVICE_URLS.USER_SERVICE;
+
+    const normalizedBaseURL = String(envBase || '').replace(/\/+$/, '');
+    return normalizedBaseURL.endsWith('/api/v1')
+      ? normalizedBaseURL
+      : `${normalizedBaseURL}/api/v1`;
+  }
+
   private normalizeAvatarUrl(rawUrl: string, fallbackFileKey = ''): string {
     const input = String(rawUrl || '').trim();
     const fileKey = String(fallbackFileKey || '').replace(/^\/+/, '');
@@ -274,17 +293,16 @@ export class UserCenterService extends BaseApiClient {
   }
 
   constructor() {
-    const envBase =
-      import.meta.env.VITE_USER_CENTER_API_URL ||
-      import.meta.env.VITE_USER_API_URL ||
-      SERVICE_ENDPOINTS.USER_SERVICE;
+    const baseWithApiPrefix =
+      (
+        import.meta.env.VITE_USER_CENTER_API_URL ||
+        import.meta.env.VITE_USER_API_URL ||
+        SERVICE_ENDPOINTS.USER_SERVICE
+      )
+        .replace(/\/+$/, '')
+        .replace(/(?<!\/api\/v1)$/, (value) => value);
 
-    const normalizedBaseURL = envBase.replace(/\/+$/, '');
-    const baseWithApiPrefix = normalizedBaseURL.endsWith('/api/v1')
-      ? normalizedBaseURL
-      : `${normalizedBaseURL}/api/v1`;
-
-    super(baseWithApiPrefix);
+    super(baseWithApiPrefix.endsWith('/api/v1') ? baseWithApiPrefix : `${baseWithApiPrefix}/api/v1`);
 
     if (import.meta.env.MODE === 'development') {
       console.info('[UserCenterService] baseURL =', baseWithApiPrefix);

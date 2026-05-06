@@ -14,10 +14,11 @@ import { AIStrategyServiceFilesMixin } from './aiStrategyServiceFiles';
 import { SERVICE_ENDPOINTS, SERVICE_URLS } from '../config/services';
 const API_BASE_URL = SERVICE_ENDPOINTS.AI_STRATEGY;
 const BACKTEST_API_BASE_URL = SERVICE_URLS.QLIB_SERVICE;
+const resolveAiStrategyBaseURL = () => String(SERVICE_ENDPOINTS.AI_STRATEGY || '').replace(/\/+$/, '');
+const resolveBacktestBaseURL = () => String(SERVICE_URLS.QLIB_SERVICE || '').replace(/\/+$/, '');
 
 // 创建axios实例
 const apiClient = axios.create({
-  baseURL: API_BASE_URL,
   timeout: 300000, // 增加到5分钟，因为DeepSeek API可能需要较长时间
   headers: {
     'Content-Type': 'application/json',
@@ -26,7 +27,6 @@ const apiClient = axios.create({
 
 // 创建回测服务专用客户端
 const backtestClient = axios.create({
-  baseURL: BACKTEST_API_BASE_URL,
   timeout: 180000, // 回测可能需要更长时间
   headers: {
     'Content-Type': 'application/json',
@@ -104,6 +104,8 @@ export interface PerformanceMetrics {
 // 添加请求和响应拦截器
 apiClient.interceptors.request.use(
   (config) => {
+    config.baseURL = resolveAiStrategyBaseURL();
+    apiClient.defaults.baseURL = config.baseURL;
     // 添加认证 Token
     const token = authService.getAccessToken();
     if (token) {
@@ -139,6 +141,8 @@ apiClient.interceptors.response.use(
 // 为回测客户端也添加拦截器
 backtestClient.interceptors.request.use(
   (config) => {
+    config.baseURL = resolveBacktestBaseURL();
+    backtestClient.defaults.baseURL = config.baseURL;
     const token = authService.getAccessToken();
     if (token) {
       if (config.headers && typeof config.headers.set === 'function') {

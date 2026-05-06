@@ -118,7 +118,7 @@ class Settings(BaseSettings):
     # ============ JWT配置 ============
     SECRET_KEY: str = ""  # 将在验证器中检查或生成
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 48  # 48 hours
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
     # 内部调用鉴别密钥（开发/联调用；生产建议通过网关侧剥离外部 Header + 独立密钥管理）
     INTERNAL_CALL_SECRET: str = DEFAULT_INTERNAL_CALL_SECRET

@@ -60,7 +60,12 @@ export class APIClient {
   private tenantId: string | null = null;
 
   constructor(config: APIClientConfig) {
-    this.baseURLOverride = config.baseURL?.trim() || undefined;
+    const requestedBaseURL = normalizeBaseUrl(config.baseURL?.trim() || '');
+    const currentGatewayBaseURL = normalizeBaseUrl(SERVICE_URLS.API_GATEWAY || '');
+    this.baseURLOverride =
+      requestedBaseURL && requestedBaseURL !== currentGatewayBaseURL
+        ? requestedBaseURL
+        : undefined;
     this.config = {
       timeout: config.timeout || 30000,
       retries: config.retries || 3,
@@ -96,8 +101,8 @@ export class APIClient {
 
   private resolveBaseURL(): string {
     return (
-      this.baseURLOverride ||
-      SERVICE_URLS.API_GATEWAY
+      normalizeBaseUrl(this.baseURLOverride || '') ||
+      normalizeBaseUrl(SERVICE_URLS.API_GATEWAY || '')
     );
   }
 
@@ -108,6 +113,10 @@ export class APIClient {
     // 请求拦截器
     this.client.interceptors.request.use(
       (config) => {
+        const runtimeBaseURL = this.resolveBaseURL();
+        config.baseURL = runtimeBaseURL;
+        this.client.defaults.baseURL = runtimeBaseURL;
+
         // 优先使用手动设置的Token，否则从authService获取
         const token = this.token || authService.getAccessToken();
 

@@ -36,6 +36,7 @@ from backend.services.engine.qlib_app.utils.margin_position import (
 from backend.services.engine.qlib_app.utils.qlib_utils import (
     QLIB_BACKEND,
     D,
+    _disabled_benchmark_series,
     backtest,
     exclude_bj_instruments,
     qlib,
@@ -405,12 +406,18 @@ class QlibBacktestServiceRuntimeMixin(QlibBacktestServiceQueryMixin):
                 "start_time": request.start_date,
                 "end_time": request.end_date,
                 "account": request.initial_capital,
-                "benchmark": request.benchmark,
+                "benchmark": _disabled_benchmark_series(request.start_date),
                 "pos_type": pos_type,
                 "exchange_kwargs": {
                     "exchange": exchange_config,
                 },
             }
+
+            task_log.info(
+                "benchmark_runtime_mode",
+                "主回测阶段禁用 qlib 原生 benchmark，基准对比指标改由后分析阶段独立计算",
+                requested_benchmark=request.benchmark,
+            )
 
             if request.universe and request.universe != "csi300":
                 task_log.info(

@@ -21,7 +21,7 @@ class LoggingSettings:
 class SecuritySettings:
     secret_key: str = os.getenv("SECRET_KEY", "dev-secret-key")
     jwt_algorithm: str = os.getenv("JWT_ALGORITHM", "HS256")
-    jwt_expire_minutes: int = int(os.getenv("JWT_EXPIRE_MINUTES", "60"))
+    jwt_expire_minutes: int = int(os.getenv("JWT_EXPIRE_MINUTES", "2880"))  # 48 hours
 
 
 @dataclass

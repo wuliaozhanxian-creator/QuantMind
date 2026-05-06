@@ -75,6 +75,65 @@ TMP_ROOT = os.getenv("AI_IDE_TEMP_DIR", "/app/db/ai_ide_tmp")
 HOST_PROJECT_PATH = os.getenv("HOST_PROJECT_PATH", "/home/quantmind")
 
 
+def _build_runner_environment(
+    user_id: str, request_meta: dict[str, Any] | None = None
+) -> dict[str, str]:
+    request_meta = request_meta or {}
+    env = {
+        "PYTHONPATH": "/app",
+        "PYTHONUNBUFFERED": "1",
+        "USER_ID": user_id,
+        "TENANT_ID": os.getenv("TENANT_ID", "default"),
+        "QLIB_DATA_PATH": "/app/db/qlib_data",
+        "QLIB_PRED_PATH": os.getenv(
+            "AI_IDE_PRED_PATH", "/app/db/qlib_data/predictions/pred.pkl"
+        ),
+        "AI_IDE_ALLOW_FEATURE_SIGNAL_FALLBACK": os.getenv(
+            "AI_IDE_ALLOW_FEATURE_SIGNAL_FALLBACK", "true"
+        ),
+    }
+    meta_env_map = {
+        "model_id": "AI_IDE_BACKTEST_MODEL_ID",
+        "strategy_id": "AI_IDE_BACKTEST_STRATEGY_ID",
+        "run_id": "AI_IDE_BACKTEST_RUN_ID",
+    }
+    for meta_key, env_key in meta_env_map.items():
+        value = str(request_meta.get(meta_key) or "").strip()
+        if value:
+            env[env_key] = value
+    passthrough_keys = [
+        "APP_ENV",
+        "DB_DRIVER",
+        "DB_HOST",
+        "DB_PORT",
+        "DB_NAME",
+        "DB_USER",
+        "DB_PASSWORD",
+        "DATABASE_URL",
+        "REDIS_HOST",
+        "REDIS_PORT",
+        "REDIS_PASSWORD",
+        "SECRET_KEY",
+        "JWT_SECRET_KEY",
+        "INTERNAL_CALL_SECRET",
+        "STORAGE_MODE",
+        "STORAGE_ROOT",
+        "DASHSCOPE_API_KEY",
+        "QWEN_API_KEY",
+        "AI_STRATEGY_TOTAL_MV_PER_YI",
+        "QLIB_ALLOW_FEATURE_SIGNAL_FALLBACK",
+        "QLIB_BACKTEST_REQUIRE_PRED",
+        "QLIB_SIGNAL_MIN_DATES",
+        "QLIB_SIGNAL_MIN_INSTRUMENTS",
+        "QLIB_SIGNAL_MAX_NAN_RATIO",
+    ]
+    for key in passthrough_keys:
+        value = os.getenv(key)
+        if value is not None:
+            env[key] = value
+    return env
+
+
 class StartRequest(BaseModel):
     file_id: str | None = None
     path: str | None = None  # 兼容前端字段，通常即 ID
@@ -82,6 +141,9 @@ class StartRequest(BaseModel):
     code: str | None = None  # 兼容前端字段
     filename: str | None = None  # 辅助文件名
     runner_image: str | None = None  # 可显式切换临时验证镜像
+    strategy_id: str | None = None
+    model_id: str | None = None
+    run_id: str | None = None
 
 
 class SmokeImageRequest(BaseModel):
@@ -577,7 +639,6 @@ def _init_qlib():
 def _run_module_backtest(module):
     """执行模块型策略（回测中心兼容模式）"""
     import json
-    import time
     from datetime import datetime, timedelta
 
     # 1. 获取策略配置
@@ -613,151 +674,100 @@ def _run_module_backtest(module):
     start_date = os.getenv("AI_IDE_BACKTEST_START_DATE", (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d"))
     end_date = os.getenv("AI_IDE_BACKTEST_END_DATE", datetime.now().strftime("%Y-%m-%d"))
     initial_capital = float(os.getenv("AI_IDE_BACKTEST_INITIAL_CAPITAL", "1000000"))
-    universe = os.getenv("AI_IDE_BACKTEST_UNIVERSE", "csi300")
+    universe = os.getenv("AI_IDE_BACKTEST_UNIVERSE", "all")
     benchmark = os.getenv("AI_IDE_BACKTEST_BENCHMARK", "SH000300")
-    commission = float(os.getenv("AI_IDE_BACKTEST_COMMISSION", "0.0003"))
-    stamp_duty = float(os.getenv("AI_IDE_BACKTEST_STAMP_DUTY", "0.001"))
+    model_id = os.getenv("AI_IDE_BACKTEST_MODEL_ID", "").strip() or None
+    strategy_id = os.getenv("AI_IDE_BACKTEST_STRATEGY_ID", "").strip() or None
+    run_id = os.getenv("AI_IDE_BACKTEST_RUN_ID", "").strip() or None
+    commission = float(os.getenv("AI_IDE_BACKTEST_COMMISSION", "0.00025"))
+    min_commission = float(os.getenv("AI_IDE_BACKTEST_MIN_COMMISSION", "5.0"))
+    stamp_duty = float(os.getenv("AI_IDE_BACKTEST_STAMP_DUTY", "0.0005"))
+    transfer_fee = float(os.getenv("AI_IDE_BACKTEST_TRANSFER_FEE", "0.00001"))
+    min_transfer_fee = float(os.getenv("AI_IDE_BACKTEST_MIN_TRANSFER_FEE", "0.01"))
+    impact_cost_coefficient = float(os.getenv("AI_IDE_BACKTEST_IMPACT_COST_COEFFICIENT", "0.0005"))
+    signal_lag_days = int(os.getenv("AI_IDE_BACKTEST_SIGNAL_LAG_DAYS", "1"))
+    deal_price = os.getenv("AI_IDE_BACKTEST_DEAL_PRICE", "close")
+    risk_free_rate = float(os.getenv("AI_IDE_BACKTEST_RISK_FREE_RATE", "0.02"))
 
     print(f"[SYSTEM] 回测参数: {start_date} ~ {end_date}, capital={initial_capital}, universe={universe}")
+    if model_id or strategy_id or run_id:
+        print(
+            "[SYSTEM] 回测上下文: "
+            f"model_id={model_id or '<none>'}, "
+            f"strategy_id={strategy_id or '<none>'}, "
+            f"run_id={run_id or '<none>'}"
+        )
 
-    # 4. 处理 signal
-    signal = kwargs.get("signal", "<PRED>")
-    if isinstance(signal, str) and signal == "<PRED>":
-        # 尝试从环境变量或默认路径加载预测文件
-        pred_path = os.getenv("AI_IDE_PRED_PATH", os.path.join(QLIB_DATA_PATH, "predictions", "pred.pkl"))
-        if os.path.exists(pred_path):
-            print(f"[SYSTEM] 加载预测文件: {pred_path}")
-            import pandas as pd
-
-            try:
-                pred = pd.read_pickle(pred_path)
-                kwargs["signal"] = pred
-                print("[SYSTEM] 预测文件加载成功")
-            except Exception as e:
-                print(f"[WARN] 预测文件加载失败，使用 $close 作为信号: {e}")
-                kwargs["signal"] = "$close"
-        else:
-            print(f"[WARN] 预测文件不存在 ({pred_path})，使用 $close 作为信号")
-            kwargs["signal"] = "$close"
-
-    # 5. 构建策略对象
-    from qlib.strategy.base import BaseStrategy
-
-    strategy_obj = None
-    strategy_dict = None
-
-    # 尝试实例化策略类
-    if module_path:
-        try:
-            spec = importlib.util.spec_from_file_location("strategy_mod", module_path.replace(".", "/") + ".py")
-            if spec and spec.loader:
-                mod = importlib.util.module_from_spec(spec)
-                sys.modules["strategy_mod"] = mod
-                spec.loader.exec_module(mod)
-                if hasattr(mod, class_name):
-                    cls = getattr(mod, class_name)
-                    strategy_obj = cls(**kwargs)
-                    print(f"[SYSTEM] 成功实例化策略: {class_name}")
-        except Exception as e:
-            print(f"[WARN] 从 module_path 实例化失败: {e}")
-
-    # 如果 module_path 为空或实例化失败，尝试从当前模块获取类
-    if strategy_obj is None:
-        if hasattr(module, class_name):
-            cls = getattr(module, class_name)
-            if issubclass(cls, BaseStrategy):
-                try:
-                    strategy_obj = cls(**kwargs)
-                    print(f"[SYSTEM] 从当前模块实例化策略: {class_name}")
-                except Exception as e:
-                    print(f"[WARN] 实例化失败: {e}")
-
-    # 如果无法实例化，使用字典配置模式
-    if strategy_obj is None:
-        print(f"[SYSTEM] 使用字典配置模式执行回测")
-        if not module_path:
-            # 尝试从命名空间推断
-            for name, obj in vars(module).items():
-                if isinstance(obj, type) and issubclass(obj, BaseStrategy) and obj is not BaseStrategy:
-                    module_path = f"ai_ide_strategy"
-                    class_name = name
-                    print(f"[SYSTEM] 推断策略类: {class_name}")
-                    break
-
-        strategy_dict = {
-            "class": class_name,
-            "module_path": module_path or "ai_ide_strategy",
-            "kwargs": kwargs,
-        }
-
-    # 6. 构建回测配置
-    executor = {
-        "class": "SimulatorExecutor",
-        "module_path": "qlib.backtest.executor",
-        "kwargs": {
-            "time_per_step": "d",
-            "generate_portfolio_metrics": True,
-        },
-    }
-
-    backtest_config = {
-        "start_time": start_date,
-        "end_time": end_date,
-        "account": initial_capital,
-        "benchmark": benchmark,
-    }
-
-    # 7. 执行回测
-    from backend.services.engine.qlib_app.utils.qlib_utils import backtest as safe_backtest
-
-    print("[SYSTEM] 开始执行回测...")
-    start_time = time.time()
-
+    # 4. 直接复用回测中心同一套引擎
+    print("[SYSTEM] 使用回测中心同一回测引擎执行")
     try:
-        if strategy_obj is not None:
-            portfolio_dict, indicator_dict = safe_backtest(
-                strategy=strategy_obj,
-                executor=executor,
-                freq="d",
-                **backtest_config,
-            )
-        else:
-            portfolio_dict, indicator_dict = safe_backtest(
-                strategy=strategy_dict,
-                executor=executor,
-                freq="d",
-                **backtest_config,
-            )
+        import asyncio
 
-        execution_time = time.time() - start_time
-        print(f"\n{'='*60}")
-        print(f"[RESULT] 回测完成 (耗时: {execution_time:.2f}s)")
-        print(f"{'='*60}")
+        from backend.services.engine.qlib_app.schemas.backtest import QlibBacktestRequest
+        from backend.services.engine.qlib_app.services.backtest_service import (
+            QlibBacktestService,
+        )
 
-        # 输出指标
-        if indicator_dict:
-            risk_analysis = indicator_dict.get("risk_analysis", {})
-            if isinstance(risk_analysis, dict):
-                print(f"\n[RESULT] 收益指标:")
-                for key, value in risk_analysis.items():
-                    if isinstance(value, (int, float)):
-                        print(f"  {key}: {value:.4f}")
+        request = QlibBacktestRequest(
+            strategy_type="CustomStrategy",
+            strategy_content=pathlib.Path(STRATEGY_PATH).read_text(encoding="utf-8"),
+            strategy_params=dict(kwargs or {}),
+            model_id=model_id,
+            start_date=start_date,
+            end_date=end_date,
+            initial_capital=initial_capital,
+            benchmark=benchmark,
+            universe=universe,
+            commission=commission,
+            min_commission=min_commission,
+            stamp_duty=stamp_duty,
+            transfer_fee=transfer_fee,
+            min_transfer_fee=min_transfer_fee,
+            impact_cost_coefficient=impact_cost_coefficient,
+            user_id=os.getenv("USER_ID", "default"),
+            tenant_id=os.getenv("TENANT_ID", "default"),
+            strategy_id=strategy_id,
+            signal_lag_days=signal_lag_days,
+            deal_price=deal_price,
+            risk_free_rate=risk_free_rate,
+            allow_feature_signal_fallback=os.getenv(
+                "AI_IDE_ALLOW_FEATURE_SIGNAL_FALLBACK", "true"
+            ).strip().lower() in {"1", "true", "yes", "on"},
+        )
 
-        if portfolio_dict:
-            portfolio_analysis = portfolio_dict.get("portfolio_analysis", {})
-            if isinstance(portfolio_analysis, dict):
-                print(f"\n[RESULT] 组合指标:")
-                for key, value in portfolio_analysis.items():
-                    if isinstance(value, (int, float)):
-                        print(f"  {key}: {value:.4f}")
-
-        print(f"\n[RESULT] 回测成功")
-        return 0
-
+        print("[SYSTEM] 开始执行回测...")
+        result = asyncio.run(QlibBacktestService().run_backtest(request))
     except Exception as e:
         print(f"\n[ERROR] 回测执行失败: {e}")
         traceback.print_exc()
         return 2
+
+    if getattr(result, "status", "") != "completed":
+        print(f"\n[ERROR] 回测未完成: status={getattr(result, 'status', '<unknown>')}")
+        if getattr(result, "error_message", None):
+            print(f"[ERROR] {result.error_message}")
+        if getattr(result, "full_error", None):
+            print(result.full_error)
+        return 2
+
+    print(f"\n{'='*60}")
+    print(f"[RESULT] 回测完成 (耗时: {float(getattr(result, 'execution_time', 0.0) or 0.0):.2f}s)")
+    print(f"{'='*60}")
+    print(f"[RESULT] annual_return: {float(getattr(result, 'annual_return', 0.0) or 0.0):.4f}")
+    print(f"[RESULT] sharpe_ratio: {float(getattr(result, 'sharpe_ratio', 0.0) or 0.0):.4f}")
+    print(f"[RESULT] max_drawdown: {float(getattr(result, 'max_drawdown', 0.0) or 0.0):.4f}")
+    if getattr(result, "total_return", None) is not None:
+        print(f"[RESULT] total_return: {float(result.total_return or 0.0):.4f}")
+    if getattr(result, "win_rate", None) is not None:
+        print(f"[RESULT] win_rate: {float(result.win_rate or 0.0):.4f}")
+    if getattr(result, "total_trades", None) is not None:
+        print(f"[RESULT] total_trades: {int(result.total_trades or 0)}")
+    if getattr(result, "profit_factor", None) is not None:
+        print(f"[RESULT] profit_factor: {float(result.profit_factor or 0.0):.4f}")
+    if getattr(result, "avg_win", None) is not None:
+        print(f"[RESULT] avg_win: {float(result.avg_win or 0.0):.4f}")
+    print("\n[RESULT] 回测成功")
+    return 0
 
 
 def main():
@@ -879,6 +889,11 @@ async def start_execution(request: Request, item: StartRequest):
             "file": file_path,
             "runner": runner_path,
             "image": runner_image,
+            "request_meta": {
+                "strategy_id": item.strategy_id,
+                "model_id": item.model_id,
+                "run_id": item.run_id,
+            },
         }
 
         # 跳过已知生产镜像的 smoke test，避免误报和延迟
@@ -1039,6 +1054,7 @@ async def run_process(job_id: str, file_path: str):
     user_id = job_info["user_id"]
     runner_path = job_info.get("runner")
     image_ref = _normalize_image_ref(job_info.get("image"))
+    request_meta = job_info.get("request_meta")
 
     try:
         client = docker.from_env()
@@ -1065,6 +1081,16 @@ async def run_process(job_id: str, file_path: str):
                 "bind": "/app/backend",
                 "mode": "ro",
             },
+            # 挂载模型目录，确保通过 model_id 解析到的 pred.pkl 对 AI-IDE 子容器可见
+            os.path.join(HOST_PROJECT_PATH, "models"): {
+                "bind": "/app/models",
+                "mode": "ro",
+            },
+            # 挂载数据根目录，兼容用户模型或本地存储落在 /data 下的场景
+            os.path.join(HOST_PROJECT_PATH, "data"): {
+                "bind": "/data",
+                "mode": "ro",
+            },
         }
 
         container_name = f"qm-ide-run-{job_id}"
@@ -1078,11 +1104,7 @@ async def run_process(job_id: str, file_path: str):
             detach=True,
             volumes=volumes,
             network=_NETWORK,
-            environment={
-                "PYTHONPATH": "/app",
-                "PYTHONUNBUFFERED": "1",
-                "USER_ID": user_id,
-            },
+            environment=_build_runner_environment(user_id, request_meta),
             mem_limit="2g",
             cpu_quota=100000,  # 1 CPU
         )

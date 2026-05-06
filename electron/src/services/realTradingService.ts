@@ -1,5 +1,5 @@
 import axios, { AxiosHeaders } from 'axios';
-import { SERVICE_ENDPOINTS } from '../config/services';
+import { SERVICE_ENDPOINTS, SERVICE_URLS } from '../config/services';
 import { authService } from '../features/auth/services/authService';
 import type { ExecutionConfig, LiveTradeConfig } from '../types/liveTrading';
 
@@ -9,15 +9,7 @@ function getTenantId(): string {
 }
 
 const configuredRealTradingApiUrl = String((import.meta as any).env?.VITE_REAL_TRADING_API_URL || '').trim();
-const apiBase =
-    configuredRealTradingApiUrl ||
-    `${SERVICE_ENDPOINTS.API_GATEWAY}/real-trading`;
 const configuredRealTradingDirectUrl = String((import.meta as any).env?.VITE_REAL_TRADING_DIRECT_URL || '').trim();
-// OSS 版本使用相对路径，通过 Nginx 代理
-const directApiBase = configuredRealTradingDirectUrl || '/api/v1/real-trading';
-const normalizedApiBase = apiBase.replace(/\/+$/, '');
-const normalizedDirectApiBase = directApiBase.replace(/\/+$/, '');
-const hasDistinctDirectFallback = normalizedApiBase !== normalizedDirectApiBase;
 
 function createHttpClient(baseURL: string) {
     const client = axios.create({
@@ -49,11 +41,27 @@ function createHttpClient(baseURL: string) {
     return client;
 }
 
-const http = createHttpClient(apiBase);
-const directHttp = createHttpClient(directApiBase);
+function getRuntimeRealTradingApiBase(): string {
+    return (
+        configuredRealTradingApiUrl ||
+        `${SERVICE_ENDPOINTS.API_GATEWAY}/real-trading`
+    ).replace(/\/+$/, '');
+}
+
+// 仅在显式配置直连地址时启用 fallback，避免开发环境误打到本地 Vite 地址。
+function getRuntimeRealTradingDirectApiBase(): string | null {
+    const normalized = configuredRealTradingDirectUrl.replace(/\/+$/, '');
+    return normalized || null;
+}
+
+function hasDistinctDirectFallback(): boolean {
+    const direct = getRuntimeRealTradingDirectApiBase();
+    if (!direct) return false;
+    return direct !== getRuntimeRealTradingApiBase();
+}
 
 function shouldUseDirectFallback(error: any): boolean {
-    if (!hasDistinctDirectFallback) {
+    if (!hasDistinctDirectFallback()) {
         return false;
     }
     const status = Number(error?.response?.status ?? 0);
@@ -75,6 +83,7 @@ async function requestRealTradingWithFallback<T>(
     config: RealTradingRequestConfig,
     allowFallback: boolean = true,
 ): Promise<T> {
+    const http = createHttpClient(getRuntimeRealTradingApiBase());
     try {
         const response = await http.request<T>(config as any);
         return response.data;
@@ -82,6 +91,11 @@ async function requestRealTradingWithFallback<T>(
         if (!allowFallback || !shouldUseDirectFallback(error)) {
             throw error;
         }
+        const directApiBase = getRuntimeRealTradingDirectApiBase();
+        if (!directApiBase) {
+            throw error;
+        }
+        const directHttp = createHttpClient(directApiBase);
         const response = await directHttp.request<T>(config as any);
         return response.data;
     }
@@ -543,7 +557,7 @@ export const realTradingService = {
 
         const token = authService.getAccessToken();
         const promise = axios.get(
-            `${SERVICE_ENDPOINTS.API_GATEWAY}/internal/strategy/bridge/binding/status`,
+            `${String(SERVICE_URLS.API_GATEWAY || '').replace(/\/+$/, '')}/internal/strategy/bridge/binding/status`,
             {
                 params: { user_id: userId },
                 headers: token ? new AxiosHeaders({ Authorization: `Bearer ${token}` }) : undefined,

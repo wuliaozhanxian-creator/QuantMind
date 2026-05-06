@@ -3,11 +3,10 @@ import axios from 'axios';
 
 // 基础配置 - 使用统一端口配置
 import { SERVICE_URLS } from '../config/services';
-const API_BASE_URL = SERVICE_URLS.DATA_SERVICE;
+const resolveApiBaseURL = () => String(SERVICE_URLS.DATA_SERVICE || '').replace(/\/+$/, '');
 
 // 创建axios实例
 const apiClient = axios.create({
-  baseURL: API_BASE_URL,
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
@@ -91,6 +90,8 @@ import { authService } from '../features/auth/services/authService';
 // 添加请求和响应拦截器
 apiClient.interceptors.request.use(
   (config) => {
+    config.baseURL = resolveApiBaseURL();
+    apiClient.defaults.baseURL = config.baseURL;
     const token = authService.getAccessToken();
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;

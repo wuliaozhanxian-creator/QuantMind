@@ -142,7 +142,7 @@ export const MODEL_ID_NAME_MAP: Record<string, string> = {
 
 export function modelIdToDisplayName(modelId?: string | null, fallback?: string) {
   if (!modelId) return fallback || '—';
-  return MODEL_ID_NAME_MAP[modelId] || modelId;
+  return MODEL_ID_NAME_MAP[modelId] || fallback || modelId;
 }
 
 export function modelDisplayName(m: UserModelRecord): string {

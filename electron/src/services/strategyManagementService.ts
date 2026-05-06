@@ -18,11 +18,11 @@ class StrategyManagementService {
 
   constructor() {
     this.client = axios.create({
-      baseURL: SERVICE_URLS.API_GATEWAY,
       timeout: 30000,
       headers: { 'Content-Type': 'application/json' },
     });
     this.client.interceptors.request.use((config) => {
+      config.baseURL = String(SERVICE_URLS.API_GATEWAY || '').replace(/\/+$/, '');
       const token = authService.getAccessToken();
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;

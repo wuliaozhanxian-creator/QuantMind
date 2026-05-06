@@ -8,9 +8,10 @@ import axios, { AxiosInstance } from 'axios';
 import { SERVICE_URLS } from '../config/services';
 import { authService } from '../features/auth/services/authService';
 
+const resolveApiBaseURL = () => String(SERVICE_URLS.QLIB_SERVICE || '').replace(/\/+$/, '');
+
 // 创建axios实例
 const apiClient: AxiosInstance = axios.create({
-  baseURL: SERVICE_URLS.QLIB_SERVICE,
   timeout: 120000,
   headers: {
     'Content-Type': 'application/json',
@@ -19,6 +20,8 @@ const apiClient: AxiosInstance = axios.create({
 
 apiClient.interceptors.request.use(
   (config) => {
+    config.baseURL = resolveApiBaseURL();
+    apiClient.defaults.baseURL = config.baseURL;
     const token = authService.getAccessToken();
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;

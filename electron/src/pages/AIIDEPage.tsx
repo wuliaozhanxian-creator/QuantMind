@@ -37,6 +37,7 @@ import { clsx } from 'clsx';
 import { authService } from '../features/auth/services/authService';
 import { strategyManagementService } from '../services/strategyManagementService';
 import { backtestService } from '../services/backtestService';
+import { modelTrainingService } from '../services/modelTrainingService';
 import type { BacktestResult } from '../services/backtestService';
 import { SERVICE_ENDPOINTS } from '../config/services';
 import { PAGE_LAYOUT } from '../config/pageLayout';
@@ -161,6 +162,18 @@ const AIIDEPage: React.FC = () => {
     const runCancelRef = React.useRef<(() => void) | null>(null);
     const runTaskIdRef = React.useRef<string | null>(null);
     const runModeRef = React.useRef<'execute' | 'qlib' | null>(null);
+    const executeResultRef = React.useRef<{
+        annual_return?: number;
+        sharpe_ratio?: number;
+        max_drawdown?: number;
+        total_return?: number;
+        win_rate?: number;
+        total_trades?: number;
+        profit_factor?: number;
+        avg_win?: number;
+        execution_time?: number;
+        status?: 'completed' | 'failed';
+    } | null>(null);
     const lastSetRootFailureRef = React.useRef<'invalid_path' | 'unavailable' | 'other' | null>(null);
     const editorRef = React.useRef<any>(null);
     const monacoRef = React.useRef<any>(null);
@@ -822,10 +835,152 @@ const AIIDEPage: React.FC = () => {
         };
     };
 
+    const resolveAiIdeExecutionContext = async () => {
+        const strategyId =
+            activeTab === 'remote' ? String(selectedRemote?.id || '').trim() || undefined : undefined;
+
+        let modelId: string | undefined;
+        let runId: string | undefined;
+
+        try {
+            const defaultModel = await modelTrainingService.getDefaultModel();
+            const defaultModelId = String(defaultModel?.model_id || '').trim();
+            if (defaultModelId) {
+                modelId = defaultModelId;
+            }
+        } catch (error) {
+            console.warn('[AI-IDE] Failed to resolve default model', error);
+        }
+
+        if (!modelId && strategyId) {
+            try {
+                const binding = await modelTrainingService.getStrategyBinding(strategyId);
+                const boundModelId = String(binding?.model_id || '').trim();
+                if (boundModelId) {
+                    modelId = boundModelId;
+                }
+            } catch (error) {
+                console.warn('[AI-IDE] Failed to resolve strategy model binding', error);
+            }
+        }
+
+        try {
+            const latestRun = await modelTrainingService.getLatestInferenceRun(modelId);
+            const resolvedModelId = String(latestRun?.model_id || '').trim();
+            const latestRunId = String(latestRun?.run_id || '').trim();
+            if (!modelId && resolvedModelId) {
+                modelId = resolvedModelId;
+            }
+            if (latestRunId) {
+                runId = latestRunId;
+            }
+        } catch (error) {
+            console.warn('[AI-IDE] Failed to resolve latest inference run', error);
+        }
+
+        return {
+            strategy_id: strategyId,
+            model_id: modelId,
+            run_id: runId,
+        };
+    };
+
     const cleanupRunSession = () => {
         runCancelRef.current = null;
         runTaskIdRef.current = null;
         runModeRef.current = null;
+    };
+
+    const resetExecuteResultSummary = () => {
+        executeResultRef.current = null;
+    };
+
+    const syncExecuteResultSummary = () => {
+        const current = executeResultRef.current;
+        if (!current) return;
+
+        const metrics: Array<{ label: string; value: string }> = [];
+        const tradeStats: Array<{ label: string; value: string }> = [];
+        const points: Array<{ label: string; value: string }> = [];
+        const pushMetric = (label: string, value: unknown, formatter?: (v: number) => string) => {
+            if (typeof value !== 'number' || !Number.isFinite(value)) return;
+            metrics.push({ label, value: formatter ? formatter(value) : value.toFixed(4) });
+        };
+
+        pushMetric('总收益率', current.total_return, (v) => `${(v * 100).toFixed(2)}%`);
+        pushMetric('年化收益率', current.annual_return, (v) => `${(v * 100).toFixed(2)}%`);
+        pushMetric('夏普比率', current.sharpe_ratio);
+        pushMetric('最大回撤', current.max_drawdown, (v) => `${(v * 100).toFixed(2)}%`);
+
+        if (typeof current.win_rate === 'number' && Number.isFinite(current.win_rate)) {
+            tradeStats.push({ label: '胜率', value: `${(current.win_rate * 100).toFixed(2)}%` });
+        }
+        if (typeof current.total_trades === 'number' && Number.isFinite(current.total_trades)) {
+            tradeStats.push({ label: '交易数', value: `${Math.round(current.total_trades)}` });
+        }
+        if (typeof current.profit_factor === 'number' && Number.isFinite(current.profit_factor)) {
+            tradeStats.push({ label: '盈亏比', value: `${current.profit_factor.toFixed(4)}` });
+        }
+        if (typeof current.avg_win === 'number' && Number.isFinite(current.avg_win)) {
+            tradeStats.push({ label: '平均盈利', value: `${current.avg_win.toFixed(2)}` });
+        }
+
+        if (typeof current.total_trades === 'number' && Number.isFinite(current.total_trades)) {
+            points.push({ label: '交易点数', value: `${Math.round(current.total_trades)}` });
+        }
+
+        setFinalResultSummary({
+            backtestId: jobId || undefined,
+            strategyName: activeTab === 'remote' ? selectedRemote?.name : selectedFile?.name,
+            benchmarkSymbol: 'SH000300',
+            status: current.status || 'completed',
+            executionTime:
+                typeof current.execution_time === 'number' && Number.isFinite(current.execution_time)
+                    ? `${current.execution_time.toFixed(2)}s`
+                    : undefined,
+            metrics,
+            tradeStats,
+            points,
+        });
+    };
+
+    const ingestExecuteResultLine = (line: string) => {
+        const trimmed = String(line || '').trim();
+        if (!trimmed) return;
+
+        const metricMatch = trimmed.match(/^\[RESULT\]\s+([a-z_]+):\s+(-?\d+(?:\.\d+)?)$/i);
+        if (metricMatch) {
+            const [, key, rawValue] = metricMatch;
+            const numericValue = Number(rawValue);
+            if (Number.isFinite(numericValue)) {
+                executeResultRef.current = {
+                    ...(executeResultRef.current || {}),
+                    [key]: numericValue,
+                };
+                syncExecuteResultSummary();
+            }
+            return;
+        }
+
+        const timeMatch = trimmed.match(/^\[RESULT\]\s+回测完成\s+\(耗时:\s+(-?\d+(?:\.\d+)?)s\)$/);
+        if (timeMatch) {
+            const numericValue = Number(timeMatch[1]);
+            executeResultRef.current = {
+                ...(executeResultRef.current || {}),
+                execution_time: Number.isFinite(numericValue) ? numericValue : undefined,
+                status: 'completed',
+            };
+            syncExecuteResultSummary();
+            return;
+        }
+
+        if (trimmed === '[RESULT] 回测成功') {
+            executeResultRef.current = {
+                ...(executeResultRef.current || {}),
+                status: 'completed',
+            };
+            syncExecuteResultSummary();
+        }
     };
 
     const appendLogLine = (line: string) => {
@@ -879,7 +1034,7 @@ const AIIDEPage: React.FC = () => {
             if (typeof result.total_trades === 'number') tradeStats.push({ label: '交易数', value: `${result.total_trades}` });
             if (typeof result.win_rate === 'number') tradeStats.push({ label: '胜率', value: `${(result.win_rate * 100).toFixed(2)}%` });
             if (typeof result.profit_factor === 'number') tradeStats.push({ label: '盈亏比', value: `${result.profit_factor.toFixed(4)}` });
-            if (typeof result.avg_holding_period === 'number') tradeStats.push({ label: '平均持仓', value: `${result.avg_holding_period.toFixed(2)}` });
+            if (typeof result.avg_win === 'number') tradeStats.push({ label: '平均盈利', value: `${result.avg_win.toFixed(2)}` });
         }
 
         if (typeof result.equity_curve?.length === 'number') {
@@ -1027,7 +1182,7 @@ const AIIDEPage: React.FC = () => {
             { label: '交易数', value: tradeMap.get('交易数') || '--', hint: '实际执行的买卖次数' },
             { label: '胜率', value: tradeMap.get('胜率') || '--', hint: '盈利交易占比' },
             { label: '盈亏比', value: tradeMap.get('盈亏比') || '--', hint: '平均盈利与平均亏损之比' },
-            { label: '平均持仓', value: tradeMap.get('平均持仓') || '--', hint: '单笔交易平均持仓天数' },
+            { label: '平均盈利', value: tradeMap.get('平均盈利') || '--', hint: '单笔盈利交易的平均收益' },
         ];
 
         const referenceItems: Array<{ label: string; value: string; hint: string }> = [
@@ -1038,10 +1193,20 @@ const AIIDEPage: React.FC = () => {
         ].filter((item) => item.value !== '--' && isReasonableMetricValue(item.value, 1000));
 
         const extraItems: Array<{ label: string; value: string; hint: string }> = [
-            { label: '权益曲线点数', value: pointMap.get('权益曲线点数') || '--', hint: '权益曲线采样点数量' },
             { label: '交易点数', value: pointMap.get('交易点数') || '--', hint: '前端可展示的交易记录条数' },
             { label: '耗时', value: summary.executionTime || '--', hint: '任务完成耗时' },
         ];
+
+        const metricDetailItems: Array<{ label: string; value: string; hint: string }> = [
+            tradeItems[0],
+            tradeItems[1],
+            tradeItems[2],
+            tradeItems[3],
+            extraItems[0],
+            extraItems[1],
+        ];
+        const leftColumnItems = metricDetailItems.slice(0, 3);
+        const rightColumnItems = metricDetailItems.slice(3, 6);
 
         return (
             <div className="space-y-3">
@@ -1086,7 +1251,7 @@ const AIIDEPage: React.FC = () => {
                     <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
                         <div className="text-sm font-bold text-gray-800 mb-3">交易统计</div>
                         <div className="space-y-2">
-                            {tradeItems.map((item) => (
+                            {leftColumnItems.map((item) => (
                                 <div key={item.label} className="flex items-center justify-between rounded-xl bg-gray-50 px-3 py-2">
                                     <div>
                                         <div className="text-[10px] text-gray-400">{item.label}</div>
@@ -1101,7 +1266,7 @@ const AIIDEPage: React.FC = () => {
                     <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
                         <div className="text-sm font-bold text-gray-800 mb-3">结果规模</div>
                         <div className="space-y-2">
-                            {extraItems.map((item) => (
+                            {rightColumnItems.map((item) => (
                                 <div key={item.label} className="flex items-center justify-between rounded-xl bg-gray-50 px-3 py-2">
                                     <div>
                                         <div className="text-[10px] text-gray-400">{item.label}</div>
@@ -1214,6 +1379,7 @@ const AIIDEPage: React.FC = () => {
             setLogs([]);
             setErrors([]);
             setFinalResultSummary(null);
+            resetExecuteResultSummary();
             setProgress(null);
             setLogTab('result');
             setIsRunning(true);
@@ -1229,6 +1395,7 @@ const AIIDEPage: React.FC = () => {
         try {
             let res;
             runModeRef.current = 'execute';
+            const executionContext = await resolveAiIdeExecutionContext();
             if (activeTab === 'local' && selectedFile) {
                 const normalizedFilePath = String(selectedFile.path || selectedFile.name || '').trim();
                 const executeFilename = (() => {
@@ -1243,6 +1410,7 @@ const AIIDEPage: React.FC = () => {
                     body: JSON.stringify({ 
                         filename: executeFilename,
                         content: editorContent,
+                        ...executionContext,
                     })
                 }, true);
             } else {
@@ -1252,6 +1420,7 @@ const AIIDEPage: React.FC = () => {
                     body: JSON.stringify({
                         content: editorContent,
                         filename: activeTab === 'remote' ? selectedRemote?.name : 'unsaved_local.py',
+                        ...executionContext,
                     })
                 }, true);
             }
@@ -1296,6 +1465,7 @@ const AIIDEPage: React.FC = () => {
             es.onmessage = (event) => {
                 const text = event.data;
                 if (text === '[PROCESS_FINISHED]') {
+                    syncExecuteResultSummary();
                     setIsRunning(false);
                     cleanupRunSession();
                     es.close();
@@ -1316,6 +1486,7 @@ const AIIDEPage: React.FC = () => {
                     });
                     setLogTab('error');
                 } else {
+                    ingestExecuteResultLine(text);
                     (setLogs as React.Dispatch<React.SetStateAction<string[]>>)((curr) => {
                         const updated = [...curr, text];
                         return updated.length > 1000 ? updated.slice(-1000) : updated;

@@ -9,12 +9,11 @@ import { SERVICE_URLS } from '../config/services';
 import { authService } from '../features/auth/services/authService';
 
 // API基础配置
-const API_BASE_URL = `${SERVICE_URLS.QLIB_SERVICE}/api/v1/qlib`;
+const resolveApiBaseURL = () => `${String(SERVICE_URLS.QLIB_SERVICE || '').replace(/\/+$/, '')}/api/v1/qlib`;
 const WS_BASE_URL = SERVICE_URLS.QLIB_SERVICE.replace(/^http(s)?:\/\//, '');
 
 // 创建axios实例
 const apiClient: AxiosInstance = axios.create({
-  baseURL: API_BASE_URL,
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
@@ -24,6 +23,8 @@ const apiClient: AxiosInstance = axios.create({
 // 请求拦截器
 apiClient.interceptors.request.use(
   (config) => {
+    config.baseURL = resolveApiBaseURL();
+    apiClient.defaults.baseURL = config.baseURL;
     // 可以在这里添加认证token
     const token = authService.getAccessToken();
     if (token) {
@@ -296,14 +297,14 @@ class BacktestCenterService {
   // ========== 导出功能 ==========
 
   async exportPDF(backtestId: string): Promise<Blob> {
-    const response = await axios.get(`${API_BASE_URL}/export/${backtestId}/pdf`, {
+    const response = await axios.get(`${resolveApiBaseURL()}/export/${backtestId}/pdf`, {
       responseType: 'blob',
     });
     return response.data;
   }
 
   async exportExcel(backtestId: string): Promise<Blob> {
-    const response = await axios.get(`${API_BASE_URL}/export/${backtestId}/excel`, {
+    const response = await axios.get(`${resolveApiBaseURL()}/export/${backtestId}/excel`, {
       responseType: 'blob',
     });
     return response.data;

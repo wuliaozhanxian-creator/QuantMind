@@ -6,8 +6,10 @@ import { SERVICE_ENDPOINTS, SERVICE_URLS } from '../config/services';
 export const API_BASE_URL = SERVICE_ENDPOINTS.AI_STRATEGY;
 export const BACKTEST_API_BASE_URL = SERVICE_URLS.QLIB_SERVICE;
 
+const resolveAiStrategyBaseURL = () => String(SERVICE_ENDPOINTS.AI_STRATEGY || '').replace(/\/+$/, '');
+const resolveBacktestBaseURL = () => String(SERVICE_URLS.QLIB_SERVICE || '').replace(/\/+$/, '');
+
 export const apiClient = axios.create({
-  baseURL: API_BASE_URL,
   timeout: 300000,
   headers: {
     'Content-Type': 'application/json',
@@ -15,7 +17,6 @@ export const apiClient = axios.create({
 });
 
 export const backtestClient = axios.create({
-  baseURL: BACKTEST_API_BASE_URL,
   timeout: 180000,
   headers: {
     'Content-Type': 'application/json',
@@ -24,6 +25,8 @@ export const backtestClient = axios.create({
 
 apiClient.interceptors.request.use(
   (config) => {
+    config.baseURL = resolveAiStrategyBaseURL();
+    apiClient.defaults.baseURL = config.baseURL;
     const token = authService.getAccessToken();
     if (token) {
       if (config.headers && typeof config.headers.set === 'function') {
@@ -57,6 +60,8 @@ apiClient.interceptors.response.use(
 
 backtestClient.interceptors.request.use(
   (config) => {
+    config.baseURL = resolveBacktestBaseURL();
+    backtestClient.defaults.baseURL = config.baseURL;
     const token = authService.getAccessToken();
     if (token) {
       if (config.headers && typeof config.headers.set === 'function') {

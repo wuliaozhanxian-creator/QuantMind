@@ -21,6 +21,7 @@ import logger from './utils/safeLogger';
 import { refreshOrchestrator } from './services/refreshOrchestrator';
 import { useTradingModeInitialization } from './hooks/useTradingModeInitialization';
 import { authService } from './features/auth/services/authService';
+import { initDynamicServerUrl } from './config/services';
 
 // 认证相关组件
 import AppRoutes from './features/auth/AppRoutes';
@@ -80,6 +81,7 @@ export default function App() {
   const navigate = useNavigate();
   const location = useLocation();
   const [modules, setModules] = useState<DashboardModule[]>(defaultModules);
+  const [serverConfigReady, setServerConfigReady] = useState(false);
   const { ExportModal } = useMenuExport();
   const { isAuthenticated, isLoading } = useAuth();
   useTheme();
@@ -173,6 +175,29 @@ export default function App() {
         logger.error('加载保存的布局失败:', error);
       }
     }
+  }, []);
+
+  // 应用启动时优先恢复用户保存的服务器地址，避免业务页先回落到 localhost。
+  React.useEffect(() => {
+    let cancelled = false;
+
+    const bootstrapServerConfig = async () => {
+      try {
+        await initDynamicServerUrl();
+      } catch (error) {
+        logger.warn('初始化服务器地址失败，将继续使用默认配置:', error);
+      } finally {
+        if (!cancelled) {
+          setServerConfigReady(true);
+        }
+      }
+    };
+
+    void bootstrapServerConfig();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // 全局预加载 AI-IDE 资源：应用启动/刷新后统一触发（开发/生产均生效）
@@ -273,6 +298,37 @@ export default function App() {
   }, [isAuthenticated, isPublicRoute]);
 
   const hasLocalToken = !!authService.getAccessToken();
+
+  if (!serverConfigReady) {
+    if (!hasLocalToken || isPublicRoute) {
+      return (
+        <div
+          style={{
+            minHeight: '100vh',
+            background:
+              'linear-gradient(135deg, #667eea 0%, #764ba2 25%, #f093fb 50%, #f5576c 75%, #4facfe 100%)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <div style={{ textAlign: 'center', color: 'white' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+              <div style={{ fontSize: 18, fontWeight: 700, color: 'white', letterSpacing: '-0.02em' }}>
+                QuantMind
+              </div>
+              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)' }}>
+                正在恢复服务器配置
+              </div>
+            </div>
+            <div style={{ height: 20 }} />
+            <Spin size="large" />
+          </div>
+        </div>
+      );
+    }
+    return <DashboardSkeleton />;
+  }
 
   if (isLoading) {
     if (!hasLocalToken || isPublicRoute) {

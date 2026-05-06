@@ -156,7 +156,7 @@ function createMenu() {
       submenu: [
         {
           label: '关于 QuantMind',
-          click: () => shell.openExternal('https://github.com/your-repo/quantmind')
+          click: () => shell.openExternal('https://www.quantmindai.cn/')
         }
       ]
     }
@@ -577,29 +577,13 @@ function setupAutoUpdater() {
   log.transports.file.level = 'debug';
   autoUpdater.logger = log;
 
-  // OSS Edition - 自动更新已禁用
-  // 如需启用，请设置 UPDATE_SERVER_URL 环境变量
-  const resolveUpdateServerUrl = (): string => {
-    const normalize = (value?: string): string => String(value || '').trim().replace(/\/+$/, '');
-    const platformUrl = process.platform === 'win32'
-      ? normalize(process.env.UPDATE_SERVER_URL_WIN)
-      : process.platform === 'darwin'
-        ? normalize(process.env.UPDATE_SERVER_URL_MAC)
-        : normalize(process.env.UPDATE_SERVER_URL_LINUX);
-    return platformUrl || normalize(process.env.UPDATE_SERVER_URL) || '';
-  };
+  // 更新服务器地址 (腾讯云 COS)
+  const UPDATE_SERVER_URL = 'https://cos.quantmind.cloud/update/oss';
 
-  const updateServerUrl = resolveUpdateServerUrl();
-  
-  if (!updateServerUrl) {
-    log.info('OSS Edition: 自动更新已禁用');
-    return;
-  }
-  
-  log.info(`自动更新源(${process.platform}): ${updateServerUrl}`);
+  log.info(`自动更新源(${process.platform}): ${UPDATE_SERVER_URL}`);
   autoUpdater.setFeedURL({
     provider: 'generic',
-    url: updateServerUrl
+    url: UPDATE_SERVER_URL
   });
 
   // 静默后台下载，退出时自动安装
