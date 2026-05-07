@@ -26,6 +26,11 @@ _SKIP_HEADERS = {"host", "content-length", "transfer-encoding"}
 
 async def _do_proxy(request: Request, user: dict | None = None) -> Response:
     path = request.url.path
+
+    # 兼容旧版前端：将 /internal/strategy 重写为 /api/v1/internal/strategy
+    if path.startswith("/internal/strategy"):
+        path = f"/api/v1{path}"
+
     url = f"{TRADE_BASE_URL}{path}"
     if request.url.query:
         url = f"{url}?{request.url.query}"
@@ -109,6 +114,13 @@ async def _do_proxy(request: Request, user: dict | None = None) -> Response:
 @router.api_route("/api/v1/internal/strategy", methods=["GET", "POST", "OPTIONS"], include_in_schema=False)
 @router.api_route(
     "/api/v1/internal/strategy/{p:path}",
+    methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    include_in_schema=False,
+)
+# 兼容旧版前端路径（不带 /api/v1 前缀）
+@router.api_route("/internal/strategy", methods=["GET", "POST", "OPTIONS"], include_in_schema=False)
+@router.api_route(
+    "/internal/strategy/{p:path}",
     methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     include_in_schema=False,
 )
