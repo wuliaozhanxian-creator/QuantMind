@@ -180,3 +180,4 @@ db/diagram/postgresql_schema.dot
 db/backups/*.gz
 db/feature_snapshots/*.parquet
 !db/feature_snapshots/*.json
+website/download-config.json

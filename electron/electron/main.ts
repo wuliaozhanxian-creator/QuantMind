@@ -86,23 +86,10 @@ let mainWindow: BrowserWindow | null = null;
 
 
 /**
- * 创建应用程序菜单
+ * 创建应用程序菜单（仅保留必要的编辑功能）
  */
 function createMenu() {
   const template: MenuItemConstructorOptions[] = [
-    {
-      label: '文件',
-      submenu: [
-        { label: '撤销', accelerator: 'CmdOrCtrl+Z', role: 'undo' },
-        { label: '重做', accelerator: 'CmdOrCtrl+Y', role: 'redo' },
-        { type: 'separator' },
-        { label: '剪切', accelerator: 'CmdOrCtrl+X', role: 'cut' },
-        { label: '复制', accelerator: 'CmdOrCtrl+C', role: 'copy' },
-        { label: '粘贴', accelerator: 'CmdOrCtrl+V', role: 'paste' },
-        { label: '删除', role: 'delete' },
-        { label: '全选', accelerator: 'CmdOrCtrl+A', role: 'selectAll' }
-      ]
-    },
     {
       label: '编辑',
       submenu: [
@@ -111,36 +98,9 @@ function createMenu() {
         { type: 'separator' },
         { label: '剪切', accelerator: 'CmdOrCtrl+X', role: 'cut' },
         { label: '复制', accelerator: 'CmdOrCtrl+C', role: 'copy' },
-        { label: '粘贴', accelerator: 'CmdOrCtrl+V', role: 'paste' }
-      ]
-    },
-    {
-      label: '视图',
-      submenu: [
-        { label: '重新加载', accelerator: 'CmdOrCtrl+R', click: () => mainWindow?.reload() },
-        { label: '强制重新加载', accelerator: 'CmdOrCtrl+Shift+R', click: () => mainWindow?.webContents.reloadIgnoringCache() },
-        { type: 'separator' },
-        { label: '实际大小', accelerator: 'CmdOrCtrl+0', role: 'resetZoom' },
-        { label: '放大', accelerator: 'CmdOrCtrl+Plus', role: 'zoomIn' },
-        { label: '缩小', accelerator: 'CmdOrCtrl+-', role: 'zoomOut' },
-        { type: 'separator' },
-        { label: '切换全屏', accelerator: 'F11', role: 'togglefullscreen' }
-      ]
-    },
-    {
-      label: '工具',
-      submenu: [
-        {
-          label: '导出数据',
-          accelerator: 'CmdOrCtrl+Shift+E',
-          click: () => {
-            if (mainWindow) {
-              console.log('[main] menu: export-data clicked');
-              mainWindow.webContents.send('menu-export-data');
-            }
-          }
-        },
-        { type: 'separator' }
+        { label: '粘贴', accelerator: 'CmdOrCtrl+V', role: 'paste' },
+        { label: '删除', role: 'delete' },
+        { label: '全选', accelerator: 'CmdOrCtrl+A', role: 'selectAll' }
       ]
     },
     {
@@ -257,21 +217,61 @@ function createWindow() {
   Menu.setApplicationMenu(null);
   mainWindow.setMenuBarVisibility(false);
 
-  // [Optimization] 恢复强制刷新功能 (Cmd/Ctrl+R)
-  // 即使禁用了原生菜单，我们仍允许开发/调试时的刷新操作
+  // 禁用所有影响用户体验的快捷键
   mainWindow.webContents.on('before-input-event', (event, input) => {
     const isControlOrMeta = process.platform === 'darwin' ? input.meta : input.control;
-    
-    // 刷新逻辑
-    if (isControlOrMeta && input.key.toLowerCase() === 'r') {
-      if (input.shift) {
-        console.log('[main] Triggering forced reload (ignoring cache)');
-        mainWindow?.webContents.reloadIgnoringCache();
-      } else {
-        console.log('[main] Triggering reload');
-        mainWindow?.webContents.reload();
-      }
+    const isAlt = input.alt;
+
+    // 禁用刷新相关快捷键 (Cmd/Ctrl+R, Cmd/Ctrl+Shift+R, F5)
+    if ((isControlOrMeta && input.key.toLowerCase() === 'r') || input.key === 'F5') {
       event.preventDefault();
+      return;
+    }
+
+    // 禁用缩放相关快捷键 (Cmd/Ctrl+Plus, Cmd/Ctrl+-, Cmd/Ctrl+0, Cmd/Ctrl+Shift+Plus)
+    if (isControlOrMeta && (input.key === '+' || input.key === '-' || input.key === '0' || input.key === '=')) {
+      event.preventDefault();
+      return;
+    }
+
+    // 禁用全屏快捷键 (F11, Cmd/Ctrl+F)
+    if (input.key === 'F11' || (isControlOrMeta && input.key.toLowerCase() === 'f')) {
+      event.preventDefault();
+      return;
+    }
+
+    // 禁用开发者工具快捷键 (Cmd/Ctrl+Shift+I, Cmd/Ctrl+Shift+J, Cmd/Ctrl+Shift+C, F12)
+    if ((isControlOrMeta && input.shift && (input.key.toLowerCase() === 'i' || input.key.toLowerCase() === 'j' || input.key.toLowerCase() === 'c')) || input.key === 'F12') {
+      event.preventDefault();
+      return;
+    }
+
+    // 禁用打印快捷键 (Cmd/Ctrl+P)
+    if (isControlOrMeta && input.key.toLowerCase() === 'p') {
+      event.preventDefault();
+      return;
+    }
+
+    // 禁用查找快捷键 (Cmd/Ctrl+F, Cmd/Ctrl+G)
+    if (isControlOrMeta && (input.key.toLowerCase() === 'f' || input.key.toLowerCase() === 'g')) {
+      event.preventDefault();
+      return;
+    }
+
+    // 禁用历史导航快捷键 (Cmd/Ctrl+H, Alt+Left/Right)
+    if (isControlOrMeta && input.key.toLowerCase() === 'h') {
+      event.preventDefault();
+      return;
+    }
+    if (isAlt && (input.key === 'ArrowLeft' || input.key === 'ArrowRight')) {
+      event.preventDefault();
+      return;
+    }
+
+    // 禁用新建窗口快捷键 (Cmd/Ctrl+N)
+    if (isControlOrMeta && input.key.toLowerCase() === 'n') {
+      event.preventDefault();
+      return;
     }
   });
 

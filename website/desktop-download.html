@@ -141,9 +141,9 @@
                 </svg>
               </div>
               <h4 class="feature-title">Windows</h4>
-              <p class="feature-desc" id="windows-info">加载中...</p>
-              <p class="text-muted" style="font-size: 13px;" id="windows-req"></p>
-              <a href="#" id="windows-link" class="btn btn-primary mt-4">
+              <p class="feature-desc">v1.0.0 | 约 160MB</p>
+              <p class="text-muted" style="font-size: 13px;">支持 Windows 10/11</p>
+              <a href="https://hubei-41.zos.ctyun.cn/bucket-quantmind/QuantMind%E9%87%8F%E5%8C%96%E5%8A%A9%E6%89%8B%20Setup%201.0.0.exe" class="btn btn-primary mt-4">
                 下载 .exe 安装包
               </a>
             </div>
@@ -156,24 +156,39 @@
                 </svg>
               </div>
               <h4 class="feature-title">Linux</h4>
-              <p class="feature-desc" id="linux-info">加载中...</p>
-              <p class="text-muted" style="font-size: 13px;" id="linux-req"></p>
-              <a href="#" id="linux-link" class="btn btn-primary mt-4">
-                下载 .AppImage
+              <p class="feature-desc">近期发布</p>
+              <p class="text-muted" style="font-size: 13px;">支持 Ubuntu 20.04+ / Debian 11+</p>
+              <a href="https://github.com/qusong0627/quantmind/releases" class="btn btn-primary mt-4">
+                近期发布
               </a>
             </div>
 
-            <!-- macOS -->
+            <!-- macOS (Intel) -->
             <div class="feature-card">
               <div class="platform-icon">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="48" height="48">
                   <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/>
                 </svg>
               </div>
-              <h4 class="feature-title">macOS</h4>
-              <p class="feature-desc" id="macos-info">加载中...</p>
-              <p class="text-muted" style="font-size: 13px;" id="macos-req"></p>
-              <a href="#" id="macos-link" class="btn btn-primary mt-4">
+              <h4 class="feature-title">macOS (Intel)</h4>
+              <p class="feature-desc">v1.0.0 | 约 220MB</p>
+              <p class="text-muted" style="font-size: 13px;">支持 macOS 11+ (Intel)</p>
+              <a href="https://hubei-41.zos.ctyun.cn/bucket-quantmind/QuantMind%E9%87%8F%E5%8C%96%E5%8A%A9%E6%89%8B-1.0.0.dmg" class="btn btn-primary mt-4">
+                下载 .dmg 安装包
+              </a>
+            </div>
+
+            <!-- macOS (Apple Silicon) -->
+            <div class="feature-card">
+              <div class="platform-icon">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="48" height="48">
+                  <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/>
+                </svg>
+              </div>
+              <h4 class="feature-title">macOS (Apple Silicon)</h4>
+              <p class="feature-desc">v1.0.0 | 约 210MB</p>
+              <p class="text-muted" style="font-size: 13px;">支持 macOS 11+ (Apple Silicon)</p>
+              <a href="https://hubei-41.zos.ctyun.cn/bucket-quantmind/QuantMind%E9%87%8F%E5%8C%96%E5%8A%A9%E6%89%8B-1.0.0-arm64.dmg" class="btn btn-primary mt-4">
                 下载 .dmg 安装包
               </a>
             </div>
@@ -258,7 +273,13 @@ sudo xattr -rd com.apple.quarantine /Applications/QuantMind量化助手.app</cod
                 <td>≥ 500MB</td>
               </tr>
               <tr>
-                <td><strong>macOS</strong></td>
+                <td><strong>macOS (Intel)</strong></td>
+                <td>macOS 11+ (Big Sur)</td>
+                <td>≥ 4GB</td>
+                <td>≥ 500MB</td>
+              </tr>
+              <tr>
+                <td><strong>macOS (Apple Silicon)</strong></td>
                 <td>macOS 11+ (Big Sur)</td>
                 <td>≥ 4GB</td>
                 <td>≥ 500MB</td>
@@ -273,51 +294,5 @@ sudo xattr -rd com.apple.quarantine /Applications/QuantMind量化助手.app</cod
   </div>
 
   <script src="./js/main.js"></script>
-  <script>
-    // 动态加载下载配置
-    (function() {
-      // 配置文件地址（COS 上的 JSON 文件）
-      const CONFIG_URL = 'https://cos.quantmind.cloud/website/download-config.json';
-
-      // 默认配置（加载失败时使用）
-      const DEFAULT_CONFIG = {
-        windows: { version: '1.0.4', size: '约 160MB', url: 'https://github.com/qusong0627/quantmind/releases', requirements: 'Windows 10/11' },
-        linux: { version: '1.0.4', size: '约 180MB', url: 'https://github.com/qusong0627/quantmind/releases', requirements: 'Ubuntu 20.04+ / Debian 11+' },
-        macos: { version: '1.0.4', size: '约 224MB', url: 'https://github.com/qusong0627/quantmind/releases', requirements: 'macOS 11+ (Intel/Apple Silicon)' }
-      };
-
-      function updateDownloadLink(platform, config) {
-        const infoEl = document.getElementById(platform + '-info');
-        const reqEl = document.getElementById(platform + '-req');
-        const linkEl = document.getElementById(platform + '-link');
-
-        if (infoEl && config) {
-          infoEl.textContent = 'v' + config.version + ' | ' + config.size;
-        }
-        if (reqEl && config) {
-          reqEl.textContent = '支持 ' + config.requirements;
-        }
-        if (linkEl && config && config.url) {
-          linkEl.href = config.url;
-        }
-      }
-
-      fetch(CONFIG_URL)
-        .then(response => response.json())
-        .then(data => {
-          if (data.downloads) {
-            updateDownloadLink('windows', data.downloads.windows);
-            updateDownloadLink('linux', data.downloads.linux);
-            updateDownloadLink('macos', data.downloads.macos);
-          }
-        })
-        .catch(error => {
-          console.warn('加载下载配置失败，使用默认配置:', error);
-          updateDownloadLink('windows', DEFAULT_CONFIG.windows);
-          updateDownloadLink('linux', DEFAULT_CONFIG.linux);
-          updateDownloadLink('macos', DEFAULT_CONFIG.macos);
-        });
-    })();
-  </script>
 </body>
 </html>
