@@ -207,9 +207,10 @@ pm2 restart quantmind-web
 
 特点：
 - 自动从 Gitee 拉取最新代码
-- 自动重建后端与前端
-- 明确不执行数据库初始化，不删除数据库数据
-- 后端仅重建 `quantmind` 与 `celery-worker`，不重建 `db`/`redis`
+- 自动重建后端容器（quantmind、celery-worker）
+- 不执行数据库初始化，不删除数据库数据
+- 不重建 db/redis 容器
+- 前端为桌面客户端，无需在服务器构建
 
 ```bash
 cd /opt/quantmind
@@ -219,12 +220,6 @@ sudo bash deploy/update.sh
 可选参数：
 
 ```bash
-# 仅更新后端
-sudo bash deploy/update.sh --backend-only
-
-# 仅更新前端
-sudo bash deploy/update.sh --frontend-only
-
 # 强制覆盖本地修改后更新（谨慎）
 sudo bash deploy/update.sh --force-sync
 ```

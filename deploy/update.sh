@@ -263,10 +263,41 @@ wait_http_ok() {
 health_check() {
     log_step "健康检查"
 
+    local all_ok=true
+
+    # 检查 API 服务
     if wait_http_ok "http://127.0.0.1:8000/health" 40 2; then
-        log_info "后端健康检查通过: http://127.0.0.1:8000/health"
+        log_info "API 服务 (8000): ✅"
     else
-        log_error "后端健康检查失败，请检查容器日志"
+        log_error "API 服务 (8000): ❌"
+        all_ok=false
+    fi
+
+    # 检查 Engine 服务
+    if wait_http_ok "http://127.0.0.1:8001/health" 20 2; then
+        log_info "Engine 服务 (8001): ✅"
+    else
+        log_warn "Engine 服务 (8001): ❌"
+    fi
+
+    # 检查 Trade 服务
+    if wait_http_ok "http://127.0.0.1:8002/health" 20 2; then
+        log_info "Trade 服务 (8002): ✅"
+    else
+        log_warn "Trade 服务 (8002): ❌"
+    fi
+
+    # 检查 Stream 服务
+    if wait_http_ok "http://127.0.0.1:8003/health" 20 2; then
+        log_info "Stream 服务 (8003): ✅"
+    else
+        log_warn "Stream 服务 (8003): ❌"
+    fi
+
+    if $all_ok; then
+        log_info "健康检查通过"
+    else
+        log_error "部分服务健康检查失败，请检查容器日志"
         exit 1
     fi
 }
