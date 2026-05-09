@@ -1,7 +1,6 @@
 """Step 2: 股票池确认 - 执行查询并展示结果"""
 
 import logging
-import math
 import os
 import re
 from datetime import date
@@ -54,54 +53,15 @@ from .step1_stock_selection import (
 
 logger = logging.getLogger(__name__)
 TOTAL_MV_PER_YI = float(os.getenv("AI_STRATEGY_TOTAL_MV_PER_YI", "100000000.0"))
-# 换算系数：从数据库单位（元）转为前端展示单位（亿元）
-TOTAL_MV_TO_YI = 1.0 / 100000000.0
+TOTAL_MV_TO_YI = 1.0 / 100000000.0  # 对外统一返回亿元口径，与投研接口一致
 
-
-def _serialize_float(v: Any) -> float | None:
-    """安全序列化浮点值，过滤 NaN/Inf 防止 JSON 序列化崩溃。"""
-    try:
-        if v is None:
-            return None
-        val = float(v)
-        if math.isfinite(val):
-            return val
-        return None
-    except (ValueError, TypeError):
-        return None
-
-
-def _normalize_symbol(symbol: str) -> str:
-    """将 symbol 统一转为大写前缀格式 (如 SZ300020)。
-
-    支持输入格式:
-    - 纯代码: 300020, 000720, 688287
-    - 小写前缀: sz300020, sh688287
-    - 大写前缀: SZ300020, SH688287
-    - 后缀格式: 300020.SZ, 300020.SZ
-    """
-    if not symbol:
-        return symbol
-    s = symbol.strip().upper()
-    # 已经是大写前缀格式
-    if re.match(r'^(SH|SZ|BJ)[0-9]{6}$', s):
-        return s
-    # 后缀格式: 300020.SZ -> SZ300020
-    m = re.match(r'^([0-9]{6})\.(SH|SZ|BJ)$', s)
-    if m:
-        return f"{m.group(2)}{m.group(1)}"
-    # 纯代码: 根据首位判断市场
-    m = re.match(r'^([0-9]{6})$', s)
-    if m:
-        code = m.group(1)
-        if code[0] in ('6', '9'):
-            return f"SH{code}"
-        elif code[0] in ('4', '8'):
-            return f"BJ{code}"
-        else:
-            return f"SZ{code}"
-    # 其他格式直接返回大写
-    return s
+COMPATIBLE_COLUMN_CANDIDATES = {
+    "symbol": ["symbol", "code"],
+    "name": ["name", "stock_name"],
+    "amount": ["amount", "turnover"],
+    "idx_hs300": ["idx_hs300", "is_hs300", "is_csi300"],
+    "idx_zz1000": ["idx_zz1000", "is_csi1000"],
+}
 
 
 def _get_table_columns(session, table_name: str) -> set[str]:
@@ -120,23 +80,78 @@ def _get_table_columns(session, table_name: str) -> set[str]:
         return set()
 
 
-def _resolve_hs300_column(columns: set[str]) -> str:
-    """解析沪深300指数成分列名，优先使用 idx_hs300。"""
-    if "idx_hs300" in columns:
-        return "idx_hs300"
-    if "is_hs300" in columns:
-        return "is_hs300"
-    if "is_csi300" in columns:
-        return "is_csi300"
-    # 回退默认值，保持兼容
-    return "idx_hs300"
+def _resolve_compatible_column(columns: set[str], logical_name: str) -> str:
+    for candidate in COMPATIBLE_COLUMN_CANDIDATES.get(logical_name, [logical_name]):
+        if candidate in columns:
+            return candidate
+    return logical_name
 
 
-def _normalize_index_flag_columns(sql: str, hs300_col: str) -> str:
-    # 统一把两种写法都改成当前库真实列名
-    out = re.sub(r"\bis_hs300\b", hs300_col, sql, flags=re.IGNORECASE)
-    out = re.sub(r"\bis_csi300\b", hs300_col, out, flags=re.IGNORECASE)
-    return out
+def _build_compat_table_sql(table_name: str, columns: set[str]) -> str:
+    if not columns:
+        return table_name
+
+    select_fields = [col for col in sorted(columns)]
+    alias_targets = {
+        "symbol": _resolve_compatible_column(columns, "symbol"),
+        "code": _resolve_compatible_column(columns, "symbol"),
+        "name": _resolve_compatible_column(columns, "name"),
+        "stock_name": _resolve_compatible_column(columns, "name"),
+        "amount": _resolve_compatible_column(columns, "amount"),
+        "turnover": _resolve_compatible_column(columns, "amount"),
+        "idx_hs300": _resolve_compatible_column(columns, "idx_hs300"),
+        "is_hs300": _resolve_compatible_column(columns, "idx_hs300"),
+        "is_csi300": _resolve_compatible_column(columns, "idx_hs300"),
+        "idx_zz1000": _resolve_compatible_column(columns, "idx_zz1000"),
+        "is_csi1000": _resolve_compatible_column(columns, "idx_zz1000"),
+    }
+    for alias, target in alias_targets.items():
+        if alias not in columns and target in columns:
+            select_fields.append(f"{target} AS {alias}")
+
+    return f"(SELECT {', '.join(select_fields)} FROM {table_name})"
+
+
+def _replace_table_with_compat_subquery(sql: str, table_name: str, compat_table_sql: str) -> str:
+    if compat_table_sql == table_name:
+        return sql
+
+    pattern = re.compile(
+        rf"\b(FROM|JOIN)\s+{re.escape(table_name)}\b"
+        rf"(?:\s+(?:AS\s+)?(?P<alias>[a-zA-Z_][a-zA-Z0-9_]*)(?=\s+(?:WHERE|JOIN|ORDER|GROUP|LIMIT|ON|$)))?",
+        re.IGNORECASE,
+    )
+
+    def _repl(match: re.Match[str]) -> str:
+        alias = match.group("alias") or table_name
+        keyword = match.group(1)
+        return f"{keyword} {compat_table_sql} {alias}"
+
+    return pattern.sub(_repl, sql)
+
+
+def _inject_trade_date_filter(sql: str, as_of_date: date | None) -> str:
+    normalized = sql.strip().rstrip(";")
+    if not as_of_date:
+        return normalized
+
+    split_match = re.search(r"\b(order\s+by|limit)\b", normalized, re.IGNORECASE)
+    if split_match:
+        body = normalized[: split_match.start()].rstrip()
+        tail = " " + normalized[split_match.start() :].lstrip()
+    else:
+        body = normalized
+        tail = ""
+
+    if re.search(r"\btrade_date\b", body, re.IGNORECASE):
+        return normalized
+
+    trade_clause = f"trade_date = '{as_of_date}'"
+    if re.search(r"\bwhere\b", body, re.IGNORECASE):
+        body = re.sub(r"\bWHERE\b", f"WHERE {trade_clause} AND ", body, count=1, flags=re.IGNORECASE)
+    else:
+        body = f"{body} WHERE {trade_clause}"
+    return f"{body}{tail}"
 
 
 def _query_pool_limit() -> int:
@@ -242,31 +257,15 @@ def _execute_raw_selection_sql(sql: str) -> tuple[list[PoolItem], date | None]:
         # 强制清除 LLM 可能生成的 LIMIT 限制，确保返回足够多的股票
         normalized_sql = re.sub(r"limit\s+\d+", "", normalized_sql, flags=re.IGNORECASE).strip()
         max_rows = _query_pool_limit()
+        if not normalized_sql.lower().endswith(f"limit {max_rows}"):
+            normalized_sql += f" LIMIT {max_rows}"
 
         with get_db() as session:
             target_columns = _get_table_columns(session, target_table)
-            hs300_col = _resolve_hs300_column(target_columns)
-            normalized_sql = _normalize_index_flag_columns(normalized_sql, hs300_col)
-
-            # 获取最新交易日期
             as_of_date = session.execute(text(f"select max(trade_date) from {target_table}")).scalar()
-
-            # 如果 SQL 中没有 WHERE 子句，添加日期筛选
-            # 如果有 WHERE 子句，在 WHERE 后添加日期条件
-            if "where" not in normalized_sql.lower():
-                normalized_sql = normalized_sql.rstrip(";").rstrip() + f" WHERE trade_date = '{as_of_date}'"
-            else:
-                # 在现有 WHERE 子句后添加日期条件
-                normalized_sql = re.sub(
-                    r"\bWHERE\b",
-                    f"WHERE trade_date = '{as_of_date}' AND ",
-                    normalized_sql,
-                    flags=re.IGNORECASE
-                )
-
-            # 添加 LIMIT
-            if not normalized_sql.lower().endswith(f"limit {max_rows}"):
-                normalized_sql += f" LIMIT {max_rows}"
+            compat_table_sql = _build_compat_table_sql(target_table, target_columns)
+            normalized_sql = _inject_trade_date_filter(normalized_sql, as_of_date)
+            normalized_sql = _replace_table_with_compat_subquery(normalized_sql, target_table, compat_table_sql)
 
             result = session.execute(text(normalized_sql)).fetchall()
 
@@ -275,7 +274,7 @@ def _execute_raw_selection_sql(sql: str) -> tuple[list[PoolItem], date | None]:
                 row_dict = row._asdict() if hasattr(row, "_asdict") else None
 
                 if row_dict:
-                    symbol = _normalize_symbol(str(row_dict.get("symbol") or row_dict.get("code") or ""))
+                    symbol = str(row_dict.get("symbol") or row_dict.get("code") or "")
                     name = row_dict.get("name") or row_dict.get("code") or symbol
 
                     market_cap = row_dict.get("market_cap")
@@ -291,17 +290,16 @@ def _execute_raw_selection_sql(sql: str) -> tuple[list[PoolItem], date | None]:
                         pb = row_dict.get("pb")
 
                     metrics = {
-                        # total_mv -> 元（默认 total_mv 为万元）
-                        "market_cap": (_serialize_float(market_cap) or 0.0) * TOTAL_MV_TO_YI,
-                        "pe": _serialize_float(pe) or 0.0,
-                        "close": _serialize_float(row_dict.get("close")) or 0.0,
-                        "pb": _serialize_float(pb) or 0.0,
-                        "roe": _serialize_float(row_dict.get("roe")) or 0.0,
+                        "market_cap": float(market_cap or 0) * TOTAL_MV_TO_YI,
+                        "pe": float(pe or 0),
+                        "close": float(row_dict.get("close") or 0),
+                        "pb": float(pb or 0),
+                        "roe": float(row_dict.get("roe") or 0),
                     }
                 else:
-                    symbol = _normalize_symbol(str(row[0]))
+                    symbol = str(row[0])
                     name = row[1] if len(row) > 1 else None
-                    metrics = {"close": _serialize_float(row[2]) if len(row) > 2 else 0.0}
+                    metrics = {"close": float(row[2]) if len(row) > 2 else 0.0}
 
                 items.append(PoolItem(symbol=symbol, name=name, metrics=metrics))
             return items, as_of_date
@@ -316,7 +314,7 @@ def _query_stock_pool(
     try:
         with get_db() as session:
             target_columns = _get_table_columns(session, LATEST_TABLE)
-            hs300_col = _resolve_hs300_column(target_columns)
+            compat_table_sql = _build_compat_table_sql(LATEST_TABLE, target_columns)
             # 1. 确定一个能覆盖绝大多数股票的有效"最新日期"
             # 而不是简单的 MAX，因为有些股票可能在最新一天停牌或未更新
             date_res = session.execute(
@@ -337,16 +335,9 @@ def _query_stock_pool(
             where_clauses = ["trade_date = :d"]
 
             # 3. 翻译 DSL 条件
-            # stock_daily_latest 表中的指数/概念标签列
-            flag_cols = {
-                "is_st", "idx_hs300", "idx_zz500", "idx_zz1000",
-                "idx_margin", "idx_chinext", "idx_all",
-                "concept_ai", "concept_chip", "concept_new_energy",
-            }
+            flag_cols = {"is_st", "idx_hs300", "idx_zz1000"}
             for idx, cond in enumerate(conditions):
                 col = _map_factor(cond["factor"])
-                if col in {"idx_hs300", "is_hs300", "is_csi300"}:
-                    col = hs300_col
                 param_key = f"p{idx}"
                 op = "=" if cond["op"] == "==" else cond["op"]
 
@@ -374,16 +365,16 @@ def _query_stock_pool(
 
             # 5. 执行最终查询 (全量返回，最高支持 10000 只股票)
             sql = f"""
-            SELECT
+            SELECT 
                 symbol,
-                stock_name as name,
+                name,
                 total_mv as market_cap,
                 pe_ttm as pe_ratio,
                 pb as pb_ratio,
                 close,
                 amount,
                 volume
-            FROM {LATEST_TABLE}
+            FROM {compat_table_sql} stock_daily_latest
             WHERE {final_where}
             ORDER BY total_mv DESC NULLS LAST
             LIMIT 10000
@@ -397,21 +388,46 @@ def _query_stock_pool(
 
             items: list[PoolItem] = []
             for row in result:
-                items.append(
-                    PoolItem(
-                        symbol=_normalize_symbol(row[0]),
-                        name=row[1],
-                        metrics={
-                            # total_mv -> 元（默认 total_mv 为万元）
-                            "market_cap": (_serialize_float(row[2]) or 0.0) * TOTAL_MV_TO_YI,
-                            "pe": _serialize_float(row[3]) or 0.0,
-                            "pb": _serialize_float(row[4]) or 0.0,
-                            "close": _serialize_float(row[5]) or 0.0,
-                            "amount": _serialize_float(row[6]) or 0.0,
-                            "volume": _serialize_float(row[7]) or 0.0,
-                        },
-                    )
-                )
+                # 使用 row_dict 确保字段取值稳健，不受列顺序影响
+                row_dict = row._asdict() if hasattr(row, "_asdict") else None
+                
+                if row_dict:
+                    symbol = str(row_dict.get("symbol") or "")
+                    name = row_dict.get("name")
+                    
+                    # 兼容不同可能的字段名
+                    market_cap = row_dict.get("market_cap")
+                    if market_cap is None:
+                        market_cap = row_dict.get("total_mv")
+                        
+                    pe = row_dict.get("pe_ratio")
+                    if pe is None:
+                        pe = row_dict.get("pe_ttm")
+                        
+                    pb = row_dict.get("pb_ratio")
+                    if pb is None:
+                        pb = row_dict.get("pb")
+
+                    metrics = {
+                        "market_cap": float(market_cap or 0) * TOTAL_MV_TO_YI,
+                        "pe": float(pe or 0),
+                        "pb": float(pb or 0),
+                        "close": float(row_dict.get("close") or 0),
+                        "amount": float(row_dict.get("amount") or 0),
+                        "volume": float(row_dict.get("volume") or 0),
+                    }
+                else:
+                    # 极端回退方案
+                    symbol = str(row[0])
+                    name = row[1] if len(row) > 1 else None
+                    metrics = {
+                        "market_cap": float(row[2] or 0) * TOTAL_MV_TO_YI if len(row) > 2 else 0,
+                        "pe": float(row[3] or 0) if len(row) > 3 else 0,
+                        "pb": float(row[4] or 0) if len(row) > 4 else 0,
+                        "close": float(row[5] or 0) if len(row) > 5 else 0,
+                    }
+                    
+                items.append(PoolItem(symbol=symbol, name=name, metrics=metrics))
             return items, as_of_date
     except Exception as e:
         logger.error(f"Critical error in _query_stock_pool: {e}", exc_info=True)
@@ -425,6 +441,7 @@ def _build_pool_summary(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     total = len(items)
     caps = [x.metrics.get("market_cap", 0) for x in items]
+    # market_cap 已经是“亿元”口径
     bucket_lt_100 = sum(1 for v in caps if v < 100)
     bucket_100_200 = sum(1 for v in caps if 100 <= v < 200)
     bucket_gte_200 = sum(1 for v in caps if v >= 200)
@@ -471,7 +488,7 @@ def _is_full_market_query(text: str) -> bool:
 
 def _build_full_market_sql() -> str:
     return (
-        "SELECT symbol, stock_name as name, close, total_mv as market_cap, pe_ttm as pe_ratio\n"
+        "SELECT symbol, name, close, total_mv as market_cap, pe_ttm as pe_ratio\n"
         "FROM stock_daily_latest"
     )
 

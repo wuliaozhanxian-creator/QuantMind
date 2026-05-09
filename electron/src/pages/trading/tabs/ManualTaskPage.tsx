@@ -19,6 +19,7 @@ import {
     resolveMetricNumber, 
     extractModelType, 
 } from '../../modelRegistryUtils';
+import { normalizeStockCode } from '../../../utils/portfolioUtils';
 import {
     realTradingService,
     type ManualExecutionLogEntry,
@@ -964,7 +965,7 @@ const ManualTaskPage: React.FC<ManualTaskPageProps> = ({ tradingMode, onBack }) 
                                                                 #{item.rank}
                                                             </div>
                                                             <div className="flex items-center justify-between flex-1 pr-1">
-                                                                    <div className="font-mono text-[11px] font-bold text-gray-900">{item.code}</div>
+                                                                    <div className="font-mono text-[11px] font-bold text-gray-900">{normalizeStockCode(item.code)}</div>
                                                                     <div className="text-[9px] text-gray-400 uppercase tracking-tighter">Score: {item.score.toFixed(4)}</div>
                                                             </div>
                                                         </div>
@@ -1251,7 +1252,7 @@ const ManualTaskPage: React.FC<ManualTaskPageProps> = ({ tradingMode, onBack }) 
                                                             {item.symbol.slice(0, 2)}
                                                         </div>
                                                         <div className="flex-1 min-w-0">
-                                                            <div className="text-[11px] font-bold text-gray-900">{item.symbol}</div>
+                                                            <div className="text-[11px] font-bold text-gray-900">{normalizeStockCode(item.symbol)}</div>
                                                             <div className="text-[9px] text-gray-500 line-clamp-1 font-medium italic">{item.reason}</div>
                                                         </div>
                                                         <div className="text-[8px] font-black px-1.5 py-0.5 rounded-md bg-rose-100/50 text-rose-600 uppercase">

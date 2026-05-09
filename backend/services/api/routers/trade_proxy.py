@@ -27,9 +27,12 @@ _SKIP_HEADERS = {"host", "content-length", "transfer-encoding"}
 async def _do_proxy(request: Request, user: dict | None = None) -> Response:
     path = request.url.path
 
-    # 兼容旧版前端：将 /internal/strategy 重写为 /api/v1/internal/strategy
-    if path.startswith("/internal/strategy"):
-        path = f"/api/v1{path}"
+    # 兼容旧版前端：重写路径到 /api/v1
+    if path.startswith("/internal/strategy") or \
+       path.startswith("/simulation") or \
+       path.startswith("/real-trading"):
+        if not path.startswith("/api/v1"):
+            path = f"/api/v1{path}"
 
     url = f"{TRADE_BASE_URL}{path}"
     if request.url.query:
@@ -121,6 +124,18 @@ async def _do_proxy(request: Request, user: dict | None = None) -> Response:
 @router.api_route("/internal/strategy", methods=["GET", "POST", "OPTIONS"], include_in_schema=False)
 @router.api_route(
     "/internal/strategy/{p:path}",
+    methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    include_in_schema=False,
+)
+@router.api_route("/simulation", methods=["GET", "POST", "OPTIONS"], include_in_schema=False)
+@router.api_route(
+    "/simulation/{p:path}",
+    methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    include_in_schema=False,
+)
+@router.api_route("/real-trading", methods=["GET", "POST", "OPTIONS"], include_in_schema=False)
+@router.api_route(
+    "/real-trading/{p:path}",
     methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     include_in_schema=False,
 )

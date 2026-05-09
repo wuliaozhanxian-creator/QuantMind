@@ -1,7 +1,6 @@
 import axios from 'axios';
 import { SERVICE_ENDPOINTS } from '../../../config/services';
 import type { Condition, BuyRule, SellRule, RiskConfig } from '../types';
-import { patchMissingStockNames } from '../utils/stockNameIndex';
 
 const client = axios.create({
   baseURL: SERVICE_ENDPOINTS.API_GATEWAY,
@@ -163,14 +162,6 @@ export async function getActivePoolFile(payload: { user_id: string }) {
 }
 
 /**
- * 设置某个股票池为活跃状态
- */
-export async function setActivePoolFile(payload: { user_id: string; file_key: string }) {
-  const res = await client.post('/strategy/set-active-pool-file', payload);
-  return res.data;
-}
-
-/**
  * 列出用户历史股票池（用于第二步复用）
  */
 export async function listPoolFiles(payload: { user_id: string; limit?: number }) {
@@ -183,11 +174,7 @@ export async function listPoolFiles(payload: { user_id: string; limit?: number }
  */
 export async function previewPoolFile(payload: { user_id: string; file_key: string }) {
   const res = await client.post('/strategy/preview-pool-file', payload, { timeout: 60000 });
-  const data = res.data || {};
-  if (Array.isArray(data.items)) {
-    data.items = await patchMissingStockNames(data.items);
-  }
-  return data;
+  return res.data;
 }
 
 /**
@@ -204,6 +191,8 @@ export async function generateQlib(payload: {
     n_drop?: number;
     rebalance_days?: 1 | 3 | 5;
     rebalance_period?: 'daily' | 'weekly' | 'monthly';
+    min_score?: number;
+    max_weight?: number;
   };
   custom_notes?: string;
 }) {

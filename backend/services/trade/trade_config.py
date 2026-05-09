@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     SERVICE_VERSION: str = "1.0.0"
     HOST: str = "0.0.0.0"
     PORT: int = 8002
+    
+    # AI / LLM
+    DASHSCOPE_API_KEY: str = os.getenv("DASHSCOPE_API_KEY", "")
 
     # Database (Unified Configuration)
     DATABASE_URL: str = os.getenv(

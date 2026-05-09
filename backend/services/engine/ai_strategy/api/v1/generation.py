@@ -41,46 +41,6 @@ _qlib_task_lock = asyncio.Lock()
 _qlib_tasks: dict[str, dict[str, Any]] = {}
 
 
-def _normalize_qlib_symbol(symbol: str) -> str:
-    code = str(symbol or "").strip()
-    if not code:
-        return ""
-    upper = code.upper()
-    if len(upper) == 8 and upper[:2] in {"SH", "SZ", "BJ"}:
-        return upper.lower()
-    if len(upper) == 9 and "." in upper:
-        left, right = upper.split(".", 1)
-        if len(left) == 6 and left.isdigit() and right in {"SH", "SZ", "BJ"}:
-            return f"{right}{left}".lower()
-    if len(upper) == 6 and upper.isdigit():
-        if upper.startswith(("6", "9")):
-            return f"sh{upper}"
-        if upper.startswith(("0", "2", "3")):
-            return f"sz{upper}"
-        if upper.startswith(("4", "8")):
-            return f"bj{upper}"
-    return code.lower()
-
-
-def _normalize_pool_content_for_qlib(pool_text: str) -> str:
-    lines: list[str] = []
-    for raw_line in str(pool_text or "").splitlines():
-        stripped = raw_line.strip()
-        if not stripped or stripped.startswith("#"):
-            lines.append(raw_line)
-            continue
-        if "\t" in stripped:
-            code, rest = stripped.split("\t", 1)
-            lines.append(f"{_normalize_qlib_symbol(code)}\t{rest}")
-        else:
-            parts = stripped.split(maxsplit=1)
-            if len(parts) == 2:
-                lines.append(f"{_normalize_qlib_symbol(parts[0])} {parts[1]}")
-            else:
-                lines.append(_normalize_qlib_symbol(stripped))
-    return "\n".join(lines) + ("\n" if str(pool_text or "").endswith("\n") else "")
-
-
 def _trace_id(request: Request | None) -> str | None:
     if not request:
         return None
@@ -227,7 +187,7 @@ async def _generate_qlib_impl(body: GenerateQlibRequest, trace_id: str | None) -
 
         def _persist_local_pool_file(pool_text: str, user_id: str) -> str:
             """保存股票池到本地文件"""
-            content = _normalize_pool_content_for_qlib(str(pool_text or ""))
+            content = str(pool_text or "")
             if not content.strip():
                 return ""
 
@@ -240,14 +200,11 @@ async def _generate_qlib_impl(body: GenerateQlibRequest, trace_id: str | None) -
             local_path.write_text(content, encoding="utf-8")
             return str(local_path)
 
-        qp = dict(body.qlib_params or {})
+        qp = body.qlib_params or {}
         strategy_type = qp.get("strategy_type", "TopkDropout")
         topk = int(qp.get("topk", 10))
-        n_drop = (
-            int(qp.get("n_drop", 2))
-            if strategy_type == "TopkDropout"
-            else None
-        )
+        # 仅 TopkDropout 时读取 n_drop
+        n_drop = int(qp.get("n_drop", 2)) if strategy_type == "TopkDropout" else 0
         long_exposure = float(qp.get("long_exposure", 1.0))
         short_exposure = float(qp.get("short_exposure", 1.0))
         max_weight = float(qp.get("max_weight", 0.05))
@@ -267,11 +224,11 @@ async def _generate_qlib_impl(body: GenerateQlibRequest, trace_id: str | None) -
                 "trace_id": trace_id,
                 "strategy_type": strategy_type,
                 "topk": topk,
+                **({"n_drop": n_drop} if strategy_type == "TopkDropout" else {}),
                 "long_exposure": long_exposure,
                 "short_exposure": short_exposure,
                 "rebalance_period": rebalance_period,
                 "rebalance_days": holding_period,
-                **({"n_drop": n_drop} if n_drop is not None else {}),
             },
         )
 
@@ -304,20 +261,6 @@ async def _generate_qlib_impl(body: GenerateQlibRequest, trace_id: str | None) -
         llm_provider = (os.getenv("LLM_PROVIDER_FORCE") or os.getenv("LLM_PROVIDER") or "qwen").strip().lower()
         llm_router = get_resilient_llm_router()
 
-        # 从用户 Profile 读取 API Key
-        user_api_key: str | None = None
-        if body.user_id:
-            try:
-                with get_db() as session:
-                    row = session.execute(
-                        text("SELECT ai_ide_api_key FROM user_profiles WHERE user_id = :uid"),
-                        {"uid": body.user_id},
-                    ).fetchone()
-                    if row and row[0]:
-                        user_api_key = row[0].strip()
-            except Exception as e:
-                logger.warning("Failed to fetch user API key: %s", e)
-
         # 获取股票池内容：优先 pool_content，其次从 COS 读取 pool_file_key
         pool_content = body.pool_content or ""
         if not pool_content.strip() and body.pool_file_key:
@@ -340,7 +283,7 @@ async def _generate_qlib_impl(body: GenerateQlibRequest, trace_id: str | None) -
             strategy_class = "RedisWeightStrategy"
             module_path = "backend.services.engine.qlib_app.utils.recording_strategy"
 
-        n_drop_field = f'"n_drop": {n_drop},' if n_drop is not None else ""
+        n_drop_field = f'"n_drop": {n_drop},' if strategy_type == "TopkDropout" else ""
         ls_fields = ""
         if strategy_type == "long_short_topk":
             ls_fields = dedent(
@@ -365,11 +308,7 @@ async def _generate_qlib_impl(body: GenerateQlibRequest, trace_id: str | None) -
 
             【策略参数】
             - 选股数量 topk: {topk}
-            {
-                f'- 每期剔除数 n_drop: {n_drop}（仅 TopkDropout 时有效）'
-                if n_drop is not None
-                else '- 当前为 TopkWeight，不要输出 n_drop 等 TopkDropout 专属参数'
-            }
+            {"- 每期剔除数 n_drop: " + str(n_drop) + "（仅 TopkDropout 时有效）" if strategy_type == "TopkDropout" else ""}
             - 调仓周期 holding_period: {holding_period} 个交易日（对应 {rebalance_period}）
             - 股票池本地文件: {pool_file_local}
             - 选股条件: {body.conditions}
@@ -400,18 +339,12 @@ async def _generate_qlib_impl(body: GenerateQlibRequest, trace_id: str | None) -
             """
         ).strip()
         try:
-            code, _meta = await asyncio.to_thread(
-                llm_router.generate_code, prompt, llm_provider, "simple", user_api_key
-            )
+            code, _meta = await asyncio.to_thread(llm_router.generate_code, prompt, llm_provider, "simple")
             code = _strip_markdown_fences(code)
             if "POOL_FILE" not in code:
                 code = f"POOL_FILE = {json.dumps(pool_file_local, ensure_ascii=False)}\n\n" + code
             if "STRATEGY_CONFIG" not in code:
-                n_drop_entry = (
-                    f'"n_drop": {n_drop},'
-                    if n_drop is not None
-                    else ""
-                )
+                n_drop_entry = f'"n_drop": {n_drop},' if strategy_type == "TopkDropout" else ""
                 code += dedent(
                     f"""
 
@@ -437,7 +370,6 @@ async def _generate_qlib_impl(body: GenerateQlibRequest, trace_id: str | None) -
                         _local_repair_prompt(code, err),
                         llm_provider,
                         "simple",
-                        user_api_key,
                     )
                     code = _strip_markdown_fences(fixed)
                     ok, err = _syntax_check(code)

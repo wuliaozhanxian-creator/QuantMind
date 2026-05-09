@@ -12,15 +12,8 @@ logger = logging.getLogger(__name__)
 
 
 class SQLGenerator:
-    MOCK_KEY_PATTERNS = ["mock-api-key", "not-configured", "placeholder"]
-
     def __init__(self):
         api_key = os.getenv("QWEN_API_KEY") or os.getenv("DASHSCOPE_API_KEY")
-        # 检测 mock key
-        if api_key and any(pattern in api_key for pattern in self.MOCK_KEY_PATTERNS):
-            raise RuntimeError(
-                "API Key 未配置真实密钥。请在个人中心配置您的 API Key。"
-            )
         base_url = os.getenv("DASHSCOPE_BASE_URL") or "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
         self.client = AsyncOpenAI(api_key=api_key, base_url=base_url)
@@ -56,6 +49,10 @@ class SQLGenerator:
             elif sql.startswith("```"):
                 sql = sql.replace("```", "").strip()
 
+            # 修复 LLM 可能生成的错误表名
+            sql = sql.replace("stock_daily_latest_latest", "stock_daily_latest")
+            sql = sql.replace("stock_selection_selection", "stock_selection")
+
             if not self._validate_sql(sql, target_table, allowed_fields):
                 raise ValueError("SQL 校验失败：包含非法语句或字段")
             return sql
@@ -65,26 +62,10 @@ class SQLGenerator:
 
     @staticmethod
     def _build_required_select(table: str) -> str:
-        if table in {"stock_daily", "stock_daily_latest"}:
-            return (
-                "SELECT\n"
-                "    symbol, stock_name as name, trade_date, close,\n"
-                "    total_mv, pe_ttm, pb, turnover_rate, pct_change,\n"
-                "    volume, amount, is_st, idx_hs300, idx_zz1000\n"
-                f"FROM {table}\n"
-                "WHERE ..."
-            )
+        # 简化 SELECT 字段，只返回核心字段
         return (
-            "SELECT\n"
-            "    symbol, name, trade_date, close, market_cap, industry,\n"
-            "    pe_ratio, pb_ratio, ps_ratio,\n"
-            "    roe, net_profit_growth,\n"
-            "    volume, amount, turnover_rate, pct_chg, float_share_ratio,\n"
-            "    is_st, is_suspended, is_listed_over_1y,\n"
-            "    macd_dif, macd_dea, macd_hist,\n"
-            "    kdj_k, kdj_d, kdj_j,\n"
-            "    sma5, sma20, sma60, rsi\n"
-            "FROM stock_selection\n"
+            "SELECT symbol, name, close, total_mv, pe_ttm, pb, roe\n"
+            f"FROM {table}\n"
             "WHERE ..."
         )
 

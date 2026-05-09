@@ -272,13 +272,18 @@ class StrategyService:
    - 权重策略: RedisWeightStrategy
    导入路径:
    from backend.services.engine.qlib_app.utils.recording_strategy import RedisRecordingStrategy, RedisWeightStrategy
-3. signal 默认使用 "<PRED>"
+3. 若是模型驱动策略，signal 使用 "<PRED>"；若是传统技术指标测量，使用 pandas 指标计算，不强制 "<PRED>"
+3.1 Top100 股票池仅在用户明确要求时使用，不再作为传统指标测量默认
 4. 若重写 __init__，必须使用 kwargs.pop() 消费自定义参数，避免 unexpected keyword argument
 5. 若重写 reset，必须兼容:
    def reset(self, *args, **kwargs)
    并对 level_infra/common_infra/trade_exchange 做参数剔除回退
 6. generate_trade_decision 必须返回 TradeDecisionWO（不能返回 dict）
 7. 禁止使用 os/sys/subprocess/requests/urllib/socket
+8. 严禁生成非本平台模板（仅限模型策略场景）：
+   - 禁止 from quantmind.api import ...
+   - 禁止 Strategy/on_bar/strategy.run() 事件驱动脚本
+   - 必须生成 get_strategy_config()/STRATEGY_CONFIG 配置式策略入口
 
 请返回JSON格式的策略代码，包含以下字段:
 - strategy_name: 策略名称
@@ -295,6 +300,7 @@ class StrategyService:
 3. 确保代码语法正确且可运行（QuantMind 环境）
 4. 必须符合上面的 V1.1 兼容约束
 5. 注释清晰易懂，解释关键交易逻辑
+6. 若是模型策略，严禁输出 from quantmind.api、on_bar、strategy.run() 这类模板
 
 请确保代码可直接用于 QuantMind 的 Qlib 回测链路。"""
 
@@ -302,32 +308,6 @@ class StrategyService:
         """调用AI API"""
         if system_prompt is None:
             system_prompt = "你是一个专业的量化交易专家。请返回JSON格式的策略代码，包含完整的交易逻辑。代码中使用简体中文注释，确保注释清晰易懂。"
-
-        # 简单 token 估算：中文约 1.5 char/token，英文约 4 char/token，取 2 char/token 作为上限估算
-        estimated_tokens = (len(system_prompt) + len(prompt)) // 2
-        max_tokens = 8000
-
-        # Qwen-max 上下文窗口约 32K tokens，Qwen-turbo 约 131K tokens
-        # 保守按 28K 输入上限估算，预留安全余量
-        input_token_limit = 25000
-        if estimated_tokens > input_token_limit:
-            logger.warning(
-                "Prompt may exceed model context window",
-                extra={
-                    "estimated_tokens": estimated_tokens,
-                    "input_limit": input_token_limit,
-                    "prompt_length": len(prompt),
-                    "system_prompt_length": len(system_prompt),
-                    "user_id": user_id,
-                },
-            )
-            # 截断用户 prompt 而非系统 prompt（规范约束在系统 prompt 中）
-            max_prompt_chars = max(500, (input_token_limit * 2) - len(system_prompt))
-            if len(prompt) > max_prompt_chars:
-                logger.warning(
-                    f"Truncating user prompt from {len(prompt)} to {max_prompt_chars} chars"
-                )
-                prompt = prompt[:max_prompt_chars] + "\n\n[提示内容因过长已被截断，核心约束已通过系统提示词注入]"
 
         response = await self.client.post(
             f"{self.api_url}/chat/completions",

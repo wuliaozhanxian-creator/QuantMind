@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Button, Select, InputNumber, Space, Typography, Row, Col, Tag, Empty } from 'antd';
+import { Card, Button, Select, InputNumber, Space, Typography, Row, Col, Tag, Empty, message } from 'antd';
 import { PlusOutlined, DeleteOutlined, InfoCircleOutlined } from '@ant-design/icons';
-import { useWizardStore } from '../store/wizardStore';
+import { useWizardV2Store } from '../store/wizardV2Store';
 import type { Condition } from '../types';
-import { FACTORS, FACTORS_BY_CATEGORY } from '../factors/dictionary';
+import { FACTORS } from '../factors/dictionary';
 
 const { Text } = Typography;
 
@@ -23,32 +23,35 @@ const operators = [
   { label: '等于', value: '==' },
 ];
 
+// 限制仅显示的5个因子
+const ALLOWED_FACTOR_KEYS = ['market_cap', 'float_mv', 'pe', 'pb', 'roe'];
+
+const factorOptions = FACTORS.filter(f => ALLOWED_FACTOR_KEYS.includes(f.key)).map(f => ({
+  label: f.label,
+  value: f.key,
+  unit: f.unit
+}));
+
 // 获取因子的单位
 const getFactorUnit = (factorKey: string): string | undefined => {
-  const factor = FACTORS.find(f => f.key === factorKey);
+  const factor = factorOptions.find(f => f.value === factorKey);
   return factor?.unit;
 };
-
-// 按类别分组的 Select 选项
-const factorOptions = Object.entries(FACTORS_BY_CATEGORY).map(([category, factors]) => ({
-  label: category,
-  options: factors.map(f => ({ label: f.label, value: f.key, unit: f.unit })),
-}));
 
 export const SimpleLogicBuilder: React.FC<{
   onChange?: (c: Condition) => void;
 }> = ({ onChange }) => {
-  const { conditions, setConditions } = useWizardStore();
-  const allowedFactors = new Set(FACTORS.map((f) => f.key));
+  const { conditions, setConditions } = useWizardV2Store();
+  
   // 内部维护一个扁平数组，提交时转换为 AND 逻辑的 CompositeCondition
   const [flatConditions, setFlatConditions] = useState<FlatCondition[]>([]);
 
-  // 从 Store 同步初始化 (仅支持顶层是 AND 且只有一层的简单结构回显，复杂结构会降级处理或重置)
+  // 从 Store 同步初始化 (仅支持顶层是 AND 且只有一层的简单结构回显)
   useEffect(() => {
     if (conditions && conditions.type === 'composite' && conditions.op === 'AND') {
       const simple = conditions.children.map((c: any) => {
         if (c.type === 'numeric') {
-          if (!allowedFactors.has(c.factor)) {
+          if (!ALLOWED_FACTOR_KEYS.includes(c.factor)) {
             return null;
           }
           return {
@@ -64,7 +67,7 @@ export const SimpleLogicBuilder: React.FC<{
         setFlatConditions(simple);
       }
     }
-  }, []); // 仅挂载时同步一次，避免循环更新
+  }, []); // 仅挂载时同步一次
 
   const updateStore = (list: FlatCondition[]) => {
     setFlatConditions(list);
@@ -86,6 +89,10 @@ export const SimpleLogicBuilder: React.FC<{
   };
 
   const addCondition = () => {
+    if (flatConditions.length >= 5) {
+      message.warning('最多只能添加 5 个筛选条件');
+      return;
+    }
     const newItem: FlatCondition = {
       id: Math.random().toString(36).slice(2),
       factor: 'market_cap',
@@ -163,8 +170,15 @@ export const SimpleLogicBuilder: React.FC<{
             );
           })}
 
-          <Button type="dashed" block icon={<PlusOutlined />} onClick={addCondition} style={{ height: 48 }}>
-            添加筛选条件
+          <Button 
+            type="dashed" 
+            block 
+            icon={<PlusOutlined />} 
+            onClick={addCondition} 
+            style={{ height: 48 }}
+            disabled={flatConditions.length >= 5}
+          >
+            {flatConditions.length >= 5 ? '已达到最大条件数量 (5)' : '添加筛选条件'}
           </Button>
 
           <div style={{ marginTop: 16, padding: 12, background: '#e6f7ff', borderRadius: 4, border: '1px solid #91d5ff' }}>

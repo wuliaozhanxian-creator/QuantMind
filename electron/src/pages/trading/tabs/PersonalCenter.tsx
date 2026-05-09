@@ -1,8 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { User, Activity, Server, Clock, Shield, Database, Settings2, RefreshCw, DownloadCloud } from 'lucide-react';
-import { message } from 'antd';
+import { User, Activity, Server, Clock, Shield, Database, Settings2, RefreshCw, DownloadCloud, Link2Off, Camera, Upload, Trash2, CheckCircle2 } from 'lucide-react';
+import { message, Modal } from 'antd';
 import { AccountInfo, RealTradingStatus, realTradingService } from '../../../services/realTradingService';
 import { strategyManagementService } from '../../../services/strategyManagementService';
+import { userCenterService } from '../../../features/user-center/services/userCenterService';
+import { authService } from '../../../features/auth/services/authService';
 import { resolveTradingAccountMode } from '../utils/accountAdapter';
 
 interface PersonalCenterProps {
@@ -18,6 +20,9 @@ const PersonalCenter: React.FC<PersonalCenterProps> = ({ tenantId, userId, statu
     
     // ... (现有状态)
     const [isSyncing, setIsSyncing] = useState(false);
+    const [isUnbinding, setIsUnbinding] = useState(false);
+    const [unbindModalOpen, setUnbindModalOpen] = useState(false);
+    const [createdAt, setCreatedAt] = useState<string | null>(null);
 
     const handleSyncTemplates = async () => {
         setIsSyncing(true);
@@ -39,14 +44,13 @@ const PersonalCenter: React.FC<PersonalCenterProps> = ({ tenantId, userId, statu
     const [independentCash, setIndependentCash] = useState<number | null>(null);
     const [configuredInitialCash, setConfiguredInitialCash] = useState<number>(1_000_000);
     const [draftInitialCash, setDraftInitialCash] = useState<number>(1_000_000);
-    const [lastModifiedAt, setLastModifiedAt] = useState<string | null>(null);
-    const [nextAllowedModifiedAt, setNextAllowedModifiedAt] = useState<string | null>(null);
-    const [canModifyAmount, setCanModifyAmount] = useState<boolean>(true);
-    const [amountStep, setAmountStep] = useState<number>(SIM_AMOUNT_STEP);
-    const [cooldownDays, setCooldownDays] = useState<number>(COOLDOWN_DAYS);
     const [loadingSettings, setLoadingSettings] = useState(false);
-    const [savingSettings, setSavingSettings] = useState(false);
     const [resettingSimulation, setResettingSimulation] = useState(false);
+    const [ocrModalOpen, setOcrModalOpen] = useState(false);
+    const [ocrLoading, setOcrLoading] = useState(false);
+    const [ocrFiles, setOcrFiles] = useState<File[]>([]);
+    const [ocrResults, setOcrResults] = useState<any[]>([]);
+    const [isSyncingHoldings, setIsSyncingHoldings] = useState(false);
     const [snapshotNotice, setSnapshotNotice] = useState<string | null>(null);
     const snapshotNoticeTimerRef = useRef<number | null>(null);
 
@@ -69,6 +73,14 @@ const PersonalCenter: React.FC<PersonalCenterProps> = ({ tenantId, userId, statu
         };
     }, []);
 
+    useEffect(() => {
+        userCenterService.getUserProfile(userId).then(profile => {
+            if (profile?.created_at) {
+                setCreatedAt(profile.created_at);
+            }
+        }).catch(() => {});
+    }, [userId]);
+
     const loadAccountSettings = React.useCallback(async (mounted: boolean = true) => {
         setLoadingSettings(true);
         try {
@@ -83,13 +95,7 @@ const PersonalCenter: React.FC<PersonalCenterProps> = ({ tenantId, userId, statu
                     const value = Number(settings.initial_cash || 1_000_000);
                     if (value > 0) {
                         setConfiguredInitialCash(value);
-                        setDraftInitialCash(value);
                     }
-                    setLastModifiedAt(settings.last_modified_at || null);
-                    setNextAllowedModifiedAt(settings.next_allowed_modified_at || null);
-                    setCanModifyAmount(Boolean(settings.can_modify));
-                    setAmountStep(Number(settings.amount_step || SIM_AMOUNT_STEP));
-                    setCooldownDays(Number(settings.cooldown_days || COOLDOWN_DAYS));
                 }
             } else {
                 // Real Mode: Restore settings
@@ -97,8 +103,6 @@ const PersonalCenter: React.FC<PersonalCenterProps> = ({ tenantId, userId, statu
                 if (settings) {
                     const value = Number(settings.initial_equity || 0);
                     setConfiguredInitialCash(value);
-                    setDraftInitialCash(value);
-                    setLastModifiedAt(settings.last_modified_at || null);
                 }
             }
 
@@ -124,88 +128,11 @@ const PersonalCenter: React.FC<PersonalCenterProps> = ({ tenantId, userId, statu
         };
     }, [loadAccountSettings, tenantId, tradingMode, userId]);
 
-    const nextModifyTime = useMemo(() => {
-        const source = nextAllowedModifiedAt || lastModifiedAt;
-        if (!source) return null;
-        const t = new Date(source).getTime();
-        if (!Number.isFinite(t)) return null;
-        if (nextAllowedModifiedAt) return new Date(t);
-        return new Date(t + cooldownDays * 24 * 60 * 60 * 1000);
-    }, [cooldownDays, lastModifiedAt, nextAllowedModifiedAt]);
-
-    const validateAmount = (value: number) =>
-        Number.isFinite(value) && value >= amountStep && value % amountStep === 0;
     const modeAccount = selectedAccount;
 
-    const handleSaveInitialCash = async () => {
-        if (tradingMode === 'simulation') {
-            if (!validateAmount(draftInitialCash)) {
-                message.error(`初始金额必须为${Math.floor(amountStep / 10000)}万的整数倍，且不低于${Math.floor(amountStep / 10000)}万`);
-                return;
-            }
-            if (!canModifyAmount) {
-                message.warning('初始金额每30天仅可修改一次，请稍后再试');
-                return;
-            }
-        } else {
-            if (draftInitialCash <= 0) {
-                message.error('实盘初始权益必须大于 0');
-                return;
-            }
-        }
-
-        setSavingSettings(true);
-        try {
-            if (tradingMode === 'simulation') {
-                const updated = await realTradingService.updateSimulationSettings(draftInitialCash);
-                if (!updated) {
-                    throw new Error('empty settings response');
-                }
-                setConfiguredInitialCash(Number(updated.initial_cash || draftInitialCash));
-                setDraftInitialCash(Number(updated.initial_cash || draftInitialCash));
-                setLastModifiedAt(updated.last_modified_at || null);
-                setNextAllowedModifiedAt(updated.next_allowed_modified_at || null);
-                setCanModifyAmount(Boolean(updated.can_modify));
-                
-                // Simulation behavior: reset account
-                const resetAccount = await realTradingService.resetSimulationAccount(
-                    userId,
-                    Number(updated.initial_cash || draftInitialCash),
-                    tenantId
-                );
-                if (resetAccount) {
-                    setSelectedAccount(resetAccount);
-                }
-                message.success('模拟盘初始金额已保存并重置，资金快照已更新');
-            } else {
-                // Real mode behavior
-                const success = await realTradingService.updateRealAccountSettings(draftInitialCash);
-                if (success) {
-                    setConfiguredInitialCash(draftInitialCash);
-                    message.success('实盘初始权益已同步，下次计算将使用此基准');
-                    // Refresh account to see immediate effect if possible
-                    loadAccountSettings();
-                } else {
-                    throw new Error('Update failed');
-                }
-            }
-            showSnapshotNotice('今日基准已更新');
-            // 调度全局刷新事件，让后台仪表盘等组件即时更新
-            window.dispatchEvent(new CustomEvent('refresh-account-data'));
-            window.dispatchEvent(new CustomEvent('refresh-strategy-status'));
-        } catch (err) {
-            console.error('Failed to save settings', err);
-            message.error('保存失败，请稍后重试');
-        } finally {
-            setSavingSettings(false);
-        }
-    };
+    // handleSaveInitialCash removed as initial cash modification is deprecated.
 
     const handleResetSimulation = async () => {
-        if (!validateAmount(configuredInitialCash)) {
-            message.error('当前配置金额无效，请先设置合法的初始金额');
-            return;
-        }
         setResettingSimulation(true);
         try {
             const account = await realTradingService.resetSimulationAccount(
@@ -221,6 +148,78 @@ const PersonalCenter: React.FC<PersonalCenterProps> = ({ tenantId, userId, statu
             message.error('重置失败，请稍后重试');
         } finally {
             setResettingSimulation(false);
+        }
+    };
+
+    const handleUnbindQmt = async () => {
+        setIsUnbinding(true);
+        try {
+            const result = await realTradingService.unbindQmtAgent();
+            if (result.success) {
+                message.success(result.message);
+                // 触发全局刷新事件
+                window.dispatchEvent(new CustomEvent('refresh-account-data'));
+                window.dispatchEvent(new CustomEvent('refresh-strategy-status'));
+            } else {
+                message.error(result.message);
+            }
+        } catch (err: any) {
+            console.error('Failed to unbind QMT agent', err);
+            message.error(err.message || '解绑失败，请稍后重试');
+        } finally {
+            setIsUnbinding(false);
+            setUnbindModalOpen(false);
+        }
+    };
+    const handleOcrAnalyze = async () => {
+        if (ocrFiles.length === 0) {
+            message.warning('请先上传持仓截图');
+            return;
+        }
+        setOcrLoading(true);
+        try {
+            const formData = new FormData();
+            ocrFiles.forEach(file => formData.append('images', file));
+            
+            const res = await realTradingService.analyzeHoldingImages(formData);
+            if (res.success) {
+                setOcrResults(res.data || []);
+                message.success(`识别成功，发现 ${res.data?.length || 0} 只股票`);
+            } else {
+                message.error(res.message || '识别失败');
+            }
+        } catch (err: any) {
+            console.error('OCR analysis failed', err);
+            message.error(err.message || '服务异常，识别失败');
+        } finally {
+            setOcrLoading(false);
+        }
+    };
+
+    const handleConfirmOcrSync = async () => {
+        if (ocrResults.length === 0) return;
+        setIsSyncingHoldings(true);
+        try {
+            const success = await realTradingService.syncSimulationHoldings(ocrResults);
+            if (success) {
+                message.success('持仓同步成功，模拟账户已更新');
+                setOcrModalOpen(false);
+                setOcrFiles([]);
+                setOcrResults([]);
+                loadAccountSettings();
+                window.dispatchEvent(new CustomEvent('refresh-account-data'));
+            }
+        } catch (err: any) {
+            message.error(err.message || '同步失败');
+        } finally {
+            setIsSyncingHoldings(false);
+        }
+    };
+
+    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (e.target.files) {
+            const files = Array.from(e.target.files);
+            setOcrFiles([...ocrFiles, ...files]);
         }
     };
 
@@ -259,7 +258,9 @@ const PersonalCenter: React.FC<PersonalCenterProps> = ({ tenantId, userId, statu
                         </div>
                         <div className="bg-gray-50 p-2 rounded-lg">
                             <div className="text-gray-500 text-xs mb-1">注册时间</div>
-                            <div className="font-medium text-sm text-gray-800">2025-01-15</div>
+                            <div className="font-medium text-sm text-gray-800">
+                                {createdAt ? new Date(createdAt).toLocaleDateString() : '--'}
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -313,7 +314,7 @@ const PersonalCenter: React.FC<PersonalCenterProps> = ({ tenantId, userId, statu
 
                     {activeStrategy ? (
                         <div className="flex-1 flex flex-col justify-center items-center text-center p-4 bg-blue-50/50 rounded-2xl border border-blue-100 border-dashed">
-                            <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 mb-3 animate-pulse">
+                            <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 mb-3">
                                 <Database size={32} />
                             </div>
                             <h2 className="text-xl font-bold text-gray-800 mb-1">{activeStrategy.name}</h2>
@@ -365,55 +366,31 @@ const PersonalCenter: React.FC<PersonalCenterProps> = ({ tenantId, userId, statu
                         </div>
                     </div>
 
-                    {tradingMode === 'simulation' ? (
-                            <div className="p-2.5 rounded-xl border border-gray-200 bg-white">
-                                <div className="flex items-center justify-between mb-2">
-                                    <div className="text-xs font-semibold text-gray-700">
-                                        模拟盘初始金额
-                                    </div>
-                                    <span className="text-[10px] text-gray-400">
-                                        步长 {Math.floor(amountStep / 10000)}万
-                                    </span>
+                        {tradingMode === 'simulation' ? (
+                            <div className="p-2 rounded-xl border border-gray-200 bg-gray-50/50">
+                                <div className="text-sm font-semibold text-gray-800 mb-1.5">
+                                    模拟盘运行状态
                                 </div>
-                                <div className="relative">
-                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs">¥</span>
-                                    <input
-                                        type="number"
-                                        step={amountStep}
-                                        min={0}
-                                        value={draftInitialCash}
-                                        onChange={(e) => setDraftInitialCash(Number(e.target.value || 0))}
-                                        className="w-full pl-7 pr-3 py-1.5 h-9 rounded-lg border border-gray-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none text-sm font-mono bg-gray-50 transition-all"
-                                        placeholder="请输入初始金额"
-                                    />
-                                </div>
-                                <div className="mt-1.5 flex items-center justify-between text-[10px] text-gray-400">
-                                    <span>每 {cooldownDays} 天仅可修改一次</span>
-                                    {lastModifiedAt && !canModifyAmount && (
-                                        <span className="text-amber-500">
-                                            下次可修改：{nextModifyTime?.toLocaleString()}
-                                        </span>
-                                    )}
+                                <div className="text-xs text-gray-500 leading-relaxed">
+                                    当前统计基准固定为 <span className="font-bold text-gray-700">¥{configuredInitialCash.toLocaleString()}</span>。
+                                    如需重新开始，请点击下方重置按钮。重置将清空所有持仓并恢复初始现金。
                                 </div>
                             </div>
                         ) : (
-                            <div className="p-2.5 rounded-xl border border-gray-200 bg-white">
-                                <div className="text-xs font-semibold text-gray-700 mb-2">
+                            <div className="p-2 rounded-xl border border-gray-200">
+                                <div className="text-sm font-semibold text-gray-800 mb-1.5">
                                     统计基准校准 (PnL Baseline)
                                 </div>
                                 <div className="flex gap-2">
-                                    <div className="relative flex-1">
-                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs">¥</span>
-                                        <input
-                                            type="number"
-                                            step={1000}
-                                            min={0}
-                                            value={draftInitialCash}
-                                            onChange={(e) => setDraftInitialCash(Number(e.target.value || 0))}
-                                            className="w-full pl-7 pr-3 py-1.5 h-9 rounded-lg border border-gray-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none text-sm font-mono bg-gray-50 transition-all"
-                                            placeholder="请输入实盘初始资金基准"
-                                        />
-                                    </div>
+                                    <input
+                                        type="number"
+                                        step={1000}
+                                        min={0}
+                                        value={draftInitialCash}
+                                        onChange={(e) => setDraftInitialCash(Number(e.target.value || 0))}
+                                        className="flex-1 px-3 py-2 rounded-xl border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm font-mono"
+                                        placeholder="请输入实盘初始资金基准"
+                                    />
                                     <button
                                         onClick={() => {
                                             const brokerPnl = (status?.portfolio as any)?.broker_total_pnl || (status?.portfolio as any)?.total_pnl_raw || 0;
@@ -424,37 +401,47 @@ const PersonalCenter: React.FC<PersonalCenterProps> = ({ tenantId, userId, statu
                                                 message.info('已填充：根据券商盈亏推算的成本基准');
                                             }
                                         }}
-                                        className="px-3 py-1.5 h-9 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg text-xs font-medium transition-colors whitespace-nowrap"
+                                        className="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-xl text-xs font-medium transition-colors"
                                         title="根据券商上报的总盈亏反推基准"
                                     >
                                         对齐券商
                                     </button>
                                 </div>
-                                <div className="mt-1.5 text-[10px] text-gray-400">
-                                    修改此金额会即时改变"总盈亏"的统计起点
+                                <div className="mt-2 text-xs text-gray-500">
+                                    修改此金额会即时改变"总盈亏"的统计起点。
                                 </div>
                             </div>
                         )}
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        <button
-                            onClick={handleSaveInitialCash}
-                            disabled={savingSettings || loadingSettings || (tradingMode === 'simulation' && !canModifyAmount)}
-                            className="px-3 py-2 rounded-xl bg-blue-600 text-white text-sm font-medium disabled:bg-gray-300 disabled:cursor-not-allowed"
-                        >
-                            {savingSettings ? '保存中...' : (tradingMode === 'simulation' ? '修改初始金额' : '保存基准修正')}
-                        </button>
-                        {tradingMode === 'simulation' && (
+                        {tradingMode === 'simulation' ? (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <button
+                                    onClick={handleResetSimulation}
+                                    disabled={resettingSimulation || loadingSettings}
+                                    className="px-3 py-2 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                >
+                                    <RefreshCw size={14} className={resettingSimulation ? 'animate-spin' : ''} />
+                                    {resettingSimulation ? '重置中...' : '重置模拟盘'}
+                                </button>
+                                <button
+                                    onClick={() => setOcrModalOpen(true)}
+                                    disabled={loadingSettings}
+                                    className="px-3 py-2 rounded-xl border border-indigo-200 text-indigo-600 bg-indigo-50/50 text-sm font-medium hover:bg-indigo-50 transition-colors flex items-center justify-center gap-2"
+                                >
+                                    <Camera size={14} />
+                                    持仓图片同步
+                                </button>
+                            </div>
+                        ) : (
                             <button
-                                onClick={handleResetSimulation}
-                                disabled={resettingSimulation || loadingSettings || savingSettings}
-                                className="px-3 py-2 rounded-xl border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-50 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                onClick={() => setUnbindModalOpen(true)}
+                                disabled={isUnbinding}
+                                className="w-full px-3 py-2 rounded-xl border border-red-200 text-red-600 text-sm font-medium hover:bg-red-50 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                             >
-                                <RefreshCw size={14} />
-                                {resettingSimulation ? '重置中...' : '重置模拟盘'}
+                                <Link2Off size={14} />
+                                一键解绑 QMT
                             </button>
                         )}
-                    </div>
 
                     <div className="text-xs text-gray-500">
                         当前统计基准：¥{configuredInitialCash.toLocaleString()}
@@ -466,6 +453,184 @@ const PersonalCenter: React.FC<PersonalCenterProps> = ({ tenantId, userId, statu
                     )}
                 </div>
             </div>
+
+            {/* 解绑确认弹窗 */}
+            <Modal
+                title="确认解绑 QMT"
+                open={unbindModalOpen}
+                onCancel={() => setUnbindModalOpen(false)}
+                footer={[
+                    <button
+                        key="cancel"
+                        onClick={() => setUnbindModalOpen(false)}
+                        className="px-4 py-2 rounded-xl border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-50"
+                    >
+                        取消
+                    </button>,
+                    <button
+                        key="confirm"
+                        onClick={handleUnbindQmt}
+                        disabled={isUnbinding}
+                        className="px-4 py-2 rounded-xl bg-red-600 text-white text-sm font-medium hover:bg-red-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                    >
+                        {isUnbinding ? '解绑中...' : '确认解绑'}
+                    </button>,
+                ]}
+                centered
+                width={420}
+            >
+                <div className="py-4">
+                    <div className="flex items-start gap-3 mb-4">
+                        <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
+                            <Link2Off size={20} className="text-red-600" />
+                        </div>
+                        <div>
+                            <p className="text-gray-800 font-medium">确定要解除 QMT 绑定吗？</p>
+                            <p className="text-gray-500 text-sm mt-1">
+                                解绑后，QMT Agent 将断开连接，需要重新启动 Agent 并绑定新设备。
+                            </p>
+                        </div>
+                    </div>
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+                        <p className="text-amber-800 text-sm">
+                            <strong>注意：</strong>解绑仅删除设备绑定关系，资产快照数据将保留。如需清除资产数据，请单独操作。
+                        </p>
+                    </div>
+                </div>
+            </Modal>
+            {/* OCR Sync Modal */}
+            <Modal
+                title={
+                    <div className="flex items-center gap-2 text-indigo-600">
+                        <Camera size={18} />
+                        <span>图片同步持仓 (Qwen-VL)</span>
+                    </div>
+                }
+                open={ocrModalOpen}
+                onCancel={() => {
+                    if (!ocrLoading && !isSyncingHoldings) {
+                        setOcrModalOpen(false);
+                        setOcrFiles([]);
+                        setOcrResults([]);
+                    }
+                }}
+                footer={null}
+                width={680}
+                centered
+                mask={false}
+            >
+                <div className="py-2 space-y-4">
+                    {/* Upload Area */}
+                    <div className="relative group">
+                        <input
+                            type="file"
+                            multiple
+                            accept="image/*"
+                            onChange={handleFileChange}
+                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                        />
+                        <div className="border-2 border-dashed border-indigo-100 rounded-2xl p-8 bg-indigo-50/30 group-hover:bg-indigo-50 group-hover:border-indigo-300 transition-all flex flex-col items-center justify-center gap-3">
+                            <div className="w-12 h-12 bg-white rounded-full shadow-sm flex items-center justify-center text-indigo-500">
+                                <Upload size={24} />
+                            </div>
+                            <div className="text-center">
+                                <p className="text-sm font-bold text-gray-700">点击或拖拽上传持仓截图</p>
+                                <p className="text-xs text-gray-500 mt-1">支持多张图片同时识别，请确保股票代码和数量清晰可见</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* File List */}
+                    {ocrFiles.length > 0 && (
+                        <div className="flex flex-wrap gap-2">
+                            {ocrFiles.map((file, idx) => (
+                                <div key={idx} className="relative w-20 h-20 rounded-lg overflow-hidden border border-gray-200 shadow-sm">
+                                    <img src={URL.createObjectURL(file)} className="w-full h-full object-cover" alt="upload" />
+                                    <button 
+                                        onClick={() => {
+                                            setOcrFiles(ocrFiles.filter((_, i) => i !== idx));
+                                        }}
+                                        className="absolute top-1 right-1 p-1 bg-red-500 text-white rounded-full hover:bg-red-600 transition-colors"
+                                    >
+                                        <Trash2 size={10} />
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    {/* Results Table */}
+                    {ocrResults.length > 0 && (
+                        <div className="border border-indigo-100 rounded-2xl overflow-hidden shadow-sm">
+                            <div className="bg-indigo-50/50 px-4 py-2 text-xs font-bold text-indigo-600 flex items-center justify-between">
+                                <span>识别结果预览</span>
+                                <span>共 {ocrResults.length} 只股票</span>
+                            </div>
+                            <div className="max-h-[280px] overflow-y-auto">
+                                <table className="w-full text-sm">
+                                    <thead className="bg-gray-50 text-gray-500 text-[11px] sticky top-0">
+                                        <tr>
+                                            <th className="px-4 py-2 text-left">代码/名称</th>
+                                            <th className="px-4 py-2 text-right">持仓数量</th>
+                                            <th className="px-4 py-2 text-right">当前市价</th>
+                                            <th className="px-4 py-2 text-right">参考市值</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-100">
+                                        {ocrResults.map((item, idx) => (
+                                            <tr key={idx} className="hover:bg-gray-50 transition-colors">
+                                                <td className="px-4 py-3">
+                                                    <div className="font-bold text-gray-800">{item.symbol}</div>
+                                                    <div className="text-[11px] text-gray-400">{item.name || '未知股票'}</div>
+                                                </td>
+                                                <td className="px-4 py-3 text-right font-mono text-blue-600 font-bold">
+                                                    {Number(item.quantity).toLocaleString()}
+                                                </td>
+                                                <td className="px-4 py-3 text-right font-mono">
+                                                    ¥{Number(item.current_price || 0).toLocaleString(undefined, {
+                                                        minimumFractionDigits: 3,
+                                                        maximumFractionDigits: 3,
+                                                    })}
+                                                </td>
+                                                <td className="px-4 py-3 text-right font-mono font-bold text-gray-700">
+                                                    ¥{Number(item.market_value || 0).toLocaleString()}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Action Buttons */}
+                    <div className="flex gap-3 pt-2">
+                        <button
+                            onClick={handleOcrAnalyze}
+                            disabled={ocrLoading || ocrFiles.length === 0}
+                            className="flex-1 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-bold shadow-lg shadow-indigo-100 hover:bg-indigo-700 transition-all disabled:bg-gray-300 disabled:shadow-none flex items-center justify-center gap-2"
+                        >
+                            {ocrLoading ? <RefreshCw size={16} className="animate-spin" /> : <Camera size={16} />}
+                            {ocrLoading ? '正在通过 Qwen-VL 识别中...' : '开始解析图片'}
+                        </button>
+                        
+                        {ocrResults.length > 0 && (
+                            <button
+                                onClick={handleConfirmOcrSync}
+                                disabled={isSyncingHoldings}
+                                className="px-8 py-2.5 rounded-xl bg-emerald-600 text-white text-sm font-bold shadow-lg shadow-emerald-100 hover:bg-emerald-700 transition-all flex items-center justify-center gap-2"
+                            >
+                                {isSyncingHoldings ? <RefreshCw size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
+                                {isSyncingHoldings ? '正在同步...' : '确认同步持仓'}
+                            </button>
+                        )}
+                    </div>
+
+                    <p className="text-[10px] text-gray-400 text-center">
+                        提示：同步操作将覆盖模拟盘现有持仓，请谨慎操作。识别结果仅供参考，请核对后再确认。
+                    </p>
+                </div>
+            </Modal>
         </div>
     );
 };

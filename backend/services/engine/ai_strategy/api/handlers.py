@@ -13,6 +13,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from ..services import get_strategy_service
+from ..services.startup_health import get_startup_health_report
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +60,6 @@ async def root_handler() -> dict[str, Any]:
 async def health_check_handler() -> dict[str, Any]:
     """健康检查端点处理器"""
     from ..provider_registry import get_provider
-    from ..services.startup_health import get_startup_health_state
 
     try:
         get_provider()
@@ -67,21 +67,20 @@ async def health_check_handler() -> dict[str, Any]:
     except Exception:
         qwen_available = False
 
-    startup_state = get_startup_health_state().to_dict()
+    startup_health = get_startup_health_report()
 
     return {
-        "status": startup_state["status"],
+        "status": "healthy",
         "service": "ai-strategy",
         "version": "3.1.0",
         "qwen_available": qwen_available,
-        "startup_health": startup_state
+        "startup_health": startup_health,
     }
 
 
 async def api_health_handler() -> dict[str, Any]:
     """API健康检查处理器"""
     from ..provider_registry import get_provider
-    from ..services.startup_health import get_startup_health_state
 
     providers = {}
     try:
@@ -90,14 +89,7 @@ async def api_health_handler() -> dict[str, Any]:
     except Exception:
         providers["qwen"] = {"is_healthy": False, "active": False}
 
-    startup_state = get_startup_health_state().to_dict()
-
-    return {
-        "status": startup_state["status"],
-        "service": "ai-strategy",
-        "providers": providers,
-        "startup_health": startup_state
-    }
+    return {"status": "healthy", "service": "ai-strategy", "providers": providers}
 
 
 async def generate_strategy_handler(request: StrategyRequest) -> dict[str, Any]:

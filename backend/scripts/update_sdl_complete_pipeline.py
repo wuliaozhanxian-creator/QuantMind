@@ -18,6 +18,7 @@ async def update_data_pipeline():
     df['low_unadj'] = df['low'] / df['factor']
     df['open_unadj'] = df['open'] / df['factor']
     df['amount_yuan'] = df['volume'] * df['close_unadj']
+    df['adj_factor'] = df['factor'].astype(float)
     
     df = df.sort_values(['symbol', 'trade_date'])
     
@@ -78,6 +79,7 @@ async def update_data_pipeline():
             sql = """
             UPDATE stock_daily_latest 
             SET amount = v.amount, turnover_rate = v.turnover,
+                adj_factor = v.adj_factor,
                 total_mv = v.total_mv, float_mv = v.float_mv, main_flow = v.main_flow, flow_net_amount = v.net_flow,
                 ma5 = v.ma5, ma10 = v.ma10, ma20 = v.ma20, ma60 = v.ma60,
                 ma_gap_5 = v.g5, ma_gap_10 = v.g10, ma_gap_20 = v.g20,
@@ -85,13 +87,14 @@ async def update_data_pipeline():
                 pe_ttm = v.pe, kdj_j = v.k_j, vol_std_20 = v.v20
             FROM unnest(
                 CAST(:symbols AS text[]), CAST(:amounts AS double precision[]), CAST(:turnovers AS double precision[]),
+                CAST(:adj_factors AS double precision[]),
                 CAST(:total_mvs AS double precision[]), CAST(:float_mvs AS double precision[]),
                 CAST(:main_flows AS double precision[]), CAST(:net_flows AS double precision[]),
                 CAST(:ma5s AS double precision[]), CAST(:ma10s AS double precision[]), CAST(:ma20s AS double precision[]), CAST(:ma60s AS double precision[]),
                 CAST(:g5s AS double precision[]), CAST(:g10s AS double precision[]), CAST(:g20s AS double precision[]),
                 CAST(:m_hists AS double precision[]), CAST(:m_difs AS double precision[]), CAST(:m_deas AS double precision[]),
                 CAST(:pes AS double precision[]), CAST(:k_js AS double precision[]), CAST(:v20s AS double precision[])
-            ) AS v(symbol, amount, turnover, total_mv, float_mv, main_flow, net_flow, ma5, ma10, ma20, ma60, g5, g10, g20, m_hist, m_dif, m_dea, pe, k_j, v20)
+            ) AS v(symbol, amount, turnover, adj_factor, total_mv, float_mv, main_flow, net_flow, ma5, ma10, ma20, ma60, g5, g10, g20, m_hist, m_dif, m_dea, pe, k_j, v20)
             WHERE stock_daily_latest.symbol = v.symbol AND stock_daily_latest.trade_date = :trade_date
             """
             params = {
@@ -99,6 +102,7 @@ async def update_data_pipeline():
                 'symbols': batch['symbol'].tolist(),
                 'amounts': batch['amount_yuan'].tolist(),
                 'turnovers': batch['turnover_calc'].tolist(),
+                'adj_factors': batch['factor'].astype(float).tolist(),
                 'total_mvs': batch['total_mv_yuan'].tolist(),
                 'float_mvs': batch['float_mv_yuan'].tolist(),
                 'main_flows': batch['main_flow_mln'].tolist(),

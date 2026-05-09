@@ -58,6 +58,7 @@ const initialState: WizardState = {
   },
   generated: undefined,
   customPool: [],
+  userStockPools: [],
   selectedSymbols: [],
   qlibParams: {
     strategy_type: 'TopkDropout',

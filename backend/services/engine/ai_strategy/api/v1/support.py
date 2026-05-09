@@ -22,6 +22,7 @@ from ...models import (
 )
 from ...provider_registry import REGISTRY, get_provider_name
 from ...services.template_matcher import template_matcher
+from ...services.startup_health import get_startup_health_report
 from ...services.validator import unified_validator
 from ...storage.database import (
     get_file_stats,
@@ -344,8 +345,6 @@ async def validate_realtime(
 @router.get("/health")
 async def api_health_with_validation():
     """API健康检查（包含验证服务状态）"""
-    from ...services.startup_health import get_startup_health_state
-
     active = get_provider_name()
     providers = {name: {"is_healthy": True, "active": name == active} for name in REGISTRY.keys()}
     validation_status = {
@@ -354,15 +353,12 @@ async def api_health_with_validation():
         "template_validator": True,
         "unified_validator": True,
     }
-    startup_state = get_startup_health_state().to_dict()
-
     return success(
         {
             "service": "ai-strategy",
-            "status": startup_state["status"],
             "models": providers,
             "validation_services": validation_status,
-            "startup_health": startup_state,
+            "startup_health": get_startup_health_report(),
             "features": {
                 "template_matching": True,
                 "parameter_validation": True,

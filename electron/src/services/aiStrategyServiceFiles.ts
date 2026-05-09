@@ -11,6 +11,7 @@ import {
   FileInfo
 } from '../types/strategy';
 import { SERVICE_ENDPOINTS } from '../config/services';
+import { authService } from '../features/auth/services/authService';
 import { apiClient } from './aiStrategyClients';
 import { AIStrategyServiceHelpersMixin } from './aiStrategyServiceHelpers';
 

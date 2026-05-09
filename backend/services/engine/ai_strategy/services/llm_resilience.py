@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import threading
 import time
@@ -10,28 +9,6 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
 from collections.abc import Callable
-
-
-def _load_ide_config_api_key() -> str:
-    """从 AI-IDE 的 config.json 读取用户配置的 API Key"""
-    data_dirs = [
-        os.getenv("AI_IDE_DATA_DIR"),
-        "/app/data",  # Docker 容器内
-        os.path.join(os.path.dirname(__file__), "data"),
-    ]
-    for data_dir in data_dirs:
-        if not data_dir:
-            continue
-        config_path = os.path.join(data_dir, "config.json")
-        if os.path.exists(config_path):
-            try:
-                with open(config_path, encoding="utf-8") as f:
-                    config = json.load(f)
-                    if config.get("qwen_api_key"):
-                        return config["qwen_api_key"]
-            except Exception:
-                pass
-    return ""
 
 
 class LLMRateLimitError(RuntimeError):
@@ -149,15 +126,12 @@ class ResilientLLMRouter:
                 state.opened_until = time.time() + self.circuit_open_seconds
 
     def generate_code(
-        self, prompt: str, preferred: str | None = None, mode: str = "simple", api_key: str | None = None
+        self, prompt: str, preferred: str | None = None, mode: str = "simple"
     ) -> tuple[str, dict[str, Any]]:
         self._acquire_rate_limit()
         providers = self._provider_order(preferred)
         if not providers:
             raise RuntimeError("No LLM providers available")
-
-        # 优先使用传入的 api_key，其次从 config.json 读取
-        effective_api_key = api_key or _load_ide_config_api_key()
 
         reasons: list[str] = []
         acquired = self._semaphore.acquire(timeout=30)
@@ -179,7 +153,7 @@ class ResilientLLMRouter:
                 last_exc: Exception | None = None
                 for attempt in range(max(1, self.max_retries)):
                     try:
-                        code, meta = provider.generate_code(prompt, mode=mode, api_key=effective_api_key)
+                        code, meta = provider.generate_code(prompt, mode=mode)
                         self._record_success(provider_name)
                         merged = dict(meta or {})
                         merged["provider"] = provider_name

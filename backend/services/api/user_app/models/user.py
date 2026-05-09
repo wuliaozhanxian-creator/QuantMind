@@ -131,19 +131,19 @@ class UserSession(Base):
 
     __tablename__ = "user_sessions"
 
-    # 主键
-    id = Column(Integer, primary_key=True, autoincrement=True, comment="自增ID")
+    # 主键 (session_id 是实际主键)
+    id = Column(String(64), primary_key=True, default=lambda: __import__("uuid").uuid4().hex)
     session_id = Column(
-        String(64), unique=True, nullable=False, index=True, comment="会话ID"
+        String(64), unique=True, nullable=False, primary_key=True, comment="会话ID"
     )
     user_id = Column(String(64), nullable=False, index=True, comment="用户ID")
     tenant_id = Column(String(64), nullable=False, index=True, comment="租户ID")
 
     # 会话信息
-    token_jti = Column(String(64), unique=True, index=True, comment="JWT ID")
-    refresh_token = Column(Text, unique=True, comment="刷新Token")
+    token_jti = Column(String(64), index=True, comment="JWT ID")
+    refresh_token = Column(String(1024), comment="刷新Token")
     ip_address = Column(String(64), comment="IP地址")
-    user_agent = Column(Text, comment="User Agent")
+    user_agent = Column(String(255), comment="User Agent")
 
     # 时间信息
     created_at = Column(

@@ -960,8 +960,49 @@ export const realTradingService = {
             console.error('Failed to update real account settings', err);
             return false;
         }
-    }
+    },
+
+    // Unbind QMT Agent (delete binding, keep account data)
+    unbindQmtAgent: async (): Promise<{ success: boolean; message: string }> => {
+        try {
+            const token = authService.getAccessToken();
+            const response = await axios.delete<{ reset: boolean; message: string }>(
+                `${SERVICE_URLS.API_GATEWAY}/internal/strategy/bridge/binding/me`,
+                {
+                    headers: token ? new AxiosHeaders({ Authorization: `Bearer ${token}` }) : undefined,
+                    timeout: 15000,
+                }
+            );
+            return { success: response.data?.reset === true, message: response.data?.message || '解绑成功' };
+        } catch (err: any) {
+            console.error('Failed to unbind QMT agent', err);
+            const errorMsg = resolveErrorMessage(err);
+            return { success: false, message: errorMsg };
+        }
+    },
+
+    analyzeHoldingImages: async (formData: FormData): Promise<{ success: boolean; message?: string; data?: any[] }> => {
+        const token = authService.getAccessToken();
+        const response = await axios.post(`${SERVICE_URLS.API_GATEWAY}/simulation/sync/ocr`, formData, {
+            headers: {
+                'Content-Type': 'multipart/form-data',
+                'Authorization': `Bearer ${token}`
+            },
+            timeout: 60000,
+        });
+        return response.data;
+    },
+
+    syncSimulationHoldings: async (holdings: any[]): Promise<boolean> => {
+        const token = authService.getAccessToken();
+        const response = await axios.post(`${SERVICE_URLS.API_GATEWAY}/simulation/sync/confirm`, { holdings }, {
+            headers: token ? new AxiosHeaders({ Authorization: `Bearer ${token}` }) : undefined,
+            timeout: 30000,
+        });
+        return response.data?.success === true;
+    },
 };
+
 
 export interface AccountInfo {
     account_id?: string;

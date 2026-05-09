@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Card, Button, Space, Typography, Progress, List, Tag, Alert, Modal, Form, Input, Select, message, Row, Col } from 'antd';
+import { Card, Button, Space, Typography, Progress, Tag, Alert, Modal, Form, Input, Select, message, Row, Col } from 'antd';
 import {
     CheckCircleOutlined,
     CloseCircleOutlined,
@@ -9,8 +9,8 @@ import {
     SyncOutlined,
     InfoCircleOutlined
 } from '@ant-design/icons';
-import { useWizardStore } from '../store/wizardStore';
-import type { ValidationCheck } from '../types';
+import { useWizardV2Store } from '../store/wizardV2Store';
+import type { ValidationCheck, ValidationResult } from '../types';
 import { useAuth } from '../../auth/hooks';
 import { deletePoolFile, saveToCloud } from '../services/wizardService';
 import { QLIB_REBALANCE_DAY_LABEL, resolveRebalanceDays } from '../../../shared/qlib/rebalance';
@@ -30,13 +30,12 @@ const QlibValidatorAndSave: React.FC<Props> = ({ onBack }) => {
         setValidationResult,
         saveStatus,
         markAsCloudSaved,
-        markAsDownloaded,
-        pool,
+        workingPool: pool,
         qlibParams,
         conditions,
-        poolFile,
-        clearPoolFile,
-    } = useWizardStore();
+        activePoolVersionId,
+        markAsDownloaded
+    } = useWizardV2Store();
     const { user } = useAuth();
 
     const [validating, setValidating] = useState(false);
@@ -53,7 +52,7 @@ const QlibValidatorAndSave: React.FC<Props> = ({ onBack }) => {
         setValidationResult(null); // 清除之前的结果
 
         try {
-            const { validateQlibCode } = await import('../services/wizardService');
+            const { validateQlibCode } = await import('../../strategy-wizard/services/wizardService');
 
             const codeToValidate = generated?.code || '';
             if (!codeToValidate) {
@@ -68,21 +67,21 @@ const QlibValidatorAndSave: React.FC<Props> = ({ onBack }) => {
                 context: {
                     start_date: '2023-01-01',
                     end_date: '2024-01-01',
-                    universe_size: pool?.items?.length || 0
+                    universe_size: pool?.length || 0
                 },
                 mode: 'syntax_only'
             });
 
             if (response.success && response.valid) {
                 const result = {
-                    valid: response.valid,
+                    valid: true,
                     checks: response.checks || [],
                     warnings: response.warnings || [],
                     executionPreview: response.execution_preview || null
                 };
 
                 setValidationResult(result);
-            message.success('语法检查通过！');
+                message.success('语法检查通过！');
             } else if (response.success && !response.valid) {
                 // 验证失败但API调用成功
                 const result = {
@@ -140,7 +139,7 @@ const QlibValidatorAndSave: React.FC<Props> = ({ onBack }) => {
 
             setRepairing(true);
 
-            const { repairQlibCode, validateQlibCode } = await import('../services/wizardService');
+            const { repairQlibCode, validateQlibCode } = await import('../../strategy-wizard/services/wizardService');
             const repairRes = await repairQlibCode({
                 code: codeToRepair,
                 error: errMsg || '语法错误',
@@ -164,7 +163,7 @@ const QlibValidatorAndSave: React.FC<Props> = ({ onBack }) => {
                 context: {
                     start_date: '2023-01-01',
                     end_date: '2024-01-01',
-                    universe_size: pool?.items?.length || 0
+                    universe_size: pool?.length || 0
                 },
                 mode: 'syntax_only'
             });
@@ -197,44 +196,40 @@ const QlibValidatorAndSave: React.FC<Props> = ({ onBack }) => {
             return;
         }
 
+        // 检查认证令牌
+        const token = localStorage.getItem('access_token') || localStorage.getItem('auth_token');
+        if (!token) {
+            message.error('认证失败：请重新登录');
+            return;
+        }
+
         saveLockRef.current = true;
         setSavingToCloud(true);
         try {
             const values = await saveForm.validateFields();
-            const storedUserStr = localStorage.getItem('user');
-            const storedUser = storedUserStr ? JSON.parse(storedUserStr) : null;
-            // 兼容 user_service 的 user 对象字段（user_id），同时保留旧字段（id）。
-            const anyUser = user as any;
-            const userId = String(
-                anyUser?.user_id ||
-                anyUser?.id ||
-                storedUser?.user_id ||
-                storedUser?.id ||
-                'dev_user_001'
-            );
-
+            
             const payload = {
-                user_id: userId,
+                user_id: user?.id || 'default_user',
                 strategy_name: values.name,
-                code: generated?.code || mockCode,
+                code: generated?.code || '',
                 metadata: {
                     description: values.description,
-                    tags: values.tags || [],
+                    tags: values.tags,
                     conditions,
-                    stock_pool: pool,
-                    pool_file_url: poolFile?.fileUrl,
-                    qlib_params: qp,
+                    qlib_params: qlibParams,
                     qlib_validated: Boolean(validationResult?.valid),
-                    validation_result: validationResult,
-                },
+                    pool_file_key: activePoolVersionId,
+                    notes: 'V2 重构版生成',
+                }
             };
 
-            const res = await saveToCloud(payload);
+            const res = await saveToCloud(payload as any);
+
             if (!res?.success) {
-                throw new Error(res?.error || '保存失败');
+                throw new Error(res?.error || '保存失败，请检查网络连接或重试');
             }
 
-            markAsCloudSaved(res.cloud_url, res.strategy_id);
+            markAsCloudSaved(res.strategy_id);
             savedRef.current = true;
             message.success('策略已成功保存到个人中心！');
             setSaveModalVisible(false);
@@ -248,19 +243,7 @@ const QlibValidatorAndSave: React.FC<Props> = ({ onBack }) => {
         }
     };
 
-    useEffect(() => {
-        return () => {
-            if (savedRef.current) {
-                return;
-            }
-            if (poolFile?.fileUrl) {
-                deletePoolFile({ file_url: poolFile.fileUrl, file_key: poolFile.fileKey })
-                    .finally(() => {
-                        clearPoolFile();
-                    });
-            }
-        };
-    }, [poolFile, clearPoolFile]);
+
 
     // 本地下载
     const handleDownloadLocal = () => {
@@ -291,33 +274,21 @@ const QlibValidatorAndSave: React.FC<Props> = ({ onBack }) => {
         return <CloseCircleOutlined className="text-red-500" />;
     };
 
-    const sanitizeQlibParams = (params?: typeof qlibParams) => {
-        const next = {
-            ...(params ?? { strategy_type: 'TopkDropout', topk: 10, n_drop: 2, rebalance_days: 5 }),
-            rebalance_days: resolveRebalanceDays(params),
-        };
-
-        if (next.strategy_type === 'TopkWeight') {
-            delete next.n_drop;
-        } else if (typeof next.n_drop !== 'number') {
-            next.n_drop = 2;
-        }
-
-        return next;
-    };
-
-    // Mock策略代码（LLM生成完成前的占位）
-    const qp = sanitizeQlibParams(qlibParams);
-    const rebalanceDays = qp.rebalance_days;
-    const nDropLine = qp.strategy_type === 'TopkDropout' ? `\n    "n_drop": ${qp.n_drop},` : '';
+        // Mock策略代码（LLM生成完成前的占位）
+    const qp = qlibParams ?? { strategy_type: 'TopkDropout', topk: 10, rebalance_days: 5 };
+    const rebalanceDays = resolveRebalanceDays(qp);
+    const nDropField = qp.strategy_type === 'TopkDropout' && qp.n_drop !== undefined ? `"n_drop": ${qp.n_drop},` : '';
     const mockCode = `# QuantMind 智能策略
 # 生成时间: ${new Date().toLocaleString()}
 
+from qlib.contrib.strategy import TopkDropoutStrategy
+
 STRATEGY_CONFIG = {
     "strategy_type": "${qp.strategy_type}",
-    "topk": ${qp.topk},${nDropLine}
+    "topk": ${qp.topk},
+    ${nDropField}
     "rebalance_days": ${rebalanceDays},
-    "universe": "${pool?.items?.length || 0} stocks",
+    "universe": "${pool?.length || 0} stocks",
 }`;
 
     return (
@@ -433,7 +404,7 @@ STRATEGY_CONFIG = {
                                 />
                             </Form.Item>
 
-                            {qp.strategy_type === 'TopkDropout' && (
+                            {qp.strategy_type === 'TopkDropout' && qp.n_drop !== undefined && (
                                 <Form.Item label={<span style={{ fontSize: '11px' }}>每期剔除数（n_drop）</span>} style={{ marginBottom: '6px' }}>
                                     <Input
                                         value={`${qp.n_drop} 只`}
@@ -445,7 +416,7 @@ STRATEGY_CONFIG = {
 
                             <Form.Item label={<span style={{ fontSize: '11px' }}>股票池规模</span>} style={{ marginBottom: '6px' }}>
                                 <Input
-                                    value={`${pool?.items?.length || 0} 只股票`}
+                                    value={`${pool?.length || 0} 只股票`}
                                     readOnly
                                     style={{ backgroundColor: '#f5f5f5', borderRadius: '16px', fontSize: '11px', height: '30px' }}
                                 />
@@ -457,18 +428,14 @@ STRATEGY_CONFIG = {
                             <div className="mt-2 pt-2" style={{ borderTop: '1px solid #f0f0f0' }}>
                                 <Text strong className="mb-1 block" style={{ fontSize: '12px' }}>语法检查结果</Text>
 
-                                <List
-                                    size="small"
-                                    dataSource={validationResult.checks}
-                                    renderItem={(check) => (
-                                        <List.Item style={{ padding: '2px 0', border: 'none' }}>
-                                            <Space size="small">
-                                                {getCheckIcon(check)}
-                                                <Text style={{ fontSize: '11px' }}>{check.message}</Text>
-                                            </Space>
-                                        </List.Item>
-                                    )}
-                                />
+                                <div className="flex flex-col gap-1">
+                                    {validationResult.checks.map((check, idx) => (
+                                        <div key={idx} className="flex items-center gap-2 py-0.5">
+                                            {getCheckIcon(check)}
+                                            <Text style={{ fontSize: '11px' }}>{check.message}</Text>
+                                        </div>
+                                    ))}
+                                </div>
 
                                 {validationResult.warnings.length > 0 && (
                                     <Alert

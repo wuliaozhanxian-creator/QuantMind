@@ -6,16 +6,7 @@ import numpy as np
 from ...ai_strategy_config import get_config as _get_config
 from .dashscope_client import DashScopeClient
 
-# 延迟加载配置
-_ai_strategy_config = None
-
-
-def _get_ai_strategy_config():
-    """延迟获取配置"""
-    global _ai_strategy_config
-    if _ai_strategy_config is None:
-        _ai_strategy_config = _get_config()
-    return _ai_strategy_config
+ai_strategy_config = _get_config()
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +31,7 @@ STRATEGY_PROTOTYPES = {
         "研发投入占比高且收入增长快的科创板公司",
     ],
     "technical_analysis": [
-        "RSI超卖且放量反弹",
+        "MACD金叉且均线多头排列",
         "KDJ超卖区域回升的股票",
         "放量突破关键压力位的标的",
         "低位放量的个股筛选",
@@ -78,7 +69,7 @@ class StrategyVectorParser:
 
     def __init__(self):
         self.client = DashScopeClient()
-        self.model = _get_ai_strategy_config().DASHSCOPE_EMBEDDING_MODEL
+        self.model = ai_strategy_config.DASHSCOPE_EMBEDDING_MODEL
 
         self._prototype_vectors: dict[str, list[np.ndarray]] = {}
         self._initialized = False

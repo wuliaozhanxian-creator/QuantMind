@@ -7,6 +7,8 @@ export const FACTORS: Array<{ key: string; label: string; category: string; unit
   { key: 'pe', label: '市盈率PE(TTM)', category: '估值因子' },
   { key: 'pb', label: '市净率PB', category: '估值因子' },
   { key: 'roe', label: '净资产收益率ROE', category: '估值因子', unit: '%' },
+  { key: 'main_flow', label: '主力资金净流入', category: '资金流向', unit: '元' },
+  { key: 'flow_net_amount', label: '资金净流入总额', category: '资金流向', unit: '元' },
 
   // ============ 价格因子 ============
   { key: 'close', label: '收盘价', category: '价格因子', unit: '元' },

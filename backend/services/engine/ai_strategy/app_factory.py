@@ -5,7 +5,6 @@ AI策略服务应用工厂模块
 """
 
 import logging
-import os
 import sys
 import time
 from contextlib import asynccontextmanager
@@ -21,6 +20,7 @@ from .api import (
     root_handler,
 )
 from .services import close_strategy_service
+from .services.startup_health import run_startup_health_checks
 
 logger = logging.getLogger(__name__)
 
@@ -245,19 +245,13 @@ def _register_events(app: FastAPI):
         except Exception as e:
             logger.error(f"Failed to initialize Qwen provider: {e}")
 
-        # 检查并预热向量解析/字段检索（2026-05-03：暂时关闭强制预热）
-        warmup_enabled = os.getenv("AI_STRATEGY_WARMUP", "false").strip().lower() not in ("0", "false", "no", "off")
-        if warmup_enabled:
-            try:
-                from .services.startup_health import run_startup_health_checks
-                await run_startup_health_checks()
-            except Exception as e:
-                logger.critical(f"FATAL: AI Strategy mandatory warmup failed: {e}")
-                # 在生产环境下建议直接抛出异常阻断启动
-                if os.getenv("ENV") == "prod":
-                    raise
-        else:
-            logger.info("Warmup disabled by env: AI_STRATEGY_WARMUP=false")
+        # 强制预热向量解析/字段检索，失败则阻断启动，避免首请求才暴露 embedding 问题。
+        warmup_start = time.monotonic()
+        await run_startup_health_checks()
+        logger.info(
+            "Warmup completed for vector parser and schema retriever in %.2fs",
+            time.monotonic() - warmup_start,
+        )
 
         yield
 

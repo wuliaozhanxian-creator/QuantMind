@@ -7,16 +7,7 @@ import numpy as np
 from ...ai_strategy_config import get_config as _get_config
 from .dashscope_client import DashScopeClient
 
-# 延迟加载配置
-_ai_strategy_config = None
-
-
-def _get_ai_strategy_config():
-    """延迟获取配置"""
-    global _ai_strategy_config
-    if _ai_strategy_config is None:
-        _ai_strategy_config = _get_config()
-    return _ai_strategy_config
+ai_strategy_config = _get_config()
 
 logger = logging.getLogger(__name__)
 
@@ -70,76 +61,139 @@ STOCK_SELECTION_SCHEMA: list[SchemaColumn] = [
 
 STOCK_DAILY_SCHEMA: list[SchemaColumn] = [
     SchemaColumn("stock_daily", "trade_date", "交易日期"),
-    SchemaColumn("stock_daily", "code", "股票代码"),
-    SchemaColumn("stock_daily", "stock_name", "股票名称"),
+    SchemaColumn("stock_daily", "symbol", "股票代码"),
+    SchemaColumn("stock_daily", "name", "股票名称"),
     SchemaColumn("stock_daily", "open", "开盘价"),
     SchemaColumn("stock_daily", "high", "最高价"),
     SchemaColumn("stock_daily", "low", "最低价"),
     SchemaColumn("stock_daily", "close", "收盘价"),
     SchemaColumn("stock_daily", "volume", "成交量（手）"),
-    SchemaColumn("stock_daily", "turnover", "成交额（元）"),
+    SchemaColumn("stock_daily", "amount", "成交额（元）"),
     SchemaColumn("stock_daily", "pct_change", "涨跌幅"),
     SchemaColumn("stock_daily", "turnover_rate", "换手率"),
     SchemaColumn("stock_daily", "pe_ttm", "市盈率 TTM"),
     SchemaColumn("stock_daily", "pb", "市净率"),
     SchemaColumn("stock_daily", "total_mv", "总市值（亿元）"),
     SchemaColumn("stock_daily", "is_st", "是否 ST (1/0)"),
-    SchemaColumn("stock_daily", "is_csi300", "是否沪深300成分股 (1/0)"),
-    SchemaColumn("stock_daily", "is_csi500", "是否中证500成分股 (1/0)"),
-    SchemaColumn("stock_daily", "is_csi800", "是否中证800成分股 (1/0)"),
-    SchemaColumn("stock_daily", "is_csi1000", "是否中证1000成分股 (1/0)"),
+    SchemaColumn("stock_daily", "idx_hs300", "是否沪深300成分股 (1/0)"),
+    SchemaColumn("stock_daily", "idx_zz1000", "是否中证1000成分股 (1/0)"),
 ]
 
 STOCK_DAILY_LATEST_SCHEMA: list[SchemaColumn] = [
+    # === 基础信息 (8个) ===
     SchemaColumn("stock_daily_latest", "trade_date", "交易日期"),
     SchemaColumn("stock_daily_latest", "symbol", "股票代码"),
-    SchemaColumn("stock_daily_latest", "stock_name", "股票名称"),
-    SchemaColumn("stock_daily_latest", "open", "开盘价"),
-    SchemaColumn("stock_daily_latest", "high", "最高价"),
-    SchemaColumn("stock_daily_latest", "low", "最低价"),
-    SchemaColumn("stock_daily_latest", "close", "收盘价"),
-    SchemaColumn("stock_daily_latest", "volume", "成交量"),
+    SchemaColumn("stock_daily_latest", "stock_name", "股票简称"),
+    SchemaColumn("stock_daily_latest", "listed_days", "上市天数"),
+    SchemaColumn("stock_daily_latest", "is_st", "是否ST股票 (0=正常, 1=ST/*ST)"),
+    SchemaColumn("stock_daily_latest", "listing_market", "上市板块（主板/创业板/科创板）"),
+    SchemaColumn("stock_daily_latest", "industry", "申万一级行业（如：银行、半导体、白酒）"),
+    SchemaColumn("stock_daily_latest", "province", "所属省份"),
+
+    # === 基础行情 (9个) ===
+    SchemaColumn("stock_daily_latest", "open", "开盘价（元）"),
+    SchemaColumn("stock_daily_latest", "high", "最高价（元）"),
+    SchemaColumn("stock_daily_latest", "low", "最低价（元）"),
+    SchemaColumn("stock_daily_latest", "close", "收盘价（元）"),
+    SchemaColumn("stock_daily_latest", "volume", "成交量（股）"),
     SchemaColumn("stock_daily_latest", "amount", "成交额（元）"),
-    SchemaColumn("stock_daily_latest", "pct_change", "涨跌幅"),
-    SchemaColumn("stock_daily_latest", "turnover_rate", "换手率"),
-    SchemaColumn("stock_daily_latest", "pe_ttm", "市盈率 TTM"),
-    SchemaColumn("stock_daily_latest", "pb", "市净率"),
-    SchemaColumn("stock_daily_latest", "total_mv", "总市值（亿元）"),
-    SchemaColumn("stock_daily_latest", "float_mv", "流通市值"),
-    SchemaColumn("stock_daily_latest", "is_st", "是否 ST (1/0)"),
-    SchemaColumn("stock_daily_latest", "idx_hs300", "是否沪深300成分股 (1/0)"),
-    SchemaColumn("stock_daily_latest", "idx_zz500", "是否中证500成分股 (1/0)"),
-    SchemaColumn("stock_daily_latest", "idx_zz1000", "是否中证1000成分股 (1/0)"),
-    SchemaColumn("stock_daily_latest", "idx_margin", "是否融资融券标的 (1/0)"),
-    SchemaColumn("stock_daily_latest", "industry", "行业分类（如：半导体、互联网、银行、白酒等）"),
-    SchemaColumn("stock_daily_latest", "ma5", "5日均线"),
-    SchemaColumn("stock_daily_latest", "ma10", "10日均线"),
-    SchemaColumn("stock_daily_latest", "ma20", "20日均线"),
-    SchemaColumn("stock_daily_latest", "ma60", "60日均线"),
-    SchemaColumn("stock_daily_latest", "rsi_6", "RSI 6日指标"),
-    SchemaColumn("stock_daily_latest", "rsi_14", "RSI 14日指标"),
-    SchemaColumn("stock_daily_latest", "macd_dif", "MACD DIF线"),
-    SchemaColumn("stock_daily_latest", "macd_dea", "MACD DEA线"),
-    SchemaColumn("stock_daily_latest", "macd_hist", "MACD柱状值"),
-    SchemaColumn("stock_daily_latest", "kdj_k", "KDJ K值"),
-    SchemaColumn("stock_daily_latest", "kdj_d", "KDJ D值"),
-    SchemaColumn("stock_daily_latest", "kdj_j", "KDJ J值"),
-    SchemaColumn("stock_daily_latest", "return_1d", "近1日收益率"),
+    SchemaColumn("stock_daily_latest", "pct_change", "涨跌幅（比率，0.05=5%）"),
+    SchemaColumn("stock_daily_latest", "turnover_rate", "换手率（百分比）"),
+    SchemaColumn("stock_daily_latest", "adj_factor", "复权因子"),
+
+    # === 估值指标 (8个) ===
+    SchemaColumn("stock_daily_latest", "pe_ttm", "动态市盈率（倍）"),
+    SchemaColumn("stock_daily_latest", "pb", "市净率（倍）"),
+    SchemaColumn("stock_daily_latest", "total_mv", "总市值（元）"),
+    SchemaColumn("stock_daily_latest", "float_mv", "流通市值（元）"),
+    SchemaColumn("stock_daily_latest", "bp", "账面市值比（1/PB）"),
+    SchemaColumn("stock_daily_latest", "ep_ttm", "盈利收益率（1/PE）"),
+    SchemaColumn("stock_daily_latest", "ln_mv_total", "总市值的对数"),
+    SchemaColumn("stock_daily_latest", "roe", "净资产收益率ROE（百分比）"),
+
+    # === 收益率序列 (6个) ===
+    SchemaColumn("stock_daily_latest", "return_1d", "当日收益率"),
     SchemaColumn("stock_daily_latest", "return_3d", "近3日收益率"),
     SchemaColumn("stock_daily_latest", "return_5d", "近5日收益率"),
     SchemaColumn("stock_daily_latest", "return_10d", "近10日收益率"),
     SchemaColumn("stock_daily_latest", "return_20d", "近20日收益率"),
+    SchemaColumn("stock_daily_latest", "return_60d", "近60日收益率"),
+
+    # === 均线系统 (7个) ===
+    SchemaColumn("stock_daily_latest", "ma5", "5日均线（元）"),
+    SchemaColumn("stock_daily_latest", "ma10", "10日均线（元）"),
+    SchemaColumn("stock_daily_latest", "ma20", "20日均线（元）"),
+    SchemaColumn("stock_daily_latest", "ma60", "60日均线（元）"),
+    SchemaColumn("stock_daily_latest", "ma_gap_5", "5日均线偏离度"),
+    SchemaColumn("stock_daily_latest", "ma_gap_10", "10日均线偏离度"),
+    SchemaColumn("stock_daily_latest", "ma_gap_20", "20日均线偏离度"),
+
+    # === 技术指标 (9个) ===
+    SchemaColumn("stock_daily_latest", "rsi_6", "RSI 6日指标（0-100）"),
+    SchemaColumn("stock_daily_latest", "rsi_14", "RSI 14日指标（0-100）"),
+    SchemaColumn("stock_daily_latest", "kdj_k", "KDJ K值（0-100）"),
+    SchemaColumn("stock_daily_latest", "kdj_d", "KDJ D值（0-100）"),
+    SchemaColumn("stock_daily_latest", "kdj_j", "KDJ J值（0-100）"),
+    SchemaColumn("stock_daily_latest", "macd_dif", "MACD快线DIF"),
+    SchemaColumn("stock_daily_latest", "macd_dea", "MACD慢线DEA"),
+    SchemaColumn("stock_daily_latest", "macd_hist", "MACD柱状图"),
+    SchemaColumn("stock_daily_latest", "beta_20", "20日贝塔系数"),
+
+    # === 波动与量能 (10个) ===
     SchemaColumn("stock_daily_latest", "vol_std_5", "5日波动率"),
     SchemaColumn("stock_daily_latest", "vol_std_20", "20日波动率"),
-    SchemaColumn("stock_daily_latest", "vol_atr_14", "14日ATR"),
+    SchemaColumn("stock_daily_latest", "vol_std_60", "60日波动率"),
+    SchemaColumn("stock_daily_latest", "vol_atr_14", "14日平均真实振幅ATR"),
     SchemaColumn("stock_daily_latest", "volume_ratio_5", "5日量比"),
     SchemaColumn("stock_daily_latest", "volume_ratio_20", "20日量比"),
-    SchemaColumn("stock_daily_latest", "roe", "净资产收益率ROE"),
-    SchemaColumn("stock_daily_latest", "concept_ai", "AI概念 (1/0)"),
-    SchemaColumn("stock_daily_latest", "concept_chip", "芯片概念 (1/0)"),
-    SchemaColumn("stock_daily_latest", "concept_new_energy", "新能源概念 (1/0)"),
-    SchemaColumn("stock_daily_latest", "concept_ev", "电动车概念 (1/0)"),
-    SchemaColumn("stock_daily_latest", "concept_semiconductor", "半导体概念 (1/0)"),
+    SchemaColumn("stock_daily_latest", "volume_ma_3", "3日平均成交量"),
+    SchemaColumn("stock_daily_latest", "volume_ma_5", "5日平均成交量"),
+    SchemaColumn("stock_daily_latest", "amount_ma_5", "5日平均成交额"),
+    SchemaColumn("stock_daily_latest", "volume_trend_3d", "3日成交量趋势"),
+
+    # === 行业概念与标签 (14个) ===
+    SchemaColumn("stock_daily_latest", "ind_code_l1", "一级行业代码"),
+    SchemaColumn("stock_daily_latest", "ind_code_l2", "二级行业代码"),
+    SchemaColumn("stock_daily_latest", "label", "自动分类标签（0=周期,1=价值,2=成长,3=价值成长）"),
+    SchemaColumn("stock_daily_latest", "concept_ai", "是否AI概念股（0/1）"),
+    SchemaColumn("stock_daily_latest", "concept_chip", "是否芯片概念股（0/1）"),
+    SchemaColumn("stock_daily_latest", "concept_new_energy", "是否新能源概念股（0/1）"),
+    SchemaColumn("stock_daily_latest", "concept_pv", "是否光伏概念股（0/1）"),
+    SchemaColumn("stock_daily_latest", "concept_military", "是否军工概念股（0/1）"),
+    SchemaColumn("stock_daily_latest", "concept_medical", "是否医药概念股（0/1）"),
+    SchemaColumn("stock_daily_latest", "concept_fintech", "是否金融科技概念股（0/1）"),
+    SchemaColumn("stock_daily_latest", "concept_consumption", "是否大消费概念股（0/1）"),
+    SchemaColumn("stock_daily_latest", "concept_state_owned", "是否国资委背景（0/1）"),
+    SchemaColumn("stock_daily_latest", "concept_lithium", "是否锂电池概念股（0/1）"),
+
+    # === 资金持仓流向 (7个) ===
+    SchemaColumn("stock_daily_latest", "main_flow", "主力资金净流入（元）"),
+    SchemaColumn("stock_daily_latest", "inst_ownership", "流通市值占比"),
+    SchemaColumn("stock_daily_latest", "lrg_trd_tolbuynum", "大单买入笔数"),
+    SchemaColumn("stock_daily_latest", "lrg_trd_tolsellnum", "大单卖出笔数"),
+    SchemaColumn("stock_daily_latest", "flow_net_amount", "资金总净流入额（元）"),
+    SchemaColumn("stock_daily_latest", "b_volume", "外盘主动买入量（股）"),
+    SchemaColumn("stock_daily_latest", "s_volume", "内盘主动卖出量（股）"),
+
+    # === 指数关联属性 (5个) ===
+    SchemaColumn("stock_daily_latest", "idx_all", "全A股集合（1）"),
+    SchemaColumn("stock_daily_latest", "idx_hs300", "沪深300成分股（0/1）"),
+    SchemaColumn("stock_daily_latest", "idx_zz1000", "中证1000成分股（0/1）"),
+    SchemaColumn("stock_daily_latest", "idx_margin", "融资融券标的（0/1）"),
+    SchemaColumn("stock_daily_latest", "idx_chinext", "创业板指成分股（0/1）"),
+
+    # === 市场微结构 (3个) ===
+    SchemaColumn("stock_daily_latest", "micro_effective_spread", "有效价差"),
+    SchemaColumn("stock_daily_latest", "micro_imbalance_volume", "指数订单不平衡量"),
+    SchemaColumn("stock_daily_latest", "micro_jump_flag", "价格跳变标记（0/1）"),
+
+    # === 特殊交易状态 (3个) ===
+    SchemaColumn("stock_daily_latest", "consecutive_limit_up_days", "连板天数"),
+    SchemaColumn("stock_daily_latest", "limit_up_today", "今日涨停（0/1）"),
+    SchemaColumn("stock_daily_latest", "limit_down_today", "今日跌停（0/1）"),
+
+    # === 其他核心财务 (1个) ===
+    SchemaColumn("stock_daily_latest", "profit_growth", "净利润同比增长率"),
 ]
 
 
@@ -157,7 +211,7 @@ def _cosine_similarity(v1: np.ndarray, v2: np.ndarray) -> float:
 class SchemaRetriever:
     def __init__(self) -> None:
         self.client = DashScopeClient()
-        self.model = _get_ai_strategy_config().DASHSCOPE_EMBEDDING_MODEL
+        self.model = ai_strategy_config.DASHSCOPE_EMBEDDING_MODEL
         self._column_vectors: dict[str, list[tuple[SchemaColumn, np.ndarray]]] = {}
         self._initialized = False
 
@@ -237,7 +291,8 @@ class SchemaRetriever:
         for table, score in table_scores.items():
             table_scores[table] = score + bias.get(table, 0.0)
 
-        target_table = max(table_scores.items(), key=lambda x: x[1])[0]
+        # 强制使用 stock_daily_latest 表，因为 stock_selection 表不存在
+        target_table = "stock_daily_latest"
         top_candidates = candidates.get(target_table, [])[:top_k]
 
         return {

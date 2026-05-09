@@ -1,40 +1,33 @@
-# components
+# components (V2)
 
-用途：可复用的 UI 组件。
+用途：智能策略向导版本的可复用 UI 组件与核心界面逻辑。
 
 ## 说明
-- 归属路径：electron\src\features\strategy-wizard\components
-- 条件选股仅保留简单财务指标（市值/市盈率/市净率）与简易构建器（AND 关系）。
-- 快速模板已包含 `沪深300` 与 `中证1000`。
-- 已移除复杂条件模块组件（`ConditionBuilder.tsx`、`LogicTreeBuilder.tsx`、`ConditionSplitLayout.tsx`）。
-- 修改本目录代码后请同步更新本 README
+- 归属路径：`electron/src/features/strategy-wizard/components`
+- V2 版本基于 V1 的专业左右分栏布局与底部状态栏进行了重构，视觉和交互对标企业级专业体验。
+- 采用 Zustand 进行统一的状态管理（`useWizardV2Store`），实现了 WorkingPool（走 Redis 缓存）与 SavedPool/ActivePool（走 PG + COS）的读写分离与架构隔离。
+- 修改本目录代码后请同步更新本 README。
 
-## 第二步：确定股票池
+## 第一步：条件选股与构建资产库
 
-- `PoolPreview.tsx`
-- 底部不再提供“上一步/下一步”按钮，统一使用页面右上角的向导导航按钮（避免重复入口）
-- 右侧“市值分布”按 300 亿阈值二分（`< 300亿` / `≥ 300亿`），并优先基于当前勾选股票统计
-- “筛选结果”上方提供“我的股票池”管理按钮，点击后弹出历史池弹窗，可加载并复用历史保存的股票池（不会重复生成占用 COS 空间）
-- 当选择“我的股票池”中的历史股票池且未修改勾选结果时，点击下一步将直接进入后续步骤，不再弹出重命名窗口；如用户修改了勾选，则视为新股票池，仍需命名保存
-- 第二步的历史池接口统一通过 token 解析 `user_id`（优先 `sub/user_id`），避免 `1` 与 `00000001` 等格式差异导致“我的股票池”加载为空
-- 第二步保存成功后会立即刷新“我的股票池”历史列表，并自动定位到刚保存的股票池，便于直接复用
-- “我的股票池”入口已改为按钮，点击后弹出居中弹窗展示历史股票池列表，支持一键复用、删除和切回“本次筛选结果”
-- “请为您的股票池命名”弹窗位置已上移，采用 `top: 18vh`（位于页面上方约三分之二区域）
-- 历史股票池删除会调用后端删除接口并同步移除数据库记录，删除后列表会立即刷新
-- 第二步“筛选结果”表格的 4 个关键指标列（代码/名称/市值(亿)/市盈率）已统一列宽，并启用固定表格布局，避免列间距不一致导致视觉不协调
+- **核心入口**: `NaturalTextInput.tsx`，整合了“自然语言描述”、“简易构建器”、“股票池管理”三大板块，已全局压缩高度和内边距，减少无效空白，提升屏效。
+- **左右分栏选择器**: `CustomStockSelector.tsx` 整合了 `StockPoolLibrary.tsx`（左侧侧边资产库）与 `StockPoolTable.tsx`（右侧表格）。
+- **资产库复用与加载优化**：
+  - 在 `StockPoolLibrary.tsx` 中点击左侧历史股票池复用时，不再由前端发起冗余的特征查询，直接复用后端 `/preview-pool-file` 中查表返回的 `stock_daily_latest` 数据，实现“秒切”。
+  - 左侧凭证鉴权统一采用 `getWizardUserId()`，解决部分情况下 `localStorage.user_id` 未更新导致请求落到 `default_user` 的鉴权失败与拉取空白问题。
+- **本地股票导入与表格优化**：
+  - `StockPoolTable.tsx`：底层表格移除了冗余截断，接入 Antd 分页（默认 pageSize: 10），更好地承载成百上千只标的。
+  - 用户从本地上传 CSV 导入股票时，彻底修复了之前的**网络风暴漏洞**（原循环触发 `addWorkingPoolItem` 导致大量并发写入 Redis），改为本地计算增量并单次批量提交。
+  - 对于用户自行上传的无表头极简 CSV，默认 fallback 取第一列，增强了容错率。
 
 ## 第三步：策略参数（Qlib 专用）
-- `SmartStrategyStudio.tsx` 左侧步骤提示文案已调整为：`Qlib专用参数（TopK / 调仓 / 风控）`，明确该步骤为 Qlib 参数配置入口。
-- `ContextAwareAssistant.tsx` 的“经典策略参考”卡片已替换为 `Qlib 参数提示`，并会按策略类型区分 TopK/n_drop 与权重策略提示，避免在 TopkWeight 场景继续展示无效的 n_drop 建议。
-- `QlibParamsConfig.tsx` 的调仓周期选项已与快速回测统一为：`每1天 / 每3天 / 每5天（推荐）`。
-- 第三步调仓周期选项改为复用共享常量（`electron/src/shared/qlib/rebalance.ts`），与快速回测共用同一份 `1/3/5` 交易日配置。
+- `SmartStrategyStudioV2.tsx` 左侧步骤提示文案明确为：`Qlib专用参数（TopK / 调仓 / 风控）`。
+- `QlibParamsConfig.tsx` 的调仓周期选项与快速回测统一为：`每1天 / 每3天 / 每5天（推荐）`。
+- `wizardService.generateQlib` 的 `qlib_params.n_drop` 类型改为可选，并补充 `min_score/max_weight`，与 `QlibParams` 逻辑保持一致。
 
 ## 第五步：Qlib 验证与保存
-
-- `QlibValidatorAndSave.tsx`
-- 顶部按钮：`语法检查`、`保存策略`
-- 语法检查：调用后端 `POST /api/v1/strategy/validate-qlib`（`mode=syntax_only`）执行 AST 语法解析校验
-- AI 修复：当语法不通过时展示按钮，调用后端 `POST /api/v1/strategy/repair-qlib` 让大模型修复代码，并自动再次语法检查；语法通过后才可保存
-- 保存到个人中心：调用后端 `POST /api/v1/strategy/save-to-cloud`；前端优先使用 `user.user_id`（兼容旧字段 `id`），网关会以 token 的 `sub` 兜底覆盖 `user_id` 防止越权
-- “保存策略到个人中心”弹窗已设置为居中显示（`centered`）
-- 保存防抖与动画：保存期间启用请求锁（禁止重复点击保存），同时禁用关闭/取消并显示“正在保存到云端”动态提示，避免重复提交同一策略。
+- `QlibValidatorAndSave.tsx` 包含：`语法检查`、`保存策略`
+- 语法检查：调用后端 `POST /api/v1/strategy/validate-qlib`（`mode=syntax_only`）执行 AST 语法解析校验。
+- AI 修复：当语法不通过时展示按钮，调用后端让大模型修复代码，并自动再次检查。
+- 保存到个人中心：调用后端 `POST /api/v1/strategy/save-to-cloud`。
+- 保存防抖与动画：保存期间启用请求锁（禁止重复点击保存），同时禁用关闭/取消并显示“正在保存到云端”动态提示，避免重复提交。

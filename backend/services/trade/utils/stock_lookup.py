@@ -9,6 +9,14 @@ logger = logging.getLogger(__name__)
 STOCK_NAME_CACHE_KEY = "quantmind:stock_names"
 
 _STOCK_SYMBOL_NAME_MAP = None
+_STOCK_NAME_SYMBOL_MAP = None
+
+
+def _normalize_stock_name(name: str) -> str:
+    value = str(name or "").strip()
+    if not value:
+        return ""
+    return value.replace("*", "").replace("ST", "", 1).strip().upper()
 
 def _load_from_file() -> dict:
     """Load symbol names from local JSON file"""
@@ -31,6 +39,35 @@ def _load_from_file() -> dict:
                     }
             except Exception as e:
                 logger.warning(f"Failed to load stock index from {path}: {e}")
+    return {}
+
+
+def _load_reverse_from_file() -> dict:
+    """Load normalized stock name -> symbol mapping from local JSON file"""
+    possible_paths = [
+        "data/stocks/stocks_index.json",
+        "/app/data/stocks/stocks_index.json",
+        "../data/stocks/stocks_index.json",
+        "/data/stocks/stocks_index.json",
+    ]
+
+    for path in possible_paths:
+        if os.path.exists(path):
+            try:
+                with open(path, encoding="utf-8") as f:
+                    data = json.load(f)
+                    mapping: dict[str, str] = {}
+                    for item in data.get("items", []):
+                        symbol = item.get("symbol")
+                        name = item.get("name")
+                        if not symbol or not name:
+                            continue
+                        normalized_name = _normalize_stock_name(name)
+                        if normalized_name and normalized_name not in mapping:
+                            mapping[normalized_name] = symbol
+                    return mapping
+            except Exception as e:
+                logger.warning(f"Failed to load reverse stock index from {path}: {e}")
     return {}
 
 def warmup_stock_cache():
@@ -95,3 +132,22 @@ def lookup_symbol_name(symbol: str) -> str | None:
                 pass
 
     return _STOCK_SYMBOL_NAME_MAP.get(symbol)
+
+
+def lookup_symbol_by_name(name: str) -> str | None:
+    """Lookup symbol from stock name using local file index."""
+    global _STOCK_NAME_SYMBOL_MAP
+
+    normalized_name = _normalize_stock_name(name)
+    if not normalized_name:
+        return None
+
+    if _STOCK_NAME_SYMBOL_MAP is not None:
+        symbol = _STOCK_NAME_SYMBOL_MAP.get(normalized_name)
+        if symbol:
+            return symbol
+
+    if _STOCK_NAME_SYMBOL_MAP is None:
+        _STOCK_NAME_SYMBOL_MAP = _load_reverse_from_file()
+
+    return _STOCK_NAME_SYMBOL_MAP.get(normalized_name)

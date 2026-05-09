@@ -35,7 +35,7 @@ import './styles/ai-strategy-theme.css';
 
 const UserCenterPage = lazy(() => import('./features/user-center/pages/UserCenterPage'));
 const StrategyComparisonPage = lazy(() => import('./features/strategy-comparison/pages/StrategyComparisonPage'));
-const StrategyWizardPage = lazy(() => import('./features/strategy-wizard/components/SmartStrategyStudio'));
+const StrategyWizardPage = lazy(() => import('./features/strategy-wizard/components/SmartStrategyStudioV2'));
 const QuantBotPage = lazy(() => import('./features/quantbot/pages/QuantBotPage'));
 const AIIDEPage = lazy(() => import('./pages/AIIDEPage'));
 const ModelTrainingPage = lazy(() => import('./pages/ModelTrainingPage'));

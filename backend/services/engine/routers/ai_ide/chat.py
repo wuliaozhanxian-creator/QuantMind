@@ -9,6 +9,11 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+try:
+    from shared.database_manager_v2 import get_session
+except ImportError:
+    from backend.shared.database_manager_v2 import get_session
+
 from .skill_engine import SkillEngine
 
 logger = logging.getLogger(__name__)
@@ -378,30 +383,20 @@ async def chat_completions(request: Request, item: ChatRequest):
         or os.getenv("OPENAI_API_KEY", "")
     )
 
-    # 2. 尝试从网关透传的用户身份获取私有 API Key (个人 Key 优先级最高)
+    # 2. 尝试从数据库获取用户私有 API Key (个人 Key 优先级最高)
     user_context = getattr(request.state, "user", None)
     if user_context:
         user_id = user_context.get("user_id")
-        tenant_id = user_context.get("tenant_id", "default")
-        # 尝试从 User Service 动态获取当前用户的私有 Key
         try:
-            from backend.shared.auth import get_internal_call_secret
-
-            # OSS 单容器模式使用 127.0.0.1
-            api_gateway = os.getenv("INTERNAL_API_GATEWAY_URL", "http://127.0.0.1:8000")
-            async with httpx.AsyncClient(timeout=3.0) as client:
-                headers = {
-                    "X-Internal-Call": get_internal_call_secret(),
-                    "X-User-Id": user_id,
-                    "X-Tenant-Id": tenant_id,
-                }
-                resp = await client.get(
-                    f"{api_gateway}/api/v1/profiles/{user_id}", headers=headers
+            from sqlalchemy import text
+            async with get_session(read_only=True) as session:
+                result = await session.execute(
+                    text("SELECT ai_ide_api_key FROM user_profiles WHERE user_id = :user_id"),
+                    {"user_id": user_id}
                 )
-                if resp.status_code == 200:
-                    profile_key = resp.json().get("data", {}).get("ai_ide_api_key")
-                    if profile_key:
-                        api_key = profile_key
+                row = result.fetchone()
+                if row and row[0]:
+                    api_key = row[0]
         except Exception as e:
             logger.warning(
                 f"Could not fetch individual API key for user {user_id}: {e}"

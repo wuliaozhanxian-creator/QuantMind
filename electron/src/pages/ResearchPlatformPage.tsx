@@ -306,13 +306,27 @@ export const ResearchPlatformPage: React.FC = () => {
   const normalizeSymbol = (raw: string): string => {
     const s = (raw || '').trim().toUpperCase();
     if (!s) return s;
-    if (s.includes('.')) return s;
-    if (s.startsWith('SH')) return `${s.slice(2)}.SH`;
-    if (s.startsWith('SZ')) return `${s.slice(2)}.SZ`;
-    if (s.startsWith('BJ')) return `${s.slice(2)}.BJ`;
-    if (s.startsWith('6')) return `${s}.SH`;
-    if (s.startsWith('0') || s.startsWith('2') || s.startsWith('3')) return `${s}.SZ`;
-    if (s.startsWith('4') || s.startsWith('8') || s.startsWith('9')) return `${s}.BJ`;
+    
+    // 1. 已经是正确的 Prefix 格式 (SH/SZ/BJ + 6位数字)
+    if (/^(SH|SZ|BJ)\d{6}$/.test(s)) return s;
+    
+    // 2. 处理 Suffix 格式 (6位数字 + .SH/SZ/BJ)
+    const suffixMatch = s.match(/^(\d{6})\.(SH|SZ|BJ)$/);
+    if (suffixMatch) {
+      const [, symbol, market] = suffixMatch;
+      return `${market}${symbol}`;
+    }
+    
+    // 3. 处理纯 6 位数字 (基于号段尝试自动补全)
+    if (/^\d{6}$/.test(s)) {
+      // 上海: 60, 68, 90
+      if (s.startsWith('6') || s.startsWith('9')) return `SH${s}`;
+      // 深圳: 00, 30, 20
+      if (s.startsWith('0') || s.startsWith('2') || s.startsWith('3')) return `SZ${s}`;
+      // 北京: 83, 43, 87, 88
+      if (s.startsWith('4') || s.startsWith('8')) return `BJ${s}`;
+    }
+    
     return s;
   };
   const normalizeRoe = (value: unknown): number => {

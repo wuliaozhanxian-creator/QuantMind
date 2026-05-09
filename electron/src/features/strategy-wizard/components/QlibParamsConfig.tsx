@@ -1,7 +1,7 @@
 import React from 'react';
 import { Form, Radio, Slider, Select, Space, Button, Typography, Divider } from 'antd';
 import { SettingOutlined } from '@ant-design/icons';
-import { useWizardStore } from '../store/wizardStore';
+import { useWizardV2Store } from '../store/wizardV2Store';
 import { QLIB_REBALANCE_DAY_OPTIONS, resolveRebalanceDays, RebalanceDays } from '../../../shared/qlib/rebalance';
 
 const { Title, Text } = Typography;
@@ -12,20 +12,17 @@ interface Props {
 }
 
 const QlibParamsConfig: React.FC<Props> = ({ onNext, onBack }) => {
-  const { qlibParams, setQlibParams } = useWizardStore();
+  const { qlibParams, setQlibParams } = useWizardV2Store();
   const params = qlibParams ?? { strategy_type: 'TopkDropout', topk: 10, n_drop: 2, rebalance_days: 5 };
   const normalizedRebalanceDays = resolveRebalanceDays(params);
 
   const update = (patch: Partial<typeof params>) => {
-    const nextParams = { ...params, ...patch };
-
-    if (nextParams.strategy_type === 'TopkWeight') {
-      delete nextParams.n_drop;
-    } else if (typeof nextParams.n_drop !== 'number') {
-      nextParams.n_drop = 2;
+    const newParams = { ...params, ...patch };
+    // 参数清洗：切换到 TopkWeight 时删除 n_drop
+    if (patch.strategy_type === 'TopkWeight') {
+      delete newParams.n_drop;
     }
-
-    setQlibParams(nextParams);
+    setQlibParams(newParams);
   };
 
   return (

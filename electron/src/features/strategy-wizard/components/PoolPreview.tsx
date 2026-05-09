@@ -1,10 +1,14 @@
-import React, { useState, useEffect, useImperativeHandle, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useImperativeHandle, useRef, useCallback, useMemo } from 'react';
 
 import { Card, Table, Statistic, Row, Col, Button, Typography, Space, Empty, Alert, message, Modal, Input, Popconfirm, Tag } from 'antd';
 import ReactECharts from 'echarts-for-react';
-import { useWizardStore } from '../store/wizardStore';
-import { savePoolFile, listPoolFiles, previewPoolFile, deletePoolFile, setActivePoolFile } from '../services/wizardService';
+import { useWizardV2Store } from '../store/wizardV2Store';
+import { type WorkingPoolItemV2 } from '../services/wizardV2Service';
+import { previewPoolFile, deletePoolFile } from '../services/wizardService';
 import { getWizardUserId } from '../utils/userId';
+import { loadFeaturesBySymbolsInBatches } from '../utils/featureEnrichment';
+
+const { Text } = Typography;
 
 export type PoolPreviewHandle = {
   triggerSaveAndNext: () => void;
@@ -12,53 +16,37 @@ export type PoolPreviewHandle = {
 
 export const PoolPreview = React.forwardRef<PoolPreviewHandle, { onNext: () => void; onBack: () => void }>(
   ({ onNext, onBack: _onBack }, ref) => {
-  const { pool, setPool, selectedSymbols, setSelectedSymbols, poolFile, setPoolFile, saveStatus } = useWizardStore();
+  const { 
+    workingPool, 
+    setWorkingPool, 
+    activePoolVersionId, 
+    selectedSymbols,
+    setSelectedSymbols,
+    saveCurrentPoolAsVersion, 
+    activateVersion,
+    currentPoolName, 
+    setCurrentPoolName, 
+    savedPools: poolHistory,
+    fetchSavedPools: loadPoolHistory,
+    deleteSavedPool
+  } = useWizardV2Store();
+
   const [saving, setSaving] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [poolName, setPoolName] = useState('');
   const [lastSaveError, setLastSaveError] = useState<string | null>(null);
   const pendingResolveRef = useRef<((ok: boolean) => void) | null>(null);
   const saveTriggerRef = useRef<'top' | 'bottom' | null>(null);
-  const initialPoolRef = useRef<typeof pool>(null);
+  
+  const initialWorkingPoolRef = useRef<WorkingPoolItemV2[]>([]);
   const initialSelectedRef = useRef<string[]>([]);
+  const initialCurrentPoolNameRef = useRef<string>('');
+  const lastHydratedKeyRef = useRef<string>('');
+  
   const [historyLoading, setHistoryLoading] = useState(false);
-  const [poolHistory, setPoolHistory] = useState<any[]>([]);
+  const [featureHydrating, setFeatureHydrating] = useState(false);
   const [historySelectedKey, setHistorySelectedKey] = useState<string>('__current__');
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
-
-  const loadPoolHistory = useCallback(async (silent = false) => {
-    try {
-      setHistoryLoading(true);
-      const userId = getWizardUserId();
-      const res = await listPoolFiles({ user_id: userId, limit: 100 });
-      if (res?.success) {
-        setPoolHistory(res.pools || []);
-      } else {
-        setPoolHistory([]);
-        if (!silent) {
-          message.warning(res?.error || '加载历史股票池失败');
-        }
-        console.warn('[PoolPreview] listPoolFiles failed:', res?.error);
-      }
-    } catch (e: any) {
-      setPoolHistory([]);
-      if (!silent) {
-        message.warning(`加载历史股票池失败: ${e?.message || '未知错误'}`);
-      }
-      console.warn('[PoolPreview] loadPoolHistory failed:', e);
-    } finally {
-      setHistoryLoading(false);
-    }
-  }, []);
-
-  // 组件挂载时验证poolFile数据结构
-  useEffect(() => {
-    if (poolFile && typeof poolFile === 'string') {
-      console.error('[PoolPreview] 错误: 检测到poolFile是字符串,正在清除...', poolFile);
-      setPoolFile(undefined);
-      message.warning('检测到错误的股票池数据,已自动清除');
-    }
-  }, [poolFile, setPoolFile]);
 
   // 设置默认股票池名称
   useEffect(() => {
@@ -70,34 +58,94 @@ export const PoolPreview = React.forwardRef<PoolPreviewHandle, { onNext: () => v
 
   // 记录"本次筛选结果"快照，便于用户从历史池切回
   useEffect(() => {
-    if (!initialPoolRef.current && pool?.items?.length) {
-      initialPoolRef.current = pool;
+    if (!initialWorkingPoolRef.current.length && workingPool.length) {
+      initialWorkingPoolRef.current = [...workingPool];
       initialSelectedRef.current = [...(selectedSymbols || [])];
     }
-  }, [pool, selectedSymbols]);
+    if (!initialCurrentPoolNameRef.current && currentPoolName) {
+      initialCurrentPoolNameRef.current = currentPoolName;
+    }
+  }, [workingPool, selectedSymbols, currentPoolName]);
 
   // 加载"我的股票池"列表
   useEffect(() => {
-    loadPoolHistory(true);
-  }, [loadPoolHistory]);
+    loadPoolHistory();
+  }, []);
 
   useEffect(() => {
-    if (poolFile?.fileKey) {
-      setHistorySelectedKey(poolFile.fileKey);
+    if (!activePoolVersionId) {
+      if (historySelectedKey !== '__current__') {
+        setHistorySelectedKey('__current__');
+      }
       return;
     }
 
-    setHistorySelectedKey('__current__');
-  }, [poolFile?.fileKey]);
+    if (historySelectedKey === activePoolVersionId) {
+      return;
+    }
+
+    const hasMatchingHistory = poolHistory.some((item) => (item?.id || (item as any)?.file_key) === activePoolVersionId);
+    if (hasMatchingHistory) {
+      setHistorySelectedKey(activePoolVersionId);
+    }
+  }, [activePoolVersionId, poolHistory, historySelectedKey]);
+
+  // 特征补全
+  useEffect(() => {
+    const hydrateMissingFeatures = async () => {
+      if (featureHydrating || !workingPool.length) return;
+      
+      const hydrateKey = workingPool.map((item) => item.symbol).join(',');
+      if (hydrateKey && hydrateKey === lastHydratedKeyRef.current) return;
+
+      const needHydrate = workingPool.some((item) => {
+        const marketCap = Number(item?.marketCap);
+        const pe = Number((item as any)?.pe);
+        return !Number.isFinite(marketCap) || marketCap <= 0 || !Number.isFinite(pe) || pe === 0;
+      });
+      if (!needHydrate) return;
+
+      try {
+        setFeatureHydrating(true);
+        const symbols = workingPool.map((item) => item.symbol);
+        const features = await loadFeaturesBySymbolsInBatches(symbols);
+        if (!features.length) return;
+
+        const featureMap = new Map(features.map((f: any) => [f.code, f]));
+        const merged = workingPool.map((item) => {
+          const f: any = featureMap.get(item.symbol);
+          if (!f) return item;
+          return {
+            ...item,
+            name: item.name || f.name,
+            marketCap: Number(item?.marketCap) > 0 ? item.marketCap : (f.marketCap ?? 0),
+            pe: ((item as any)?.pe !== undefined && (item as any)?.pe !== null && (item as any)?.pe !== 0) ? (item as any).pe : (f.pe ?? f.pe_ttm ?? f.peTtm ?? 0),
+            roe: item?.roe ?? f.roe ?? 0,
+            price: (item as any)?.price ?? f.closePrice ?? 0,
+          };
+        });
+
+        setWorkingPool(merged as any, true);
+        lastHydratedKeyRef.current = hydrateKey;
+      } catch (e) {
+        console.warn('[PoolPreview] hydrate feature failed:', e);
+      } finally {
+        setFeatureHydrating(false);
+      }
+    };
+
+    hydrateMissingFeatures();
+  }, [workingPool, setWorkingPool, featureHydrating]);
 
   const handleSelectHistoryPool = async (fileKey: string) => {
     setHistorySelectedKey(fileKey);
     if (!fileKey || fileKey === '__current__') {
-      if (initialPoolRef.current?.items?.length) {
-        setPool(initialPoolRef.current as any);
+      if (initialWorkingPoolRef.current.length) {
+        setWorkingPool(initialWorkingPoolRef.current, true);
         setSelectedSymbols(initialSelectedRef.current || []);
-        // 切回"本次筛选结果"时，清理复用的 poolFile，避免后续误认为仍在复用历史池
-        setPoolFile(undefined);
+        setCurrentPoolName(initialCurrentPoolNameRef.current || '我的股票池');
+        setPoolName(initialCurrentPoolNameRef.current || '我的股票池');
+        await activateVersion(''); 
         message.info('已切换为本次筛选结果');
       }
       return;
@@ -112,27 +160,25 @@ export const PoolPreview = React.forwardRef<PoolPreviewHandle, { onNext: () => v
         throw new Error(res?.error || '加载失败');
       }
 
-      // 更新向导状态：股票池列表 + 勾选 + poolFile 供后续 generate-qlib 复用
-      setPool({ items: res.items || [], summary: res.summary || {}, charts: res.charts || {} } as any);
-      setSelectedSymbols((res.items || []).map((x: any) => x.symbol));
-      if (res.pool_file?.file_key) {
-        setPoolFile({
-          fileUrl: res.pool_file.file_url,
-          fileKey: res.pool_file.file_key,
-          format: (res.pool_file.format || 'txt') as any,
-          relativePath: res.pool_file.relative_path,
-          fileSize: res.pool_file.file_size,
-          codeHash: res.pool_file.code_hash,
-        });
-        // 设置该股票池为活跃状态
-        try {
-          await setActivePoolFile({ user_id: userId, file_key: res.pool_file.file_key });
-        } catch (e) {
-          console.warn('Failed to set active pool file:', e);
-        }
-      }
+      const items = res.items.map((x: any) => ({
+        symbol: String(x?.symbol || '').trim(),
+        name: String(x?.name || '').trim(),
+        marketCap: Number(x?.metrics?.market_cap ?? 0),
+        pe: Number(x?.metrics?.pe ?? 0),
+        roe: Number(x?.metrics?.roe ?? 0),
+        price: Number(x?.metrics?.close ?? 0),
+      }));
 
-      message.success(`已复用股票池：${res.pool_file?.pool_name || fileKey}`);
+      const historyPoolName = res.pool_file?.pool_name || '历史股票池';
+
+      setWorkingPool(items, true);
+      setSelectedSymbols(items.map((item: any) => item.symbol));
+      setCurrentPoolName(historyPoolName);
+      setPoolName(historyPoolName);
+      
+      await activateVersion(fileKey);
+
+      message.success(`已复用股票池：${historyPoolName}`);
     } catch (e: any) {
       message.error(`加载历史股票池失败: ${e?.message || '未知错误'}`);
       setHistorySelectedKey('__current__');
@@ -142,63 +188,39 @@ export const PoolPreview = React.forwardRef<PoolPreviewHandle, { onNext: () => v
   };
 
   const handleDeleteHistoryPool = async (poolItem: any) => {
-    const fileKey = poolItem?.file_key;
+    const fileKey = poolItem?.id;
     if (!fileKey) {
       message.error('缺少文件标识，无法删除');
       return;
     }
     try {
-      const userId = getWizardUserId();
-      const res = await deletePoolFile({
-        user_id: userId,
-        file_url: poolItem?.file_url || '',
-        file_key: fileKey,
-      });
-      if (!res?.success) {
-        throw new Error(res?.error || '删除失败');
+      const success = await deleteSavedPool(fileKey);
+      if (success) {
+        message.success('已删除股票池');
+        if (historySelectedKey === fileKey) {
+          await handleSelectHistoryPool('__current__');
+        }
+      } else {
+        message.error('删除失败');
       }
-
-      await loadPoolHistory(true);
-      if (historySelectedKey === fileKey) {
-        await handleSelectHistoryPool('__current__');
-      }
-      message.success('已删除股票池');
     } catch (e: any) {
       message.error(`删除股票池失败: ${e?.message || '未知错误'}`);
     }
   };
 
   const canSkipRenameModal = () => {
-    // 仅当"复用历史股票池"且当前选择未被修改时，允许直接进入下一步，不再弹出命名窗口。
-    if (!pool?.items?.length) return false;
-    if (historySelectedKey === '__current__') return false;
-    if (!poolFile?.fileKey || poolFile.fileKey !== historySelectedKey) return false;
-
-    const allSymbols = pool.items.map((x) => x.symbol);
-    if (!Array.isArray(selectedSymbols)) return false;
-    if (selectedSymbols.length !== allSymbols.length) return false;
-
-    const setSel = new Set(selectedSymbols);
-    for (const s of allSymbols) {
-      if (!setSel.has(s)) return false;
-    }
-    return true;
+    const isDirty = useWizardV2Store.getState().dirty;
+    return !!activePoolVersionId && !isDirty;
   };
 
+  const dataSource = useMemo(() => workingPool.map((x) => ({ ...x, key: x.symbol })), [workingPool]);
+  const selectedList = useMemo(() => workingPool.filter((x) => selectedSymbols.includes(x.symbol)), [workingPool, selectedSymbols]);
+  const listForStats = selectedList.length > 0 ? selectedList : workingPool;
 
-  const dataSource = (pool?.items || []).map((x) => ({ ...x, key: x.symbol }));
-
-  const selectedList = (pool?.items || []).filter((x) => selectedSymbols.includes(x.symbol));
-  const listForStats = selectedList.length > 0 ? selectedList : (pool?.items || []);
-  const marketCapYI = (v: any) => {
-    const n = Number(v);
-    if (!Number.isFinite(n)) return 0;
-    // 数据库存储单位为亿元，直接返回
-    return n;
-  };
-  const capThresholdYi = 300; // 300亿阈值
-  const capSmallCount = listForStats.filter((x) => marketCapYI(x?.metrics?.market_cap) < capThresholdYi).length;
+  const capThresholdYi = 300; 
+  const capSmallCount = listForStats.filter((x) => (x.marketCap || 0) < capThresholdYi).length;
   const capLargeCount = listForStats.length - capSmallCount;
+  
   const marketCapOption = {
     title: { text: '市值分布（300亿阈值）', left: 'center', textStyle: { fontSize: 14 } },
     tooltip: { trigger: 'item' },
@@ -220,7 +242,7 @@ export const PoolPreview = React.forwardRef<PoolPreviewHandle, { onNext: () => v
   };
 
   const handleNextClick = () => {
-    if (!pool?.items || selectedSymbols.length === 0) {
+    if (workingPool.length === 0 || selectedSymbols.length === 0) {
       message.warning('请先选择股票池');
       return;
     }
@@ -234,7 +256,7 @@ export const PoolPreview = React.forwardRef<PoolPreviewHandle, { onNext: () => v
 
   useImperativeHandle(ref, () => ({
     triggerSaveAndNext: async () => {
-      if (!pool?.items || selectedSymbols.length === 0) {
+      if (workingPool.length === 0 || selectedSymbols.length === 0) {
         message.warning('请先选择股票池');
         return;
       }
@@ -252,7 +274,7 @@ export const PoolPreview = React.forwardRef<PoolPreviewHandle, { onNext: () => v
         setLastSaveError(null);
       }
     }
-  }), [pool, selectedSymbols, lastSaveError]);
+  }), [workingPool, selectedSymbols, lastSaveError, onNext]);
 
   const handleConfirmSave = async () => {
     if (!poolName.trim()) {
@@ -263,101 +285,32 @@ export const PoolPreview = React.forwardRef<PoolPreviewHandle, { onNext: () => v
     setSaving(true);
     setLastSaveError(null);
     try {
-      const userId = getWizardUserId();
-
-      // 若已有未保存文件,先删除 (仅当fileUrl存在且不是已保存到云端的状态时)
-      if (!saveStatus.savedToCloud && poolFile?.fileUrl) {
-        // try { await deletePoolFile({ file_url: poolFile.fileUrl, file_key: poolFile.fileKey }); } catch(e) { console.warn('Clean up failed', e) }
+      const filteredPool = workingPool.filter(x => selectedSymbols.includes(x.symbol));
+      if (filteredPool.length !== workingPool.length) {
+          setWorkingPool(filteredPool, false); 
       }
 
-      const selected = pool.items.filter((x) => selectedSymbols.includes(x.symbol));
-
-      const toQlibSymbol = (symbol: string) => {
-        const s = String(symbol || '').trim();
-        if (!s) return '';
-        const u = s.toUpperCase();
-        if (u.length === 8 && (u.startsWith('SZ') || u.startsWith('SH')) && /^\d{6}$/.test(u.slice(2))) return u;
-        const dotIdx = u.indexOf('.');
-        if (dotIdx > 0) {
-          const base = u.slice(0, dotIdx);
-          const suffix = u.slice(dotIdx + 1);
-          if ((suffix === 'SZ' || suffix === 'SH') && /^\d+$/.test(base)) {
-            return `${suffix}${base.padStart(6, '0')}`;
-          }
-        }
-        if ((u.startsWith('SZ') || u.startsWith('SH')) && u.length >= 8) {
-          const digits = u.slice(2).replace(/\D+/g, '');
-          if (digits) return `${u.slice(0, 2)}${digits.padStart(6, '0').slice(-6)}`;
-        }
-        return u;
-      };
-
-      // 使用TXT格式保存(QLib instruments),后端会自动创建时间戳文件夹
-      console.log('[PoolPreview] 开始保存股票池文件...', { userId, count: selected.length, poolName });
-
-      const res = await savePoolFile({
-        user_id: userId,
-        format: 'txt',
-        pool: selected.map((x) => ({ symbol: toQlibSymbol(x.symbol), name: x.name })),
-        pool_name: poolName
-      });
-
-      console.log('[PoolPreview] API响应:', res);
-
-      // 严格验证响应 (兼容 legacy success字段 和 standard code字段)
-      const isSuccess = res?.success === true || res?.code === 0;
-      if (!isSuccess) {
-        throw new Error(res?.error || res?.message || '保存股票池失败');
+      const success = await saveCurrentPoolAsVersion(poolName.trim());
+      if (!success) {
+        throw new Error('保存失败');
       }
 
-      const responseData = res.data || res; // 提取实际数据
-
-      // 验证必需字段
-      if (!responseData.file_key) {
-        throw new Error('服务器未返回文件Key,保存失败');
+      const currentSavedPools = useWizardV2Store.getState().savedPools;
+      if (currentSavedPools.length > 0) {
+        const latestId = currentSavedPools[0].id;
+        await activateVersion(latestId);
+        setHistorySelectedKey(latestId);
       }
 
-      if (!responseData.relative_path) {
-        console.warn('[PoolPreview] 警告: 未返回相对路径');
-      }
-
-      // 保存到store
-      const poolFileData = {
-        fileUrl: responseData.file_url,
-        fileKey: responseData.file_key,
-        format: 'txt' as const,
-        relativePath: responseData.relative_path,
-        fileSize: responseData.file_size,
-        codeHash: responseData.code_hash,
-      };
-
-      setPoolFile(poolFileData);
-
-      console.log('[PoolPreview] 股票池文件已保存到store:', poolFileData);
-
-      // 验证store是否成功保存
-      setTimeout(() => {
-        const currentPoolFile = useWizardStore.getState().poolFile;
-        if (!currentPoolFile?.fileKey) {
-          console.error('[PoolPreview] 错误: store中未找到poolFile!');
-          message.error('状态保存失败,请重试');
-        } else {
-          console.log('[PoolPreview] store验证成功:', currentPoolFile);
-        }
-      }, 100);
-
-      message.success(`股票池 "${poolName}" 已保存 (${selected.length}只股票)`);
-      await loadPoolHistory(true);
-      setHistorySelectedKey(responseData.file_key || '__current__');
-
+      message.success(`股票池 "${poolName}" 已保存并激活 (${filteredPool.length}只股票)`);
       setIsModalOpen(false);
+      
       if (pendingResolveRef.current) {
         pendingResolveRef.current(true);
         pendingResolveRef.current = null;
       }
       saveTriggerRef.current = null;
 
-      // 确保状态已保存后再进入下一步
       setTimeout(() => {
         onNext();
       }, 200);
@@ -399,7 +352,7 @@ export const PoolPreview = React.forwardRef<PoolPreviewHandle, { onNext: () => v
                   size="small"
                   loading={historyLoading}
                   onClick={() => {
-                    loadPoolHistory();   // 点击时立即从 DB 拉取最新列表
+                    loadPoolHistory();   
                     setIsHistoryModalOpen(true);
                   }}
                 >
@@ -407,7 +360,7 @@ export const PoolPreview = React.forwardRef<PoolPreviewHandle, { onNext: () => v
                 </Button>
               </Space>
             }
-            variant="borderless"
+            bordered={false}
             styles={{ body: { padding: 0 } }}
           >
             {dataSource.length === 0 ? (
@@ -425,20 +378,20 @@ export const PoolPreview = React.forwardRef<PoolPreviewHandle, { onNext: () => v
                   { title: '名称', dataIndex: 'name', width: 160, ellipsis: true },
                   {
                     title: '市值(亿)',
-                    dataIndex: ['metrics', 'market_cap'],
+                    dataIndex: 'marketCap',
                     width: 140,
                     align: 'center',
-                    render: (v) => v ? v.toFixed(2) : '-',
-                    sorter: (a, b) => (a.metrics?.market_cap || 0) - (b.metrics?.market_cap || 0)
+                    render: (v) => (v !== undefined && v !== null) ? Number(v).toFixed(2) : '-',
+                    sorter: (a, b) => (a.marketCap || 0) - (b.marketCap || 0)
                   },
                   {
                     title: '市盈率',
-                    dataIndex: ['metrics', 'pe'],
+                    dataIndex: 'pe',
                     width: 140,
                     onHeaderCell: () => ({ style: { paddingRight: 30 } }),
                     onCell: () => ({ style: { paddingRight: 30 } }),
-                    render: (v) => (v !== undefined && v !== null && v !== 0) ? v.toFixed(2) : (v === 0 ? '0.00' : '-'),
-                    sorter: (a, b) => (a.metrics?.pe || 0) - (b.metrics?.pe || 0)
+                    render: (v) => (v !== undefined && v !== null && v !== 0) ? Number(v).toFixed(2) : (v === 0 ? '0.00' : '-'),
+                    sorter: (a, b) => (a.pe || 0) - (b.pe || 0)
                   },
                 ]}
                 pagination={{ pageSize: 10, showSizeChanger: false }}
@@ -448,27 +401,33 @@ export const PoolPreview = React.forwardRef<PoolPreviewHandle, { onNext: () => v
         </Col>
         <Col span={8}>
           <Space direction="vertical" style={{ width: '100%' }} size="large">
-            <Card variant="borderless" title="统计概览">
+            <Card bordered={false} title="统计概览">
               {dataSource.length === 0 ? (
                 <Alert type="info" showIcon message="尚未生成股票池，请返回上一步完成解析。" />
               ) : (
                 <Row gutter={16}>
-                  <Col span={12}><Statistic title="选出股票" value={selectedSymbols?.length || 0} suffix="只抽选" /></Col>
-                  <Col
-                    span={12}
-                  >
+                  <Col span={12}>
+                    <Statistic
+                      title="选出股票"
+                      value={selectedSymbols?.length || 0}
+                      suffix="只"
+                      style={{ fontSize: 20, fontWeight: 600, color: '#1e293b' }}
+                    />
+                  </Col>
+                  <Col span={12}>
                     <Statistic
                       title="覆盖率"
-                      value={Math.min(100, Number(pool?.summary?.matchRate || 0))}
+                      value={((selectedSymbols?.length || 0) / 6017) * 100}
                       suffix="%"
                       precision={2}
+                      style={{ fontSize: 20, fontWeight: 600, color: '#1e293b' }}
                     />
                   </Col>
                 </Row>
               )}
             </Card>
 
-            <Card variant="borderless" styles={{ body: { padding: 12 } }}>
+            <Card bordered={false} styles={{ body: { padding: 12 } }}>
               {dataSource.length === 0 ? <Empty description="暂无图表" /> : <ReactECharts option={marketCapOption} style={{ height: 200 }} />}
             </Card>
           </Space>
@@ -518,7 +477,7 @@ export const PoolPreview = React.forwardRef<PoolPreviewHandle, { onNext: () => v
         width={860}
       >
         <Table
-          rowKey={(row: any) => row.file_key}
+          rowKey={(row: any) => row.id || row.file_key}
           loading={historyLoading}
           dataSource={poolHistory || []}
           pagination={{ pageSize: 8, showSizeChanger: false }}
@@ -526,24 +485,23 @@ export const PoolPreview = React.forwardRef<PoolPreviewHandle, { onNext: () => v
           columns={[
             {
               title: '股票池名称',
-              dataIndex: 'pool_name',
+              dataIndex: 'name',
               render: (_: any, row: any) => (
                 <Space>
-                  <span>{row.pool_name || '未命名股票池'}</span>
-                  {historySelectedKey === row.file_key && <Tag color="blue">当前使用</Tag>}
-                  {row.is_active && <Tag color="green">活跃</Tag>}
+                  <span>{row.name || '未命名股票池'}</span>
+                  {historySelectedKey === (row.id || row.file_key) && <Tag color="blue">当前使用</Tag>}
                 </Space>
               ),
             },
             {
               title: '股票数',
-              dataIndex: 'stock_count',
+              dataIndex: 'stockCount',
               width: 120,
               render: (v: any) => `${Number(v || 0)} 只`,
             },
             {
               title: '创建时间',
-              dataIndex: 'created_at',
+              dataIndex: 'createdAt',
               width: 220,
               render: (v: any) => (v ? String(v).slice(0, 19).replace('T', ' ') : '-'),
             },
@@ -553,7 +511,7 @@ export const PoolPreview = React.forwardRef<PoolPreviewHandle, { onNext: () => v
               width: 220,
               render: (_: any, row: any) => (
                 <Space>
-                  <Button size="small" onClick={() => handleSelectHistoryPool(row.file_key)}>
+                  <Button size="small" onClick={() => handleSelectHistoryPool(row.id || row.file_key)}>
                     复用
                   </Button>
                   <Popconfirm

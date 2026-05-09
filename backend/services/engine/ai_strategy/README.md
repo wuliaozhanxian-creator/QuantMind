@@ -83,9 +83,9 @@ backend/ai_strategy/
 7. 生产默认关闭 legacy 路由：`/api/v1/legacy/strategy/*` 默认禁用，需显式设置 `AI_STRATEGY_ENABLE_LEGACY_ROUTES=true` 才启用。
 8. LLM 弹性调度上线：策略生成链路启用“主备 + 熔断 + 重试 + 限流”，默认主模型失败时自动回退到备模型。
 9. OpenAPI 噪音收敛：`routes.py` 中与统一策略入口重复的 `GET/PUT/DELETE /strategies/{strategy_id}` 标记为 `include_in_schema=False`，避免与 `qlib_app/api/user_strategies.py` 的 operationId 冲突告警；运行时兼容路由仍可访问。
-10. `query-pool` 字段兼容增强：HS300 指数字段改为运行时按表结构自动适配（`is_hs300` / `is_csi300`），避免因历史字段名差异导致 500。
+10. `query-pool` 字段兼容增强：快照查询改为运行时兼容 `symbol/code`、`name/stock_name`、`amount/turnover`、`idx_hs300/is_hs300/is_csi300`、`idx_zz1000/is_csi1000`，避免字段漂移导致 500。
 11. `query-pool` 错误语义优化：遇到数据库字段缺失时返回 `422` 友好错误，不再笼统包装为 500。
-12. `parse-conditions` 市值口径统一：`market_cap` 统一按前端“亿”输入换算为数据库 `total_mv` 口径（默认万元，可由 `AI_STRATEGY_TOTAL_MV_PER_YI` 覆盖），与 `parse-text` 语义对齐。
+12. `parse-conditions` 市值口径统一：`market_cap` 统一按前端“亿”输入换算为数据库 `total_mv` 口径（默认亿元，可由 `AI_STRATEGY_TOTAL_MV_PER_YI` 覆盖兼容旧库），与 `parse-text` 语义对齐。
 13. `parse-text` 选股纠偏：修复“成分股”被误识别为行业词导致 HS300/CSI1000 结果为 0；金融主题映射补充 `金融信息服务`，贴合当前 `industry` 字段真实取值。
 
 ## 🔄 最近变更 (2026-03-09)
@@ -196,8 +196,8 @@ DATABASE_URL=postgresql+asyncpg://user:password@host:5432/database  # ⚠️ 必
 # 兼容旧变量（可选，不推荐）
 AI_STRATEGY_DB_URL=postgresql+asyncpg://user:password@host:5432/database
 
-# （可选）启动预热开关：默认 true。本地调试如需更快启动可关闭
-AI_STRATEGY_WARMUP=false
+# 启动预热改为强制执行：服务启动时会预热向量解析器和字段检索，失败将直接阻断启动
+AI_STRATEGY_WARMUP=true
 ```
 
 **注意**: 
@@ -218,13 +218,15 @@ AI_STRATEGY_WARMUP=false
 **pyqlib 说明**：依赖已锁定为 `pyqlib==0.9.7`，并仅在 `x86_64/AMD64` 平台安装；默认构建会跳过 `pyqlib`（`SKIP_PYQLIB=1`）以兼容部分 Linux/ARM 环境，如需安装请使用 x86_64 基础镜像并传 `--build-arg SKIP_PYQLIB=0`。
 **依赖说明**：`prometheus-client` 版本跟随统一 requirements（>=0.20.0），避免与基础依赖冲突。
 **查询容错**：`query-pool` 对空值字段做了安全处理，避免因缺失字段导致解析失败。默认返回匹配的全部结果，不再强制 `limit 500`。
+**预览容错**：`preview-pool-file` 对 `market_cap/pe/pb/roe/close/amount/volume` 做有限值清洗（`NaN/Inf -> 0`），避免 JSON 序列化触发 `Out of range float values are not JSON compliant` 导致接口 `500`。
 **结果上限**：`query-pool` 在 SQL 分支默认上限为 `10000`（环境变量 `AI_STRATEGY_QUERY_POOL_LIMIT` 可调，最大 `50000`），避免历史 `1000` 条硬截断导致全市场场景结果不完整。
-**标准话术**：市值字段统一口径为“接口返回 `market_cap` 使用元，前端展示统一换算为亿（`/100000000`），数据库底层 `total_mv` 单位通过 `AI_STRATEGY_TOTAL_MV_PER_YI` 配置（默认万元）”；本地文本解析支持“亿 -> total_mv”换算，并支持“小市值/小盘股”默认阈值 `<=500亿`；“金融股/金融板块/金融行业”统一解析为 `银行`、`保险`、`证券` 三个行业。
+**标准话术**：市值字段统一口径为“接口返回 `market_cap` 使用亿元，数据库底层 `total_mv` 默认按亿元存储；若仍使用旧库单位，可通过 `AI_STRATEGY_TOTAL_MV_PER_YI` 配置兼容”；本地文本解析支持“亿 -> total_mv”换算，并支持“小市值/小盘股”默认阈值 `<=500亿`；“金融股/金融板块/金融行业”统一解析为 `银行`、`保险`、`证券` 三个行业。
 **宽松查询策略**：本地规则解析新增“比较词同义归一 + 近似值区间化 + 行业词兜底”，支持“以上/以下/不超过/不少于/约XX左右/XX板块(股)”等自然表达，优先在本地命中并回传宽松策略提示。
 **行业主题映射增强**：新增“主题词 -> `industry` 字段门类名”映射（如科技/军工/新能源/医药/消费/地产/基建/交通运输/公用事业/传媒等），自定义行业条件默认走 `industry` 宽松匹配。
 **启动预热**：服务启动时会预热向量解析与字段检索（会调用 DashScope embeddings），首次启动可能耗时几十秒，属于正常现象。
 **COS 读取稳定性**：`generate-qlib` 读取股票池文件改为线程化非阻塞执行，并增加 `COS_READ_TIMEOUT_SECONDS`（默认 30s）超时保护，避免同步 I/O 阻塞事件循环导致整服务请求超时。
 **股票池保存一致性**：`save-pool-file` 现强制“COS + DB 双写一致”，若 `stock_pool_files` 落库失败将返回失败并回滚已上传对象，避免出现前端提示成功但“我的股票池”不可复用的假成功。
+**股票池预览简称回填**：股票池 `txt` 文件仅保存 QLib 代码列表，`preview-pool-file` 预览接口需额外查询 `stock_name` 补齐简称，避免第二步复用历史股票池时名称列为空。
 
 1.  **部署服务** (默认端口 8008，统一入口):
     ```bash
@@ -440,7 +442,7 @@ http://localhost:8008/docs
 
 
 ## 常见问题
-*   **市值单位**: 数据库底层单位由 `AI_STRATEGY_TOTAL_MV_PER_YI` 决定（默认万元，即 1亿=10000）；SQL 生成器会自动处理“亿”到 `total_mv` 单位的换算。
+*   **市值单位**: 数据库底层单位由 `AI_STRATEGY_TOTAL_MV_PER_YI` 决定（默认元，即 `1e8` 元 = 1 亿）；`parse-conditions` 会把前端“亿”口径换算到数据库 `total_mv`，而 `query-pool`/`preview-pool-file`/投研接口返回的 `market_cap` 统一为“亿元”，前端不应再二次除以 `1e8`。
 *   **数据范围**: 该模块只保留近30天数据，请确保 ETL 任务持续补齐每日数据并定期清理历史行。
 
 ## 工具脚本：上传股票池到 COS
@@ -478,13 +480,15 @@ TENCENT_COS_URL=https://cos.quantmind.cloud
 脚本会返回完整可访问链接。
 *   **覆盖率口径**: 覆盖率以“候选全集大小”为分母，优先使用 `user_universe(user_id, ts_code)`（若存在且该用户有数据），否则退化为 `stock_daily_latest` 全量记录数；覆盖率被限制在 0-100% 之间，避免出现超过 100% 的异常显示。
 *   **SQL兜底**: 若 LLM 生成了仅包含最新交易日、无筛选条件的 `stock_selection` 查询，会自动改写为 `stock_daily` 全量查询。
-*   **stock_daily 字段扩展**: 支持 `stock_name/is_st/is_hs300/is_csi1000` 以便在全市场筛选中直接过滤 ST/指数成分股。
-*   **查询源切换**: 选股查询逻辑已统一读取 `stock_daily_latest` 快照表（每股一行），并按 1/0 标记识别 `is_st/is_hs300/is_csi1000`。
+*   **stock_daily 字段扩展**: 支持 `name/is_st/idx_hs300/idx_zz1000`，并兼容旧字段别名，以便在全市场筛选中直接过滤 ST/指数成分股。
+*   **查询源切换**: 选股查询逻辑已统一读取 `stock_daily_latest` 快照表（每股一行），并通过兼容层同时识别新旧字段名。
 *   **快照表简化**: `stock_daily_latest` 已收敛为核心选股字段（价格、成交额、市值、PE/PB、ST/指数成分），移除技术指标与扩展财务字段。
-*   **快照字段对齐（2026-03-03）**: `stock_daily_latest` 字段映射已与线上库结构对齐（使用 `is_hs300` 与 `nindnme`），不再声明不存在的 `market_type/is_csi500/is_csi800`。
+*   **快照字段对齐（2026-05-03）**: `stock_daily_latest` 字段映射已与当前库结构对齐（`symbol/name/amount/idx_hs300/idx_zz1000`），并保留旧字段别名兼容历史 SQL。
+*   **策略池统一口径（2026-05-08）**: `query-pool`、`preview-pool-file` 和 `research/symbols/features` 已统一返回 `market_cap` 为亿元，`PoolPreview` 不再对市值重复除以 `1e8`；全市场股票池也改为批量富化，避免固定截断前 500 只。
+*   **股票池去重（2026-05-08）**: `save-pool-file` 现在会优先按内容哈希复用同一份 `txt` 股票池，重复同步不会再创建多条完全相同的历史记录。
 *   **金融股解析修复（2026-03-03）**: “金融股/金融板块”本地解析改为“业务词本身 + 细分别名”双轨匹配（如 `金融/银行/保险/证券` 与 `证券、期货业`），避免仅匹配别名导致候选结果为 0。
 *   **行业匹配增强（2026-03-03）**: 本地文本解析的行业筛选由单列 `industry` 升级为 `industry OR nindnme` 联合匹配，提升细分行业词（如“证券、期货业”）召回稳定性。
 *   **解析策略**: 选股文本采用“本地优先 + 远程兜底”流程，本地规则命中则直接生成 DSL，未命中才调用 LLM；LLM 生成 SQL 会被强制改写为 `stock_daily_latest`。
-*   **成交额字段**: 快照表中使用 `turnover` 字段表示成交额，查询 SQL 不再引用 `amount`。
-*   **布尔条件**: DSL 中的 `==` 会自动转换为 SQL `=`；`is_st/is_hs300` 等布尔字段会将 0/1 转为布尔值比较。
-*   **空值处理**: `is_st/is_hs300/is_csi1000` 若为 NULL，查询时按 `0/false` 处理，避免全量过滤为空。
+*   **成交额字段**: 快照表当前使用 `amount` 字段表示成交额，同时兼容历史 `turnover` 写法。
+*   **布尔条件**: DSL 同时支持 `==` 与 `=`；`is_st/idx_hs300/idx_zz1000` 等布尔字段会将 0/1 转为布尔值比较。
+*   **空值处理**: `is_st/idx_hs300/idx_zz1000` 若为 NULL，查询时按 `0/false` 处理，避免全量过滤为空。

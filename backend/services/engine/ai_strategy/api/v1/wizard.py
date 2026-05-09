@@ -95,6 +95,7 @@ from ...steps.step2_pool_confirmation import query_pool as _step2_query_pool
 from .validation import router as validation_router
 from .storage import router as storage_router
 from .generation import router as generation_router
+from .pool_management import router as pool_management_router
 
 # ---------------------------------------------------------------------------
 # Schemas（Phase 1 抽取的 Pydantic 模型）
@@ -143,6 +144,7 @@ router = APIRouter(prefix="/strategy", tags=["strategy-wizard"])
 router.include_router(validation_router)
 router.include_router(storage_router)
 router.include_router(generation_router)
+router.include_router(pool_management_router)
 
 _QLIB_TASK_TTL_SECONDS = int(os.getenv("QLIB_GENERATE_TASK_TTL_SECONDS", "3600"))
 _QLIB_TASK_REDIS_PREFIX = os.getenv("QLIB_GENERATE_TASK_REDIS_PREFIX", "quantmind:strategy:generate_qlib:task:").strip()
@@ -333,7 +335,7 @@ def _simple_parse_text(text_input: str):
         return (val or "").replace("'", "''")
 
     # total_mv 单位可配置，默认“元”：1亿=100,000,000.0。
-    # 若数据库存“万元”，可设置 AI_STRATEGY_TOTAL_MV_PER_YI=10000。
+    # 若仍使用旧库“万元”口径，可设置 AI_STRATEGY_TOTAL_MV_PER_YI=10000。
     cap_unit_multiplier = 1.0
     if "亿" in s:
         cap_unit_multiplier = TOTAL_MV_PER_YI
@@ -583,7 +585,7 @@ def _simple_parse_text(text_input: str):
             }
             for term in coarse_terms:
                 t = term.strip()
-                if not t or t in industry_stopwords:
+                if not t or t in industry_stopwords or t.endswith("的"):
                     continue
                 if t not in industry_list:
                     industry_list.append(t)
@@ -605,11 +607,11 @@ def _simple_parse_text(text_input: str):
     csi1000_flag = None
     if "沪深300" in s or "HS300" in s.upper():
         hs300_flag = 1
-        factors.append("is_csi300")
+        factors.append("idx_hs300")
         local_hit = True
     if "中证1000" in s or "CSI1000" in s.upper():
         csi1000_flag = 1
-        factors.append("is_csi1000")
+        factors.append("idx_zz1000")
         local_hit = True
 
     parts = []
@@ -654,9 +656,9 @@ def _simple_parse_text(text_input: str):
     if is_st_flag is not None:
         parts.append(f"is_st == {is_st_flag}")
     if hs300_flag is not None:
-        parts.append("is_csi300 == 1")
+        parts.append("idx_hs300 == 1")
     if csi1000_flag is not None:
-        parts.append("is_csi1000 == 1")
+        parts.append("idx_zz1000 == 1")
     if industry_list:
         sql_parts: list[str] = []
         if cap_range:
@@ -686,9 +688,9 @@ def _simple_parse_text(text_input: str):
         if is_st_flag is not None:
             sql_parts.append(f"is_st = {is_st_flag}")
         if hs300_flag is not None:
-            sql_parts.append("is_csi300 = 1")
+            sql_parts.append("idx_hs300 = 1")
         if csi1000_flag is not None:
-            sql_parts.append("is_csi1000 = 1")
+            sql_parts.append("idx_zz1000 = 1")
         # 将业务行业词映射到库内 industry 字段常见取值，仍然基于 industry 字段匹配。
         industry_alias_map: dict[str, list[str]] = {
             # 金融
@@ -755,10 +757,10 @@ def _simple_parse_text(text_input: str):
                 if alias and alias not in expanded_industry_terms:
                     expanded_industry_terms.append(alias)
 
-        # 行业匹配
+        # 行业匹配覆盖 industry, ind_code_l1, ind_code_l2 三列，确保从一级到细分行业都能匹配。
         ind_clause = " OR ".join(
             [
-                f"industry ILIKE '%{_sql_quote(ind)}%'"
+                f"industry ILIKE '%{_sql_quote(ind)}%' OR ind_code_l1 ILIKE '%{_sql_quote(ind)}%' OR ind_code_l2 ILIKE '%{_sql_quote(ind)}%'"
                 for ind in expanded_industry_terms
             ]
         )
@@ -766,7 +768,7 @@ def _simple_parse_text(text_input: str):
             sql_parts.append(f"({ind_clause})")
         where_clause = " AND ".join(sql_parts) if sql_parts else "true"
         dsl = (
-            "SQL: SELECT symbol, stock_name as name, close, "
+            "SQL: SELECT symbol, name, close, "
             "total_mv as market_cap, pe_ttm as pe_ratio, pb as pb_ratio "
             f"FROM {LATEST_TABLE} WHERE {where_clause}"
         )
@@ -800,57 +802,67 @@ async def parse_text(body: ParseTextRequest, request: Request):
                 version="2.0.0",
             )
 
-        local_dsl, local_mapping, local_suggestions = _simple_parse_text(body.text)
-        if local_mapping.get("local_hit"):
-            return ParseResponse(
-                dsl=local_dsl,
-                mapping=local_mapping,
-                warnings=[],
-                confidence=0.85,
-                suggestions=local_suggestions,
-                version="local-1.0.0",
-            )
-
+        # 优先使用 LLM 大模型解析逻辑，以处理复杂语义和趋势描述。
         parser = get_intent_parser()
-        intent = await parser.parse(body.text)
+        try:
+            intent = await parser.parse(body.text)
+            generator = get_sql_generator()
+            sql = await generator.generate_sql(intent)
+        except Exception as llm_err:
+            logger.warning("LLM parsing failed, falling back to local: %s", llm_err)
+            sql = None
+            intent = {}
 
-        generator = get_sql_generator()
-        sql = await generator.generate_sql(intent)
+        # 检查是否成功生成 SQL
         if sql:
-            sql = re.sub(
-                r"from\s+stock_selection",
-                f"from {LATEST_TABLE}",
-                sql,
-                flags=re.IGNORECASE,
-            )
-            sql = re.sub(r"from\s+stock_daily", f"from {LATEST_TABLE}", sql, flags=re.IGNORECASE)
+            # 修复 LLM 可能生成的错误表名（重复拼接）
+            sql = re.sub(r"stock_daily_latest_latest", "stock_daily_latest", sql, flags=re.IGNORECASE)
+            sql = re.sub(r"stock_selection_selection", "stock_selection", sql, flags=re.IGNORECASE)
 
-        if _is_full_market_sql(sql):
-            sql = _build_full_market_sql()
-            intent = {
-                **intent,
-                "semantic_category": "full_market",
-                "target_table": "stock_daily_latest",
-            }
+            # 适配表名规范（仅替换未正确使用 LATEST_TABLE 的情况）
+            if "from stock_selection" in sql.lower():
+                sql = re.sub(r"from\s+stock_selection", f"from {LATEST_TABLE}", sql, flags=re.IGNORECASE)
+            if "from stock_daily" in sql.lower() and "from stock_daily_latest" not in sql.lower():
+                sql = re.sub(r"from\s+stock_daily(?!\s_latest)", f"from {LATEST_TABLE}", sql, flags=re.IGNORECASE)
+            
+            # 若生成的是全市场 SQL，自动对齐口径
+            if _is_full_market_sql(sql):
+                sql = _build_full_market_sql()
+                intent["semantic_category"] = "full_market"
 
-        if not sql:
-            dsl, mapping, suggestions = _simple_parse_text(body.text)
-        else:
             dsl = f"SQL: {sql}"
             mapping = {**intent, "sql": sql}
             suggestions = [
                 f"已识别为 {intent.get('semantic_category', '通用')} 策略原型",
-                f"选用数据表: {intent.get('target_table', 'stock_selection')}",
+                f"选用数据表: {intent.get('target_table', 'stock_daily_latest')}",
             ]
+            return ParseResponse(
+                dsl=dsl,
+                mapping=mapping,
+                warnings=[],
+                confidence=0.9,
+                suggestions=suggestions,
+                version="llm-2.0.0",
+            )
 
+        # 降级：只有在 LLM 无法处理时，才使用本地正则解析作为兜底
+        local_dsl, local_mapping, local_suggestions = _simple_parse_text(body.text)
         return ParseResponse(
-            dsl=dsl,
-            mapping=mapping,
-            warnings=[],
-            confidence=0.9,
-            suggestions=suggestions,
-            version="2.0.0",
+            dsl=local_dsl,
+            mapping=local_mapping,
+            warnings=["当前解析结果由基础规则生成，复杂语义可能受限"],
+            confidence=0.7,
+            suggestions=local_suggestions,
+            version="local-fallback-1.0.0",
         )
+    except Exception as e:
+        logger.error("parse_text failed: %s", e)
+        # 最后的最后，尝试最简单的解析
+        try:
+            dsl, mapping, suggestions = _simple_parse_text(body.text)
+            return ParseResponse(dsl=dsl, mapping=mapping, suggestions=suggestions)
+        except:
+            raise HTTPException(status_code=400, detail=f"解析完全失败: {e}")
     except Exception as e:
         logger.error("parse_text failed: %s", e)
         try:

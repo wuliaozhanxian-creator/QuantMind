@@ -1,8 +1,18 @@
 import React, { useState } from 'react';
 import { Row, Col, Card, Typography, Input, Button, Space, Alert, Tabs, Tag, Divider, message } from 'antd';
-import { BulbOutlined, EditOutlined, ThunderboltOutlined, CheckCircleOutlined, StockOutlined } from '@ant-design/icons';
-import { useWizardStore } from '../store/wizardStore';
+import { 
+  BulbOutlined, 
+  EditOutlined, 
+  ThunderboltOutlined, 
+  CheckCircleOutlined, 
+  StockOutlined,
+  SendOutlined
+} from '@ant-design/icons';
+import { motion, AnimatePresence } from 'framer-motion';
+import { useWizardV2Store } from '../store/wizardV2Store';
+import { fetchWorkingPoolByDsl, syncWorkingPoolToBackend } from '../services/wizardV2Service';
 import { parseConditions, parseText, queryPool } from '../services/wizardService';
+import { FACTORS } from '../factors/dictionary';
 import { SimpleLogicBuilder } from './SimpleLogicBuilder';
 import { CustomStockSelector } from './CustomStockSelector';
 
@@ -10,7 +20,11 @@ const { Title, Text } = Typography;
 const { TextArea } = Input;
 
 export const NaturalTextInput: React.FC<{ onNext: () => void }> = ({ onNext }) => {
-  const { conditions, setConditions, setPool, customPool } = useWizardStore();
+  const { workingPool, setWorkingPool, conditions, setConditions } = useWizardV2Store();
+  // V2 specific: we use setWorkingPool instead of setPool/setConditions etc.
+  // For simplicity during migration, we might still need some V1 states if UI depends on them
+  // but let's try to stick to SSOT.
+  
   const [activeTab, setActiveTab] = useState('nlp');
   const [text, setText] = useState('');
   const [loading, setLoading] = useState(false);
@@ -40,29 +54,49 @@ export const NaturalTextInput: React.FC<{ onNext: () => void }> = ({ onNext }) =
     setMatchedCount(null);
     try {
       const parsed = await parseText(text);
-      setPreview(parsed);
+      
+      // 针对数据库按“元”存储的情况，修复 DSL 中的单位换算（AI 通常输出以“亿”为单位的数字）
+      let correctedDsl = parsed.dsl;
+      if (correctedDsl) {
+        const billionFactors = FACTORS.filter(f => f.unit === '亿').map(f => f.key);
+        billionFactors.forEach(f => {
+          const regex = new RegExp(`(${f}\\s*(?:>|<|>=|<=|==)\\s*)(\\d+(\\.\\d+)?)`, 'g');
+          correctedDsl = correctedDsl.replace(regex, (match, p1, p2) => {
+            const val = parseFloat(p2);
+            // 如果数值已经很大（大于100万），说明后端可能已经做过单位换算，不再重复计算
+            if (val > 1000000) return match;
+            return p1 + Math.floor(val * 1e8);
+          });
+        });
+      }
+      
+      setPreview({ ...parsed, dsl: correctedDsl });
 
-      if (parsed.dsl) {
+      if (correctedDsl) {
         try {
-          const poolRes = await queryPool({ dsl: parsed.dsl });
-          if (poolRes && poolRes.items) {
-            setMatchedCount(poolRes.items.length);
-          }
+          const items = await fetchWorkingPoolByDsl(correctedDsl);
+          setMatchedCount(items.length);
+          // fetchWorkingPoolByDsl already syncs to backend
+          setWorkingPool(items, true); 
         } catch (e) {
           console.warn('Failed to pre-calculate pool size', e);
         }
       }
 
-      // 仅当后端提供明确 defaults 时才回填，避免使用占位值污染可视化条件。
       if (parsed.mapping?.factors && parsed.mapping?.defaults) {
         const dummyChildren = parsed.mapping.factors
           .filter((f: string) => parsed.mapping.defaults?.[f]?.threshold !== undefined)
-          .map((f: string) => ({
-            type: 'numeric',
-            factor: f, // 假设后端返回的 factor key 与前端一致，如果不一致需要映射，这里假设 dictionary.ts 中的 key 与后端一致
-            operator: '>',
-            threshold: parsed.mapping.defaults[f].threshold
-          }));
+          .map((f: string) => {
+            const factorDef = FACTORS.find(item => item.key === f);
+            const isBillion = factorDef?.unit === '亿';
+            const val = parsed.mapping.defaults[f].threshold;
+            return {
+              type: 'numeric',
+              factor: f,
+              operator: '>',
+              threshold: isBillion ? Math.floor(val * 1e8) : val
+            };
+          });
         if (dummyChildren.length > 0) {
           setConditions({ type: 'composite', op: 'AND', children: dummyChildren } as any);
         }
@@ -77,43 +111,21 @@ export const NaturalTextInput: React.FC<{ onNext: () => void }> = ({ onNext }) =
   };
 
   const runStrategy = async () => {
-    if (!preview.dsl && (!customPool || customPool.length === 0)) {
+    // In V2, workingPool should already be populated if analyze was successful
+    if (workingPool.length === 0 && !preview.dsl) {
       message.warning('请先完成解析或添加自选股票');
       return;
     }
     setLoading(true);
     try {
-      // 1. Get pool from DSL if available
-      let poolRes: any = { items: [] };
-      const dsl = preview.dsl;
-      if (dsl) {
-        poolRes = await queryPool({ dsl });
+      if (preview.dsl) {
+        // If there's a DSL but maybe analyze wasn't called or we want to refresh
+        const items = await fetchWorkingPoolByDsl(preview.dsl);
+        setWorkingPool(items, true);
+        message.success(`已生成股票池，包含 ${items.length} 只股票`);
+      } else {
+        message.success(`当前已选 ${workingPool.length} 只股票`);
       }
-
-      // 2. Merge custom pool
-      if (customPool && customPool.length > 0) {
-        const existingIds = new Set(poolRes.items?.map((s: any) => s.symbol));
-        const customToAdd = customPool.filter(s => !existingIds.has(s.symbol));
-        poolRes.items = [...(poolRes.items || []), ...customToAdd.map(s => ({
-          symbol: s.symbol,
-          name: s.name,
-          metrics: { price: s.price || 0 } // Basic metric
-        }))];
-        // Recalculate summary count if needed, or just ignore for now
-        if (poolRes.summary) {
-          poolRes.summary.count = poolRes.items.length;
-        }
-      }
-
-      if (!poolRes.items || poolRes.items.length === 0) {
-        message.warning('未获取到股票池，请检查条件后重试');
-        return;
-      }
-
-      setPool(poolRes);
-      message.success(`已生成股票池，包含 ${poolRes.items.length} 只股票`);
-
-      // 可视化构建器条件已经写入 store
       onNext();
     } catch (err: any) {
       console.error('runStrategy failed', err);
@@ -136,8 +148,16 @@ export const NaturalTextInput: React.FC<{ onNext: () => void }> = ({ onNext }) =
         message.warning('未获取到股票池，请检查条件后重试');
         return;
       }
-      setPool(poolRes);
-      message.success(`已生成股票池，包含 ${poolRes.items.length} 只股票`);
+      const items = (poolRes.items || []).map((x: any) => ({
+        symbol: String(x?.symbol || x?.code || '').trim(),
+        name: String(x?.name || '').trim(),
+        marketCap: Number(x?.metrics?.market_cap ?? x?.market_cap ?? 0) || 0,
+        pe: Number(x?.metrics?.pe ?? x?.pe ?? 0) || 0,
+        price: Number(x?.metrics?.close ?? x?.price ?? 0) || 0,
+      })).filter((x: any) => x.symbol);
+      
+      setWorkingPool(items);
+      message.success(`已生成股票池，包含 ${items.length} 只股票`);
       onNext();
     } catch (err: any) {
       console.error('runVisualStrategy failed', err);
@@ -148,126 +168,209 @@ export const NaturalTextInput: React.FC<{ onNext: () => void }> = ({ onNext }) =
   };
 
   return (
-    <div style={{ maxWidth: 1200, margin: '0 auto' }}>
-      <Tabs
-        activeKey={activeTab}
-        onChange={setActiveTab}
-        type="card"
-        items={[
-          {
-            key: 'nlp',
-            label: <span><BulbOutlined />自然语言描述</span>,
-            children: (
-              <Row gutter={24} style={{ height: 600 }}>
-                <Col span={16} style={{ height: '100%' }}>
-                  <Card variant="borderless" style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.05)', height: '100%' }}>
-                    <Title level={5}>请输入选股逻辑</Title>
-                    <TextArea
-                      rows={8}
-                      placeholder="例如：沪深300成分股中，市值大于200亿、PE小于25、PB小于3的股票"
-                      value={text}
-                      onChange={(e) => setText(e.target.value)}
-                      style={{ fontSize: 16, padding: 12 }}
-                    />
-                    <div style={{ marginTop: 16 }}>
-                      <Text type="secondary" style={{ marginRight: 8 }}>快速模版：</Text>
-                      {templates.map(t => (
-                        <Tag
-                          key={t.label}
-                          color="blue"
-                          style={{ cursor: 'pointer', padding: '4px 8px' }}
-                          onClick={() => useTemplate(t.value)}
-                        >
-                          {t.label}
-                        </Tag>
-                      ))}
-                    </div>
-                    <Divider />
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                        <Button type="primary" size="large" onClick={analyze} loading={loading} icon={<ThunderboltOutlined />}>
-                          智能解析
-                        </Button>
-                        {matchedCount !== null && (
-                          <span style={{ color: '#666', fontSize: 14 }}>
-                            匹配到 <span style={{ color: '#1890ff', fontWeight: 600 }}>{matchedCount}</span> 只标的
-                          </span>
-                        )}
-                      </div>
-                      <Button size="large" onClick={runStrategy} disabled={!preview.dsl} icon={<CheckCircleOutlined />}>
-                        确认并下一步
-                      </Button>
-                    </div>
-                  </Card>
-                </Col>
-                <Col span={8} style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 16 }}>
-                  <Card title="项目说明" variant="borderless" style={{ flex: 1, background: '#fafafa', overflow: 'auto' }} size="small">
-                    {!preview.dsl ? (
-                      <div style={{ padding: '12px 0', color: '#666', lineHeight: '1.8' }}>
-                        <p style={{ textIndent: '2em', marginBottom: 16 }}>
-                          作为新一代 AI 驱动量化平台，QuantMind基于Qlib框架深度定制，和传统框架不同的是Qlib颠覆了传统“手动写因子”的模式，通过深度学习自动捕捉市场规律。
-                        </p>
-                        <p style={{ textIndent: '2em' }}>
-                          我们利用 Qlib 强大的建模能力，为您提供每日盘后自动决策服务。系统会根据当日行情实时更新模型，预测次日最具潜力的标的。您无需深谙算法，只需自定义股票池与风险偏好，剩下的交由 AI 深度模型。从海量数据中捕捉到市场规律，助您轻松把握市场先机。
-                        </p>
-                      </div>
-                    ) : (
-                      <Space direction="vertical" style={{ width: '100%' }}>
-                        <Alert message="解析成功" type="success" showIcon />
-                        <div>
-                          <Text strong>生成的查询逻辑 (DSL):</Text>
-                          <div style={{ background: '#eee', padding: 8, borderRadius: 4, marginTop: 4, fontFamily: 'monospace', fontSize: 12 }}>
-                            {preview.dsl}
+    <div className="max-w-[1200px] mx-auto p-2">
+      <div className="mb-8">
+        <Tabs
+          activeKey={activeTab}
+          onChange={setActiveTab}
+          type="line"
+          className="custom-premium-tabs"
+          items={[
+            {
+              key: 'nlp',
+              label: (
+                <div className="flex items-center gap-2 px-4 py-1">
+                  <BulbOutlined />
+                  <span className="font-medium">自然语言描述</span>
+                </div>
+              ),
+              children: (
+                <div className="mt-3">
+                  <Row gutter={24}>
+                    <Col span={16}>
+                      <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm hover:shadow-md transition-all duration-300">
+                        <Title level={5} className="mb-4 text-gray-800 flex items-center gap-2">
+                          <SendOutlined className="text-blue-500" />
+                          请输入选股逻辑
+                        </Title>
+                        <TextArea
+                          rows={6}
+                          placeholder="例如：市值在10-100亿之间且ROE小于30的股票"
+                          value={text}
+                          onChange={(e) => setText(e.target.value)}
+                          className="text-lg p-4 rounded-2xl border-gray-200 focus:border-blue-400 focus:ring-4 focus:ring-blue-50 transition-all"
+                          style={{ resize: 'none' }}
+                        />
+                        
+                        <div className="mt-4 mb-6">
+                          <div className="flex items-center gap-2 mb-3">
+                            <Text type="secondary" className="text-xs font-medium uppercase tracking-wider">快速模版</Text>
+                            <div className="h-px flex-1 bg-gray-100" />
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {templates.map(t => (
+                              <button
+                                key={t.label}
+                                onClick={() => useTemplate(t.value)}
+                                className="px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200
+                                  bg-blue-50 text-blue-600 border border-blue-100 hover:bg-blue-600 hover:text-white hover:border-blue-600
+                                  active:scale-95 shadow-sm"
+                              >
+                                {t.label}
+                              </button>
+                            ))}
                           </div>
                         </div>
-                        {preview.mapping?.factors && (
-                          <div>
-                            <Text strong>识别因子:</Text>
-                            <div style={{ marginTop: 4 }}>
-                              {preview.mapping.factors.map((f: string) => (
-                                <Tag key={f}>{f}</Tag>
-                              ))}
+
+                        <Divider className="my-8" />
+
+                        <div className="flex justify-start items-center">
+                          <div className="flex items-center gap-4">
+                            <Button 
+                              type="primary" 
+                              size="large" 
+                              onClick={analyze} 
+                              loading={loading} 
+                              icon={<ThunderboltOutlined />}
+                              className="h-12 px-8 rounded-2xl bg-gradient-to-r from-blue-600 to-blue-500 border-none shadow-lg shadow-blue-200 hover:shadow-blue-300 transition-all"
+                            >
+                              智能解析
+                            </Button>
+                            <AnimatePresence>
+                              {matchedCount !== null && (
+                                <motion.div
+                                  initial={{ opacity: 0, x: -10 }}
+                                  animate={{ opacity: 1, x: 0 }}
+                                  className="flex items-center gap-2 text-gray-500"
+                                >
+                                  <div className="w-2 h-2 rounded-full bg-green-500" />
+                                  <span>
+                                    匹配到 <span className="text-blue-600 font-bold text-lg">{matchedCount}</span> 只标的
+                                  </span>
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </div>
+                        </div>
+                      </div>
+                    </Col>
+                    <Col span={8}>
+                      <Card
+                        bordered={false}
+                        className="h-full rounded-3xl bg-gray-50/50 border border-gray-100 shadow-sm"
+                        title={<span className="text-gray-700 font-bold">逻辑预览</span>}
+                      >
+                        {!preview.dsl ? (
+                          <div className="space-y-6 text-gray-500 leading-relaxed text-sm">
+                            <div className="p-4 bg-white rounded-2xl border border-gray-100">
+                              <p className="font-medium text-gray-700 mb-2">💡 提示</p>
+                              <p className="mb-2">您可以直接用自然语言描述您期望的底层股票池。</p>
+                              <p className="text-orange-600 font-medium">⚠️ 请注意：建议在此构建宽泛的备选池以保证 AI 的学习空间；若过滤条件过于严格，可能会导致标的过少而影响回测效果。如需在实际交易中精准限定名单，请在后续的策略配置中设置。</p>
                             </div>
+                            <p>
+                              &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;QuantMind 是一款企业级 AI 量化交易平台，基于 Qlib 框架深度定制。我们依托前沿的深度学习模型与海量特征，为您提供专业的每日盘后自动决策服务。
+                            </p>
+                            <p>
+                              &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;您无需深谙复杂算法，只需构建期望的股票池与风险偏好，AI 引擎即可随市场行情实时迭代，为您精准预测次日最具潜力的投资组合。
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="space-y-6">
+                            <Alert 
+                              message="解析成功" 
+                              type="success" 
+                              showIcon 
+                              className="rounded-2xl border-emerald-100 bg-emerald-50 text-emerald-800"
+                            />
+                            <div>
+                              <Text strong className="text-xs text-gray-400 uppercase tracking-wider mb-2 block">生成的查询逻辑 (DSL)</Text>
+                              <div className="bg-white border border-gray-100 p-4 rounded-2xl font-mono text-xs text-blue-600 break-all leading-relaxed">
+                                {preview.dsl}
+                              </div>
+                            </div>
+                            {preview.mapping?.factors && (
+                              <div>
+                                <Text strong className="text-xs text-gray-400 uppercase tracking-wider mb-2 block">识别因子</Text>
+                                <div className="flex flex-wrap gap-2">
+                                  {preview.mapping.factors.map((f: string) => (
+                                    <Tag key={f} className="m-0 px-3 py-1 rounded-full bg-blue-50 border-blue-100 text-blue-600 font-medium">
+                                      {f}
+                                    </Tag>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         )}
-                      </Space>
-                    )}
-                  </Card>
-                </Col>
-              </Row>
-            )
-          },
-          {
-            key: 'visual',
-            label: <span><EditOutlined />简易构建器</span>,
-            children: (
-              <Card variant="borderless">
-                <SimpleLogicBuilder onChange={(c) => setConditions(c)} />
-                <Divider />
-                <div style={{ textAlign: 'right' }}>
-                  <Button type="primary" size="large" onClick={runVisualStrategy} loading={loading}>确认并下一步</Button>
+                      </Card>
+                    </Col>
+                  </Row>
                 </div>
-              </Card>
-            )
-          },
-          {
-            key: 'custom',
-            label: <span><StockOutlined />自定义选股</span>,
-            children: (
-              <Card variant="borderless" style={{ height: 600 }}>
-                <Alert message="手动添加您关注的特定股票，它们将与筛选结果合并。" type="info" showIcon style={{ marginBottom: 16 }} />
-                <div style={{ height: 480 }}>
-                  <CustomStockSelector />
+              )
+            },
+            {
+              key: 'visual',
+              label: (
+                <div className="flex items-center gap-2 px-4 py-1">
+                  <EditOutlined />
+                  <span className="font-medium">简易构建器</span>
                 </div>
-                <Divider />
-                <div style={{ textAlign: 'right' }}>
-                  <Button type="primary" size="large" onClick={runStrategy}>确认并下一步</Button>
+              ),
+              children: (
+                <div className="mt-3 bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">
+                  <SimpleLogicBuilder onChange={(c) => setConditions(c)} />
                 </div>
-              </Card>
-            )
-          }
-        ]}
-      />
+              )
+            },
+            {
+              key: 'custom',
+              label: (
+                <div className="flex items-center gap-2 px-4 py-1">
+                  <StockOutlined />
+                  <span className="font-medium">股票池管理</span>
+                </div>
+              ),
+              children: (
+                <div className="mt-3 bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">
+                  <Alert
+                    message="手动添加您关注的特定股票，它们将与筛选结果合并。"
+                    type="info"
+                    showIcon
+                    className="mb-4 rounded-xl py-2 px-4"
+                  />
+                  <div style={{ height: '550px' }}>
+                    <CustomStockSelector />
+                  </div>
+                </div>
+              )
+            }
+          ]}
+        />
+      </div>
+      
+      <style>{`
+        .custom-premium-tabs .ant-tabs-nav {
+          margin-bottom: 0 !important;
+        }
+        .custom-premium-tabs .ant-tabs-nav::before {
+          display: none !important;
+        }
+        .custom-premium-tabs .ant-tabs-tab {
+          padding: 8px 0 !important;
+          margin: 0 4px 0 0 !important;
+          border-radius: 12px !important;
+          transition: all 0.3s !important;
+        }
+        .custom-premium-tabs .ant-tabs-tab-active {
+          background: #eff6ff !important;
+        }
+        .custom-premium-tabs .ant-tabs-tab-active .ant-tabs-tab-btn {
+          color: #2563eb !important;
+        }
+        .custom-premium-tabs .ant-tabs-ink-bar {
+          display: none !important;
+        }
+      `}</style>
     </div>
   );
 };

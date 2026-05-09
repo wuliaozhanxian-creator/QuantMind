@@ -1,9 +1,9 @@
 """
-本地策略保存服务（OSS Edition）
-Local Strategy Storage Service
+云端策略保存服务（COS上传器）
+Cloud Strategy Storage Service
 
 功能：
-- 上传策略代码到本地存储
+- 上传策略代码到云存储
 - 保存策略元数据到数据库
 - 生成访问URL
 """
@@ -24,50 +24,11 @@ from sqlalchemy import text
 logger = logging.getLogger(__name__)
 
 
-def _normalize_qlib_symbol(symbol: str) -> str:
-    code = str(symbol or "").strip()
-    if not code:
-        return ""
-    upper = code.upper()
-    if len(upper) == 8 and upper[:2] in {"SH", "SZ", "BJ"}:
-        return upper.lower()
-    if len(upper) == 9 and "." in upper:
-        left, right = upper.split(".", 1)
-        if len(left) == 6 and left.isdigit() and right in {"SH", "SZ", "BJ"}:
-            return f"{right}{left}".lower()
-    if len(upper) == 6 and upper.isdigit():
-        if upper.startswith(("6", "9")):
-            return f"sh{upper}"
-        if upper.startswith(("0", "2", "3")):
-            return f"sz{upper}"
-        if upper.startswith(("4", "8")):
-            return f"bj{upper}"
-    return code.lower()
-
-
-def _normalize_pool_content_for_qlib(content: str) -> str:
-    lines: list[str] = []
-    for raw_line in str(content or "").splitlines():
-        stripped = raw_line.strip()
-        if not stripped or stripped.startswith("#"):
-            lines.append(raw_line)
-            continue
-        if "\t" in stripped:
-            code, rest = stripped.split("\t", 1)
-            lines.append(f"{_normalize_qlib_symbol(code)}\t{rest}")
-        else:
-            parts = stripped.split(maxsplit=1)
-            if len(parts) == 2:
-                lines.append(f"{_normalize_qlib_symbol(parts[0])} {parts[1]}")
-            else:
-                lines.append(_normalize_qlib_symbol(stripped))
-    return "\n".join(lines) + ("\n" if str(content or "").endswith("\n") else "")
-
-
 class InvalidUserIdError(ValueError):
     """用户ID格式错误（应为整数语义字符串）。"""
 
 
+# 尝试导入共享模块（数据库连接）
 try:
     from backend.shared.database_pool import get_db
 except Exception:
@@ -79,12 +40,16 @@ except Exception:
 
 class COSUploader:
     """
-    本地存储上传服务 (OSS Edition)
+    腾讯云COS上传服务
     """
 
     def __init__(self):
+        """
+        初始化上传器
+        """
         try:
             from pathlib import Path
+
             from dotenv import load_dotenv
 
             env_path = Path(__file__).resolve().parents[3] / ".env"
@@ -95,23 +60,57 @@ class COSUploader:
         except Exception:
             pass
 
-        self.storage_mode = "local"
-        self.is_local_mode = True
-        logger.info("COSUploader: storage_mode=local (OSS Edition)")
+        # 1. 确定存储模式
+        # 企业级金融业务禁止 mock/演示兜底；仅允许明确选择 local 或 cos。
+        self.storage_mode = (os.getenv("STORAGE_MODE") or "cos").strip().lower()
+        if self.storage_mode not in ("local", "cos"):
+            raise RuntimeError("STORAGE_MODE 仅支持 local 或 cos")
 
-        default_root = "/app/data/strategies"
-        storage_root = os.getenv("STORAGE_ROOT", default_root)
+        self.is_local_mode = self.storage_mode == "local"
+        logger.info(f"COSUploader: storage_mode={self.storage_mode}")
 
-        self.local_storage_path = Path(storage_root)
-        try:
-            self.local_storage_path.mkdir(parents=True, exist_ok=True)
-            logger.info(f"本地存储路径已就绪: {self.local_storage_path}")
-        except Exception as e:
-            logger.error(f"无法创建本地存储路径 {self.local_storage_path}: {e}")
-            if "/tmp" not in str(self.local_storage_path):
-                self.local_storage_path = Path("/tmp/quantmind_strategies")
+        # 2. 配置 COS (仅当非本地模式时)
+        if not self.is_local_mode:
+            # 真实COS配置（优先 TENCENT_*，兼容 COS_*）
+            self.region = os.getenv("TENCENT_REGION") or os.getenv("COS_REGION") or "ap-guangzhou"
+            self.secret_id = os.getenv("TENCENT_SECRET_ID") or os.getenv("COS_SECRET_ID")
+            self.secret_key = os.getenv("TENCENT_SECRET_KEY") or os.getenv("COS_SECRET_KEY")
+            self.bucket = os.getenv("TENCENT_BUCKET") or os.getenv("COS_BUCKET") or "quantmind-strategies"
+            self.base_url = os.getenv("TENCENT_COS_URL", "").rstrip("/")
+            if not self.base_url:
+                try:
+                    from pathlib import Path
+
+                    env_path = Path(__file__).resolve().parents[3] / ".env"
+                    if env_path.exists():
+                        for line in env_path.read_text().splitlines():
+                            if line.strip().startswith("TENCENT_COS_URL="):
+                                self.base_url = line.split("=", 1)[1].strip().strip("\"'").rstrip("/")
+                                break
+                except Exception:
+                    pass
+
+            if not all([self.secret_id, self.secret_key, self.bucket]):
+                raise RuntimeError("COS 配置不完整：请配置 TENCENT_SECRET_ID/TENCENT_SECRET_KEY/TENCENT_BUCKET")
+
+        # 3. 配置本地存储路径 (local)
+        if self.is_local_mode:
+            # 默认路径:
+            # local模式 (STORAGE_MODE=local) -> /app/data/strategies (可通过 STORAGE_ROOT 覆盖)
+            default_root = "/app/data/strategies"
+            storage_root = os.getenv("STORAGE_ROOT", default_root)
+
+            self.local_storage_path = Path(storage_root)
+            try:
                 self.local_storage_path.mkdir(parents=True, exist_ok=True)
-                logger.warning(f"降级到临时路径: {self.local_storage_path}")
+                logger.info(f"本地存储路径已就绪: {self.local_storage_path}")
+            except Exception as e:
+                logger.error(f"无法创建本地存储路径 {self.local_storage_path}: {e}")
+                # Fallback to tmp if permission denied
+                if "/tmp" not in str(self.local_storage_path):
+                    self.local_storage_path = Path("/tmp/quantmind_strategies")
+                    self.local_storage_path.mkdir(parents=True, exist_ok=True)
+                    logger.warning(f"降级到临时路径: {self.local_storage_path}")
 
     def _get_user_int_id(self, user_uuid: str) -> int | None:
         """从users表解析用户Int ID (Resolution from UUID/String to Int)"""
@@ -231,18 +230,20 @@ class COSUploader:
                 return True
 
         except Exception as e:
-            logger.error(
-                f"[DirectDB] Failed to save strategy to DB: {e}", exc_info=True
-            )
+            logger.error(f"[DirectDB] Failed to save strategy to DB: {e}", exc_info=True)
             return False
 
     async def upload_strategy(
         self, user_id: str, strategy_id: str, code: str, metadata: dict | None = None
     ) -> dict[str, str]:
         """
-        上传策略文件到本地存储 (OSS Edition)
+        上传策略文件到存储（Local/COS）
         """
-        return await self._upload_to_local(user_id, strategy_id, code, metadata)
+        # 仅处理文件存储；数据库写入由 StrategyStorageService.save_strategy 统一处理
+        if self.is_local_mode:
+            return await self._upload_to_local(user_id, strategy_id, code, metadata)
+        else:
+            return await self._upload_to_cos(user_id, strategy_id, code, metadata)
 
     async def upload_pool_file(
         self,
@@ -253,11 +254,21 @@ class COSUploader:
         timestamp: str | None = None,
     ) -> dict[str, str]:
         """
-        上传股票池文件到本地存储 (OSS Edition)
+        上传股票池文件
+
+        Args:
+            user_id: 用户ID
+            pool_id: 股票池ID
+            content: 文件内容
+            fmt: 文件格式 (json, txt, csv)
+            timestamp: 时间戳文件夹名称
+
+        Returns:
+            包含url, object_key, file_size, code_hash, relative_path的字典
         """
-        return await self._upload_pool_to_local(
-            user_id, pool_id, content, fmt, timestamp
-        )
+        if self.is_local_mode:
+            return await self._upload_pool_to_local(user_id, pool_id, content, fmt, timestamp)
+        return await self._upload_pool_to_cos(user_id, pool_id, content, fmt, timestamp)
 
     async def _upload_to_local(
         self, user_id: str, strategy_id: str, code: str, metadata: dict | None = None
@@ -292,8 +303,7 @@ class COSUploader:
             file_url = f"file://{strategy_file.absolute()}"
 
             logger.info(
-                f"策略已保存到本地: {strategy_file} "
-                f"(用户: {user_id}, 策略ID: {strategy_id}, 大小: {file_size}字节)"
+                f"策略已保存到本地: {strategy_file} " f"(用户: {user_id}, 策略ID: {strategy_id}, 大小: {file_size}字节)"
             )
 
             return {
@@ -306,6 +316,52 @@ class COSUploader:
         except Exception as e:
             logger.error(f"本地保存失败: {e}", exc_info=True)
             raise RuntimeError(f"策略保存失败: {e}")
+
+    async def _upload_to_cos(
+        self, user_id: str, strategy_id: str, code: str, metadata: dict | None = None
+    ) -> dict[str, str]:
+        """真实上传到腾讯云COS"""
+        try:
+            # 导入COS SDK
+            from qcloud_cos import CosConfig, CosS3Client
+
+            # 初始化客户端
+            config = CosConfig(Region=self.region, SecretId=self.secret_id, SecretKey=self.secret_key)
+            client = CosS3Client(config)
+
+            # 构建对象键
+            object_key = f"user_strategies/{user_id}/{strategy_id}/strategy.py"
+
+            # 上传代码
+            client.put_object(
+                Bucket=self.bucket,
+                Key=object_key,
+                Body=code.encode("utf-8"),
+                ContentType="text/x-python",
+            )
+
+            # 计算文件信息
+            file_size = len(code.encode("utf-8"))
+            code_hash = hashlib.sha256(code.encode("utf-8")).hexdigest()
+
+            # 生成URL
+            base_url = os.getenv("TENCENT_COS_URL", "").rstrip("/") or self.base_url
+            if base_url:
+                url = f"{base_url}/{object_key}"
+            else:
+                url = f"https://{self.bucket}.cos.{self.region}.myqcloud.com/{object_key}"
+
+            logger.info(f"策略已上传到COS: {url} " f"(用户: {user_id}, 策略ID: {strategy_id}, 大小: {file_size}字节)")
+
+            return {
+                "url": url,
+                "object_key": object_key,
+                "file_size": file_size,
+                "code_hash": code_hash,
+            }
+        except Exception as e:
+            logger.error(f"COS上传失败: {e}", exc_info=True)
+            raise RuntimeError(f"COS上传失败: {e}")
 
     async def _upload_pool_to_local(
         self,
@@ -329,8 +385,6 @@ class COSUploader:
 
             file_name = f"stock_pool.{fmt}"
             pool_file = user_dir / file_name
-            if str(fmt).lower() == "txt":
-                content = _normalize_pool_content_for_qlib(content)
 
             with open(pool_file, "w", encoding="utf-8") as f:
                 f.write(content)
@@ -344,9 +398,7 @@ class COSUploader:
             relative_path = f"{timestamp}/{file_name}"
             file_url = f"file://{pool_file.absolute()}"
 
-            logger.info(
-                f"股票池已保存: {pool_file} (用户: {user_id}, 时间戳: {timestamp}, 格式: {fmt})"
-            )
+            logger.info(f"股票池已保存: {pool_file} (用户: {user_id}, 时间戳: {timestamp}, 格式: {fmt})")
 
             return {
                 "url": file_url,
@@ -359,57 +411,154 @@ class COSUploader:
             logger.error(f"本地保存股票池失败: {e}", exc_info=True)
             raise RuntimeError(f"股票池保存失败: {e}")
 
+    async def _upload_pool_to_cos(
+        self,
+        user_id: str,
+        pool_id: str,
+        content: str,
+        fmt: str,
+        timestamp: str | None = None,
+    ) -> dict[str, str]:
+        """上传股票池到COS,支持时间戳文件夹"""
+        try:
+            try:
+                from dotenv import load_dotenv
+
+                env_path = Path(__file__).resolve().parents[3] / ".env"
+                if env_path.exists():
+                    load_dotenv(dotenv_path=env_path, override=True)
+                else:
+                    load_dotenv(override=True)
+            except Exception:
+                pass
+            from qcloud_cos import CosConfig, CosS3Client
+
+            # 如果没有提供timestamp,使用当前时间
+            if not timestamp:
+                from datetime import datetime
+
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+            config = CosConfig(
+                Region=self.region,
+                SecretId=self.secret_id,
+                SecretKey=self.secret_key,
+            )
+            client = CosS3Client(config)
+
+            file_name = f"stock_pool.{fmt}"
+            object_key = f"user_pools/{user_id}/{timestamp}/{file_name}"
+            relative_path = f"{timestamp}/{file_name}"
+
+            client.put_object(
+                Bucket=self.bucket,
+                Key=object_key,
+                Body=content.encode("utf-8"),
+                ContentType=("text/csv" if fmt == "csv" else ("application/json" if fmt == "json" else "text/plain")),
+            )
+
+            file_size = len(content.encode("utf-8"))
+            code_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+            base_url = os.getenv("TENCENT_COS_URL", "").rstrip("/") or self.base_url
+            if base_url:
+                url = f"{base_url}/{object_key}"
+            else:
+                url = f"https://{self.bucket}.cos.{self.region}.myqcloud.com/{object_key}"
+
+            logger.info(f"股票池已上传到COS: {url} (用户: {user_id}, 时间戳: {timestamp}, 格式: {fmt})")
+
+            return {
+                "url": url,
+                "object_key": object_key,
+                "relative_path": relative_path,
+                "file_size": file_size,
+                "code_hash": code_hash,
+            }
+        except ImportError as e:
+            # 企业级金融业务禁止任何“降级为模拟/演示模式”的行为；缺依赖应显式失败。
+            raise RuntimeError("缺少 COS SDK（qcloud_cos），无法在 cos 模式上传") from e
+        except Exception as e:
+            logger.error(f"COS上传股票池失败: {e}", exc_info=True)
+            raise RuntimeError(f"股票池上传失败: {e}")
+
     async def delete_object(self, url: str, object_key: str | None = None) -> bool:
         try:
             if url.startswith("file://"):
                 file_path = url.replace("file://", "")
                 Path(file_path).unlink(missing_ok=True)
                 return True
+            if object_key and not self.is_local_mode:
+                from qcloud_cos import CosConfig, CosS3Client
+
+                config = CosConfig(
+                    Region=self.region,
+                    SecretId=self.secret_id,
+                    SecretKey=self.secret_key,
+                )
+                client = CosS3Client(config)
+                client.delete_object(Bucket=self.bucket, Key=object_key)
+                return True
             return False
         except Exception as e:
             logger.error(f"删除对象失败: {e}", exc_info=True)
             return False
 
-    async def read_object(
-        self, url: str | None = None, object_key: str | None = None
-    ) -> str:
+    async def read_object(self, url: str | None = None, object_key: str | None = None) -> str:
         try:
-            # 优先使用 url 参数
+            read_timeout = float(os.getenv("COS_READ_TIMEOUT_SECONDS", "30"))
+
             if url and url.startswith("file://"):
                 file_path = url.replace("file://", "")
                 with open(file_path, encoding="utf-8") as f:
                     return f.read()
 
-            # 如果提供了 object_key，从本地存储路径读取
-            if object_key:
-                # object_key 格式如: user_pools/user_id/timestamp/stock_pool.txt
-                # 需要映射到实际路径: {local_storage_path}/user_{user_id}/timestamp/stock_pool.txt
-                if object_key.startswith("user_pools/"):
-                    # 转换: user_pools/{user_id}/{timestamp}/{file} -> user_{user_id}/{timestamp}/{file}
-                    parts = object_key.split("/")
-                    if len(parts) >= 4:
-                        user_id = parts[1]
-                        timestamp = parts[2]
-                        file_name = parts[3]
-                        relative_path = f"user_{user_id}/{timestamp}/{file_name}"
-                        file_path = self.local_storage_path / relative_path
-                        if file_path.exists():
-                            with open(file_path, encoding="utf-8") as f:
-                                return f.read()
-                        else:
-                            logger.warning(f"股票池文件不存在: {file_path}")
-                            return ""
-                else:
-                    # 其他 object_key 格式，直接拼接
-                    file_path = self.local_storage_path / object_key
-                    if file_path.exists():
-                        with open(file_path, encoding="utf-8") as f:
-                            return f.read()
-                    else:
-                        logger.warning(f"文件不存在: {file_path}")
-                        return ""
+            if object_key and not self.is_local_mode:
 
-            return ""
+                def _read_from_cos_sync() -> str:
+                    from qcloud_cos import CosConfig, CosS3Client
+
+                    config = CosConfig(
+                        Region=self.region,
+                        SecretId=self.secret_id,
+                        SecretKey=self.secret_key,
+                    )
+                    client = CosS3Client(config)
+                    resp = client.get_object(Bucket=self.bucket, Key=object_key)
+                    return resp["Body"].get_raw_stream().read().decode("utf-8")
+
+                return await asyncio.wait_for(
+                    asyncio.to_thread(_read_from_cos_sync),
+                    timeout=read_timeout,
+                )
+
+            if url and not url.startswith("file://") and not self.is_local_mode:
+                # 尝试从URL推断Key（仅当URL为本服务生成格式）
+                prefix = f"https://{self.bucket}.cos.{self.region}.myqcloud.com/"
+                if url.startswith(prefix):
+                    key = url[len(prefix) :]
+                    return await self.read_object(object_key=key)
+
+                # 兼容自定义 COS 域名（例如 https://cos.quantmind.cloud/<object_key>）
+                if self.base_url:
+                    custom_prefix = f"{self.base_url.rstrip('/')}/"
+                    if url.startswith(custom_prefix):
+                        key = url[len(custom_prefix) :]
+                        return await self.read_object(object_key=key)
+
+                # 最后兜底：对于公网可读 URL，直接 HTTP 拉取文本内容
+                def _read_from_url_sync() -> str:
+                    from urllib.request import urlopen
+
+                    with urlopen(url, timeout=read_timeout) as resp:
+                        raw = resp.read()
+                    return raw.decode("utf-8")
+
+                return await asyncio.wait_for(
+                    asyncio.to_thread(_read_from_url_sync),
+                    timeout=read_timeout + 2.0,
+                )
+
+            raise RuntimeError("无法读取对象内容")
         except Exception as e:
             logger.error(f"读取对象失败: {e}", exc_info=True)
             raise RuntimeError(f"读取对象失败: {e}")
@@ -498,6 +647,48 @@ class COSUploader:
                             "last_modified": datetime.fromtimestamp(stat.st_mtime),
                         }
                     )
+            else:
+                # 真实模式：调用COS API
+                from qcloud_cos import CosConfig, CosS3Client
+
+                config = CosConfig(
+                    Region=self.region,
+                    SecretId=self.secret_id,
+                    SecretKey=self.secret_key,
+                )
+                client = CosS3Client(config)
+
+                # 分页获取所有对象
+                marker = ""
+                while True:
+                    resp = client.list_objects(Bucket=self.bucket, Prefix=prefix, Marker=marker, MaxKeys=1000)
+
+                    if "Contents" in resp:
+                        for item in resp["Contents"]:
+                            key = item["Key"]
+                            # 简单的过滤：只关心 strategy.py
+                            if key.endswith("/strategy.py"):
+                                results.append(
+                                    {
+                                        "key": key,
+                                        "size": int(item["Size"]),
+                                        "last_modified": (
+                                            datetime.strptime(
+                                                item["LastModified"],
+                                                "%Y-%m-%dT%H:%M:%S.%fZ",
+                                            )
+                                            if "." in item["LastModified"]
+                                            else datetime.strptime(
+                                                item["LastModified"],
+                                                "%Y-%m-%dT%H:%M:%SZ",
+                                            )
+                                        ),
+                                    }
+                                )
+
+                    if resp.get("IsTruncated") == "false":
+                        break
+                    marker = resp.get("NextMarker", "")
 
         except Exception as e:
             logger.error(f"List objects failed: {e}", exc_info=True)
@@ -527,9 +718,7 @@ class StrategyStorageService:
         # 使用 STORAGE_MODE 决定 local 或 cos
         self.cos_uploader = get_cos_uploader()
 
-    async def save_strategy(
-        self, user_id: str, strategy_name: str, code: str, metadata: dict
-    ) -> dict:
+    async def save_strategy(self, user_id: str, strategy_name: str, code: str, metadata: dict) -> dict:
         """
         保存策略到云端并记录数据库
 
@@ -552,9 +741,7 @@ class StrategyStorageService:
             # 生产统一要求：user_id 以整数语义传递，避免跨服务类型歧义。
             normalized_user_id = str(int(str(user_id).strip()))
         except Exception as exc:
-            raise InvalidUserIdError(
-                f"user_id 必须为整数类型字符串，当前值: {user_id}"
-            ) from exc
+            raise InvalidUserIdError(f"user_id 必须为整数类型字符串，当前值: {user_id}") from exc
 
         # 生成策略ID
         strategy_id = str(uuid4())
@@ -579,9 +766,7 @@ class StrategyStorageService:
             "yes",
             "on",
         )
-        strategy_service_url = os.getenv(
-            "STRATEGY_SERVICE_URL", "http://strategy-service:8003"
-        )
+        strategy_service_url = os.getenv("STRATEGY_SERVICE_URL", "http://strategy-service:8003")
 
         # 准备创建策略的 Payload (符合 StrategyCreate schema)
         tags = metadata.get("tags") or []
@@ -591,9 +776,7 @@ class StrategyStorageService:
         # 提取关键回测参数，确保回测一致性
         # 这些参数由 AI 向导的 Step 3, 4 提供
         strategy_config = metadata.get("config") or {}
-        benchmark = (
-            metadata.get("risk_config", {}).get("marketIndexSymbol") or "SH000300"
-        )
+        benchmark = metadata.get("risk_config", {}).get("marketIndexSymbol") or "SH000300"
         # 兼容性处理：如果 benchmark 只有代码（如 000300），补全后缀
         if benchmark == "000300":
             benchmark = "SH000300"
@@ -614,16 +797,11 @@ class StrategyStorageService:
                 "file_size": upload_result["file_size"],
                 "source": "ai_wizard",
                 "benchmark": benchmark,
-                "universe": metadata.get("stock_pool", {})
-                .get("summary", {})
-                .get("universeTotal")
-                or "csi300",
+                "universe": metadata.get("stock_pool", {}).get("summary", {}).get("universeTotal") or "csi300",
                 "strategy_type": "TopkDropout",  # 默认 Qlib 类型
                 **strategy_config,
             },
-            "parameters": metadata.get("parameters")
-            or metadata.get("risk_config")
-            or {},
+            "parameters": metadata.get("parameters") or metadata.get("risk_config") or {},
             "tags": tags,
             "is_public": bool(metadata.get("is_public", False)),
         }
@@ -666,9 +844,7 @@ class StrategyStorageService:
                             url=upload_result["url"],
                             object_key=upload_result["object_key"],
                         )
-                        logger.info(
-                            f"已补偿删除孤儿文件: {upload_result['object_key']}"
-                        )
+                        logger.info(f"已补偿删除孤儿文件: {upload_result['object_key']}")
                     except Exception as delete_err:
                         logger.error(f"补偿删除失败: {delete_err}")
 
@@ -679,9 +855,7 @@ class StrategyStorageService:
                 new_strategy = data.get("data") or data
                 strategy_db_id = new_strategy.get("id")
 
-                logger.info(
-                    f"策略已通过 strategy-service 创建: id={strategy_db_id}, user={user_int_id}"
-                )
+                logger.info(f"策略已通过 strategy-service 创建: id={strategy_db_id}, user={user_int_id}")
 
                 return {
                     "strategy_id": str(strategy_db_id),
@@ -694,12 +868,8 @@ class StrategyStorageService:
             logger.error(f"集成保存策略失败: {e}", exc_info=True)
             # 如果是请求抛出的异常（如超时），也尝试清理
             try:
-                await self.cos_uploader.delete_object(
-                    url=upload_result["url"], object_key=upload_result["object_key"]
-                )
-                logger.info(
-                    f"已因请求异常补偿删除孤儿文件: {upload_result['object_key']}"
-                )
+                await self.cos_uploader.delete_object(url=upload_result["url"], object_key=upload_result["object_key"])
+                logger.info(f"已因请求异常补偿删除孤儿文件: {upload_result['object_key']}")
             except:
                 pass
             raise RuntimeError(f"策略保存同步到服务失败: {e}")

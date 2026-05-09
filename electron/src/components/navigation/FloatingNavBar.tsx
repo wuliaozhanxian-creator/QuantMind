@@ -2,7 +2,7 @@ import React from 'react';
 import {
   ArrowLeftRight,
   Boxes,
-  BrainCircuit,
+  Layers,
   CircleUserRound,
   FlaskConical,
   LayoutDashboard,
@@ -35,12 +35,13 @@ export const FloatingNavBar: React.FC<FloatingNavBarProps> = ({ current, onChang
     { id: 'dashboard', label: '仪表盘', icon: LayoutDashboard },
     { id: 'strategy', label: '智能策略', icon: LineChart },
     { id: 'ai-ide', label: 'AI-IDE', icon: SquareTerminal },
-    { id: 'model-training', label: '模型训练', icon: BrainCircuit },
     { id: 'backtest', label: '回测中心', icon: FlaskConical },
     { id: 'agent', label: 'QuantBot', icon: Orbit },
+    { id: 'model-training', label: '模型训练', icon: Layers },
     { id: 'model-registry', label: '模型管理', icon: Boxes },
     { id: 'research', label: '投研平台', icon: Search },
     { id: 'trading', label: '实盘交易', icon: ArrowLeftRight },
+    { id: 'community', label: '策略社区', icon: MessagesSquare },
     { id: 'profile', label: '个人中心', icon: CircleUserRound }
   ];
 
@@ -49,13 +50,13 @@ export const FloatingNavBar: React.FC<FloatingNavBarProps> = ({ current, onChang
   }
 
   const groupedNavItems: NavItemConfig[][] = [
-    navItems.filter((item) => ['dashboard', 'strategy', 'ai-ide', 'model-training', 'backtest'].includes(item.id)),
-    navItems.filter((item) => ['agent', 'model-registry', 'research', 'trading'].includes(item.id)),
-    navItems.filter((item) => ['profile', 'admin'].includes(item.id))
+    navItems.filter((item) => ['dashboard', 'strategy', 'ai-ide', 'backtest', 'agent'].includes(item.id)),
+    navItems.filter((item) => ['model-training', 'model-registry', 'research', 'trading'].includes(item.id)),
+    navItems.filter((item) => ['community', 'profile', 'admin'].includes(item.id))
   ].filter((group) => group.length > 0);
 
   return (
-    <nav className="floating-nav-container pointer-events-none" style={{ zIndex: 9999 }}>
+    <nav className="floating-nav-container pointer-events-none" style={{ zIndex: 1050 }}>
       <motion.div
         className="floating-nav-bar pointer-events-auto"
         initial={{ y: 20, opacity: 0 }}

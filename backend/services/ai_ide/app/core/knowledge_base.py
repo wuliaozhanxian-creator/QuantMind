@@ -16,6 +16,7 @@ class KnowledgeBase:
             "docs/Qlib内部策略开发规范.md",
             "docs/QuantMind_152维特征方案规范.md",
             "docs/Qlib回测API集成指南.md",
+            "docs/stock_daily_latest_维护文档.md",
         ]
         self._cached_context = ""
         self._cached_at = 0.0

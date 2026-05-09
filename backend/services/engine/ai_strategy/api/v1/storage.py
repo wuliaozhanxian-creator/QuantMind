@@ -2,6 +2,8 @@
 
 import logging
 import os
+import hashlib
+import math
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
@@ -17,7 +19,13 @@ except ImportError:
 from ...models.stock_pool_file import StockPoolFile
 from ...services.cos_uploader import get_cos_uploader
 from ...steps.step1_stock_selection import LATEST_TABLE
-from ...steps.step2_pool_confirmation import _build_pool_summary, _get_universe_total
+from ...steps.step2_pool_confirmation import (
+    TOTAL_MV_TO_YI,
+    _build_compat_table_sql,
+    _build_pool_summary,
+    _get_table_columns,
+    _get_universe_total,
+)
 from ..schemas import (
     DeletePoolFileRequest,
     DeletePoolFileResponse,
@@ -33,14 +41,10 @@ from ..schemas import (
     SavePoolFileResponse,
     SaveToCloudRequest,
     SaveToCloudResponse,
-    SetActivePoolFileRequest,
-    SetActivePoolFileResponse,
 )
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-TOTAL_MV_TO_YUAN = 100000000.0 / float(os.getenv("AI_STRATEGY_TOTAL_MV_PER_YI", "10000"))
 
 
 def _trace_id(request: Request | None) -> str | None:
@@ -100,6 +104,17 @@ def _user_id_variants(user_id: str) -> list:
 def _canonical_user_id(user_id: str) -> str:
     uid = (user_id or "").strip()
     return uid.zfill(8) if uid.isdigit() else uid
+
+
+def _safe_number(value: Any, default: float = 0.0) -> float:
+    """将数据库数值安全转换为 JSON 兼容浮点数（过滤 NaN/Inf）。"""
+    try:
+        n = float(value)
+    except (TypeError, ValueError):
+        return default
+    if not math.isfinite(n):
+        return default
+    return n
 
 
 @router.post("/save-to-cloud", response_model=SaveToCloudResponse)
@@ -205,18 +220,22 @@ async def preview_pool_file(body: PreviewPoolFileRequest):
                     pool_file=rec.to_dict(),
                 )
 
+            latest_columns = _get_table_columns(db, LATEST_TABLE)
+            compat_table_sql = _build_compat_table_sql(LATEST_TABLE, latest_columns)
             sql = text(
                 f"""
                 select
-                  code as symbol,
+                  symbol,
+                  name,
                   total_mv as market_cap,
                   pe_ttm as pe_ratio,
                   pb as pb_ratio,
+                  roe,
                   close,
-                  turnover,
+                  amount,
                   volume
-                from {LATEST_TABLE}
-                where code = any(:codes)
+                from {compat_table_sql} stock_daily_latest
+                where symbol = any(:codes)
                 """
             )
             rows = db.execute(sql, {"codes": instruments}).fetchall()
@@ -224,14 +243,15 @@ async def preview_pool_file(body: PreviewPoolFileRequest):
             for row in rows:
                 metrics_map[str(row[0])] = {
                     "symbol": str(row[0]),
-                    "name": None,
+                    "name": row[1],
                     "metrics": {
-                        "market_cap": float(row[1] or 0) * TOTAL_MV_TO_YUAN,
-                        "pe": float(row[2] or 0),
-                        "pb": float(row[3] or 0),
-                        "close": float(row[4] or 0),
-                        "amount": float(row[5] or 0),
-                        "volume": float(row[6] or 0),
+                        "market_cap": _safe_number(row[2]) * TOTAL_MV_TO_YI,
+                        "pe": _safe_number(row[3]),
+                        "pb": _safe_number(row[4]),
+                        "roe": _safe_number(row[5]) * 100,  # 转换为百分比
+                        "close": _safe_number(row[6]),
+                        "amount": _safe_number(row[7]),
+                        "volume": _safe_number(row[8]),
                     },
                 }
 
@@ -291,6 +311,56 @@ async def save_pool_file(body: SavePoolFileRequest, request: Request):
                 ensure_ascii=False,
                 indent=2,
             )
+
+        content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+        try:
+            with get_db() as db:
+                uid_variants = _user_id_variants(body.user_id)
+                existing_query = db.query(StockPoolFile).filter(
+                    StockPoolFile.user_id.in_(uid_variants),
+                    StockPoolFile.code_hash == content_hash,
+                )
+                if body.tenant_id:
+                    existing_query = existing_query.filter(StockPoolFile.tenant_id == body.tenant_id)
+                existing_record = existing_query.order_by(StockPoolFile.created_at.desc()).first()
+
+                if existing_record:
+                    deactivate_query = db.query(StockPoolFile).filter(
+                        StockPoolFile.user_id.in_(uid_variants),
+                        StockPoolFile.is_active == True,
+                    )
+                    if body.tenant_id:
+                        deactivate_query = deactivate_query.filter(StockPoolFile.tenant_id == body.tenant_id)
+                    deactivate_query.update({"is_active": False}, synchronize_session=False)
+
+                    existing_record.pool_name = body.pool_name
+                    existing_record.format = body.format
+                    existing_record.file_size = len(content.encode("utf-8"))
+                    existing_record.stock_count = stock_count
+                    existing_record.is_active = True
+                    existing_record.updated_at = datetime.utcnow()
+                    db.commit()
+                    db.refresh(existing_record)
+
+                    logger.info(
+                        "Stock pool deduplicated and reactivated: id=%s user_id=%s code_hash=%s",
+                        existing_record.id,
+                        body.user_id,
+                        content_hash,
+                    )
+
+                    return SavePoolFileResponse(
+                        success=True,
+                        pool_name=existing_record.pool_name,
+                        file_url=existing_record.file_url,
+                        file_key=existing_record.file_key,
+                        relative_path=existing_record.relative_path,
+                        file_size=existing_record.file_size,
+                        code_hash=existing_record.code_hash,
+                    )
+        except Exception as db_lookup_error:
+            logger.warning("Pool dedupe lookup failed, fallback to new save: %s", db_lookup_error, exc_info=True)
 
         pool_id = str(uuid4())
         result = await uploader.upload_pool_file(
@@ -406,39 +476,3 @@ async def delete_pool_file(body: DeletePoolFileRequest):
     except Exception as e:
         logger.error("Delete pool file failed: %s", e, exc_info=True)
         return DeletePoolFileResponse(success=False, error=f"删除失败: {e}")
-
-
-@router.post("/set-active-pool-file", response_model=SetActivePoolFileResponse)
-async def set_active_pool_file(body: SetActivePoolFileRequest, request: Request):
-    """设置某个股票池为活跃状态"""
-    try:
-        logger.info("set_active_pool_file started", extra={"trace_id": _trace_id(request)})
-        uid_variants = _user_id_variants(body.user_id)
-        with get_db() as db:
-            # 先将该用户所有股票池设为非活跃
-            query = db.query(StockPoolFile).filter(
-                StockPoolFile.user_id.in_(uid_variants),
-                StockPoolFile.is_active == True,
-            )
-            if body.tenant_id:
-                query = query.filter(StockPoolFile.tenant_id == body.tenant_id)
-            query.update({"is_active": False}, synchronize_session=False)
-
-            # 再将指定的股票池设为活跃
-            target_query = db.query(StockPoolFile).filter(
-                StockPoolFile.user_id.in_(uid_variants),
-                StockPoolFile.file_key == body.file_key,
-            )
-            if body.tenant_id:
-                target_query = target_query.filter(StockPoolFile.tenant_id == body.tenant_id)
-            target = target_query.first()
-            if target:
-                target.is_active = True
-                db.commit()
-                logger.info("Set pool file active: user=%s file_key=%s", body.user_id, body.file_key)
-                return SetActivePoolFileResponse(success=True)
-            else:
-                return SetActivePoolFileResponse(success=False, error="股票池不存在")
-    except Exception as e:
-        logger.error("Set active pool file failed: %s", e, exc_info=True)
-        return SetActivePoolFileResponse(success=False, error=f"设置失败: {e}")

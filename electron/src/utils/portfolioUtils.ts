@@ -36,6 +36,36 @@ export const normalizePositions = (accountInfo: AccountInfo | null): Array<{ key
 };
 
 /**
+ * 解析股票代码并强制归一化为 Prefix 格式 (如 SH600036)
+ */
+export const normalizeStockCode = (raw: string): string => {
+    const s = (raw || '').trim().toUpperCase();
+    if (!s) return s;
+    
+    // 1. 已经是正确的 Prefix 格式 (SH/SZ/BJ + 6位数字)
+    if (/^(SH|SZ|BJ)\d{6}$/.test(s)) return s;
+    
+    // 2. 处理 Suffix 格式 (6位数字 + .SH/SZ/BJ)
+    const suffixMatch = s.match(/^(\d{6})\.(SH|SZ|BJ)$/);
+    if (suffixMatch) {
+        const [, symbol, market] = suffixMatch;
+        return `${market}${symbol}`;
+    }
+    
+    // 3. 处理纯 6 位数字 (基于号段尝试自动补全)
+    if (/^\d{6}$/.test(s)) {
+        // 上海: 60, 68, 90
+        if (s.startsWith('6') || s.startsWith('9')) return `SH${s}`;
+        // 深圳: 00, 30, 20
+        if (s.startsWith('0') || s.startsWith('2') || s.startsWith('3')) return `SZ${s}`;
+        // 北京: 83, 43, 87, 88
+        if (s.startsWith('4') || s.startsWith('8')) return `BJ${s}`;
+    }
+    
+    return s;
+};
+
+/**
  * 解析股票代码
  */
 export const resolveCode = (entryKey: string | null, pos: RawPosition): string => {
@@ -51,9 +81,9 @@ export const resolveCode = (entryKey: string | null, pos: RawPosition): string =
         const text = String(candidate || '').trim();
         if (!text) continue;
         if (text === '0' && String(pos.symbol || '').trim()) continue;
-        return text;
+        return normalizeStockCode(text);
     }
-    return key || '--';
+    return normalizeStockCode(key) || '--';
 };
 
 /**

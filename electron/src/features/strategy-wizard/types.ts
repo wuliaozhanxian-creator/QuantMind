@@ -57,10 +57,13 @@ export interface RiskConfig {
 export interface QlibParams {
   strategy_type: 'TopkDropout' | 'TopkWeight';
   topk: number;
-  n_drop?: number;
+  n_drop?: number; // 仅 TopkDropout 时有效，TopkWeight 不应使用此参数
   rebalance_days: 1 | 3 | 5;
   // 兼容历史缓存与旧接口字段
   rebalance_period?: 'daily' | 'weekly' | 'monthly';
+  // TopkWeight 专用参数
+  min_score?: number;
+  max_weight?: number;
 }
 
 // 仓位管理配置（保留兼容，不再在向导中使用）
@@ -131,6 +134,27 @@ export interface PoolFile {
   codeHash?: string;
 }
 
+export interface StockItem {
+  symbol: string;
+  name: string;
+  marketCap?: number;
+  pe?: number;
+  roe?: number;
+  price?: number;
+}
+
+export interface UserStockPool {
+  id: string;
+  name: string;
+  stocks: StockItem[];
+  updatedAt: string;
+  stockCount?: number;
+  isCloud?: boolean;
+  fileUrl?: string;
+  fileKey?: string;
+  codeHash?: string;
+}
+
 export interface WizardState {
   conditions: Condition | null;
   pool: {
@@ -146,7 +170,9 @@ export interface WizardState {
     doc?: string;
     hints?: Record<string, any>;
   };
-  customPool?: Array<{ symbol: string; name: string; price?: number }>;
+  customPool?: StockItem[];
+  userStockPools: UserStockPool[];
+  currentPoolName?: string;
   selectedSymbols?: string[];
 
   // Qlib 策略参数（合并了原仓位管理+风格选择）

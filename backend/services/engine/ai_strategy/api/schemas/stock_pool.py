@@ -1,5 +1,6 @@
 """AI 策略向导 - 股票池相关 Schema 定义"""
 
+from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
@@ -141,12 +142,17 @@ class GetActivePoolFileResponse(BaseModel):
     error: str | None = None
 
 
-class SetActivePoolFileRequest(BaseModel):
-    tenant_id: str | None = None
+# --- Phase A: New Pool Refactoring Schemas ---
+
+class WorkingPool(BaseModel):
     user_id: str
-    file_key: str
+    items: list[PoolItem]
+    updated_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
 
 
-class SetActivePoolFileResponse(BaseModel):
-    success: bool
-    error: str | None = None
+class SaveWorkingPoolRequest(BaseModel):
+    items: list[PoolItem]
+
+
+class ActivatePoolVersionRequest(BaseModel):
+    version_id: int

@@ -13,130 +13,108 @@ from ..api.schemas.stock_pool import (
 logger = logging.getLogger(__name__)
 
 FACTOR_COLUMN_MAP = {
-    # ============ 估值因子 ============
-    "market_cap": "total_mv",
-    "float_mv": "float_mv",
-    "pe": "pe_ttm",
-    "pe_ttm": "pe_ttm",
-    "pb": "pb",
-    "ps": "ps_ratio",
-    "roe": "roe",
-    "bp": "bp",
-    "ep_ttm": "ep_ttm",
-    "ln_mv_total": "ln_mv_total",
-
-    # ============ 价格因子 ============
-    "close": "close",
+    # ── 基础信息 ──
+    "symbol": "symbol",
+    "stock_name": "stock_name",
+    "listed_days": "listed_days",
+    "is_st": "is_st",
+    "listing_market": "listing_market",
+    "industry": "industry",
+    "province": "province",
+    "label": "label",
+    # ── 行情 ──
     "open": "open",
     "high": "high",
     "low": "low",
+    "close": "close",
+    "volume": "volume",
+    "amount": "amount",
     "pct_change": "pct_change",
     "pct_chg": "pct_change",
     "turnover_rate": "turnover_rate",
     "adj_factor": "adj_factor",
-
-    # ============ 均线因子 ============
-    "ma5": "ma5",
-    "ma10": "ma10",
-    "ma20": "ma20",
-    "ma60": "ma60",
-    "sma5": "ma5",
-    "sma10": "ma10",
-    "sma20": "ma20",
-    "sma60": "ma60",
-    "ma_gap_5": "ma_gap_5",
-    "ma_gap_10": "ma_gap_10",
-    "ma_gap_20": "ma_gap_20",
-
-    # ============ 技术指标 ============
-    "rsi": "rsi_14",
-    "rsi_6": "rsi_6",
-    "rsi_14": "rsi_14",
-    "kdj_k": "kdj_k",
-    "kdj_d": "kdj_d",
-    "kdj_j": "kdj_j",
-    "macd": "macd_hist",
-    "macd_dif": "macd_dif",
-    "macd_dea": "macd_dea",
-    "macd_hist": "macd_hist",
-    "dif": "macd_dif",
-    "dea": "macd_dea",
-
-    # ============ 收益率因子 ============
+    # ── 估值 ──
+    "pe": "pe_ttm",
+    "pe_ttm": "pe_ttm",
+    "pb": "pb",
+    "market_cap": "total_mv",
+    "total_mv": "total_mv",
+    "float_mv": "float_mv",
+    "bp": "bp",
+    "ep_ttm": "ep_ttm",
+    "ln_mv_total": "ln_mv_total",
+    "roe": "roe",
+    # ── 收益率 ──
     "return_1d": "return_1d",
     "return_3d": "return_3d",
     "return_5d": "return_5d",
     "return_10d": "return_10d",
     "return_20d": "return_20d",
     "return_60d": "return_60d",
-
-    # ============ 波动率因子 ============
+    # ── 均线 ──
+    "ma5": "ma5", "sma5": "ma5",
+    "ma10": "ma10",
+    "ma20": "ma20", "sma20": "ma20",
+    "ma60": "ma60", "sma60": "ma60",
+    "ma_gap_5": "ma_gap_5",
+    "ma_gap_10": "ma_gap_10",
+    "ma_gap_20": "ma_gap_20",
+    # ── 技术指标 ──
+    "rsi_6": "rsi_6",
+    "rsi_14": "rsi_14", "rsi": "rsi_14",
+    "kdj_k": "kdj_k", "kdj_d": "kdj_d", "kdj_j": "kdj_j",
+    "macd_dif": "macd_dif", "macd_dea": "macd_dea", "macd_hist": "macd_hist",
+    "dif": "macd_dif", "dea": "macd_dea", "macd": "macd_hist",
+    "beta_20": "beta_20",
+    # ── 波动量能 ──
     "vol_std_5": "vol_std_5",
     "vol_std_20": "vol_std_20",
     "vol_std_60": "vol_std_60",
     "vol_atr_14": "vol_atr_14",
-    "atr": "vol_atr_14",
-    "beta_20": "beta_20",
-
-    # ============ 量能因子 ============
-    "volume": "volume",
-    "amount": "amount",
     "volume_ratio_5": "volume_ratio_5",
     "volume_ratio_20": "volume_ratio_20",
-    "volume_ma_5": "volume_ma_5",
     "volume_ma_3": "volume_ma_3",
+    "volume_ma_5": "volume_ma_5",
     "amount_ma_5": "amount_ma_5",
-
-    # ============ 指数成分 ============
-    "idx_hs300": "idx_hs300",
-    "idx_zz500": "idx_zz500",
-    "idx_zz1000": "idx_zz1000",
-    "idx_margin": "idx_margin",
-    "idx_chinext": "idx_chinext",
-    "idx_all": "idx_all",
-    "is_hs300": "idx_hs300",
-    "hs300": "idx_hs300",
-    "is_csi300": "idx_hs300",
-    "csi300": "idx_hs300",
-    "is_csi1000": "idx_zz1000",
-    "csi1000": "idx_zz1000",
-    "is_zz500": "idx_zz500",
-    "zz500": "idx_zz500",
-    "is_zz1000": "idx_zz1000",
-    "zz1000": "idx_zz1000",
-
-    # ============ 概念标签 ============
+    "volume_trend_3d": "volume_trend_3d",
+    # ── 行业概念 ──
+    "ind_code_l1": "ind_code_l1",
+    "ind_code_l2": "ind_code_l2",
     "concept_ai": "concept_ai",
     "concept_chip": "concept_chip",
     "concept_new_energy": "concept_new_energy",
-    "concept_ev": "concept_ev",
     "concept_pv": "concept_pv",
-    "concept_lithium": "concept_lithium",
-    "concept_semiconductor": "concept_semiconductor",
     "concept_military": "concept_military",
     "concept_medical": "concept_medical",
-    "concept_cyber": "concept_cyber",
     "concept_fintech": "concept_fintech",
     "concept_consumption": "concept_consumption",
-    "concept_real_estate": "concept_real_estate",
-    "concept_infrastructure": "concept_infrastructure",
     "concept_state_owned": "concept_state_owned",
-
-    # ============ 其他因子 ============
-    "is_st": "is_st",
-    "listed_days": "listed_days",
+    "concept_lithium": "concept_lithium",
+    # ── 资金流向 ──
+    "main_flow": "main_flow",
+    "inst_ownership": "inst_ownership",
+    "lrg_trd_tolbuynum": "lrg_trd_tolbuynum",
+    "lrg_trd_tolsellnum": "lrg_trd_tolsellnum",
+    "flow_net_amount": "flow_net_amount",
+    "b_volume": "b_volume",
+    "s_volume": "s_volume",
+    # ── 指数关联 ──
+    "idx_all": "idx_all",
+    "idx_hs300": "idx_hs300", "hs300": "idx_hs300",
+    "idx_zz1000": "idx_zz1000", "csi1000": "idx_zz1000",
+    "idx_margin": "idx_margin",
+    "idx_chinext": "idx_chinext",
+    # ── 微结构 ──
+    "micro_effective_spread": "micro_effective_spread",
+    "micro_imbalance_volume": "micro_imbalance_volume",
+    "micro_jump_flag": "micro_jump_flag",
+    # ── 状态 ──
+    "consecutive_limit_up_days": "consecutive_limit_up_days",
     "limit_up_today": "limit_up_today",
     "limit_down_today": "limit_down_today",
-    "consecutive_limit_up_days": "consecutive_limit_up_days",
-    "industry": "industry",
-    "province": "province",
-    "listing_market": "listing_market",
-    "is_suspended": "is_suspended",
-    "is_listed_over_1y": "is_listed_over_1y",
-    "net_profit_growth": "net_profit_growth",
+    # ── 财务 ──
     "profit_growth": "profit_growth",
-    "inst_ownership": "inst_ownership",
-    "main_flow": "main_flow",
+    "net_profit_growth": "profit_growth",
 }
 
 DSL_PREFIX = "SELECT symbol WHERE "
@@ -145,15 +123,15 @@ DELTA_REGEX = re.compile(
     re.IGNORECASE,
 )
 SIMPLE_REGEX = re.compile(
-    r"(?P<factor>[a-zA-Z0-9_]+)\s*(?P<op>>=|<=|==|!=|>|<|=)\s*(?P<value>-?\d+(?:\.\d+)?)",
+    r"(?P<factor>[a-zA-Z0-9_]+)\s*" r"(?P<op>>=|<=|==|!=|>|<|=)\s*(?P<value>-?\d+(?:\.\d+)?)",
     re.IGNORECASE,
 )
 COMBINER_REGEX = re.compile(r"\s+(AND|OR)\s+", re.IGNORECASE)
 MAX_LOOKBACK_DAYS = 400
 LATEST_TABLE = "stock_daily_latest"
 
-# total_mv 列口径可配置：默认“万元”（1亿=10000）。
-# 若你的数据库是“千元”，可通过环境变量 AI_STRATEGY_TOTAL_MV_PER_YI=100000 覆盖。
+# total_mv 列口径可配置：默认“亿元”（1亿=1）。
+# 若仍使用旧库“万元”口径，可通过环境变量 AI_STRATEGY_TOTAL_MV_PER_YI=10000 覆盖。
 MARKET_CAP_YI_TO_DB_UNIT = float(os.getenv("AI_STRATEGY_TOTAL_MV_PER_YI", "100000000.0"))
 
 
