@@ -728,6 +728,8 @@ export const ModelRegistryPage: React.FC = () => {
                             horizonDays={horizonDays}
                             running={inferenceRunning}
                             onRun={handleRunInference}
+                            onRunAsDefault={handleSetDefault}
+                            isDefault={selectedModel.is_default}
                             lastRun={lastInferenceRun}
                             history={inferenceHistory}
                             historyLoading={inferenceHistoryLoading}

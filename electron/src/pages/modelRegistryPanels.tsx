@@ -699,6 +699,7 @@ export const InferenceCenterPanel: React.FC<{
   running: boolean;
   onRun: () => void;
   onRunAsDefault?: () => void;
+  isDefault?: boolean;
   lastRun: InferenceRunRecord | null;
   history: InferenceRunRecord[];
   historyLoading: boolean;
@@ -719,7 +720,7 @@ export const InferenceCenterPanel: React.FC<{
   onHistoryDateFilterChange: (value: dayjs.Dayjs | null) => void;
 }> = ({
   model, inferenceDate, onDateChange, targetDate, targetDateLoading, horizonDays,
-  running, onRun, onRunAsDefault, lastRun, history, historyLoading, onViewRanking,
+  running, onRun, onRunAsDefault, isDefault, lastRun, history, historyLoading, onViewRanking,
   autoSettings, autoSaving, onToggleAuto, latestInferenceRun, latestInferenceRunLoading, precheck, precheckLoading, onRefreshPrecheck,
   historyRunIdFilter, onHistoryRunIdFilterChange, historyStatusFilter, onHistoryStatusFilterChange, historyDateFilter, onHistoryDateFilterChange,
 }) => {
@@ -835,12 +836,25 @@ export const InferenceCenterPanel: React.FC<{
                 >
                   立即执行
                 </Button>
-                <Button 
-                  size="large"
-                  icon={<Star size={16} />}
-                  onClick={onRunAsDefault}
-                  className="rounded-xl h-10 w-10 border-slate-200 text-slate-400"
-                />
+<Tooltip title={isDefault ? '已是默认模型' : '设为默认模型'}>
+                  <Button 
+                    size="large"
+                    icon={
+                      <Star
+                        size={15}
+                        fill={isDefault ? '#fcd34d' : 'none'}
+                        className={isDefault ? 'text-yellow-300' : 'text-slate-300'}
+                      />
+                    }
+                    onClick={isDefault ? undefined : onRunAsDefault}
+                    className={clsx(
+                      'rounded-xl h-10 w-10 border transition-colors',
+                      isDefault
+                        ? 'border-yellow-100 bg-yellow-50/60 cursor-default shadow-none'
+                        : 'border-slate-200 hover:border-yellow-200 hover:bg-yellow-50/40'
+                    )}
+                  />
+                </Tooltip>
               </div>
             </div>
 
@@ -905,7 +919,7 @@ export const InferenceCenterPanel: React.FC<{
                 <RefreshCw size={14} className={clsx("text-blue-500", autoSettings?.enabled && "animate-spin-slow")} />
                 <div>
                   <Text className="text-[11px] font-bold text-slate-700 block leading-tight">自动调度</Text>
-                  <Text className="text-[9px] text-slate-400">下一个交易日 00:00 自动执行</Text>
+                  <Text className="text-[9px] text-slate-400">次日 00:00 起进入任务队列</Text>
                 </div>
               </div>
               <Switch size="small" checked={autoSettings?.enabled} loading={autoSaving} onChange={onToggleAuto} className={autoSettings?.enabled ? 'bg-blue-600' : ''} />

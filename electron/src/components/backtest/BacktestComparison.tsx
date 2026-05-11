@@ -25,6 +25,7 @@ import { BacktestResult, ComparisonResult } from '../../services/backtestService
 import { format } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 import { resolveStrategyName, resolveBacktestPeriod } from './BacktestHistory';
+import { modelIdToDisplayName } from '../../pages/modelRegistryUtils';
 
 interface BacktestComparisonProps {
   userId: string;
@@ -414,16 +415,12 @@ interface BacktestCardProps {
 const BacktestCard: React.FC<BacktestCardProps> = ({ backtest, label }) => {
   const totalReturn = backtest.total_return || 0;
   const isProfit = totalReturn > 0;
-  const modelName = (backtest as any).model_name || '-';
 
   return (
     <div className="bg-gray-50 rounded-2xl p-6 border border-gray-200 flex flex-col items-center text-center">
       <div className="text-xs font-medium text-gray-500 mb-2 uppercase tracking-wider">{label}</div>
-      <div className="text-xl font-bold text-gray-800 mb-1 truncate w-full" title={resolveStrategyName(backtest)}>
+      <div className="text-xl font-bold text-gray-800 mb-4 truncate w-full" title={resolveStrategyName(backtest)}>
         {resolveStrategyName(backtest)}
-      </div>
-      <div className="text-xs text-gray-400 mb-3 truncate w-full" title={modelName}>
-        {modelName}
       </div>
       <div className="flex items-center justify-center gap-2 mb-3">
         {isProfit ? (
@@ -438,6 +435,11 @@ const BacktestCard: React.FC<BacktestCardProps> = ({ backtest, label }) => {
       <div className="text-sm text-gray-500">
         {resolveBacktestPeriod(backtest)}
       </div>
+      {resolveModelName(backtest) && (
+        <div className="mt-2 px-2 py-1 bg-gray-100 rounded-lg text-[10px] font-mono text-gray-400 truncate max-w-[90%]" title={resolveModelName(backtest)!}>
+          {resolveModelName(backtest)}
+        </div>
+      )}
     </div>
   );
 };
@@ -620,4 +622,35 @@ function buildMetricRow(
     percentage_diff: percentageDiff,
     better,
   };
+}
+
+export function resolveModelName(backtest: BacktestResult): string | null {
+  const config = backtest.config || {};
+  const params = config.strategy_params || {};
+
+  // 优先取 human-readable 展示名（按可读性由高到低排序）
+  const nameRaw =
+    config.model_display_name ||
+    config.model_name ||
+    config.display_name ||
+    params.model_display_name ||
+    params.model_name ||
+    params.signal_name ||
+    config.model_id ||
+    params.model_id;
+
+  if (!nameRaw) return null;
+  const raw = String(nameRaw).trim();
+
+  // 尝试通过映射表转换为展示名（MODEL_ID_NAME_MAP）
+  const resolved = modelIdToDisplayName(raw);
+
+  // 若映射表未命中，且仍是原始 model_id 格式，做友好截断（取末两段 hash）
+  if (resolved === raw && /^mdl_train_|^sys-/.test(raw)) {
+    const parts = raw.split('_');
+    const shortId = parts.length >= 4 ? parts.slice(-2).join('_') : raw.slice(-12);
+    return shortId;
+  }
+
+  return resolved;
 }

@@ -2,25 +2,28 @@ cache:
   dir: /tmp
 callback:
   secret: 83fcf31f7620827251fb4516adf1f928f0ed689b6238407c7d80e617f31d4e5b
-  url: http://quantmind-api:8000/api/v1/models/training-runs/train_20260412145721_9273d147/complete
+  url: http://114.132.80.206:8000/api/v1/models/training-runs/train_20260511130320_8be99c27/complete
 context:
   benchmark: SH000300
   commission_rate: 0.00025
-  deal_price: close
+  deal_price: open
   initial_capital: 1000000.0
   slippage: 0.0005
 data:
   features:
+  - mom_ret_1d
+  - mom_ret_5d
+  - mom_ret_20d
+  - liq_volume
+  - liq_amount
+  - liq_turnover_os
   - open
   - high
   - low
   - close
   - volume
   - factor
-  - mom_ret_1d
-  - mom_ret_5d
   - mom_ret_10d
-  - mom_ret_20d
   - mom_ma_gap_5
   - mom_ma_gap_20
   - mom_macd_hist
@@ -61,16 +64,20 @@ data:
   - ind_momentum_rank_20
   local_dir: /tmp/feature_snapshots
   source_mode: LOCAL
-  train_end: '2023-12-31'
-  train_start: '2016-01-01'
-job_name: model_train_t5_20260412225720
+  train_end: '2023-03-31'
+  train_start: '2016-01-04'
+explain:
+  enable_shap: true
+  shap_sample_rows: 30000
+  shap_split: valid
+job_name: model_train_t5_20260511130320
 label:
-  effective_trade_date: '2025-01-06'
-  label_formula: label = future_return(T, T+5) = close(T+5) / close(T) - 1
+  effective_trade_date: '2024-10-23'
+  label_formula: label = future_return(T, T+5) = open(T+5) / open(T) - 1
   target_horizon_days: 5
   target_mode: return
-  training_window: 2016-01-01 → 2023-12-31 | 2024-01-01 → 2024-12-31 | 2025-01-01
-    → 2025-12-31
+  training_window: 2016-01-04 → 2023-03-31 | 2023-04-01 → 2024-10-17 | 2024-10-18
+    → 2026-05-08
 model:
   early_stopping_rounds: 50
   num_boost_round: 2000
@@ -88,7 +95,8 @@ model:
   type: lightgbm
   val_ratio: null
 output:
-  cos_prefix: models/candidates/train_20260412145721_9273d147/
+  cos_prefix: models/candidates/train_20260511130320_8be99c27/
+  log_path: /workspace/training.log
   required_artifacts:
   - model.lgb
   - pred.pkl
@@ -96,14 +104,14 @@ output:
   - config.yaml
   - result.json
   result_path: /workspace/result.json
-run_id: train_20260412145721_9273d147
+run_id: train_20260511130320_8be99c27
 split:
   test:
-  - '2025-01-05'
-  - '2025-12-31'
+  - '2024-10-22'
+  - '2026-05-08'
   train:
-  - '2016-01-01'
-  - '2023-12-31'
+  - '2016-01-04'
+  - '2023-03-31'
   valid:
-  - '2024-01-05'
-  - '2024-12-31'
+  - '2023-04-05'
+  - '2024-10-17'
