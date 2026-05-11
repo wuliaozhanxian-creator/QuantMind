@@ -360,7 +360,7 @@ export const PoolPreview = React.forwardRef<PoolPreviewHandle, { onNext: () => v
                 </Button>
               </Space>
             }
-            bordered={false}
+            variant="borderless"
             styles={{ body: { padding: 0 } }}
           >
             {dataSource.length === 0 ? (
@@ -401,7 +401,7 @@ export const PoolPreview = React.forwardRef<PoolPreviewHandle, { onNext: () => v
         </Col>
         <Col span={8}>
           <Space direction="vertical" style={{ width: '100%' }} size="large">
-            <Card bordered={false} title="统计概览">
+            <Card variant="borderless" title="统计概览">
               {dataSource.length === 0 ? (
                 <Alert type="info" showIcon message="尚未生成股票池，请返回上一步完成解析。" />
               ) : (
@@ -427,7 +427,7 @@ export const PoolPreview = React.forwardRef<PoolPreviewHandle, { onNext: () => v
               )}
             </Card>
 
-            <Card bordered={false} styles={{ body: { padding: 12 } }}>
+            <Card variant="borderless" styles={{ body: { padding: 12 } }}>
               {dataSource.length === 0 ? <Empty description="暂无图表" /> : <ReactECharts option={marketCapOption} style={{ height: 200 }} />}
             </Card>
           </Space>

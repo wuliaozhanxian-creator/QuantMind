@@ -120,7 +120,7 @@ export const ContextAwareAssistant: React.FC<{ step: number }> = ({ step }) => {
         const isTopkDropout = (qlibParams?.strategy_type ?? 'TopkDropout') === 'TopkDropout';
         return (
           <Space direction="vertical" style={{ width: '100%' }}>
-            <Card size="small" title="Qlib 参数提示" bordered={false} styles={{ body: { padding: 12 } }}>
+            <Card size="small" title="Qlib 参数提示" variant="borderless" styles={{ body: { padding: 12 } }}>
               <Space direction="vertical" size={8} style={{ width: '100%' }}>
                 {(isTopkDropout
                   ? [
@@ -169,7 +169,7 @@ export const ContextAwareAssistant: React.FC<{ step: number }> = ({ step }) => {
       size="small"
       style={{ height: 'auto', overflow: 'hidden' }}
       styles={{ body: { padding: '8px 4px' } }}
-      bordered={false}
+      variant="borderless"
     >
       {renderContent()}
     </Card>

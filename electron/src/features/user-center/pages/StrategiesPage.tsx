@@ -245,7 +245,7 @@ const StrategiesPage: React.FC<StrategiesPageProps> = ({ userId }) => {
           <Select
             placeholder="所有状态"
             className="w-36 h-10 rounded-xl custom-select-xl shadow-sm"
-            bordered={true}
+            variant="outlined"
             allowClear
             value={filters.status}
             onChange={(status: StrategyStatus) => handleFilterChange({ status })}

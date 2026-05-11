@@ -256,7 +256,7 @@ export const NaturalTextInput: React.FC<{ onNext: () => void }> = ({ onNext }) =
                     </Col>
                     <Col span={8}>
                       <Card
-                        bordered={false}
+                        variant="borderless"
                         className="h-full rounded-3xl bg-gray-50/50 border border-gray-100 shadow-sm"
                         title={<span className="text-gray-700 font-bold">逻辑预览</span>}
                       >
