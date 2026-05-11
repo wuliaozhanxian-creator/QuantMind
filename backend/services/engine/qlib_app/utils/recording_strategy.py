@@ -10,6 +10,7 @@ from qlib.contrib.strategy.signal_strategy import (
 
 import redis
 
+from backend.shared.fundamental_aligner import fundamental_aligner
 from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
 
 logger = logging.getLogger(__name__)
@@ -480,7 +481,48 @@ class DynamicRiskMixin:
                 return super().reset()
 
 
-class RedisRecordingStrategy(DynamicRiskMixin, TopkDropoutStrategy, RedisLoggerMixin):
+class FundamentalFilterMixin:
+    """
+    基本面硬过滤混入类
+    支持 kwargs 中 `f_` 前缀参数，映射到 FundamentalAligner 约束。
+    """
+
+    def init_fundamental_filter(self, kwargs):
+        self.fundamental_constraints = {}
+        for key in list(kwargs.keys()):
+            if key.startswith("f_"):
+                self.fundamental_constraints[key[2:]] = kwargs.pop(key)
+
+        # 兼容旧参数
+        for old_key in ["pe_max", "mc_min", "mc_max", "exclude_st"]:
+            if old_key in kwargs:
+                if old_key == "exclude_st" and kwargs[old_key]:
+                    self.fundamental_constraints["is_st_not"] = 1
+                    kwargs.pop(old_key)
+                else:
+                    self.fundamental_constraints[old_key] = kwargs.pop(old_key)
+
+        self.use_fundamental_filter = len(self.fundamental_constraints) > 0
+
+    def apply_fundamental_filter(self, score, trade_date):
+        if not self.use_fundamental_filter or score is None or score.empty:
+            return score
+
+        instruments = score.index.get_level_values("instrument").tolist()
+        filtered_list = fundamental_aligner.filter_instruments(
+            trade_date, instruments, constraints=self.fundamental_constraints
+        )
+        if not filtered_list:
+            return pd.Series(dtype=float)
+
+        if isinstance(score, pd.DataFrame):
+            return score.loc[pd.IndexSlice[:, filtered_list], :]
+        return score.loc[pd.IndexSlice[:, filtered_list]]
+
+
+class RedisRecordingStrategy(
+    DynamicRiskMixin, FundamentalFilterMixin, TopkDropoutStrategy, RedisLoggerMixin
+):
     """
     带有 Redis 记录功能的 TopkDropout 策略
     """
@@ -497,6 +539,7 @@ class RedisRecordingStrategy(DynamicRiskMixin, TopkDropoutStrategy, RedisLoggerM
         # 1. 初始化我们自定义的 mixin
         self.init_redis(kwargs)
         self.init_dynamic_risk(kwargs)
+        self.init_fundamental_filter(kwargs)
 
         # 2. 统一清除所有「本项目自定义 / 前端传入」的 kwargs，
         #    这些字段 Qlib BaseStrategy 不接受。
@@ -504,6 +547,12 @@ class RedisRecordingStrategy(DynamicRiskMixin, TopkDropoutStrategy, RedisLoggerM
 
         # 3. 调用 super().__init__
         super().__init__(*args, **clean_kwargs)
+
+    def generate_target_weight_position(self, score, current=None, trade_exchange=None, *args, **kwargs):
+        t_start = kwargs.get("trade_start_time") or kwargs.get("t_start")
+        if t_start:
+            score = self.apply_fundamental_filter(score, t_start)
+        return super().generate_target_weight_position(score, current, trade_exchange, *args, **kwargs)
 
     def generate_trade_decision(self, execute_result=None):
         # 0. 账户止损检查

@@ -100,7 +100,16 @@ class SandboxSignalConsumer:
         sig_type = sig.get("type")
         tenant_id = sig.get("tenant_id", "default")
         user_id = str(sig.get("user_id", ""))
-        strategy_id = sig.get("strategy_id", "unknown")
+        raw_strategy_id = sig.get("strategy_id", "unknown")
+        # 规范化 strategy_id：仅纯数字字符串转为 int，其余置 None
+        strategy_id: int | None = None
+        try:
+            if isinstance(raw_strategy_id, (int, float)):
+                strategy_id = int(raw_strategy_id)
+            elif isinstance(raw_strategy_id, str) and raw_strategy_id.isdigit():
+                strategy_id = int(raw_strategy_id)
+        except (ValueError, TypeError):
+            pass
 
         if sig_type == "log":
             logger.info("[Sandbox Log %s] %s", strategy_id, sig.get("message"))
@@ -148,7 +157,7 @@ class SandboxSignalConsumer:
             return False
 
     async def _handle_order_target_percent(
-        self, sig: dict[str, Any], tenant_id: str, user_id: str, strategy_id: str
+        self, sig: dict[str, Any], tenant_id: str, user_id: str, strategy_id: int | None
     ):
         """
         处理 order_target_percent 信号：
@@ -182,8 +191,22 @@ class SandboxSignalConsumer:
             logger.warning("[SandboxSignalConsumer] 总资产为 0，跳过下单")
             return
 
-        # 获取当前价格
+        # 获取当前持仓（先于价格查询，供回退使用）
+        positions = account.get("positions", {})
+        current_pos = positions.get(symbol.upper())
+        current_volume = int(float(current_pos.get("volume", 0))) if current_pos else 0
+
+        # 获取当前价格（优先行情API，回退到持仓成本价）
         current_price = await self._get_current_price(symbol)
+        if current_price <= 0:
+            if current_pos:
+                fallback_price = float(current_pos.get("price") or current_pos.get("cost", 0))
+                if fallback_price > 0:
+                    current_price = fallback_price
+                    logger.info(
+                        "[SandboxSignalConsumer] 使用持仓价格回退 %s: %.2f",
+                        symbol, current_price,
+                    )
         if current_price <= 0:
             logger.warning("[SandboxSignalConsumer] 无法获取 %s 的价格，跳过下单", symbol)
             return
@@ -191,11 +214,6 @@ class SandboxSignalConsumer:
         # 计算目标持仓数量（A 股 100 股整数倍）
         target_value = total_asset * target_percent
         target_volume = int(target_value / current_price / 100) * 100
-
-        # 获取当前持仓
-        positions = account.get("positions", {})
-        current_pos = positions.get(symbol.upper())
-        current_volume = int(float(current_pos.get("volume", 0))) if current_pos else 0
 
         # 计算需要交易的量
         delta = target_volume - current_volume
@@ -232,7 +250,7 @@ class SandboxSignalConsumer:
         )
 
     async def _handle_direct_order(
-        self, sig: dict[str, Any], tenant_id: str, user_id: str, strategy_id: str
+        self, sig: dict[str, Any], tenant_id: str, user_id: str, strategy_id: int | None
     ):
         """处理直接下单信号"""
         data = sig.get("data", {})
@@ -267,7 +285,7 @@ class SandboxSignalConsumer:
         self,
         tenant_id: str,
         user_id: int,
-        strategy_id: str,
+        strategy_id: int | None,
         symbol: str,
         side: OrderSide,
         quantity: int,

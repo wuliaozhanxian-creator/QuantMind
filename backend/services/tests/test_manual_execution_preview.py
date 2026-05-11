@@ -61,6 +61,46 @@ def test_build_execution_plan_from_signals_marks_unexecutable_items_as_skipped()
     assert {item["symbol"] for item in plan["skipped_items"]} >= {"600100.SH"}
 
 
+def test_build_execution_plan_applies_fundamental_constraints_and_keeps_explicit_sell(monkeypatch):
+    account_snapshot = {
+        "available_cash": 20_000.0,
+        "positions": [
+            {
+                "symbol": "600300.SH",
+                "available_volume": 300,
+                "volume": 300,
+                "last_price": 10.0,
+                "market_value": 3_000.0,
+            }
+        ],
+    }
+    signal_rows = [
+        {"symbol": "600001.SH", "fusion_score": 0.92, "signal_side": "buy", "expected_price": 10.0},
+        {"symbol": "600002.SH", "fusion_score": 0.90, "signal_side": "buy", "expected_price": 10.0},
+        {"symbol": "600300.SH", "fusion_score": 0.20, "signal_side": "sell"},
+    ]
+
+    monkeypatch.setattr(
+        "backend.services.trade.services.manual_execution_service.fundamental_aligner.filter_instruments",
+        lambda _dt, symbols, constraints=None: [s for s in symbols if s == "600001.SH"],
+    )
+
+    plan = _build_execution_plan_from_signals(
+        signal_rows=signal_rows,
+        strategy_params={"strategy_type": "alpha_cross_section", "topk": 2, "f_pe_ttm_max": 25},
+        account_snapshot=account_snapshot,
+        trade_date=date(2026, 4, 1),
+    )
+
+    assert plan["summary"]["raw_signal_count"] == 3
+    assert plan["summary"]["fundamental_filtered_count"] == 1
+    assert plan["summary"]["signal_count"] == 2
+    assert plan["summary"]["sell_order_count"] == 1
+    assert plan["sell_orders"][0]["symbol"] == "600300.SH"
+    assert plan["summary"]["buy_order_count"] == 1
+    assert plan["buy_orders"][0]["symbol"] == "600001.SH"
+
+
 @pytest.mark.asyncio
 async def test_submit_execution_plan_rejects_mismatched_preview_hash():
     service = ManualExecutionService()
@@ -104,18 +144,6 @@ def test_preview_hash_is_stable_for_same_payload():
 @pytest.mark.asyncio
 async def test_create_hosted_task_uses_latest_default_model_run_and_db_signals(monkeypatch):
     service = ManualExecutionService()
-
-    monkeypatch.setattr(
-        service,
-        "_load_user_default_model_record",
-        AsyncMock(
-            return_value={
-                "model_id": "mdl_user_default",
-                "metadata_json": {"target_horizon_days": 5},
-                "status": "ready",
-            }
-        ),
-    )
     latest_run = {
         "run_id": "run_latest_default",
         "data_trade_date": date(2026, 4, 13),
@@ -123,10 +151,22 @@ async def test_create_hosted_task_uses_latest_default_model_run_and_db_signals(m
         "fallback_used": False,
         "model_source": "user_default",
     }
+
     monkeypatch.setattr(
         service,
-        "_load_latest_default_model_inference_run",
-        AsyncMock(return_value=latest_run),
+        "get_default_model_hosted_status",
+        AsyncMock(
+            return_value={
+                "model_id": "mdl_user_default",
+                "available": True,
+                "latest_default_model_id": "mdl_user_default",
+                "latest_run_id": "run_latest_default",
+                "prediction_trade_date": "2026-04-14",
+                "execution_window_start": "2026-04-14",
+                "execution_window_end": "2026-04-19",
+                "target_horizon_days": 5,
+            }
+        ),
     )
     monkeypatch.setattr(
         service,
@@ -169,9 +209,10 @@ async def test_create_hosted_task_uses_latest_default_model_run_and_db_signals(m
     )
     captured: dict[str, object] = {}
 
-    def _fake_plan(*, signal_rows, strategy_params, account_snapshot):
+    def _fake_plan(*, signal_rows, strategy_params, account_snapshot, trade_date=None):
         captured["signal_rows"] = signal_rows
         captured["strategy_params"] = strategy_params
+        captured["trade_date"] = trade_date
         return {
             "sell_orders": [],
             "buy_orders": [

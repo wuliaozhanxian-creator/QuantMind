@@ -30,6 +30,7 @@ import {
   Segmented,
   Select,
   Slider,
+  Spin,
   Switch,
   Table,
   Tag,
@@ -70,6 +71,7 @@ import {
 import '../styles/research-next-theme.css';
 
 const { Text, Title, Paragraph } = Typography;
+const FULL_UNIVERSE_REQUEST_LIMIT = 10000;
 
 const ResearchMetricCard: React.FC<{
   icon: any;
@@ -178,8 +180,12 @@ const RangeInput: React.FC<{
 export const ResearchPlatformPage: React.FC = () => {
   const [availableModels, setAvailableModels] = React.useState<ResearchModelOption[]>([]);
   const [selectedModelId, setSelectedModelId] = React.useState<string>('');
+  const [modelsLoading, setModelsLoading] = React.useState<boolean>(true);
+  const [modelsError, setModelsError] = React.useState<string | null>(null);
   const [availableRuns, setAvailableRuns] = React.useState<ResearchRunOption[]>([]);
   const [selectedRunId, setSelectedRunId] = React.useState<string>('');
+  const [runsLoading, setRunsLoading] = React.useState<boolean>(false);
+  const [runsError, setRunsError] = React.useState<string | null>(null);
   const [candidatePool, setCandidatePool] = React.useState<ResearchStockRow[]>([]);
   const [overviewLoading, setOverviewLoading] = React.useState<boolean>(false);
   const [syncing, setSyncing] = React.useState<boolean>(false);
@@ -447,30 +453,41 @@ export const ResearchPlatformPage: React.FC = () => {
   React.useEffect(() => {
     let cancelled = false;
     const loadModels = async () => {
+      setModelsLoading(true);
+      setModelsError(null);
       try {
         const models = await researchService.getAvailableModels();
         if (cancelled) return;
         setAvailableModels(models);
         if (models.length > 0 && !selectedModelId) {
           setSelectedModelId(models[0].modelId);
+        } else if (models.length === 0) {
+          setModelsError('暂无可用模型，请先在模型管理中训练或上传模型');
         }
       } catch (error) {
         console.error('[ResearchPlatformPage] load models failed:', error);
+        if (!cancelled) setModelsError('模型列表加载失败，请检查网络连接后重试');
+      } finally {
+        if (!cancelled) setModelsLoading(false);
       }
     };
     void loadModels();
     return () => { cancelled = true; };
-  }, []);
+  }, [refreshNonce]);
 
   // 模型切换时加载批次
   React.useEffect(() => {
     if (!selectedModelId) {
       setAvailableRuns([]);
       setSelectedRunId('');
+      setRunsLoading(false);
+      setRunsError(null);
       return;
     }
     let cancelled = false;
     const loadRuns = async () => {
+      setRunsLoading(true);
+      setRunsError(null);
       try {
         const runs = await researchService.getInferenceRuns(selectedModelId);
         if (cancelled) return;
@@ -479,9 +496,13 @@ export const ResearchPlatformPage: React.FC = () => {
           setSelectedRunId(runs[0].runId);
         } else {
           setSelectedRunId('');
+          setRunsError('该模型暂无推理批次，请先在模型管理中对当前模型执行推理');
         }
       } catch (error) {
         console.error('[ResearchPlatformPage] load runs failed:', error);
+        if (!cancelled) setRunsError('推理批次加载失败，请检查网络连接后重试');
+      } finally {
+        if (!cancelled) setRunsLoading(false);
       }
     };
     void loadRuns();
@@ -498,7 +519,7 @@ export const ResearchPlatformPage: React.FC = () => {
     const loadUniverse = async () => {
       setOverviewLoading(true);
       try {
-        const result = await researchService.getResearchUniverse(selectedRunId, 1000);
+        const result = await researchService.getResearchUniverse(selectedRunId, FULL_UNIVERSE_REQUEST_LIMIT);
         if (cancelled) return;
         setCandidatePool(
           (result.candidates || []).map((item: any) => ({
@@ -845,7 +866,7 @@ export const ResearchPlatformPage: React.FC = () => {
         }
 
         if (isMatch) {
-          const peRange = appliedFilters.peRange || [0, 100000];
+          const peRange = appliedFilters.peRange || [-10000, 100000];
           // 强制执行 PE 过滤，不再依赖 advancedFiltersEnabled 开关
           if (item.pe < peRange[0] || item.pe > peRange[1]) isMatch = false;
         }
@@ -1737,30 +1758,64 @@ export const ResearchPlatformPage: React.FC = () => {
                     <div className="space-y-4">
                       <div>
                         <div className="mb-2 text-xs font-semibold text-slate-500">研究模型</div>
-                        <Select
-                          className={`w-full ${FIELD_STYLES.select} mb-3`}
-                          value={selectedModelId}
-                          onChange={setSelectedModelId}
-                          placeholder="请选择投研模型"
-                          options={availableModels.map((item) => ({
-                            value: item.modelId,
-                            label: item.name,
-                          }))}
-                        />
+                        {modelsLoading ? (
+                          <div className="flex items-center gap-2 px-3 py-2 text-xs text-slate-400">
+                            <Spin size="small" /> 加载中...
+                          </div>
+                        ) : modelsError ? (
+                          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                            <div className="text-xs text-amber-700 mb-2">{modelsError}</div>
+                            <button
+                              onClick={() => { setModelsError(null); setRefreshNonce(refreshNonce + 1); }}
+                              className="text-xs font-bold text-amber-700 underline hover:text-amber-900"
+                            >
+                              重试
+                            </button>
+                          </div>
+                        ) : (
+                          <Select
+                            className={`w-full ${FIELD_STYLES.select} mb-3`}
+                            value={selectedModelId}
+                            onChange={setSelectedModelId}
+                            placeholder="请选择投研模型"
+                            options={availableModels.map((item) => ({
+                              value: item.modelId,
+                              label: item.name,
+                            }))}
+                          />
+                        )}
                       </div>
 
                       <div>
                         <div className="mb-2 text-xs font-semibold text-slate-500">推理批次</div>
-                        <Select
-                          className={`w-full ${FIELD_STYLES.select}`}
-                          value={selectedRunId}
-                          onChange={setSelectedRunId}
-                          placeholder="选择推理批次"
-                          options={availableRuns.map((item) => ({
-                            value: item.runId,
-                            label: `${item.inferenceDate} · ${item.runId.slice(-8)}`,
-                          }))}
-                        />
+                        {!selectedModelId ? (
+                          <div className="text-xs text-slate-400 px-1">请先选择模型</div>
+                        ) : runsLoading ? (
+                          <div className="flex items-center gap-2 px-3 py-2 text-xs text-slate-400">
+                            <Spin size="small" /> 加载中...
+                          </div>
+                        ) : runsError ? (
+                          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                            <div className="text-xs text-amber-700 mb-2">{runsError}</div>
+                            <button
+                              onClick={() => { setRunsError(null); setRefreshNonce(refreshNonce + 1); }}
+                              className="text-xs font-bold text-amber-700 underline hover:text-amber-900"
+                            >
+                              重试
+                            </button>
+                          </div>
+                        ) : (
+                          <Select
+                            className={`w-full ${FIELD_STYLES.select}`}
+                            value={selectedRunId}
+                            onChange={setSelectedRunId}
+                            placeholder="选择推理批次"
+                            options={availableRuns.map((item) => ({
+                              value: item.runId,
+                              label: `${item.inferenceDate} · ${item.runId.slice(-8)}`,
+                            }))}
+                          />
+                        )}
                       </div>
 
                       <div>

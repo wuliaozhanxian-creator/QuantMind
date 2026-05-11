@@ -18,7 +18,7 @@ export const DEFAULT_RESEARCH_FILTERS: ResearchFiltersState = {
   selectedSectors: [],
   selectedConcepts: [],
   selectedIndices: [],
-  peRange: [0, 100000],
+  peRange: [-10000, 100000],
   roeRange: [-1000, 1000],
   profitGrowthRange: [-1000, 1000],
   pbRange: [0, 1000],

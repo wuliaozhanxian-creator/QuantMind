@@ -622,31 +622,37 @@ const StrategyManagement: React.FC<StrategyManagementProps> = ({
     const realtimeCheckKey: string = 'stream_series_freshness';
     const dataFeedCheckKey: string = 'stream_series_freshness';
 
-    const envChecks = isGlobalSim
+    const envChecksAll = isGlobalSim
         ? [
-            { label: '推理模型', value: getEnvDisplayMessage('inference_database_ready', '未获取'), ok: getCheckTone('inference_database_ready'), title: getCheckMessage('inference_database_ready') },
-            { label: '沙箱进程池', value: getEnvDisplayMessage('simulation_sandbox_pool', '未获取'), ok: getCheckTone('simulation_sandbox_pool'), title: getCheckMessage('simulation_sandbox_pool') },
-            { label: '实时行情', value: getEnvDisplayMessage(realtimeCheckKey, '未获取'), ok: getCheckTone(realtimeCheckKey), title: getCheckMessage(realtimeCheckKey) },
+            { label: '推理模型', keyRef: 'inference_database_ready', value: getEnvDisplayMessage('inference_database_ready', '未获取'), ok: getCheckTone('inference_database_ready'), title: getCheckMessage('inference_database_ready') },
+            { label: '沙箱进程池', keyRef: 'simulation_sandbox_pool', value: getEnvDisplayMessage('simulation_sandbox_pool', '未获取'), ok: getCheckTone('simulation_sandbox_pool'), title: getCheckMessage('simulation_sandbox_pool') },
+            { label: '实时行情', keyRef: realtimeCheckKey, value: getEnvDisplayMessage(realtimeCheckKey, '未获取'), ok: getCheckTone(realtimeCheckKey), title: getCheckMessage(realtimeCheckKey) },
         ]
         : [
-            { label: 'Runner 镜像', value: getEnvDisplayMessage('strategy_runner_image', '未获取'), ok: getCheckTone('strategy_runner_image'), title: getCheckMessage('strategy_runner_image') },
-            { label: '运行容器状态', value: status?.k8s_status ? `Ready ${status.k8s_status.ready_replicas}/${status.k8s_status.replicas}` : getEnvDisplayMessage('orchestration', '未获取'), ok: status?.status === 'running' || getCheckTone('orchestration'), title: getCheckMessage('orchestration') },
-            { label: 'QMT Agent', value: getEnvDisplayMessage('qmt_agent_online', '未获取'), ok: getCheckTone('qmt_agent_online'), title: getCheckMessage('qmt_agent_online') },
+            { label: 'Runner 镜像', keyRef: 'strategy_runner_image', value: getEnvDisplayMessage('strategy_runner_image', '未获取'), ok: getCheckTone('strategy_runner_image'), title: getCheckMessage('strategy_runner_image') },
+            { label: '运行容器状态', keyRef: 'orchestration', value: status?.k8s_status ? `Ready ${status.k8s_status.ready_replicas}/${status.k8s_status.replicas}` : getEnvDisplayMessage('orchestration', '未获取'), ok: status?.status === 'running' || getCheckTone('orchestration'), title: getCheckMessage('orchestration') },
+            { label: 'QMT Agent', keyRef: 'qmt_agent_online', value: getEnvDisplayMessage('qmt_agent_online', '未获取'), ok: getCheckTone('qmt_agent_online'), title: getCheckMessage('qmt_agent_online') },
         ];
+    // 仅展示后端实际返回的检查项（后端精简后自动隐藏已移除的项）
+    const envChecks = envChecksAll.filter((item) => pickMonitorItem(item.keyRef) !== undefined);
 
-    const connectionChecks = isGlobalSim
+    const connectionChecksAll = isGlobalSim
         ? [
-            { label: 'Redis Signal', value: getCheckMessage('redis'), ok: getCheckTone('redis') },
-            { label: 'PostgreSQL', value: getCheckMessage('db'), ok: getCheckTone('db') },
-            { label: 'Data Feed', value: getCheckMessage(dataFeedCheckKey), ok: getCheckTone(dataFeedCheckKey) },
-            { label: 'WebSocket', value: wsStatusText.label, ok: wsStatusText.ok },
+            { label: 'Redis Signal', keyRef: 'redis', value: getCheckMessage('redis'), ok: getCheckTone('redis') },
+            { label: 'PostgreSQL', keyRef: 'db', value: getCheckMessage('db'), ok: getCheckTone('db') },
+            { label: 'Data Feed', keyRef: dataFeedCheckKey, value: getCheckMessage(dataFeedCheckKey), ok: getCheckTone(dataFeedCheckKey) },
+            { label: 'WebSocket', keyRef: 'websocket', value: wsStatusText.label, ok: wsStatusText.ok },
         ].map(toConnectionCheck)
         : [
-            { label: 'Redis Signal', value: getCheckMessage('redis'), ok: getCheckTone('redis') },
-            { label: 'PostgreSQL', value: getCheckMessage('db'), ok: getCheckTone('db') },
-            { label: 'Data Feed', value: getCheckMessage(dataFeedCheckKey), ok: getCheckTone(dataFeedCheckKey) },
-            { label: 'WebSocket', value: wsStatusText.label, ok: wsStatusText.ok },
+            { label: 'Redis Signal', keyRef: 'redis', value: getCheckMessage('redis'), ok: getCheckTone('redis') },
+            { label: 'PostgreSQL', keyRef: 'db', value: getCheckMessage('db'), ok: getCheckTone('db') },
+            { label: 'Data Feed', keyRef: dataFeedCheckKey, value: getCheckMessage(dataFeedCheckKey), ok: getCheckTone(dataFeedCheckKey) },
+            { label: 'WebSocket', keyRef: 'websocket', value: wsStatusText.label, ok: wsStatusText.ok },
         ].map(toConnectionCheck);
+    const connectionChecks = connectionChecksAll.filter((item: any) => {
+        if (item.keyRef === 'websocket') return true; // WebSocket 状态独立管理，始终展示
+        return pickMonitorItem(item.keyRef) !== undefined;
+    });
     const connectionAttentionCount = connectionChecks.filter((item) => item.level !== 'green').length;
     const connectionHealthyCount = connectionChecks.length - connectionAttentionCount;
 

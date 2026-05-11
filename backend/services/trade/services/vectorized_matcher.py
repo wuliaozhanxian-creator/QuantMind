@@ -209,29 +209,17 @@ class VectorizedMatcher:
             )
 
     async def _consume_sandbox_signals(self):
-        """消费沙箱 Worker 产生的模拟盘信号，并在中央引擎处理订单账本"""
+        """监控沙箱信号队列状态（只读探针，不消费信号）"""
         try:
-            for _ in range(100):
-                raw_sig = self.redis.lpop("trade:simulation:signals")
-                if not raw_sig:
-                    break
-                sig = json.loads(raw_sig)
-
-                sig_type = sig.get("type")
-                if sig_type == "log":
-                    logger.info("[Sandbox Log %s] %s", sig.get("strategy_id", "unknown"), sig.get("message"))
-                    continue
-
-                if sig_type == "order_target_percent":
-                    data = sig.get("data", {})
-                    symbol = data.get("symbol")
-                    target = data.get("target_percent")
-                    logger.info(
-                        "[Sandbox Matched] Strategy %s target %s to %.1f%%",
-                        sig.get("strategy_id"), symbol, (target or 0) * 100,
-                    )
+            # 使用 LLEN 获取队列长度而非 LPOP 消费信号
+            queue_len = self.redis.llen("trade:simulation:signals")
+            if queue_len > 0:
+                logger.debug(
+                    "[VectorizedMatcher] 沙箱信号队列待消费: %d 条",
+                    queue_len,
+                )
         except Exception as e:
-            logger.error("[VectorizedMatcher] Error consuming sandbox signals: %s", e)
+            logger.error("[VectorizedMatcher] Error probing sandbox signals: %s", e)
 
     def stop(self):
         self.is_running = False

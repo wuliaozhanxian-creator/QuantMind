@@ -87,6 +87,10 @@ class SandboxContext:
         }
         self.signals_queue.append(signal)
 
+    def order(self, symbol: str, quantity: int, price: float, side: str, order_type: str = "limit"):
+        """直接下单接口：手动指定买卖方向和数量/价格"""
+        self._add_order_signal(symbol=symbol, quantity=quantity, price=price, side=side, order_type=order_type)
+
     def order_target_percent(self, symbol: str, target_percent: float):
         """
         常见交易API接口：设置目标持仓比例。

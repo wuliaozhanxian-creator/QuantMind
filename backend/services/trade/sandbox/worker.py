@@ -26,9 +26,11 @@ def _restricted_execute(code_str: str, sandbox_context):
 
     # 将 context 开放的方法暴露在全局，以便用户直接调用 order_target_percent 等
     glob_env["order_target_percent"] = sandbox_context.order_target_percent
+    glob_env["order"] = sandbox_context.order
     glob_env["log"] = sandbox_context.log
     glob_env["get_position"] = sandbox_context.get_position
     glob_env["get_cash"] = sandbox_context.get_cash
+    glob_env["get_total_asset"] = sandbox_context.get_total_asset
 
     try:
         # 先编译以尽早发现语法错误

@@ -58,6 +58,7 @@ class SkillEngine:
         if traditional_score > 0 or model_score > 0:
             if model_score > traditional_score:
                 templates.append("qlib_model_strategy_config")
+                templates.append("fundamental_factor_reference")
             else:
                 templates.append("traditional_indicator_backtest")
         # 否则不注入策略模板，让系统提示词主导对话风格

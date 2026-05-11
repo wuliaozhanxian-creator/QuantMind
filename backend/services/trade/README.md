@@ -55,6 +55,7 @@
   - trade 服务直接查询当前用户的默认模型最新完成推理结果，不再依赖 signal stream、fallback matcher 或外部信号作为数据源；
   - trade 服务按 `data_trade_date` + 默认模型 `target_horizon_days` 计算可执行窗口，超过窗口直接拒绝；
   - trade 服务基于默认模型最新推理结果、当前账户快照与策略参数生成 `execution_plan`，写入 `trade_manual_execution_tasks`；
+  - 当策略参数包含 `f_` 前缀（如 `f_pe_ttm_max`、`f_total_mv_min`）时，托管/手动预案会按 `prediction_trade_date` 调用 `FundamentalAligner` 对候选信号做一致性过滤（显式卖出信号保留），并在 `summary` 回写 `raw_signal_count/fundamental_filtered_count` 便于审计；
   - 后续仍由 `manual_execution_worker.py` 异步消费，并复用手动任务执行器、日志流、QMT Agent 保护限价能力。
 - `trade_manual_execution_tasks` 已扩展并兼容以下字段：
   - `task_type`：`manual | hosted`

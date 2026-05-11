@@ -24,6 +24,7 @@ except ImportError:  # pragma: no cover - optional in local/unit test env
 
 from backend.services.trade.redis_client import get_redis
 from backend.shared.database_manager_v2 import get_session
+from backend.shared.fundamental_aligner import fundamental_aligner
 from backend.shared.strategy_storage import get_strategy_storage_service
 
 from backend.services.trade.portfolio.models import Portfolio
@@ -296,6 +297,57 @@ def _normalize_strategy_params(strategy: dict[str, Any] | None) -> dict[str, Any
     return params if isinstance(params, dict) else {}
 
 
+def _extract_fundamental_constraints(strategy_params: dict[str, Any]) -> dict[str, Any]:
+    constraints: dict[str, Any] = {}
+    for key, value in (strategy_params or {}).items():
+        if isinstance(key, str) and key.startswith("f_"):
+            constraints[key[2:]] = value
+    return constraints
+
+
+def _apply_fundamental_constraints_to_signal_rows(
+    rows: list[dict[str, Any]],
+    *,
+    strategy_params: dict[str, Any],
+    trade_date: date | None,
+) -> tuple[list[dict[str, Any]], int]:
+    if not rows or trade_date is None:
+        return rows, 0
+
+    constraints = _extract_fundamental_constraints(strategy_params)
+    if not constraints:
+        return rows, 0
+
+    explicit_sell_rows: list[dict[str, Any]] = []
+    candidates: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        side = str(row.get("signal_side") or "").strip().lower()
+        if side == "sell":
+            explicit_sell_rows.append(dict(row))
+            continue
+        symbol = str(row.get("symbol") or "").strip().upper()
+        if not symbol:
+            continue
+        normalized = dict(row)
+        normalized["symbol"] = symbol
+        candidates.append(normalized)
+
+    if not candidates:
+        return explicit_sell_rows, 0
+
+    input_symbols = [str(row["symbol"]) for row in candidates]
+    filtered_symbols = set(
+        fundamental_aligner.filter_instruments(
+            trade_date, input_symbols, constraints=constraints
+        )
+    )
+    filtered_rows = [row for row in candidates if row["symbol"] in filtered_symbols]
+    dropped_count = len(candidates) - len(filtered_rows)
+    return explicit_sell_rows + filtered_rows, max(0, dropped_count)
+
+
 def _normalize_positions(raw_positions: Any) -> dict[str, dict[str, Any]]:
     if isinstance(raw_positions, dict):
         iterable = []
@@ -457,12 +509,18 @@ def _build_execution_plan_from_signals(
     signal_rows: list[dict[str, Any]],
     strategy_params: dict[str, Any],
     account_snapshot: dict[str, Any],
+    trade_date: date | None = None,
 ) -> dict[str, Any]:
+    filtered_rows, fundamental_dropped = _apply_fundamental_constraints_to_signal_rows(
+        signal_rows,
+        strategy_params=strategy_params,
+        trade_date=trade_date,
+    )
     positions = _normalize_positions((account_snapshot or {}).get("positions"))
     cash = _to_float(
         account_snapshot.get("available_cash") or account_snapshot.get("cash"), 0.0
     )
-    signal_plan = _filter_signal_rows(signal_rows, strategy_params, positions)
+    signal_plan = _filter_signal_rows(filtered_rows, strategy_params, positions)
     skipped_items: list[dict[str, Any]] = []
     sell_orders: list[dict[str, Any]] = []
     buy_orders: list[dict[str, Any]] = []
@@ -593,7 +651,9 @@ def _build_execution_plan_from_signals(
         "buy_orders": buy_orders,
         "skipped_items": skipped_items,
         "summary": {
-            "signal_count": len(signal_rows),
+            "signal_count": len(filtered_rows),
+            "raw_signal_count": len(signal_rows),
+            "fundamental_filtered_count": fundamental_dropped,
             "buy_candidate_count": len(raw_buy_candidates),
             "sell_candidate_count": len(signal_plan["sell_candidates"]),
             "sell_order_count": len(sell_orders),
@@ -1258,6 +1318,7 @@ class ManualExecutionService:
             signal_rows=signal_rows,
             strategy_params=strategy_params,
             account_snapshot=account_snapshot,
+            trade_date=prepared.prediction_trade_date,
         )
         if not plan["sell_orders"] and not plan["buy_orders"]:
             raise HTTPException(status_code=400, detail="策略计算后无可执行调仓动作")
@@ -1691,6 +1752,7 @@ class ManualExecutionService:
             signal_rows=normalized_signals,
             strategy_params=strategy_params,
             account_snapshot=latest_snapshot,
+            trade_date=prepared.prediction_trade_date,
         )
         created_at = datetime.now(timezone.utc)
         plan_summary = execution_plan.get("summary") or {}
@@ -2050,6 +2112,7 @@ class ManualExecutionService:
                     signal_rows=signal_rows,
                     strategy_params=strategy_params,
                     account_snapshot=latest_snapshot,
+                    trade_date=prepared.prediction_trade_date,
                 )
 
             sell_orders = list(execution_plan.get("sell_orders") or [])

@@ -23,10 +23,11 @@ class SQLGenerator:
         try:
             target_table = parsed_intent.get("target_table") or "stock_selection"
             retriever = await get_schema_retriever()
-            schema_info = await retriever.retrieve(parsed_intent.get("query", ""), top_k=12)
+            schema_info = await retriever.retrieve(parsed_intent.get("query", ""), top_k=30)
             allowed_fields = parsed_intent.get("allowed_fields") or schema_info.get("allowed_fields") or []
 
-            required_select = self._build_required_select(target_table)
+            fields_used = parsed_intent.get("fields_used", [])
+            required_select = self._build_required_select(target_table, fields_used)
             prompt = SQL_GENERATOR_SYSTEM_PROMPT_DYNAMIC.format(
                 target_table=target_table,
                 table_description=TABLE_DESCRIPTIONS.get(target_table, ""),
@@ -61,13 +62,20 @@ class SQLGenerator:
             return ""
 
     @staticmethod
-    def _build_required_select(table: str) -> str:
-        # 简化 SELECT 字段，只返回核心字段
-        return (
-            "SELECT symbol, name, close, total_mv, pe_ttm, pb, roe\n"
-            f"FROM {table}\n"
-            "WHERE ..."
-        )
+    def _build_required_select(table: str, fields_used: list[str] | None = None) -> str:
+        # 基础固定字段：symbol（股票代码）、name（股票名称）
+        base_fields = ["symbol", "stock_name AS name"]
+        # 用户条件涉及的字段（去重，排除已在 base 中的）
+        extra = []
+        if fields_used:
+            seen = {"symbol", "name", "stock_name"}
+            for f in fields_used:
+                if f not in seen:
+                    extra.append(f)
+                    seen.add(f)
+        all_fields = base_fields + extra
+        select_clause = "SELECT " + ", ".join(all_fields)
+        return f"{select_clause}\nFROM {table}\nWHERE ..."
 
     @staticmethod
     def _validate_sql(sql: str, target_table: str, allowed_fields: list[str]) -> bool:
@@ -133,7 +141,7 @@ class SQLGenerator:
             "avg",
             "count",
         }
-        allowed = set(allowed_fields) | {target_table}
+        allowed = {f.lower() for f in allowed_fields} | {target_table}
         for t in tokens:
             if t in keywords:
                 continue

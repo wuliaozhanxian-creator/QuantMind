@@ -468,6 +468,7 @@ async def run_trading_readiness_precheck(
                 )
             )
 
+        try:
             from backend.services.trade.routers.real_trading_utils import check_stream_series_freshness
             res = check_stream_series_freshness(redis_client=redis_client)
             checks.append(
@@ -488,7 +489,7 @@ async def run_trading_readiness_precheck(
                 _build_check(
                     "stream_series_freshness",
                     "实时行情服务已就绪",
-                    not is_trading_hours,  # 交易时段异常则阻断，非交易时段放行
+                    not is_trading_hours,
                     f"[阻断] stream_probe_error={exc}" if is_trading_hours else f"[WARNING] stream_probe_error={exc}",
                 )
             )

@@ -15,6 +15,10 @@ Qlib service 通用工具与适配器。
 - 读取 `pred.pkl` 时会自动检测并对齐股票代码大小写（如 `SH600000` -> `sh600000`），避免因代码风格不一致导致策略无法成交。
 
 ## 近期更新
+- 基本面参数化过滤迁移（2026-05-11）：
+  - 新增 `backend/shared/fundamental_aligner.py`，统一从 `db/custom/fundamental_aligned.parquet` 按交易日读取快照并执行约束过滤；
+  - `RedisRecordingStrategy` 接入 `FundamentalFilterMixin`，支持 `f_` 前缀参数（如 `f_pe_ttm_max`、`f_roe_min`、`f_industry_in`）；
+  - 策略选股在 `generate_target_weight_position` 阶段自动应用过滤，保持回测/托管执行口径一致。
 - 交易流水数量还原稳定性修复（2026-04-22）：
   - `recording_strategy.py` 的展示数量写入新增 A 股整手容差纠偏（容差 `<=2` 股）；
   - 当复权因子跨日微漂移导致数量落在 `2701/2702` 等近整手值时，自动回吸到最近 `100` 股整手；

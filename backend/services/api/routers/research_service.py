@@ -319,7 +319,7 @@ def _format_candidate_record(row: dict[str, Any]) -> dict[str, Any]:
         "nextDayReturn": return_1d_pct,
         "day3Return": return_3d_pct,
         "mainFlow": (_serialize_float(row.get("main_flow")) or 0.0) / 100.0,
-        "flowNetAmount": (_serialize_float(row.get("inst_ownership")) or 0.0) / 1000000.0,
+        "flowNetAmount": (_serialize_float(row.get("flow_net_amount")) or 0.0) / 1000000.0,
         "instOwnership": (_serialize_float(row.get("inst_ownership")) or 0.0) / 1000000.0,
         "profitGrowth": _serialize_float(row.get("profit_growth")) or 0.0,
         "isSt": bool(row.get("is_st")),
@@ -641,6 +641,15 @@ async def add_to_watchlist(
     return {"code": 200, "message": "success"}
 
 
+async def remove_from_watchlist(tid: str, uid: str, symbol: str) -> dict[str, Any]:
+    async with get_session() as session:
+        await session.execute(
+            text("DELETE FROM qm_user_watchlist WHERE tenant_id = :tid AND user_id = :uid AND symbol = :s"),
+            {"tid": tid, "uid": uid, "s": symbol},
+        )
+    return {"code": 200, "message": "success"}
+
+
 async def get_user_research_pool(tid: str, uid: str, status: str | None, limit: int, offset: int) -> dict[str, Any]:
     where = "tenant_id = :tid AND user_id = :uid"
     params: dict[str, Any] = {"tid": tid, "uid": uid, "limit": limit, "offset": offset}
@@ -693,6 +702,15 @@ async def add_to_research_pool(
                 "ts": thesis_summary,
                 "f": json.dumps(features_snapshot or {}),
             },
+        )
+    return {"code": 200, "message": "success"}
+
+
+async def remove_from_research_pool(tid: str, uid: str, symbol: str) -> dict[str, Any]:
+    async with get_session() as session:
+        await session.execute(
+            text("DELETE FROM qm_user_research_pool WHERE tenant_id = :tid AND user_id = :uid AND symbol = :s"),
+            {"tid": tid, "uid": uid, "s": symbol},
         )
     return {"code": 200, "message": "success"}
 
@@ -823,7 +841,7 @@ async def get_stock_kline(symbol: str, days: int) -> dict[str, Any]:
                     "volume": float(r[5]),
                 }
             )
-            items.reverse()
+        items.reverse()
     payload = {"code": 200, "data": {"symbol": normalized_symbol, "items": items}}
     _set_local_cache(_SDL_CACHE, cache_key, payload, _SDL_CACHE_MAX_ENTRIES)
     return payload

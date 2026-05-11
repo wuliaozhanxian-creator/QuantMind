@@ -202,6 +202,53 @@ def test_recording_strategy_drops_pool_file_local_before_super(monkeypatch):
     assert "pool_file_local" not in captured
 
 
+def test_recording_strategy_applies_f_prefix_fundamental_filter(monkeypatch):
+    qlib = pytest.importorskip("qlib")
+    assert qlib is not None
+
+    import pandas as pd
+    from backend.services.engine.qlib_app.utils import recording_strategy as rs
+
+    def fake_init_redis(self, kwargs):
+        return None
+
+    def fake_init_dynamic_risk(self, kwargs):
+        return None
+
+    def fake_super_init(self, *args, **kwargs):
+        return None
+
+    monkeypatch.setattr(rs.RedisRecordingStrategy, "init_redis", fake_init_redis)
+    monkeypatch.setattr(rs.RedisRecordingStrategy, "init_dynamic_risk", fake_init_dynamic_risk)
+    monkeypatch.setattr(rs.TopkDropoutStrategy, "__init__", fake_super_init)
+    monkeypatch.setattr(
+        rs.fundamental_aligner,
+        "filter_instruments",
+        lambda *_args, **_kwargs: ["SH600001"],
+    )
+
+    strategy = rs.RedisRecordingStrategy(
+        signal="$close",
+        topk=10,
+        n_drop=2,
+        rebalance_days=1,
+        f_pe_ttm_max=25,
+    )
+
+    idx = pd.MultiIndex.from_tuples(
+        [
+            (pd.Timestamp("2026-04-01"), "SH600001"),
+            (pd.Timestamp("2026-04-01"), "SH600002"),
+        ],
+        names=["datetime", "instrument"],
+    )
+    score = pd.Series([0.8, 0.3], index=idx)
+
+    result = strategy.apply_fundamental_filter(score, pd.Timestamp("2026-04-01"))
+    instruments = list(result.index.get_level_values("instrument"))
+    assert instruments == ["SH600001"]
+
+
 def test_normalize_trades_for_display_deduplicates_mixed_writers(monkeypatch):
     monkeypatch.setattr(RiskAnalyzer, "_load_factor_map", classmethod(lambda cls, pairs: {}))
     trades = [

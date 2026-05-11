@@ -21,6 +21,8 @@ from backend.services.api.routers.research_service import (
     get_symbols_features as get_symbols_features_service,
     get_user_research_pool as get_user_research_pool_service,
     get_user_watchlist as get_user_watchlist_service,
+    remove_from_research_pool as remove_from_research_pool_service,
+    remove_from_watchlist as remove_from_watchlist_service,
 )
 from backend.services.api.user_app.middleware.auth import get_current_user
 from backend.shared.database_manager_v2 import get_session
@@ -93,6 +95,12 @@ async def add_to_watchlist(symbol: str, req: WatchlistAddRequest, current_user: 
     return await add_to_watchlist_service(tid, uid, symbol, req.run_id, req.stock_name, req.features_snapshot)
 
 
+@router.delete("/watchlist/{symbol}")
+async def remove_from_watchlist(symbol: str, current_user: dict = Depends(get_current_user)):
+    tid, uid = str(current_user["tenant_id"]), str(current_user["user_id"])
+    return await remove_from_watchlist_service(tid, uid, symbol)
+
+
 @router.get("/pool")
 async def get_user_research_pool(
     status: str | None = Query(None),
@@ -118,6 +126,12 @@ async def add_to_research_pool(symbol: str, req: PoolAddRequest, current_user: d
         req.thesis_summary,
         req.features_snapshot,
     )
+
+
+@router.delete("/pool/{symbol}")
+async def remove_from_research_pool(symbol: str, current_user: dict = Depends(get_current_user)):
+    tid, uid = str(current_user["tenant_id"]), str(current_user["user_id"])
+    return await remove_from_research_pool_service(tid, uid, symbol)
 
 
 @router.post("/symbols/features")

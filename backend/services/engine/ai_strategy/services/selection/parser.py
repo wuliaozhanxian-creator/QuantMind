@@ -1,12 +1,13 @@
 import json
 import logging
 import os
+import re
 from typing import Any, Dict
 
 from openai import AsyncOpenAI
 
 from .prompts import PARSER_SYSTEM_PROMPT
-from .schema_retriever import get_schema_retriever
+from .schema_retriever import SCHEMAS, get_schema_retriever
 from .vector_parser import get_strategy_vector_parser
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,21 @@ class IntentParser:
             target_table = schema_info["target_table"]
             candidate_fields = schema_info["candidate_fields"]
             allowed_fields = set(schema_info["allowed_fields"])
+
+            # 直接关键词匹配：用户查询中明确出现的字段名，强制追加到候选列表
+            all_columns = SCHEMAS.get(target_table, [])
+            query_lower = query.lower()
+            candidate_names = {f["name"] for f in candidate_fields}
+            extra_fields: list[dict] = []
+            for col in all_columns:
+                col_lower = col.name.lower()
+                # 字段名长度 >= 3 且在用户查询中作为独立词出现（单词边界匹配）
+                if len(col_lower) >= 3 and re.search(r"\b" + re.escape(col_lower) + r"\b", query_lower):
+                    if col.name not in candidate_names:
+                        extra_fields.append({"name": col.name, "description": col.description, "score": 1.0})
+                        candidate_names.add(col.name)
+            if extra_fields:
+                candidate_fields = extra_fields + candidate_fields
 
             # Stage 2: Qwen 生成结构化过滤条件 (使用轻量化 flash 模型加速)
             formatted_system_prompt = PARSER_SYSTEM_PROMPT.format(
@@ -69,12 +85,14 @@ class IntentParser:
             result["query"] = query
             result["target_table"] = result.get("target_table") or target_table
 
-            # 过滤非法字段
+            # 过滤非法字段（大小写不敏感匹配）
             filters = result.get("filters") or []
+            allowed_lower = {f.lower(): f for f in allowed_fields}
             sanitized_filters = []
             for f in filters:
                 field = f.get("field")
-                if field in allowed_fields:
+                if field and field.lower() in allowed_lower:
+                    f["field"] = allowed_lower[field.lower()]  # 规范化为正确大小写
                     sanitized_filters.append(f)
             result["filters"] = sanitized_filters
             result["fields_used"] = [f.get("field") for f in sanitized_filters if f.get("field")]

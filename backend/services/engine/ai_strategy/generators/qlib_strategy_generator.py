@@ -599,7 +599,6 @@ def get_strategy_config():
 STRATEGY_CONFIG = get_strategy_config()
 '''
         return code
-        return code
 
     def generate_weight_strategy(self, design: dict[str, Any], requirement: dict[str, Any]) -> str:
         """生成权重策略（V2 合规：STRATEGY_CONFIG 入口 + RedisWeightStrategy 基类）"""
