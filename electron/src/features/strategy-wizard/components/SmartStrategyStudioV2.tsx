@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Layout, Steps, theme, Button, Space, Typography, Card, Divider, Breadcrumb, message, Alert, Modal, Tag } from 'antd';
 import { HelpCircle } from 'lucide-react';
 import {
@@ -7,7 +7,8 @@ import {
   SettingOutlined,
   RocketOutlined,
   LeftOutlined,
-  RightOutlined
+  RightOutlined,
+  ArrowDownOutlined
 } from '@ant-design/icons';
 import { motion, AnimatePresence } from 'framer-motion';
 import { NaturalTextInput } from './NaturalTextInput';
@@ -47,9 +48,11 @@ const SmartStrategyStudioV2: React.FC = () => {
   useEffect(() => {
     fetchWorkingPool();
     fetchSavedPools();
-  }, []);
+  }, [fetchWorkingPool, fetchSavedPools]);
 
-  const next = async () => {
+  const prev = useCallback(() => setCurrentStep(prevStep => Math.max(prevStep - 1, 0)), []);
+
+  const next = useCallback(async () => {
     if (currentStep === 0) {
       // Step 1 -> Step 2: Already synced to backend via setWorkingPool
     }
@@ -95,37 +98,99 @@ const SmartStrategyStudioV2: React.FC = () => {
       }
     }
     
-    setCurrentStep(Math.min(currentStep + 1, 3));
-  };
+    setCurrentStep(prev => Math.min(prev + 1, 3));
+  }, [currentStep, activePoolVersionId, conditions, qlibParams, setGenerated]);
 
-  const prev = () => setCurrentStep(Math.max(currentStep - 1, 0));
-
-  const steps = [
+  const steps = useMemo(() => [
     {
       title: '条件选股',
       icon: <BulbOutlined />,
       description: '自然语言或可视化构建',
-      content: <NaturalTextInput onNext={next} />
     },
     {
       title: '确定股票池',
       icon: <ExperimentOutlined />,
       description: '预览与验证股票池',
-      content: <PoolPreview ref={poolPreviewRef} onNext={next} onBack={prev} />
     },
     {
       title: '策略参数',
       icon: <SettingOutlined />,
       description: 'Qlib专用参数（TopK / 调仓 / 风控）',
-      content: <QlibParamsConfig onNext={next} onBack={prev} />
     },
     {
       title: '验证与保存',
       icon: <RocketOutlined />,
       description: 'Qlib验证并保存策略',
-      content: <QlibValidatorAndSave onBack={prev} />
     }
-  ];
+  ], []);
+
+  const renderStepContent = (stepIndex: number) => {
+    switch (stepIndex) {
+      case 0:
+        return <NaturalTextInput onNext={next} />;
+      case 1:
+        return <PoolPreview ref={poolPreviewRef} onNext={next} onBack={prev} />;
+      case 2:
+        return <QlibParamsConfig onNext={next} onBack={prev} />;
+      case 3:
+        return <QlibValidatorAndSave onBack={prev} />;
+      default:
+        return null;
+    }
+  };
+
+  const StepFlow = () => {
+    return (
+      <div className="relative py-8 px-5">
+        <div className="flex flex-col gap-4 relative">
+          {steps.map((step, index) => {
+            const isActive = currentStep === index;
+            
+            return (
+              <div 
+                key={index}
+                onClick={() => setCurrentStep(index)}
+                className={`
+                  relative group cursor-pointer p-4 rounded-2xl transition-all duration-300
+                  ${isActive ? 'bg-white shadow-[0_10px_30px_rgba(59,130,246,0.08)] border border-blue-50' : 'hover:bg-slate-50'}
+                `}
+              >
+                {/* 活跃状态的侧边指示器 - 仅在活跃时显示，不使用 layoutId 以减少渲染开销 */}
+                {isActive && (
+                  <div className="absolute left-0 top-4 bottom-4 w-1 bg-blue-500 rounded-r-full" />
+                )}
+
+                <div className="flex-1 min-w-0 pt-0.5">
+                  <div className={`
+                    text-[10px] font-bold uppercase tracking-wider mb-1 transition-colors
+                    ${isActive ? 'text-blue-500' : 'text-slate-300'}
+                  `}>
+                    Step 0{index + 1}
+                  </div>
+                  <div className={`
+                    text-sm font-bold transition-all
+                    ${isActive ? 'text-slate-900' : 'text-slate-500'}
+                  `}>
+                    {step.title}
+                  </div>
+                  
+                  {isActive && (
+                    <motion.div 
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="text-[11px] text-slate-400 mt-2 leading-relaxed"
+                    >
+                      {step.description}
+                    </motion.div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
 
   const canProceed = (stepIndex: number) => {
     if (stepIndex === 0) {
@@ -150,7 +215,7 @@ const SmartStrategyStudioV2: React.FC = () => {
         }
         open={generating}
         closable={false}
-        maskClosable={false}
+        mask={{ closable: false }}
         footer={null}
         centered
         styles={{
@@ -252,57 +317,53 @@ const SmartStrategyStudioV2: React.FC = () => {
               background: '#fff'
             }}
           >
-            <div className="flex flex-col h-full">
-              <div style={{ flex: 1, overflow: 'auto', padding: '24px 12px 12px' }}>
-                <Steps
-                  direction="vertical"
-                  current={currentStep}
-                  items={steps.map(s => ({ title: s.title, icon: s.icon, description: s.description }))}
-                  onChange={(i) => setCurrentStep(i)}
-                  size="small"
-                  className="custom-steps"
-                />
-                <Divider style={{ margin: '12px 0' }} />
-                <div style={{ padding: '0 4px 24px' }}>
+            <div className="flex flex-col h-full overflow-hidden">
+              {/* 1. 流程图区域 60% */}
+              <div style={{ height: '62%', overflowY: 'auto', borderBottom: '1px solid #f1f5f9' }} className="no-scrollbar">
+                <StepFlow />
+              </div>
+
+              {/* 2. 智能助手区域 40% */}
+              <div style={{ height: '38%', overflowY: 'auto' }} className="no-scrollbar">
+                <div style={{ padding: '12px' }}>
                   <ContextAwareAssistant step={currentStep} />
-                  {currentStep === 4 && (
+                  {currentStep === 3 && (
                     <Alert
                       type="info"
                       showIcon
                       className="mt-3"
-                      message="当前只执行语法检测，如需评估量化效果，请前往回测中心模块"
+                      title="当前只执行语法检测，如需评估量化效果，请前往“回测中心”模块"
                     />
                   )}
                 </div>
               </div>
 
-              {/* 底部帮助中心链接 - 标准化样式 */}
-              <div className="border-t border-gray-200 p-4 shrink-0 mt-auto">
+              {/* 3. 底部固定帮助链接 */}
+              <div className="border-t border-gray-100 p-2 shrink-0 mt-auto bg-gray-50/50">
                 <a
                   href="https://www.quantmindai.cn/help"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-gray-600 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-gray-500 hover:text-blue-600 hover:bg-white hover:shadow-sm transition-all"
                 >
-                  <HelpCircle className="w-5 h-5" />
-                  <span className="text-sm">帮助文档</span>
+                  <HelpCircle className="w-4 h-4" />
+                  <span className="text-[12px] font-medium">帮助文档与中心</span>
                 </a>
               </div>
             </div>
           </Sider>
 
           <Layout style={{ background: '#f8fafc', padding: '0', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            {/* 面包屑/标题栏 - 增加呼吸感 */}
-            <div className="px-6 py-4 flex items-center justify-between bg-white border-b border-gray-200">
+            <div className="px-8 py-6 flex items-center justify-between bg-white border-b border-slate-50">
               <div className="flex flex-col">
                 <Breadcrumb 
                   items={[
-                    { title: '策略开发' },
-                    { title: <Text strong>智能策略向导</Text> }
+                    { title: <span className="text-slate-400">Strategy</span> },
+                    { title: <span className="text-slate-600 font-medium">Smart Wizard</span> }
                   ]} 
-                  style={{ marginBottom: 4, fontSize: 12 }}
+                  style={{ marginBottom: 4, fontSize: 11 }}
                 />
-                <Title level={3} style={{ margin: 0, fontSize: '1.25rem', fontWeight: 600, color: '#1e293b' }}>
+                <Title level={4} style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: '#0f172a', letterSpacing: '-0.02em' }}>
                   {steps[currentStep].title}
                 </Title>
               </div>
@@ -346,13 +407,7 @@ const SmartStrategyStudioV2: React.FC = () => {
                 flex: 1
               }}
             >
-              <AnimatePresence mode="wait">
-                <motion.div
-                  key={currentStep}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  transition={{ duration: 0.2 }}
+                <div 
                   className="bg-white overflow-hidden"
                   style={{
                     padding: 24,
@@ -363,10 +418,9 @@ const SmartStrategyStudioV2: React.FC = () => {
                   }}
                 >
                   <div className="flex-1">
-                    {steps[currentStep].content}
+                    {renderStepContent(currentStep)}
                   </div>
-                </motion.div>
-              </AnimatePresence>
+                </div>
             </Content>
 
             {/* 状态栏 */}
@@ -380,14 +434,13 @@ const SmartStrategyStudioV2: React.FC = () => {
               borderTop: '1px solid #e2e8f0',
               zIndex: 10
             }}>
-              <Space>
-                <div className="inline-block h-4 w-px bg-gray-300 mx-2" />
+              <Space separator={<div className="inline-block h-4 w-px bg-gray-300 mx-2" />}>
                 <div className="flex items-center gap-2">
                   <div className={`w-2 h-2 rounded-full ${generated?.code ? 'bg-green-500' : 'bg-amber-500 animate-pulse'}`} />
                   <Text type="secondary" className="text-xs">状态: {generated?.code ? '已生成' : '草稿'}</Text>
                 </div>
                 <Text type="secondary" className="text-xs">
-                  股票池: <span className="font-medium text-gray-700">{workingPool ? `${workingPool.length} 只` : '未计算'}</span>
+                  股票池: <span className="font-medium text-gray-700">{Array.isArray(workingPool) ? `${workingPool.length} 只` : '未计算'}</span>
                 </Text>
                 <Text type="secondary" className="text-xs">
                   最后更新: <span className="font-mono">{new Date().toLocaleTimeString()}</span>
@@ -397,6 +450,15 @@ const SmartStrategyStudioV2: React.FC = () => {
           </Layout>
         </Layout>
       </Layout>
+      <style>{`
+        .no-scrollbar::-webkit-scrollbar {
+          display: none;
+        }
+        .no-scrollbar {
+          -ms-overflow-style: none;
+          scrollbar-width: none;
+        }
+      `}</style>
       </div>
     </div>
   );

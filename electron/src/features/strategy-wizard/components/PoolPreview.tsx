@@ -400,10 +400,10 @@ export const PoolPreview = React.forwardRef<PoolPreviewHandle, { onNext: () => v
           </Card>
         </Col>
         <Col span={8}>
-          <Space direction="vertical" style={{ width: '100%' }} size="large">
+          <Space orientation="vertical" style={{ width: '100%' }} size="large">
             <Card variant="borderless" title="统计概览">
               {dataSource.length === 0 ? (
-                <Alert type="info" showIcon message="尚未生成股票池，请返回上一步完成解析。" />
+                <Alert type="info" showIcon title="尚未生成股票池，请返回上一步完成解析。" />
               ) : (
                 <Row gutter={16}>
                   <Col span={12}>
@@ -411,7 +411,7 @@ export const PoolPreview = React.forwardRef<PoolPreviewHandle, { onNext: () => v
                       title="选出股票"
                       value={selectedSymbols?.length || 0}
                       suffix="只"
-                      style={{ fontSize: 20, fontWeight: 600, color: '#1e293b' }}
+                      styles={{ content: { fontSize: 20, fontWeight: 600, color: '#1e293b' } }}
                     />
                   </Col>
                   <Col span={12}>
@@ -420,7 +420,7 @@ export const PoolPreview = React.forwardRef<PoolPreviewHandle, { onNext: () => v
                       value={((selectedSymbols?.length || 0) / 6017) * 100}
                       suffix="%"
                       precision={2}
-                      style={{ fontSize: 20, fontWeight: 600, color: '#1e293b' }}
+                      styles={{ content: { fontSize: 20, fontWeight: 600, color: '#1e293b' } }}
                     />
                   </Col>
                 </Row>
@@ -481,7 +481,22 @@ export const PoolPreview = React.forwardRef<PoolPreviewHandle, { onNext: () => v
           loading={historyLoading}
           dataSource={poolHistory || []}
           pagination={{ pageSize: 8, showSizeChanger: false }}
-          locale={{ emptyText: '暂无已保存股票池' }}
+          locale={{ 
+            emptyText: (
+              <div className="py-12 flex flex-col items-center">
+                <Empty 
+                  description={
+                    <div className="text-slate-400">
+                      <div>暂无已保存股票池</div>
+                      <div className="text-[11px] mt-2 opacity-70">
+                        如果持续出现此问题，请检查后端 API 状态
+                      </div>
+                    </div>
+                  } 
+                />
+              </div>
+            )
+          }}
           columns={[
             {
               title: '股票池名称',
@@ -489,7 +504,7 @@ export const PoolPreview = React.forwardRef<PoolPreviewHandle, { onNext: () => v
               render: (_: any, row: any) => (
                 <Space>
                   <span>{row.name || '未命名股票池'}</span>
-                  {historySelectedKey === (row.id || row.file_key) && <Tag color="blue">当前使用</Tag>}
+                  {historySelectedKey === (row.id || row.file_key) && <Tag variant="filled" color="blue">当前使用</Tag>}
                 </Space>
               ),
             },

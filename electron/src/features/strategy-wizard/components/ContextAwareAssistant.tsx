@@ -9,101 +9,26 @@ const { Text, Paragraph, Title } = Typography;
 export const ContextAwareAssistant: React.FC<{ step: number }> = ({ step }) => {
   const { conditions, generated, workingPool, qlibParams } = useWizardV2Store();
 
-  // 提取当前相关的因子
-  const activeFactors = useMemo(() => {
-    if (step !== 0) return [];
-
-    // 简单的深度优先遍历提取条件中的因子
-    const factors = new Set<string>();
-    const traverse = (c: any) => {
-      if (!c) return;
-      if (c.factor) factors.add(c.factor);
-      if (c.children) c.children.forEach(traverse);
-    };
-    traverse(conditions);
-
-    return Array.from(factors).map(k => FACTORS.find(f => f.key === k)).filter(Boolean);
-  }, [conditions, step]);
 
   const renderContent = () => {
     switch (step) {
       case 0: // 选股条件
         return (
-          <Space direction="vertical" style={{ width: '100%' }}>
-            <div className="bg-blue-50 p-2 rounded-xl border border-blue-100 mb-2">
-              <Space align="start" size={4}>
-                <BulbOutlined className="text-blue-500 mt-0.5 text-xs" />
-                <Text className="text-xs leading-snug text-blue-800">
+          <Space orientation="vertical" style={{ width: '100%' }}>
+            <div className="bg-blue-50 p-3 rounded-xl border border-blue-100 mb-2">
+              <Space align="start" size={8}>
+                <BulbOutlined className="text-blue-500 mt-1 text-sm" />
+                <Text className="text-xs leading-relaxed text-blue-800">
                   尝试输入组合条件，例如："低估值且高增长"，或具体指标 "PE &lt; 20 且 营收增长 &gt; 30%"。
                 </Text>
               </Space>
             </div>
-
-            {activeFactors.length > 0 ? (
-              <Collapse
-                ghost
-                defaultActiveKey={['0']}
-                size="small"
-                className="custom-premium-collapse"
-                items={activeFactors.map((f, i) => ({
-                  key: String(i),
-                  label: <Space><Tag color="blue" className="rounded-full px-2 text-[10px]">{f?.category}</Tag><span className="font-medium text-gray-700">{f?.label}</span></Space>,
-                  children: (
-                    <div className="bg-blue-50/30 p-3 rounded-xl border border-blue-50/50">
-                      <Text type="secondary" className="text-xs leading-relaxed italic">
-                        {getFactorDescription(f?.key)}
-                      </Text>
-                    </div>
-                  ),
-                }))}
-              />
-             ) : (
-              <div className="mt-2">
-                 <div className="flex items-center gap-2 mb-2">
-                   <div className="h-px flex-1 bg-gray-100" />
-                   <Text className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.1em]">常用因子速查</Text>
-                   <div className="h-px flex-1 bg-gray-100" />
-                 </div>
-                 
-                 <div className="flex flex-wrap gap-1.5 mb-2">
-                   {[
-                     'market_cap', 'pe', 'pb', 'roe', 
-                     'main_flow', 'pct_change', 'return_5d', 'return_20d', 
-                     'turnover_rate', 'volume_ratio_5', 'volume_ma_5', 'rsi_14', 
-                     'macd_hist', 'idx_hs300', 'is_st', 'limit_up_today', 'industry'
-                   ].map(key => {
-                     const f = FACTORS.find(item => item.key === key);
-                     if (!f) return null;
-                     return (
-                       <button
-                         key={f.key}
-                         className="px-2 py-1 rounded-md text-[11px] font-medium transition-all duration-200
-                           bg-gray-50 text-gray-600 border border-gray-100 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200
-                           active:scale-95 shadow-sm"
-                       >
-                         {f.label}
-                       </button>
-                     );
-                   })}
-                 </div>
-
-                 <div className="pt-2 border-t border-gray-50 text-center">
-                   <a 
-                    href="#" 
-                    className="text-[10px] text-blue-500 hover:text-blue-700 font-medium transition-colors flex items-center justify-center gap-1"
-                   >
-                     <span>更多因子请查看帮助中心</span>
-                     <ReadOutlined className="text-[10px]" />
-                   </a>
-                 </div>
-              </div>
-            )}
           </Space>
         );
 
       case 1: // 股票池
         return (
-          <Space direction="vertical" style={{ width: '100%' }}>
+          <Space orientation="vertical" style={{ width: '100%' }}>
             <div style={{ background: '#f6ffed', padding: 12, borderRadius: 6, border: '1px solid #b7eb8f' }}>
               <Space align="start">
                 <InfoCircleOutlined style={{ color: '#52c41a', marginTop: 4 }} />
@@ -119,9 +44,9 @@ export const ContextAwareAssistant: React.FC<{ step: number }> = ({ step }) => {
       case 2: // 交易规则
         const isTopkDropout = (qlibParams?.strategy_type ?? 'TopkDropout') === 'TopkDropout';
         return (
-          <Space direction="vertical" style={{ width: '100%' }}>
+          <Space orientation="vertical" style={{ width: '100%' }}>
             <Card size="small" title="Qlib 参数提示" variant="borderless" styles={{ body: { padding: 12 } }}>
-              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+              <Space orientation="vertical" size={8} style={{ width: '100%' }}>
                 {(isTopkDropout
                   ? [
                     { title: 'TopK / n_drop', desc: '建议先用 TopK=20~50、n_drop=3~10 作为稳定起点。' },

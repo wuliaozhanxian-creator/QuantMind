@@ -48,7 +48,7 @@ export const SimpleLogicBuilder: React.FC<{
 
   // 从 Store 同步初始化 (仅支持顶层是 AND 且只有一层的简单结构回显)
   useEffect(() => {
-    if (conditions && conditions.type === 'composite' && conditions.op === 'AND') {
+    if (conditions && conditions.type === 'composite' && conditions.op === 'AND' && Array.isArray(conditions.children)) {
       const simple = conditions.children.map((c: any) => {
         if (c.type === 'numeric') {
           if (!ALLOWED_FACTOR_KEYS.includes(c.factor)) {
@@ -121,7 +121,7 @@ export const SimpleLogicBuilder: React.FC<{
           <Button type="primary" icon={<PlusOutlined />} onClick={addCondition}>添加第一个条件</Button>
         </Empty>
       ) : (
-        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+        <Space orientation="vertical" style={{ width: '100%' }} size="middle">
           {flatConditions.map((item, index) => {
             const unit = getFactorUnit(item.factor);
             return (

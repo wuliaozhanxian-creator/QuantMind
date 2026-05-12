@@ -180,25 +180,17 @@ class DeepTimeSeriesBuilder(StrategyBuilder):
         backtest_id: str,
     ) -> dict[str, Any]:
         logger.info("build_deep_time_series", "Building DeepTimeSeries strategy")
-        # DL strategy usually points to a specific signal file
-        pred_path = (
-            request.strategy_params.signal
-            if request.strategy_params.signal.endswith(".pkl")
-            else "models/production/model_qlib/pred.pkl"
-        )
 
+        # 修复：不再在此嵌入内联 signal dict（会绕过 Runtime 的实例化保障）。
+        # 使用 "<PRED>" 占位符，由 Runtime 层统一通过 signal_data 替换，
+        # 保持与 TopkDropoutBuilder 等一致的信号处理链路。
+        # signal_data 已由 _build_signal_data() 构建（含 pred.pkl 加载逻辑），
+        # 并经 Runtime 实例化保障块转换为合法 Signal 对象。
         strategy = {
             "class": "RedisRecordingStrategy",
             "module_path": "backend.services.engine.qlib_app.utils.recording_strategy",
             "kwargs": {
-                "signal": {
-                    "class": "SimpleSignal",
-                    "module_path": "backend.services.engine.qlib_app.utils.simple_signal",
-                    "kwargs": {
-                        "pred_path": pred_path,
-                        "universe": request.universe,
-                    },
-                },
+                "signal": "<PRED>",
                 "topk": request.strategy_params.topk,
                 "n_drop": (
                     request.strategy_params.n_drop

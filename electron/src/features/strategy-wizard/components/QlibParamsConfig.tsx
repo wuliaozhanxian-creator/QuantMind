@@ -65,7 +65,7 @@ const StrategyTypeCard: React.FC<{
   </motion.div>
 );
 
-const QlibParamsConfig: React.FC<Props> = () => {
+const QlibParamsConfig: React.FC<Props> = ({ onNext, onBack }) => {
   const { qlibParams, setQlibParams } = useWizardV2Store();
   const params = qlibParams ?? { strategy_type: 'TopkDropout', topk: 10, n_drop: 2, rebalance_days: 5 };
   const normalizedRebalanceDays = resolveRebalanceDays(params);
@@ -79,7 +79,7 @@ const QlibParamsConfig: React.FC<Props> = () => {
   };
 
   return (
-    <div className="mx-auto max-w-4xl">
+    <div className="w-full">
       <div className="mb-8">
         <Title level={4} style={{ margin: 0, fontWeight: 800, color: '#0f172a' }}>Qlib 策略参数</Title>
         <Text style={{ color: '#475569', fontWeight: 500 }}>配置 Alpha 引擎的选股逻辑与执行参数</Text>
@@ -91,7 +91,7 @@ const QlibParamsConfig: React.FC<Props> = () => {
           selected={params.strategy_type === 'TopkDropout'}
           onClick={() => update({ strategy_type: 'TopkDropout', n_drop: 2 })}
           title="TopK 轮换策略"
-          description="基于 Qlib 的 TopkDropout 原理。每期根据模型得分对股票池进行排名，选取前 K 名进入组合。若原有持仓在排名中掉出前 K 名 or 满足剔除数(n_drop)条件，系统将自动卖出并调入新的高分标的。该模式能保持组合的极高灵敏度，是动量和短中线策略的首选。"
+          description="基于 Qlib 的 TopkDropout 原理。每期根据模型得分对股票池进行排名，选取前 K 名进入组合。若原有持仓在排名中掉出前 K 名或满足剔除数(n_drop)条件，系统将自动卖出并调入新的高分标的。该模式能保持组合的极高灵敏度，是动量和短中线策略的首选。"
           tag="推荐"
         />
         <StrategyTypeCard
@@ -107,7 +107,8 @@ const QlibParamsConfig: React.FC<Props> = () => {
         <Card variant="borderless" className="rounded-3xl border border-gray-100 shadow-sm">
           <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
             {/* 核心执行参数 */}
-            <div className="space-y-6">
+            <div className="space-y-10">
+              {/* 选股数量 (TopK) */}
               <div>
                 <div className="mb-4 flex items-center justify-between">
                   <div className="flex items-center gap-2 font-bold text-slate-800">
@@ -136,8 +137,9 @@ const QlibParamsConfig: React.FC<Props> = () => {
                 </div>
               </div>
 
-              <div>
-                <div className="mb-4 flex items-center gap-2 font-bold text-slate-800">
+              {/* 调仓周期 - 水平布局 */}
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2 font-bold text-slate-800 shrink-0">
                   <RefreshCcw size={18} className="text-blue-600" />
                   <span>调仓周期</span>
                   <Tooltip title="策略执行重新审视持仓并换仓的频率">
@@ -151,14 +153,15 @@ const QlibParamsConfig: React.FC<Props> = () => {
                     value: item.value,
                     label: item.value === 5 ? `${item.label} (平衡型)` : item.label,
                   }))}
-                  className="w-full premium-select"
-                  dropdownClassName="premium-dropdown"
+                  className="flex-1 premium-select"
+                  classNames={{ popup: { root: 'premium-dropdown' } }}
+                  style={{ height: 44 }}
                 />
               </div>
             </div>
 
             {/* 高级控制项 */}
-            <div className="rounded-2xl bg-gray-50/50 p-6">
+            <div className="space-y-10">
               <AnimatePresence mode="wait">
                 {params.strategy_type === 'TopkDropout' ? (
                   <motion.div
@@ -168,25 +171,26 @@ const QlibParamsConfig: React.FC<Props> = () => {
                     exit={{ opacity: 0 }}
                     className="space-y-4"
                   >
-                    <div className="flex items-center gap-2 text-sm font-bold text-slate-800">
-                      <Trash2 size={16} className="text-orange-600" />
-                      <span>强制剔除数 (n_drop)</span>
-                    </div>
-                    <div className="flex items-center gap-4">
-                      <div className="flex-1">
-                        <Slider
-                          min={0}
-                          max={params.topk}
-                          step={1}
-                          value={params.n_drop}
-                          onChange={(v) => update({ n_drop: v })}
-                          className="custom-orange-slider"
-                        />
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-sm font-bold text-slate-800">
+                        <Trash2 size={16} className="text-orange-600" />
+                        <span>强制剔除数 (n_drop)</span>
                       </div>
-                      <div className="w-12 text-center font-mono text-lg font-bold text-orange-600">
+                      <div className="font-mono text-lg font-bold text-orange-600">
                         {params.n_drop}
                       </div>
                     </div>
+                    
+                    <Slider
+                      min={0}
+                      max={params.topk}
+                      step={1}
+                      value={params.n_drop}
+                      onChange={(v) => update({ n_drop: v })}
+                      tooltip={{ open: false }}
+                      className="custom-orange-slider"
+                    />
+                    
                     <Paragraph className="text-xs leading-relaxed text-slate-600 font-medium">
                       每次调仓将强制卖出排名最低的 <Text strong>{params.n_drop}</Text> 只标的。
                       {params.n_drop === 0 ? '当前设为 0，即仅根据得分变化触发换仓。' : '强制剔除能有效防止持仓僵化，提升组合灵敏度。'}
@@ -198,14 +202,14 @@ const QlibParamsConfig: React.FC<Props> = () => {
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
-                    className="flex h-full flex-col items-center justify-center text-center py-4"
+                    className="flex h-full flex-col items-center justify-center text-center pt-8"
                   >
                     <div className="mb-3 rounded-full bg-blue-100 p-3 text-blue-600">
                       <TrendingUp size={24} />
                     </div>
                     <div className="text-sm font-bold text-slate-800">因子均衡模式已激活</div>
                     <Text className="mt-2 text-xs text-slate-600 font-medium">
-                      该模式下持仓权重将根据模型预测得分动态分配，无需手动设置剔除阈值。
+                      该模式下持仓权重将根据模型预测得分动态分配。
                     </Text>
                   </motion.div>
                 )}

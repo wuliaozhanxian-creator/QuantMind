@@ -630,6 +630,35 @@ class RedisSectorRotationStrategy(DynamicRiskMixin, TopkDropoutStrategy, RedisLo
         self.topk_sectors = int(kwargs.pop("topk_sectors", 5))
         self.lookback_days = int(kwargs.pop("lookback_days", 20))
 
+        # 信号兼容处理：与 RedisRecordingStrategy、RedisWeightStrategy 保持一致。
+        # RedisSectorRotationStrategy 继承 TopkDropoutStrategy，
+        # qlib create_signal_from() 不接受 dict 类型，必须在此处提前实例化。
+        if "signal" in kwargs:
+            sig = kwargs["signal"]
+            if isinstance(sig, dict) and "class" in sig:
+                from qlib.utils import init_instance_by_config
+
+                _log = StructuredTaskLogger(
+                    logger,
+                    "redis-sector-rotation",
+                    {"backtest_id": getattr(self, "backtest_id", None)},
+                )
+                try:
+                    kwargs["signal"] = init_instance_by_config(sig)
+                    _log.info(
+                        "signal_instantiated",
+                        "RedisSectorRotationStrategy: signal dict 已实例化",
+                        signal_class=sig.get("class"),
+                    )
+                except Exception as e:
+                    _log.error(
+                        "signal_instantiate_failed",
+                        "RedisSectorRotationStrategy: signal 实例化失败，移除 signal 参数",
+                        signal_class=sig.get("class"),
+                        error=str(e),
+                    )
+                    kwargs.pop("signal", None)
+
         for k in _OUR_KWARGS:
             kwargs.pop(k, None)
         super().__init__(*args, **kwargs)

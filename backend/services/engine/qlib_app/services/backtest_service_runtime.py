@@ -357,6 +357,45 @@ class QlibBacktestServiceRuntimeMixin(QlibBacktestServiceQueryMixin):
                 ) and signal_data is not None:
                     strategy["kwargs"]["signal"] = signal_data
 
+                # --- 信号实例化保障 [START] ---
+                # qlib create_signal_from() 不接受 dict 类型，必须在此统一实例化。
+                # 涵盖以下路径：
+                #   1. _load_pred_pkl 成功/失败返回的 SimpleSignal dict
+                #   2. _build_signal_data 透传的 signal_dict 来源
+                #   3. DeepTimeSeriesBuilder 嵌入的内联 signal dict
+                final_signal = strategy["kwargs"].get("signal")
+                if isinstance(final_signal, dict) and "class" in final_signal:
+                    from qlib.utils import init_instance_by_config
+
+                    task_log.info(
+                        "signal_instantiating",
+                        "检测到 dict 类型 signal，开始实例化",
+                        signal_class=final_signal.get("class"),
+                        module_path=final_signal.get("module_path", "<auto>"),
+                    )
+                    try:
+                        instantiated_signal = init_instance_by_config(final_signal)
+                        strategy["kwargs"]["signal"] = instantiated_signal
+                        task_log.info(
+                            "signal_instantiated",
+                            "Signal dict 已成功实例化为对象",
+                            signal_class=final_signal.get("class"),
+                            signal_type=type(instantiated_signal).__name__,
+                        )
+                    except Exception as inst_err:
+                        task_log.error(
+                            "signal_instantiate_failed",
+                            "Signal dict 实例化失败",
+                            signal_class=final_signal.get("class"),
+                            module_path=final_signal.get("module_path"),
+                            error=str(inst_err),
+                        )
+                        raise ValueError(
+                            f"信号实例化失败（class={final_signal.get('class')}）：{inst_err}。"
+                            "请检查 pred_path 是否存在，或 SimpleSignal 模块路径是否正确。"
+                        ) from inst_err
+                # --- 信号实例化保障 [END] ---
+
             # 构建执行器配置
             executor = {
                 "class": "SimulatorExecutor",
@@ -734,9 +773,18 @@ class QlibBacktestServiceRuntimeMixin(QlibBacktestServiceQueryMixin):
     ) -> None:
         source = signal_meta.get("source")
         if source == "close_fallback" and not self._feature_fallback_allowed(request):
+            fallback_reason = signal_meta.get("fallback_reason", "unknown")
+            pred_path_hint = (
+                signal_meta.get("resolved_pred_path")
+                or signal_meta.get("model_storage_path")
+                or signal_meta.get("pred_path")
+                or signal_meta.get("legacy_pred_path")
+                or "<未解析>"
+            )
             raise ValueError(
-                "信号质量预检失败：预测信号缺失且默认禁止回退到 $close。"
-                "如确需使用行情特征信号，请显式设置 allow_feature_signal_fallback=true。"
+                f"信号质量预检失败：预测信号缺失（原因：{fallback_reason}）。"
+                f"尝试查找的 pred 路径：{pred_path_hint}。"
+                "如确需使用行情特征信号（$close），请显式设置 allow_feature_signal_fallback=true 或环境变量 QLIB_ALLOW_FEATURE_SIGNAL_FALLBACK=true。"
             )
         require_pred = os.getenv(
             "QLIB_BACKTEST_REQUIRE_PRED", "false"
