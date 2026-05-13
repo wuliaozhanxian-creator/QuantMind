@@ -29,6 +29,7 @@ import { authService } from '../services/authService';
 import { validatePasswordStrength } from '../utils/validation';
 import { PageLoading } from './LoadingStates';
 import { handleError } from '../utils/errorHandler';
+import HelpCenterLink from '../../../components/common/HelpCenterLink';
 
 const { Title, Text } = Typography;
 
@@ -506,7 +507,7 @@ const ResetPasswordPage: React.FC = () => {
           <Space split={<span style={{ color: 'rgba(255,255,255,0.3)' }}>|</span>}>
             <a href="https://api.quantmind.cloud/privacy" target="_blank" rel="noopener noreferrer" style={{ color: 'white', textDecoration: 'none' }}>隐私政策</a>
             <a href="https://api.quantmind.cloud/terms" target="_blank" rel="noopener noreferrer" style={{ color: 'white', textDecoration: 'none' }}>服务条款</a>
-            <a href="https://api.quantmind.cloud/help" target="_blank" rel="noopener noreferrer" style={{ color: 'white', textDecoration: 'none' }}>帮助中心</a>
+            <HelpCenterLink variant="white" />
             <span>© 2026 QuantMind</span>
           </Space>
         </div>

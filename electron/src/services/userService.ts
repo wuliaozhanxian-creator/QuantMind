@@ -65,6 +65,7 @@ export interface FundData {
   maxDrawdown: number;
   sharpeRatio: number;
   monthlyPnL?: number;  // 本月盈亏
+  initialCapitalAvailable?: boolean;
   todayPnLAvailable?: boolean;
   dailyReturnAvailable?: boolean;
   totalPnLAvailable?: boolean;

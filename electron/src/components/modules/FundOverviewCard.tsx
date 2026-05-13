@@ -45,7 +45,8 @@ export const FundOverviewCard: React.FC = () => {
     dailyReturn: 0,
     totalPnL: 0,
     totalReturn: 0,
-    initialCapital: 100000,
+    initialCapital: 0,
+    initialCapitalAvailable: false,
     initialCapitalEstimated: false,
     winRate: 0,
     maxDrawdown: 0,
@@ -66,6 +67,7 @@ export const FundOverviewCard: React.FC = () => {
   const dailyReturn = Number.isFinite(fundInfo.dailyReturn) ? fundInfo.dailyReturn : 0;
   const returnRate = Number.isFinite(fundInfo.totalReturn) ? fundInfo.totalReturn : 0;
   const isRealAccountOffline = tradingMode === 'real' && !isSimulated && fundInfo.accountOnline === false;
+  const initialCapitalAvailable = fundInfo.initialCapitalAvailable !== false;
   const todayPnLAvailable = fundInfo.todayPnLAvailable !== false;
   const dailyReturnAvailable = fundInfo.dailyReturnAvailable !== false;
   const totalPnLAvailable = fundInfo.totalPnLAvailable !== false;
@@ -99,7 +101,11 @@ export const FundOverviewCard: React.FC = () => {
           <div className="grid grid-cols-2 gap-2">
             <div title="统一基线口径，对应账户基线 initial_equity。" className="bg-slate-50 border border-slate-100 rounded-2xl p-3.5 hover:bg-slate-100 transition-colors flex flex-col items-center justify-center text-center">
               <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">{initialCapitalLabel}</div>
-              <div className="text-lg font-black text-slate-800 font-mono leading-tight">￥{fundInfo.initialCapital ? formatMoney(fundInfo.initialCapital) : '100,000.00'}</div>
+              {!initialCapitalAvailable ? (
+                <div className="text-lg font-black text-slate-300 font-mono leading-tight">--</div>
+              ) : (
+                <div className="text-lg font-black text-slate-800 font-mono leading-tight">￥{formatMoney(fundInfo.initialCapital)}</div>
+              )}
             </div>
             <div title="统一日账本口径，对应 daily_pnl / today_pnl。" className="bg-slate-50 border border-slate-100 rounded-2xl p-3.5 hover:bg-slate-100 transition-colors flex flex-col items-center justify-center text-center">
               <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">今日盈亏</div>

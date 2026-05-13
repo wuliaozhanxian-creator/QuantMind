@@ -70,15 +70,17 @@ export const ContextAwareAssistant: React.FC<{ step: number }> = ({ step }) => {
 
       case 3: // 生成
         return (
-           <div style={{ background: '#fff7e6', padding: 12, borderRadius: 6, border: '1px solid #ffd591' }}>
-              <Space align="start">
-                <ReadOutlined style={{ color: '#fa8c16', marginTop: 4 }} />
-                <Text style={{ fontSize: 13 }}>
-                  生成代码后，您可以：
-                  1. 点击“一键回测”验证效果
-                  2. 复制简报到剪贴板
-                  3. 导出为 Python 文件
-                </Text>
+            <div style={{ background: '#fff7e6', padding: '16px 12px', borderRadius: 12, border: '1px solid #ffd591/60' }}>
+              <Space align="start" size={10}>
+                <ReadOutlined style={{ color: '#fa8c16', marginTop: 4, fontSize: 16 }} />
+                <div className="flex flex-col gap-1.5">
+                  <Text strong style={{ fontSize: 13, color: '#873800' }}>生成代码后，您可以：</Text>
+                  <Paragraph className="m-0 text-gray-600" style={{ fontSize: 12, lineHeight: 1.6 }}>
+                    1. 点击“一键回测”验证效果<br />
+                    2. 复制简报到剪贴板<br />
+                    3. 导出为 Python 文件
+                  </Paragraph>
+                </div>
               </Space>
             </div>
         );

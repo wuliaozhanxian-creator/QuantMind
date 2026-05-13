@@ -151,6 +151,23 @@ const PersonalCenter: React.FC<PersonalCenterProps> = ({ tenantId, userId, statu
         }
     };
 
+    const handleSaveInitialCash = async () => {
+        if (draftInitialCash <= 0) {
+            message.warning('初始基准金额必须大于 0');
+            return;
+        }
+        try {
+            const success = await realTradingService.updateRealAccountSettings(draftInitialCash);
+            if (success) {
+                setConfiguredInitialCash(draftInitialCash);
+                message.success('统计基准更新成功');
+                loadAccountSettings();
+            }
+        } catch (err: any) {
+            message.error(`保存失败: ${err.message}`);
+        }
+    };
+
     const handleUnbindQmt = async () => {
         setIsUnbinding(true);
         try {
@@ -369,80 +386,88 @@ const PersonalCenter: React.FC<PersonalCenterProps> = ({ tenantId, userId, statu
                     </div>
 
                         {tradingMode === 'simulation' ? (
-                            <div className="p-2 rounded-xl border border-gray-200 bg-gray-50/50">
-                                <div className="text-sm font-semibold text-gray-800 mb-1.5">
-                                    模拟盘运行状态
+                            <>
+                                <div className="p-2 rounded-xl border border-gray-200 bg-gray-50/50">
+                                    <div className="text-sm font-semibold text-gray-800 mb-1.5">
+                                        模拟盘运行状态
+                                    </div>
+                                    <div className="text-xs text-gray-500 leading-relaxed">
+                                        当前统计基准固定为 <span className="font-bold text-gray-700">¥{configuredInitialCash.toLocaleString()}</span>。
+                                        如需重新开始，请点击下方重置按钮。重置将清空所有持仓并恢复初始现金。
+                                    </div>
                                 </div>
-                                <div className="text-xs text-gray-500 leading-relaxed">
-                                    当前统计基准固定为 <span className="font-bold text-gray-700">¥{configuredInitialCash.toLocaleString()}</span>。
-                                    如需重新开始，请点击下方重置按钮。重置将清空所有持仓并恢复初始现金。
+                                <div className="grid grid-cols-2 gap-2 mt-2">
+                                    <button
+                                        onClick={handleResetSimulation}
+                                        disabled={resettingSimulation || loadingSettings}
+                                        className="px-3 py-2 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                    >
+                                        <RefreshCw size={14} className={resettingSimulation ? 'animate-spin' : ''} />
+                                        {resettingSimulation ? '重置中...' : '重置模拟盘'}
+                                    </button>
+                                    <button
+                                        onClick={() => setOcrModalOpen(true)}
+                                        disabled={loadingSettings}
+                                        className="px-3 py-2 rounded-xl border border-indigo-200 text-indigo-600 bg-indigo-50/50 text-sm font-medium hover:bg-indigo-50 transition-colors flex items-center justify-center gap-2"
+                                    >
+                                        <Camera size={14} />
+                                        持仓图片同步
+                                    </button>
                                 </div>
-                            </div>
+                            </>
                         ) : (
                             <div className="p-2 rounded-xl border border-gray-200">
                                 <div className="text-sm font-semibold text-gray-800 mb-1.5">
                                     统计基准校准 (PnL Baseline)
                                 </div>
-                                <div className="flex gap-2">
-                                    <input
-                                        type="number"
-                                        step={1000}
-                                        min={0}
-                                        value={draftInitialCash}
-                                        onChange={(e) => setDraftInitialCash(Number(e.target.value || 0))}
-                                        className="flex-1 px-3 py-2 rounded-xl border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm font-mono"
-                                        placeholder="请输入实盘初始资金基准"
-                                    />
-                                    <button
-                                        onClick={() => {
-                                            const brokerPnl = (status?.portfolio as any)?.broker_total_pnl || (status?.portfolio as any)?.total_pnl_raw || 0;
-                                            const totalAsset = status?.portfolio?.total_value || 0;
-                                            const inferredBaseline = totalAsset - brokerPnl;
-                                            if (inferredBaseline > 0) {
-                                                setDraftInitialCash(Math.round(inferredBaseline));
-                                                message.info('已填充：根据券商盈亏推算的成本基准');
-                                            }
-                                        }}
-                                        className="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-xl text-xs font-medium transition-colors"
-                                        title="根据券商上报的总盈亏反推基准"
-                                    >
-                                        对齐券商
-                                    </button>
+                                <div className="flex flex-col gap-2">
+                                    <div className="flex gap-2">
+                                        <input
+                                            type="number"
+                                            step={1000}
+                                            min={0}
+                                            value={draftInitialCash}
+                                            onChange={(e) => setDraftInitialCash(Number(e.target.value || 0))}
+                                            className="flex-1 px-3 py-2 rounded-xl border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm font-mono"
+                                            placeholder="请输入实盘初始资金基准"
+                                        />
+                                        <button
+                                            onClick={handleSaveInitialCash}
+                                            className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-bold transition-all shadow-sm active:scale-95"
+                                        >
+                                            保存
+                                        </button>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <button
+                                            onClick={() => {
+                                                const brokerPnl = (status?.portfolio as any)?.broker_total_pnl || (status?.portfolio as any)?.total_pnl_raw || 0;
+                                                const totalAsset = status?.portfolio?.total_value || 0;
+                                                const inferredBaseline = totalAsset - brokerPnl;
+                                                if (inferredBaseline > 0) {
+                                                    setDraftInitialCash(Math.round(inferredBaseline));
+                                                    message.info('已填充：根据券商盈亏推算的成本基准');
+                                                }
+                                            }}
+                                            className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-xl text-xs font-medium transition-colors border border-emerald-100"
+                                            title="根据券商上报的总盈亏反推基准"
+                                        >
+                                            对齐券商
+                                        </button>
+                                        <button
+                                            onClick={() => setUnbindModalOpen(true)}
+                                            disabled={isUnbinding}
+                                            className="px-3 py-1.5 rounded-xl border border-red-200 text-red-600 text-xs font-medium hover:bg-red-50 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 transition-colors"
+                                        >
+                                            <Link2Off size={12} />
+                                            一键解绑 QMT
+                                        </button>
+                                    </div>
                                 </div>
-                                <div className="mt-2 text-xs text-gray-500">
+                                <div className="mt-2 text-[10px] text-gray-400">
                                     修改此金额会即时改变"总盈亏"的统计起点。
                                 </div>
                             </div>
-                        )}
-
-                        {tradingMode === 'simulation' ? (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                <button
-                                    onClick={handleResetSimulation}
-                                    disabled={resettingSimulation || loadingSettings}
-                                    className="px-3 py-2 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                                >
-                                    <RefreshCw size={14} className={resettingSimulation ? 'animate-spin' : ''} />
-                                    {resettingSimulation ? '重置中...' : '重置模拟盘'}
-                                </button>
-                                <button
-                                    onClick={() => setOcrModalOpen(true)}
-                                    disabled={loadingSettings}
-                                    className="px-3 py-2 rounded-xl border border-indigo-200 text-indigo-600 bg-indigo-50/50 text-sm font-medium hover:bg-indigo-50 transition-colors flex items-center justify-center gap-2"
-                                >
-                                    <Camera size={14} />
-                                    持仓图片同步
-                                </button>
-                            </div>
-                        ) : (
-                            <button
-                                onClick={() => setUnbindModalOpen(true)}
-                                disabled={isUnbinding}
-                                className="w-full px-3 py-2 rounded-xl border border-red-200 text-red-600 text-sm font-medium hover:bg-red-50 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                            >
-                                <Link2Off size={14} />
-                                一键解绑 QMT
-                            </button>
                         )}
 
                     <div className="text-xs text-gray-500">

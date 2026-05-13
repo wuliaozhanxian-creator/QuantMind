@@ -38,6 +38,7 @@ import { authService } from '../features/auth/services/authService';
 import { strategyManagementService } from '../services/strategyManagementService';
 import { backtestService } from '../services/backtestService';
 import { modelTrainingService } from '../services/modelTrainingService';
+import HelpCenterLink from '../components/common/HelpCenterLink';
 import type { BacktestResult } from '../services/backtestService';
 import { SERVICE_ENDPOINTS } from '../config/services';
 import { PAGE_LAYOUT } from '../config/pageLayout';
@@ -2360,16 +2361,8 @@ const AIIDEPage: React.FC = () => {
                 </div>
 
                 {/* Status Bar Left Part */}
-                <div className="p-4 border-t border-gray-200">
-                    <a
-                        href="https://api.quantmind.cloud/help"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-gray-600 hover:text-blue-600 hover:bg-blue-50 transition-colors"
-                    >
-                        <HelpCircle className="w-5 h-5" />
-                        <span className="text-sm">帮助中心</span>
-                    </a>
+                <div className="p-4 border-t border-gray-200 shrink-0">
+                    <HelpCenterLink className="w-full" />
                 </div>
             </aside>
 

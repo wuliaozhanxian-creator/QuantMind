@@ -17,8 +17,8 @@ import {
   Settings,
   FolderKanban,
   TrendingUp,
-  HelpCircle,
 } from 'lucide-react';
+import HelpCenterLink from '../common/HelpCenterLink';
 import { ModuleId } from '../../stores/backtestCenterStore';
 
 interface Module {
@@ -119,16 +119,8 @@ export const BacktestSidebar: React.FC<BacktestSidebarProps> = ({
       </div>
 
       {/* 底部帮助链接 */}
-      <div className="border-t border-gray-200 p-4">
-        <a
-          href="https://api.quantmind.cloud/help"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-gray-600 hover:text-blue-600 hover:bg-blue-50 transition-colors"
-        >
-          <HelpCircle className="w-5 h-5" />
-          <span className="text-sm">帮助中心</span>
-        </a>
+      <div className="border-t border-gray-200 p-4 shrink-0 mt-auto">
+        <HelpCenterLink className="w-full" />
       </div>
 
     </aside>

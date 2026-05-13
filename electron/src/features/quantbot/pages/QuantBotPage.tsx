@@ -6,7 +6,8 @@ import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useDispatch } from 'react-redux';
 import { useSelector } from 'react-redux';
-import { Bot, HelpCircle, Radio } from 'lucide-react';
+import { Bot, Radio } from 'lucide-react';
+import HelpCenterLink from '../../../components/common/HelpCenterLink';
 import ChatContainer from '../components/ChatArea/ChatContainer';
 import TaskPanelContainer from '../components/TaskPanel/TaskPanelContainer';
 import agentApi from '../services/agentApi';
@@ -146,16 +147,8 @@ const QuantBotPage: React.FC = () => {
               </div>
 
               {/* 底部帮助中心链接 */}
-              <div className="border-t border-gray-200 p-2">
-                <a
-                  href="https://api.quantmind.cloud/help"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-gray-600 hover:text-blue-600 hover:bg-blue-50 transition-colors"
-                >
-                  <HelpCircle className="w-5 h-5" />
-                  <span className="text-sm">帮助中心</span>
-                </a>
+              <div className="border-t border-gray-200 p-4 shrink-0">
+                <HelpCenterLink className="w-full" />
               </div>
             </div>
 

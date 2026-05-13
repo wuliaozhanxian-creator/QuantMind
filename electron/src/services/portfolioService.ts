@@ -491,6 +491,10 @@ class PortfolioService {
             const accountOnline = useSimulation
                 ? undefined
                 : Boolean(account.is_online === true);
+            const initialCapitalAvailable = useSimulation || (
+                this.pickFirstNumber([account.initial_equity], 0) > 0 ||
+                (totalAsset > 0 && Number.isFinite(totalPnL))
+            );
             const todayPnLAvailable = this.boolOr(
                 metricsMeta.today_pnl_available,
                 Number.isFinite(Number(metrics.daily_pnl ?? metrics.today_pnl ?? account.daily_pnl ?? account.today_pnl)),
@@ -532,6 +536,7 @@ class PortfolioService {
                     maxDrawdown,
                     sharpeRatio,
                     monthlyPnL: Number.isFinite(monthlyPnL) ? monthlyPnL : undefined,
+                    initialCapitalAvailable,
                     todayPnLAvailable,
                     dailyReturnAvailable,
                     totalPnLAvailable,

@@ -331,8 +331,9 @@ const SmartStrategyStudioV2: React.FC = () => {
             }}
           >
             <div 
-              className="flex flex-col h-full overflow-hidden m-3 shadow-xl"
+              className="flex flex-col overflow-hidden m-3 shadow-xl"
               style={{
+                height: 'calc(100% - 24px)',
                 background: 'rgba(255, 255, 255, 0.4)',
                 backdropFilter: 'blur(20px) saturate(160%)',
                 WebkitBackdropFilter: 'blur(20px) saturate(160%)',
@@ -341,37 +342,38 @@ const SmartStrategyStudioV2: React.FC = () => {
                 boxShadow: '0 8px 32px 0 rgba(0, 0, 0, 0.05)'
               }}
             >
-              {/* 1. 流程图区域 60% */}
-              <div style={{ height: '62%', overflowY: 'auto', borderBottom: '1px solid #f1f5f9' }} className="no-scrollbar">
+              {/* 1. 流程图区域 - 自适应高度 */}
+              <div style={{ flex: '1 1 auto', overflowY: 'auto', borderBottom: '1px solid #f1f5f9' }} className="no-scrollbar">
                 <StepFlow steps={steps} currentStep={currentStep} setCurrentStep={setCurrentStep} />
               </div>
-
-              {/* 2. 智能助手区域 40% */}
-              <div style={{ height: '38%', overflowY: 'auto' }} className="no-scrollbar">
-                <div style={{ padding: '12px' }}>
+              
+              {/* 2. 智能助手与帮助区域 - 保持合理占比 */}
+              <div style={{ flex: '0 0 auto', maxHeight: '45%', overflowY: 'auto', background: 'rgba(250, 250, 250, 0.3)' }} className="no-scrollbar">
+                <div style={{ padding: '16px 12px 24px' }}>
                   <ContextAwareAssistant step={currentStep} />
+                  
                   {currentStep === 3 && (
                     <Alert
                       type="info"
                       showIcon
-                      className="mt-3"
-                      title="当前只执行语法检测，如需评估量化效果，请前往“回测中心”模块"
+                      className="mt-4 rounded-xl border-blue-100 bg-blue-50/50"
+                      message="当前只执行语法检测，如需评估量化效果，请前往“回测中心”模块"
                     />
                   )}
-                </div>
-              </div>
 
-              {/* 3. 底部固定帮助链接 */}
-              <div className="border-t border-gray-100 p-2 shrink-0 mt-auto bg-gray-50/50">
-                <a
-                  href="https://www.quantmindai.cn/help"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-gray-500 hover:text-blue-600 hover:bg-white hover:shadow-sm transition-all"
-                >
-                  <HelpCircle className="w-4 h-4" />
-                  <span className="text-[12px] font-medium">帮助文档与中心</span>
-                </a>
+                  {/* 移动到此处的帮助链接 */}
+                  <div className="mt-6 px-1">
+                    <a
+                      href="https://www.quantmindai.cn/help"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2.5 text-gray-400 hover:text-blue-600 transition-all group"
+                    >
+                      <HelpCircle className="w-3.5 h-3.5 text-gray-300 group-hover:text-blue-500" />
+                      <span className="text-[11px] font-semibold tracking-wide">帮助文档</span>
+                    </a>
+                  </div>
+                </div>
               </div>
             </div>
           </Sider>

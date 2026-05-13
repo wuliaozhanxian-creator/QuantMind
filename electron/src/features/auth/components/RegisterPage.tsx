@@ -32,6 +32,7 @@ import { useAppDispatch } from '../../../store';
 import { setUser } from '../store/authSlice';
 import { validatePasswordStrength, createValidationRules, debounce } from '../utils/validation';
 import { PageLoading } from './LoadingStates';
+import HelpCenterLink from '../../../components/common/HelpCenterLink';
 import type { RegisterData } from '../types/auth.types';
 
 const { Title, Text } = Typography;
@@ -88,7 +89,7 @@ const RegisterPage: React.FC = () => {
     }, 100);
     return () => clearTimeout(timer);
   }, []);
-
+            <HelpCenterLink variant="white" />
   // 密码强度检测（使用新的验证工具）
   const checkPasswordStrength = (password: string) => {
     if (!password) {
@@ -508,7 +509,7 @@ const RegisterPage: React.FC = () => {
           <Space split={<span style={{ color: 'rgba(255,255,255,0.3)' }}>|</span>}>
             <a href="https://api.quantmind.cloud/privacy" target="_blank" rel="noopener noreferrer" style={{ color: 'white', textDecoration: 'none' }}>隐私政策</a>
             <a href="https://api.quantmind.cloud/terms" target="_blank" rel="noopener noreferrer" style={{ color: 'white', textDecoration: 'none' }}>服务条款</a>
-            <a href="https://api.quantmind.cloud/help" target="_blank" rel="noopener noreferrer" style={{ color: 'white', textDecoration: 'none' }}>帮助中心</a>
+            <HelpCenterLink variant="white" />
             <span>© 2026 QuantMind</span>
           </Space>
         </div>

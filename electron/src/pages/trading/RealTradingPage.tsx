@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { LayoutDashboard, PieChart, FileText, Settings, User, HelpCircle, ClipboardList } from 'lucide-react';
+import { LayoutDashboard, PieChart, FileText, Settings, User, ClipboardList } from 'lucide-react';
+import HelpCenterLink from '../../components/common/HelpCenterLink';
 import type { LucideIcon } from 'lucide-react';
 import { Button, Collapse, Modal, Spin, Tag, message } from 'antd';
 import TopBar from './components/TopBar';
@@ -514,18 +515,9 @@ const RealTradingPage: React.FC = () => {
                     </div>
 
                     {/* Bottom Help Center + Mode Switch */}
-                    <div className="p-4 border-t border-gray-200 relative">
+                    <div className="p-4 border-t border-gray-200 shrink-0 relative">
                         <div className="flex items-center justify-between gap-1">
-                            <a
-                                href="https://api.quantmind.cloud/help"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 px-2 py-2 rounded-xl text-gray-600 hover:text-blue-600 hover:bg-blue-50 transition-colors flex-shrink-0"
-                                title="查看操作手册与帮助文档"
-                            >
-                                <HelpCircle size={16} className="text-gray-600" />
-                                <span className="text-[11px] font-black text-gray-600 tracking-tight whitespace-nowrap">帮助中心</span>
-                            </a>
+                            <HelpCenterLink className="whitespace-nowrap flex-1" />
                             <button
                                 onClick={() => handleModeSwitch(tradingMode === 'simulation' ? 'real' : 'simulation')}
                                 className="flex items-center gap-1.5 px-2 py-2 rounded-xl border border-gray-200 text-gray-600 hover:text-blue-600 hover:border-blue-200 hover:bg-blue-50 transition-colors flex-shrink-0"

@@ -21,6 +21,7 @@ import { PageLoading } from './LoadingStates';
 import type { LoginCredentials } from '../types/auth.types';
 import { preloadAiIdeResources } from '../utils/lazyLoad';
 import { isElectronEnv, initDynamicServerUrl, setDynamicServerUrl, getDynamicServerUrl } from '../../../config/services';
+import HelpCenterLink from '../../../components/common/HelpCenterLink';
 
 const { Title, Text } = Typography;
 
@@ -686,10 +687,13 @@ const LoginPage: React.FC = () => {
           backdropFilter: 'blur(10px)',
         }}
       >
-        <Space split={<span style={{ color: 'rgba(255,255,255,0.4)', margin: '0 8px' }}>|</span>}>
+          <Space split={<span style={{ color: 'rgba(255,255,255,0.4)', margin: '0 8px' }}>|</span>}>
           <a href="https://api.quantmind.cloud/privacy" target="_blank" rel="noopener noreferrer" style={{ color: 'white', cursor: 'pointer', transition: 'all 0.3s ease', textDecoration: 'none' }} onMouseEnter={(e) => e.currentTarget.style.color = '#1890ff'} onMouseLeave={(e) => e.currentTarget.style.color = 'white'}>隐私政策</a>
           <a href="https://api.quantmind.cloud/terms" target="_blank" rel="noopener noreferrer" style={{ color: 'white', cursor: 'pointer', transition: 'all 0.3s ease', textDecoration: 'none' }} onMouseEnter={(e) => e.currentTarget.style.color = '#1890ff'} onMouseLeave={(e) => e.currentTarget.style.color = 'white'}>服务条款</a>
-          <a href="https://api.quantmind.cloud/help" target="_blank" rel="noopener noreferrer" style={{ color: 'white', cursor: 'pointer', transition: 'all 0.3s ease', textDecoration: 'none' }} onMouseEnter={(e) => e.currentTarget.style.color = '#1890ff'} onMouseLeave={(e) => e.currentTarget.style.color = 'white'}>帮助中心</a>
+          {/* 使用统一 HelpCenterLink，保留白色样式 */}
+          <span>
+            <HelpCenterLink variant="white" />
+          </span>
           <span>© 2026 QuantMind</span>
         </Space>
       </div>
