@@ -476,13 +476,14 @@ async def test_start_trading_launches_runtime_container(monkeypatch, tmp_path):
     monkeypatch.setattr(real_lifecycle, "run_trading_readiness_precheck", _fake_precheck)
     captured = {}
 
-    def _fake_create_deployment(user_id, strategy_file_path, run_id="default", exec_config=None, tenant_id="default", live_trade_config=None):
+    def _fake_create_deployment(user_id, strategy_file_path, run_id="default", exec_config=None, tenant_id="default", live_trade_config=None, strategy_id=None):
         captured["user_id"] = user_id
         captured["strategy_file_path"] = strategy_file_path
         captured["run_id"] = run_id
         captured["exec_config"] = exec_config
         captured["tenant_id"] = tenant_id
         captured["live_trade_config"] = live_trade_config
+        captured["strategy_id"] = strategy_id
         return {"status": "success", "message": "Container demo started"}
 
     monkeypatch.setattr(real_lifecycle.k8s_manager, "create_deployment", _fake_create_deployment)
@@ -520,6 +521,7 @@ async def test_start_trading_launches_runtime_container(monkeypatch, tmp_path):
     assert captured["tenant_id"] == "default"
     assert captured["run_id"].startswith("run_")
     assert captured["strategy_file_path"].endswith(".py")
+    assert captured["strategy_id"] == "1"
 
     stored = json.loads(redis_wrapper.client.writes[real_utils._active_strategy_key("default", "1001")])
     assert stored["launch_result"]["status"] == "success"

@@ -87,6 +87,11 @@
   - `signal_pipeline_enabled`：当前用户默认模型最新完成推理是否可用于自动托管
   - `latest_signal_run`：当前用户默认模型最新完成推理批次号
 
+- 策略启动链路已修正为显式透传真实 `strategy_id`（2026-05-13）：
+  - `start_trading()` API 显式将 `strategy_id` 传递给 `k8s_manager.create_deployment()`；
+  - `k8s_manager` 在 Docker 与 K8s 路径中均注入 `STRATEGY_ID` 环境变量与 `--strategy` 启动参数；
+  - `runner/main.py` 现在优先读取启动参数/环境变量中的真实 `strategy_id`，确保自动托管任务回写与前端选中的策略一致；
+
 > 注：自动托管链路当前接受“用户默认模型的最新 `completed` 推理结果”，其中 `model_source` 允许为 `user_default` 或 `explicit_system_model`；且要求该结果未使用兜底模型。T+5 之类的执行有效期由模型元数据中的 `target_horizon_days` 决定。
 
 ## 仪表盘口径收敛（2026-04-09）

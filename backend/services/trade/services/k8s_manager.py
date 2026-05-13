@@ -68,8 +68,17 @@ class K8sManager:
         exec_config: dict = None,
         tenant_id: str = "default",
         live_trade_config: dict = None,
+        strategy_id: str | None = None,
     ):
         """Create the strategy runtime in Docker or Kubernetes."""
+        resolved_strategy_id = str(strategy_id or "").strip()
+        if not resolved_strategy_id:
+            resolved_strategy_id = (
+                os.path.basename(strategy_file_path).replace(".py", "")
+                if strategy_file_path
+                else "default"
+            )
+
         if self.mode == "docker":
             return self._create_docker_container(
                 user_id,
@@ -78,6 +87,7 @@ class K8sManager:
                 exec_config or {},
                 tenant_id,
                 live_trade_config or {},
+                strategy_id=resolved_strategy_id,
             )
         return self._create_k8s_deployment(
             user_id,
@@ -86,6 +96,7 @@ class K8sManager:
             exec_config or {},
             tenant_id,
             live_trade_config or {},
+            strategy_id=resolved_strategy_id,
         )
 
     def _create_docker_container(
@@ -96,6 +107,7 @@ class K8sManager:
         exec_config: dict,
         tenant_id: str,
         live_trade_config: dict,
+        strategy_id: str,
     ):
         if not self.docker_client:
             return {"status": "error", "message": "Docker client not initialized"}
@@ -114,12 +126,7 @@ class K8sManager:
             except Exception:
                 pass
 
-            # Extract strategy_id from path or use default
-            strategy_id = (
-                os.path.basename(strategy_file_path).replace(".py", "")
-                if strategy_file_path
-                else "default"
-            )
+            # strategy_id is now explicitly passed
 
             env = {
                 "USER_ID": str(user_id),
@@ -194,6 +201,7 @@ class K8sManager:
         exec_config,
         tenant_id,
         live_trade_config,
+        strategy_id: str,
     ):
         if not self.api:
             return {"status": "error", "message": "K8s client not initialized"}
@@ -224,7 +232,7 @@ class K8sManager:
             image=image_path,
             image_pull_policy="Always",
             command=["python", "/app/main.py"],
-            args=["--strategy", "user_strategy", "--user_id", user_id],
+            args=["--strategy", strategy_id, "--user_id", user_id],
             resources=client.V1ResourceRequirements(
                 limits=resource_limits, requests=resource_requests
             ),
@@ -248,6 +256,7 @@ class K8sManager:
             env=[
                 client.V1EnvVar(name="USER_ID", value=user_id),
                 client.V1EnvVar(name="TENANT_ID", value=str(tenant_id or "default")),
+                client.V1EnvVar(name="STRATEGY_ID", value=strategy_id),
                 client.V1EnvVar(name="RUN_ID", value=run_id),
                 client.V1EnvVar(name="EXECUTION_CONFIG", value=json.dumps(exec_config)),
                 client.V1EnvVar(

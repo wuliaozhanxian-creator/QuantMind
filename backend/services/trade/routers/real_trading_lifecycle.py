@@ -258,6 +258,7 @@ async def start_trading(
                 },
                 tenant_id=resolved_tenant_id,
                 live_trade_config=live_config,
+                strategy_id=strategy_id,
             )
             if result.get("status") == "error":
                 raise HTTPException(status_code=500, detail=result.get("message"))
