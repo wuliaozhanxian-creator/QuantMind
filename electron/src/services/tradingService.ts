@@ -277,7 +277,7 @@ class TradingService {
                 range
             };
             if (tradingMode) {
-                params['trading_mode'] = this.normalizeTradingMode(tradingMode);
+                params['trading_mode'] = String(tradingMode).toUpperCase();
             }
             const response = await this.client.get<TradeStatsSummaryResponse | ChartDataPoint[]>(API_ENDPOINTS.TRADING_STATS, params);
             if (Array.isArray(response)) {

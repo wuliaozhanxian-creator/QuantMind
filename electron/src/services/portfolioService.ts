@@ -229,12 +229,13 @@ class PortfolioService {
      * @param userId 用户ID
      * @param range 时间范围 (1w, 1m, 3m, 6m, 1y, all)
      */
-    async getDailyReturns(userId: string, range = '1m'): Promise<ChartDataPoint[]> {
+    async getDailyReturns(userId: string, range = '1m', tradingMode?: 'real' | 'simulation'): Promise<ChartDataPoint[]> {
         try {
             return await this.client.get<ChartDataPoint[]>(API_ENDPOINTS.PORTFOLIOS_PERFORMANCE, {
                 user_id: userId,
                 range,
-                type: 'daily_pnl'
+                type: 'daily_pnl',
+                trading_mode: tradingMode?.toUpperCase()
             });
         } catch (error) {
             console.warn('获取日收益数据失败:', error);
@@ -246,10 +247,11 @@ class PortfolioService {
      * 获取持仓分布
      * @param userId 用户ID
      */
-    async getPositionDistribution(userId: string): Promise<PositionDistribution[]> {
+    async getPositionDistribution(userId: string, tradingMode?: 'real' | 'simulation'): Promise<PositionDistribution[]> {
         try {
             return await this.client.get<PositionDistribution[]>(API_ENDPOINTS.PORTFOLIO_DISTRIBUTION, {
-                user_id: userId
+                user_id: userId,
+                trading_mode: tradingMode?.toUpperCase()
             });
         } catch (error) {
             console.warn('获取持仓分布失败:', error);

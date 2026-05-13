@@ -153,6 +153,7 @@ async def list_portfolios(
     description="获取当前用户所有投资组合的资产分布比例（行业、资产类型等）。",
 )
 async def get_all_portfolios_distribution(
+    trading_mode: str | None = Query(None, description="交易模式过滤: REAL/SIMULATION"),
     tenant_id: str = Depends(get_current_tenant_id),
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
@@ -175,6 +176,10 @@ async def get_all_portfolios_distribution(
                 )
             )
         )
+
+        if trading_mode:
+            stmt = stmt.where(Portfolio.trading_mode == trading_mode.upper())
+
         result = await db.execute(stmt)
         positions = result.scalars().all()
         logger.info(
@@ -232,6 +237,7 @@ async def get_all_portfolios_distribution(
 )
 async def get_all_portfolios_performance(
     type: str = Query("daily_return", description="数据类型: daily_return (收益率), daily_pnl (盈亏金额)"),
+    trading_mode: str | None = Query(None, description="交易模式过滤: REAL/SIMULATION"),
     tenant_id: str = Depends(get_current_tenant_id),
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
@@ -250,8 +256,12 @@ async def get_all_portfolios_performance(
                 Portfolio.tenant_id == tenant_id,
                 Portfolio.user_id == user_id,
             )
-            .order_by(PortfolioSnapshot.snapshot_date.asc())
         )
+
+        if trading_mode:
+            stmt = stmt.where(Portfolio.trading_mode == trading_mode.upper())
+
+        stmt = stmt.order_by(PortfolioSnapshot.snapshot_date.asc())
 
         result = await db.execute(stmt)
         snapshots = result.scalars().all()

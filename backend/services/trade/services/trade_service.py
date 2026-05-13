@@ -321,11 +321,13 @@ class TradeService:
         )
         return list(result.scalars().all())
 
-    async def get_trade_statistics(self, tenant_id: str, user_id: int, portfolio_id: int | None = None) -> dict:
+    async def get_trade_statistics(self, tenant_id: str, user_id: int, portfolio_id: int | None = None, trading_mode: TradingMode | None = None) -> dict:
         """Get trade statistics"""
         conditions = [Trade.tenant_id == tenant_id, Trade.user_id == user_id]
         if portfolio_id:
             conditions.append(Trade.portfolio_id == portfolio_id)
+        if trading_mode:
+            conditions.append(Trade.trading_mode == trading_mode)
 
         summary_stmt = select(
             func.count(Trade.id).label("total_trades"),

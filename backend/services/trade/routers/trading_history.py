@@ -104,14 +104,24 @@ async def get_trades_by_order(
 @router.get("/stats/summary")
 async def get_trade_statistics(
     portfolio_id: int = None,
+    trading_mode: str | None = None,
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
     redis: RedisClient = Depends(get_redis),
 ):
     """Get trade statistics"""
     user_id = _require_user_id(auth.user_id)
+    
+    normalized_trading_mode = None
+    if trading_mode is not None:
+        try:
+            normalized_trading_mode = TradingMode(str(trading_mode).upper())
+        except ValueError:
+            # Silently ignore or raise 422 if strictness is preferred
+            pass
+
     trade_service = TradeService(db, redis)
-    stats = await trade_service.get_trade_statistics(auth.tenant_id, user_id, portfolio_id)
+    stats = await trade_service.get_trade_statistics(auth.tenant_id, user_id, portfolio_id, normalized_trading_mode)
     logger.info(
         "trade stats ready: tenant_id=%s user_id=%s portfolio_id=%s total_trades=%s daily_points=%s",
         auth.tenant_id,

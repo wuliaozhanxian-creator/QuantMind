@@ -223,8 +223,14 @@ const ManualTaskPage: React.FC<ManualTaskPageProps> = ({ tradingMode, onBack }) 
     const filteredStrategyOptions = useMemo(() => {
         const q = strategySearch.toLowerCase().trim();
         return strategies
-            .filter((s) => s.is_verified && /^\d+$/.test(s.id))
-            .filter(s => s.name.toLowerCase().includes(q) || s.id.toLowerCase().includes(q));
+            .filter((s) => !s.is_system) // 过滤掉系统模板，只显示个人策略
+            .filter(s => s.name.toLowerCase().includes(q) || s.id.toLowerCase().includes(q))
+            .sort((a, b) => {
+                const idA = Number(a.id);
+                const idB = Number(b.id);
+                if (!isNaN(idA) && !isNaN(idB)) return idA - idB;
+                return String(a.id).localeCompare(String(b.id));
+            });
     }, [strategies, strategySearch]);
 
     const strategyOptions = useMemo(
@@ -493,10 +499,58 @@ const ManualTaskPage: React.FC<ManualTaskPageProps> = ({ tradingMode, onBack }) 
                         <div className="text-[11px] text-gray-500 font-medium">采用 5 步向导式执行流程，经由 Hash 核对后推送到 QMT 柜台</div>
                     </div>
                 </div>
-                <button onClick={onBack} className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl border border-gray-200 text-xs font-bold text-gray-600 hover:bg-gray-50 transition-colors" type="button">
-                    <ArrowLeft size={14} />
-                    返回策略管理
-                </button>
+                <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2 mr-2">
+                        <button
+                            type="button"
+                            disabled={currentStep === 0}
+                            onClick={() => {
+                                if (currentStep === 3) setPreview(null);
+                                setCurrentStep(Math.max(0, currentStep - 1));
+                            }}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-gray-200 text-xs font-bold text-gray-600 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                        >
+                            <ArrowLeft size={14} />
+                            上一步
+                        </button>
+                        {currentStep < 4 ? (
+                            <button
+                                type="button"
+                                disabled={
+                                    (currentStep === 1 && !selectedRunId) ||
+                                    (currentStep === 2 && !selectedStrategyId) ||
+                                    (currentStep === 3 && !preview)
+                                }
+                                onClick={() => {
+                                    if (currentStep === 3) {
+                                        setCurrentStep(4);
+                                    } else {
+                                        setCurrentStep(currentStep + 1);
+                                    }
+                                }}
+                                className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-xl bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md shadow-blue-100 transition-all active:scale-[0.98]"
+                            >
+                                下一步
+                                <ArrowRight size={14} />
+                            </button>
+                        ) : (
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setPreview(null);
+                                    setSelectedTaskId('');
+                                    setSelectedTask(null);
+                                    setLogs([]);
+                                    setCurrentStep(0);
+                                }}
+                                className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 transition-all"
+                            >
+                                完成任务
+                                <CheckCircle2 size={14} />
+                            </button>
+                        )}
+                    </div>
+                </div>
             </div>
 
             {!isRealMode ? (
@@ -560,36 +614,38 @@ const ManualTaskPage: React.FC<ManualTaskPageProps> = ({ tradingMode, onBack }) 
                                                 key={model.model_id}
                                                 type="button"
                                                 onClick={() => resetDownstreamFromModel(model.model_id)}
-                                                className={`group w-full flex flex-col p-2.5 rounded-xl border text-left transition-all ${
-                                                    isActive 
-                                                        ? 'bg-blue-600 border-blue-600 text-white shadow-md shadow-blue-100 scale-[1.02] z-10' 
-                                                        : 'bg-white border-transparent hover:border-blue-200 text-gray-700'
-                                                }`}
+                                                className={`group relative w-full flex flex-col p-3 rounded-xl border-2 text-left transition-all duration-300 ${isActive
+                                                        ? 'bg-gradient-to-br from-blue-50 to-white border-blue-500 shadow-xl shadow-blue-100/50 scale-[1.02] z-10'
+                                                        : 'bg-white border-gray-100 hover:border-blue-100 text-gray-700'
+                                                    }`}
                                             >
-                                                <div className="flex items-center justify-between mb-1 w-full overflow-hidden">
-                                                    <span className={`text-[11px] font-black truncate pr-2 ${isActive ? 'text-white' : 'text-slate-800'}`}>
-                                                        {name}
-                                                    </span>
+                                                <div className="flex items-center justify-between mb-1.5 w-full overflow-hidden">
+                                                    <div className="flex items-center gap-2 truncate">
+                                                        <span className={`text-[11px] font-black truncate ${isActive ? 'text-blue-950' : 'text-slate-800'}`}>
+                                                            {name}
+                                                        </span>
+                                                        {isActive && <CheckCircle2 size={12} className="text-blue-500 shrink-0" />}
+                                                    </div>
                                                     <span className="shrink-0 flex items-center gap-1">
-                                                        <span className={`px-1 rounded text-[8px] font-black uppercase tracking-tighter ${isActive ? 'bg-white/20 text-white' : 'bg-blue-50 text-blue-500'}`}>
+                                                        <span className={`px-1.5 rounded text-[8px] font-black uppercase tracking-tighter ${isActive ? 'bg-blue-500 text-white' : 'bg-blue-50 text-blue-500'}`}>
                                                             {extractModelType(model)}
                                                         </span>
-                                                        <UserIcon size={10} className={isActive ? 'text-blue-100' : 'text-blue-300'} />
+                                                        <UserIcon size={10} className={isActive ? 'text-blue-500' : 'text-blue-300'} />
                                                     </span>
                                                 </div>
                                                 <div className="flex items-center justify-between w-full">
-                                                    <div className={`font-mono text-[9px] truncate tracking-tight ${isActive ? 'text-blue-100' : 'text-slate-400'}`}>
+                                                    <div className={`font-mono text-[9px] truncate tracking-tight ${isActive ? 'text-blue-800/70' : 'text-slate-400'}`}>
                                                         ID: {model.model_id.slice(-8).toUpperCase()}
                                                     </div>
-                                                    <div className={`text-[9px] font-bold ${isActive ? 'text-blue-100' : 'text-blue-500/60'}`}>
+                                                    <div className={`text-[9px] font-bold ${isActive ? 'text-blue-700' : 'text-blue-500/60'}`}>
                                                         T+{Number(getMeta(model).target_horizon_days ?? getMeta(model).horizon_days ?? 5)}
                                                     </div>
                                                 </div>
-                                                <div className="mt-2 flex items-center gap-1.5">
-                                                    <Tag bordered={false} className={`m-0 text-[8px] px-1.5 py-0 rounded-md font-bold ${isActive ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                                                <div className="mt-2.5 flex items-center gap-1.5">
+                                                    <Tag bordered={false} className={`m-0 text-[8px] px-2 py-0 rounded-md font-bold ${isActive ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-500'}`}>
                                                         私有
                                                     </Tag>
-                                                    <span className={`text-[8px] font-bold uppercase tracking-wider ${isActive ? 'text-blue-100' : 'text-gray-400'}`}>
+                                                    <span className={`text-[8px] font-bold uppercase tracking-wider ${isActive ? 'text-blue-600/40' : 'text-gray-400'}`}>
                                                         {extractModelType(model as any)}
                                                     </span>
                                                 </div>
@@ -786,14 +842,6 @@ const ManualTaskPage: React.FC<ManualTaskPageProps> = ({ tradingMode, onBack }) 
                                                 <Sparkles className="text-amber-400" size={16} />
                                                 <p className="text-[11px] text-gray-400 font-medium">只有处于 READY 状态的模型可产生有效信号</p>
                                             </div>
-                                            <button
-                                                type="button"
-                                                onClick={() => setCurrentStep(1)}
-                                                className="px-10 py-3 rounded-2xl bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 shadow-xl shadow-blue-200/50 transition-all active:scale-[0.95] flex items-center justify-center gap-2"
-                                            >
-                                                确认模型并下一步
-                                                <ArrowRight size={14} />
-                                            </button>
                                         </div>
                                     </div>
                                 ) : (
@@ -828,15 +876,6 @@ const ManualTaskPage: React.FC<ManualTaskPageProps> = ({ tradingMode, onBack }) 
                                             展示当前模型下已完成的推理批次。每个批次包含了对全市场的股票排序与评分。
                                         </p>
                                     </div>
-                                    <button
-                                        type="button"
-                                        onClick={() => setCurrentStep(2)}
-                                        disabled={!selectedRunId}
-                                        className="px-8 py-2.5 rounded-2xl bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-xl shadow-blue-200/50 transition-all active:scale-[0.95] flex items-center gap-2"
-                                    >
-                                        确认并进入下一步
-                                        <ArrowRight size={14} />
-                                    </button>
                                 </div>
 
                                 <div className="flex flex-col md:flex-row gap-2">
@@ -1008,15 +1047,6 @@ const ManualTaskPage: React.FC<ManualTaskPageProps> = ({ tradingMode, onBack }) 
                                             选定经过验证的策略，系统将基于推理信号生成调仓方案。
                                         </p>
                                     </div>
-                                    <button
-                                        type="button"
-                                        onClick={() => setCurrentStep(3)}
-                                        disabled={!selectedStrategyId}
-                                        className="px-8 py-2.5 rounded-2xl bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-xl shadow-blue-200/50 transition-all active:scale-[0.95] flex items-center gap-2"
-                                    >
-                                        确认并进入下一步
-                                        <ArrowRight size={14} />
-                                    </button>
                                 </div>
 
                                 <div className="relative">
@@ -1319,22 +1349,20 @@ const ManualTaskPage: React.FC<ManualTaskPageProps> = ({ tradingMode, onBack }) 
                                             <button
                                                 type="button"
                                                 onClick={() => {
-                                                    if (preview) setCurrentStep(4);
-                                                    else void generatePreview();
+                                                    if (!preview) void generatePreview();
                                                 }}
-                                                disabled={previewLoading}
-                                                className={`w-full py-3.5 rounded-2xl text-[13px] font-black transition-all active:scale-[0.95] flex items-center justify-center gap-2 ${
-                                                    preview 
-                                                        ? 'bg-rose-600 text-white hover:bg-rose-700 shadow-xl shadow-rose-200/50' 
+                                                disabled={previewLoading || !!preview}
+                                                className={`w-full py-3.5 rounded-2xl text-[13px] font-black transition-all active:scale-[0.95] flex items-center justify-center gap-2 ${preview
+                                                        ? 'bg-emerald-50 text-emerald-600 border border-emerald-100 cursor-default'
                                                         : 'bg-blue-600 text-white hover:bg-blue-700 shadow-xl shadow-blue-200/50'
-                                                }`}
+                                                    }`}
                                             >
                                                 {previewLoading ? (
                                                     <Loader2 size={16} className="animate-spin" />
                                                 ) : preview ? (
-                                                    <>确认并前往提交 <ArrowRight size={14} /></>
+                                                    <>预案计算完成 <CheckCircle2 size={14} /></>
                                                 ) : (
-                                                    <>生成调仓预案 <Play size={14} fill="currentColor" /></>
+                                                    <>开始计算调仓预案 <Play size={14} fill="currentColor" /></>
                                                 )}
                                             </button>
                                             <button 

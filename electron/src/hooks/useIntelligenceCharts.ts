@@ -398,9 +398,9 @@ export const useIntelligenceCharts = (userId: string = 'current', options?: { au
         try {
             // 根据模式动态选择接口
             const [dailyReturn, tradeCount, positionRatio, account, ledgerDaily] = await Promise.all([
-                portfolioService.getDailyReturns(resolvedUserId),
+                portfolioService.getDailyReturns(resolvedUserId, '1m', mode),
                 tradingService.getTradeStats(resolvedUserId, '1w', mode),
-                portfolioService.getPositionDistribution(resolvedUserId),
+                portfolioService.getPositionDistribution(resolvedUserId, mode),
                 realTradingService.getRuntimeAccount(resolvedUserId, 'default', mode).catch(() => null),
                 isLive 
                     ? realTradingService.getAccountLedgerDaily(30, resolvedUserId).catch(() => [])
