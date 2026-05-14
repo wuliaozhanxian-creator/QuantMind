@@ -736,9 +736,6 @@ step8_build_docker() {
             build_success=true
         fi
     fi
-            build_success=true
-        fi
-    fi
 
     if ! $build_success; then
         log_error "Docker 镜像构建失败"

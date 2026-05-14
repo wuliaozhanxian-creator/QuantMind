@@ -106,10 +106,10 @@ flowchart LR
 在全新的 Ubuntu 服务器上执行：
 
 ```bash
-curl -fsSL https://gitee.com/qusong0627/quantmind/raw/master/deploy/quick-deploy.sh | sudo bash -s -- --yes
+curl -fsSL https://gitee.com/qusong0627/quantmind/raw/master/deploy/quick-deploy.sh | sudo bash
 ```
 
-部署完成后访问：`http://<服务器IP>`
+脚本将引导您交互式完成部署配置。
 
 **默认账号：** `admin` / `admin123`
 
