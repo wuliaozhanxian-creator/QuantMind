@@ -3,14 +3,16 @@
 
 FROM python:3.10-slim-bookworm
 
+# pip 镜像源参数（构建时可传入）
 ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+ARG PIP_TRUSTED_HOST=mirrors.aliyun.com
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_INDEX_URL=${PIP_INDEX_URL} \
-    PIP_TRUSTED_HOST=mirrors.aliyun.com \
+    PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST} \
     PYTHONPATH=/app \
     SERVICE_MODE=all
 

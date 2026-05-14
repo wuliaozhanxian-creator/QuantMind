@@ -1,10 +1,11 @@
 #!/bin/bash
 #===============================================================================
-# QuantMind 一键部署脚本 v5.0
+# QuantMind 一键部署脚本 v5.1
 # 适用于 Ubuntu 22.04/24.04
 #
 # 特性:
-#   - 国内镜像加速 (Docker)
+#   - 国内镜像加速 (Docker, npm, pip)
+#   - 支持 pip 镜像源选择（阿里云/腾讯云）
 #   - 支持断点续传
 #   - 自动健康检查
 #
@@ -17,6 +18,10 @@
 #   sudo ./deploy.sh --resume           # 从断点继续
 #   sudo ./deploy.sh --reset            # 重置进度重新部署
 #   sudo ./deploy.sh --force-sync       # 强制同步代码（覆盖本地修改）
+#
+# 环境变量:
+#   QUANTMIND_PIP_MIRROR  # 指定 pip 镜像源（跳过交互选择）
+#                         # 例如: QUANTMIND_PIP_MIRROR=https://mirrors.aliyun.com/pypi/simple/
 #
 # 注意:
 #   前端已集成到桌面客户端，部署完成后请下载客户端配置服务器地址使用
@@ -65,6 +70,11 @@ NPM_MIRRORS=(
     "https://registry.npmmirror.com"
     "https://mirrors.cloud.tencent.com/npm"
 )
+
+# pip 镜像源配置（用户选择）
+PIP_MIRROR_ALIYUN="https://mirrors.aliyun.com/pypi/simple/"
+PIP_MIRROR_TENCENT="https://mirrors.cloud.tencent.com/pypi/simple/"
+PIP_MIRROR_URL="${QUANTMIND_PIP_MIRROR:-}"
 
 # 解析参数
 BACKEND_ONLY=false
@@ -657,6 +667,7 @@ step8_build_docker() {
     cd "$PROJECT_DIR"
 
     log_info "构建 QuantMind OSS 镜像 (5-10分钟)..."
+    log_info "使用 pip 镜像源: $PIP_MIRROR_URL"
 
     # 预选可用镜像源（只配置一次，避免反复重启 Docker）
     local build_mirror
@@ -679,8 +690,16 @@ step8_build_docker() {
         fi
     fi
 
+    # 提取 trusted host
+    local pip_trusted_host
+    pip_trusted_host=$(echo "$PIP_MIRROR_URL" | sed -E 's|https?://([^/]+).*|\1|')
+
     local build_success=false
-    if docker build -t quantmind-oss:latest -f docker/Dockerfile.oss . 2>&1; then
+    if docker build \
+        -t quantmind-oss:latest \
+        --build-arg PIP_INDEX_URL="$PIP_MIRROR_URL" \
+        --build-arg PIP_TRUSTED_HOST="$pip_trusted_host" \
+        -f docker/Dockerfile.oss . 2>&1; then
         build_success=true
     fi
 
@@ -696,7 +715,11 @@ step8_build_docker() {
             sleep 5
         done
 
-        if docker build -t quantmind-oss:latest -f docker/Dockerfile.oss . 2>&1; then
+        if docker build \
+            -t quantmind-oss:latest \
+            --build-arg PIP_INDEX_URL="$PIP_MIRROR_URL" \
+            --build-arg PIP_TRUSTED_HOST="$pip_trusted_host" \
+            -f docker/Dockerfile.oss . 2>&1; then
             build_success=true
         fi
     fi
@@ -1142,6 +1165,51 @@ show_welcome() {
     echo ""
 }
 
+# 选择 pip 镜像源
+select_pip_mirror() {
+    # 如果已通过环境变量设置，直接使用
+    if [[ -n "$PIP_MIRROR_URL" ]]; then
+        log_info "使用环境变量指定的 pip 镜像源: $PIP_MIRROR_URL"
+        return 0
+    fi
+
+    # 自动确认模式，默认使用阿里云
+    if $AUTO_YES; then
+        PIP_MIRROR_URL="$PIP_MIRROR_ALIYUN"
+        log_info "自动模式，使用阿里云 pip 镜像源"
+        return 0
+    fi
+
+    # 检查是否为交互式终端
+    if [[ ! -t 0 ]]; then
+        log_warn "非交互式终端，使用默认阿里云 pip 镜像源"
+        PIP_MIRROR_URL="$PIP_MIRROR_ALIYUN"
+        return 0
+    fi
+
+    echo ""
+    echo -e "${YELLOW}请选择 pip 镜像源（用于 Docker 镜像构建）:${NC}"
+    echo "  1) 阿里云镜像源 (推荐)"
+    echo "  2) 腾讯云镜像源"
+    echo ""
+    echo -e -n "请输入选择 [1]: "
+    read -r choice
+    case "${choice:-1}" in
+        1)
+            PIP_MIRROR_URL="$PIP_MIRROR_ALIYUN"
+            log_info "已选择阿里云 pip 镜像源"
+            ;;
+        2)
+            PIP_MIRROR_URL="$PIP_MIRROR_TENCENT"
+            log_info "已选择腾讯云 pip 镜像源"
+            ;;
+        *)
+            log_warn "无效选择，使用默认阿里云 pip 镜像源"
+            PIP_MIRROR_URL="$PIP_MIRROR_ALIYUN"
+            ;;
+    esac
+}
+
 # 确认部署
 confirm_deploy() {
     # 自动确认模式
@@ -1179,6 +1247,9 @@ main() {
 
     check_root
     check_system
+
+    # 选择 pip 镜像源（在系统更新前）
+    select_pip_mirror
 
     # 确保脚本有执行权限
     ensure_execute_permission "$0"
