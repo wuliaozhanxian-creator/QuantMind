@@ -304,17 +304,12 @@ async def sync_official_data_update(
 ):
     _ = current_user
 
-    if not DAILY_SYNC_SHELL_SCRIPT.exists():
-        raise HTTPException(
-            status_code=500,
-            detail=f"同步脚本不存在: {DAILY_SYNC_SHELL_SCRIPT}",
-        )
+    # OSS 部署模式：在 Docker 容器内执行同步脚本
+    # 脚本路径在容器内为 /app/scripts/data/maintenance/run_daily_pg_parquet_and_qlib_sync.sh
+    script_path = "/app/scripts/data/maintenance/run_daily_pg_parquet_and_qlib_sync.sh"
 
-    # 简化的执行命令：直接运行 bash 脚本
-    cmd = ["bash", str(DAILY_SYNC_SHELL_SCRIPT)]
-    
-    # 注意：我们的 shell 脚本目前不接受这些参数，它们通过环境变量读取
-    # 如果未来需要透传参数，可以在此处添加。目前保持简洁。
+    # 使用 docker exec 在 quantmind 容器内执行
+    cmd = ["docker", "exec", "quantmind", "bash", script_path]
 
     try:
         # 给同步任务更长的超时时间（30分钟）
