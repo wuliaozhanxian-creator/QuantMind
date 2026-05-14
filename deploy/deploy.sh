@@ -4,17 +4,16 @@
 # 适用于 Ubuntu 22.04/24.04
 #
 # 特性:
+#   - 交互式安装，逐步确认
 #   - 国内镜像加速 (Docker, npm, pip, apt)
 #   - 支持镜像源选择（阿里云/腾讯云，pip 和 apt 统一）
 #   - 支持断点续传
 #   - 自动健康检查
 #
 # 使用方式:
-#   chmod +x deploy.sh
-#   sudo ./deploy.sh                    # 完整部署（后端服务）
+#   sudo ./deploy.sh                    # 交互式部署
 #   sudo ./deploy.sh 192.168.1.100      # 指定服务器地址显示
-#   sudo ./deploy.sh --yes              # 自动确认，无需交互
-#   sudo ./deploy.sh --backend-only     # 仅部署后端（等同于完整部署）
+#   sudo ./deploy.sh --backend-only     # 仅部署后端
 #   sudo ./deploy.sh --resume           # 从断点继续
 #   sudo ./deploy.sh --reset            # 重置进度重新部署
 #   sudo ./deploy.sh --force-sync       # 强制同步代码（覆盖本地修改）
@@ -79,7 +78,6 @@ MIRROR_CHOICE="${QUANTMIND_MIRROR:-}"
 # 解析参数
 BACKEND_ONLY=false
 FRONTEND_ONLY=false
-AUTO_YES=false
 RESUME=false
 RESET=false
 FORCE_SYNC=false
@@ -89,13 +87,12 @@ for arg in "$@"; do
     case $arg in
         --backend-only) BACKEND_ONLY=true ;;
         --frontend-only) FRONTEND_ONLY=true ;;
-        --yes) AUTO_YES=true ;;
         --resume) RESUME=true ;;
         --reset) RESET=true ;;
         --force-sync) FORCE_SYNC=true ;;
         --*)
             echo "错误: 未知参数: $arg" >&2
-            echo "支持参数: --yes --backend-only --frontend-only --resume --reset --force-sync [server_ip]" >&2
+            echo "支持参数: --backend-only --frontend-only --resume --reset --force-sync [server_ip]" >&2
             exit 1
             ;;
         *)
@@ -1192,13 +1189,6 @@ select_mirror() {
         return 0
     fi
 
-    # 自动确认模式，默认使用阿里云
-    if $AUTO_YES; then
-        MIRROR_CHOICE="$MIRROR_ALIYUN"
-        log_info "自动模式，使用阿里云镜像源"
-        return 0
-    fi
-
     # 检查是否为交互式终端
     if [[ ! -t 0 ]]; then
         log_warn "非交互式终端，使用默认阿里云镜像源"
@@ -1231,15 +1221,10 @@ select_mirror() {
 
 # 确认部署
 confirm_deploy() {
-    # 自动确认模式
-    if $AUTO_YES; then
-        return 0
-    fi
-
     # 检查是否为交互式终端
     if [[ ! -t 0 ]]; then
         log_error "检测到非交互式终端，无法执行人工确认"
-        log_info "如需继续，请显式使用: sudo ./deploy.sh --yes"
+        log_info "请使用交互式终端运行: sudo ./deploy.sh"
         exit 1
     fi
 
