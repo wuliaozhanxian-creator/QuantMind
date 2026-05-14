@@ -1186,9 +1186,9 @@ select_mirror() {
         return 0
     fi
 
-    # 检查是否为交互式终端
-    if [[ ! -t 0 ]]; then
-        log_warn "非交互式终端，使用默认阿里云镜像源"
+    # 检查是否有可用的 tty
+    if [[ ! -e /dev/tty ]]; then
+        log_warn "无法访问 /dev/tty，使用默认阿里云镜像源"
         MIRROR_CHOICE="$MIRROR_ALIYUN"
         return 0
     fi
@@ -1199,7 +1199,7 @@ select_mirror() {
     echo "  2) 腾讯云镜像源"
     echo ""
     echo -e -n "请输入选择 [1]: "
-    read -r choice
+    read -r choice < /dev/tty
     case "${choice:-1}" in
         1)
             MIRROR_CHOICE="$MIRROR_ALIYUN"
@@ -1218,15 +1218,14 @@ select_mirror() {
 
 # 确认部署
 confirm_deploy() {
-    # 检查是否为交互式终端
-    if [[ ! -t 0 ]]; then
-        log_error "检测到非交互式终端，无法执行人工确认"
-        log_info "请使用交互式终端运行: sudo ./deploy.sh"
+    # 检查是否有可用的 tty（支持 curl | bash 方式）
+    if [[ ! -e /dev/tty ]]; then
+        log_error "无法访问 /dev/tty，请直接在终端运行部署脚本"
         exit 1
     fi
 
     echo -e -n "是否继续部署？ [y/N]: "
-    read -r response
+    read -r response < /dev/tty
     case "$response" in
         [yY][eE][sS]|[yY])
             return 0
