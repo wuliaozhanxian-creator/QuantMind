@@ -84,6 +84,9 @@ services:
       - DB_PASSWORD=${DB_PASSWORD:-quantmind2026}
       - DATABASE_URL=postgresql+asyncpg://quantmind:quantmind2026@db:5432/quantmind
 
+      # 远程数据源配置（用于从官方数据库拉取增量数据）
+      - SOURCE_DATABASE_URL=${SOURCE_DATABASE_URL:-postgresql://readonly_sync:quantmind_sync_2026@139.199.75.121:5432/quantmind}
+
       # Redis 配置
       - REDIS_HOST=redis
       - REDIS_PORT=6379

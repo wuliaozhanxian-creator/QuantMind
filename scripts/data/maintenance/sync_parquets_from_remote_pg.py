@@ -150,7 +150,13 @@ def fetch_incremental_rows(
             chunks.append(chunk.reindex(columns=selected_columns))
     if not chunks:
         return pd.DataFrame(columns=selected_columns)
-    return pd.concat(chunks, ignore_index=True)
+    result = pd.concat(chunks, ignore_index=True)
+
+    # 类型转换：ind_code_l1 远程是 string，本地 parquet 是 double
+    if "ind_code_l1" in result.columns:
+        result["ind_code_l1"] = pd.to_numeric(result["ind_code_l1"], errors="coerce")
+
+    return result
 
 
 def write_merged_parquet(

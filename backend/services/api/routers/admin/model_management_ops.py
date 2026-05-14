@@ -307,16 +307,24 @@ async def sync_official_data_update(
     # OSS 部署模式：直接在当前容器内执行 Python 同步脚本
     # 脚本路径在容器内为 /app/scripts/data/maintenance/
     scripts_dir = Path("/app/scripts/data/maintenance")
+    processing_dir = Path("/app/scripts/data/processing")
 
-    # 按顺序执行同步步骤
+    # 按顺序执行同步步骤（完整流程：远程PG → parquet → qlib/stock_daily → 收益计算）
     steps = [
-        ("Step 1: 同步 stock_daily_latest", "sync_stock_daily_latest_from_parquet.py"),
-        ("Step 2: 同步 qlib_data", "sync_qlib_from_fundamental_parquet.py"),
+        ("Step 0: 从远程PG拉取最新数据", "sync_parquets_from_remote_pg.py"),
+        ("Step 1: 同步 qlib_data", "sync_qlib_from_fundamental_parquet.py"),
+        ("Step 2: 同步 stock_daily_latest", "sync_stock_daily_latest_from_parquet.py"),
+        ("Step 3: 滚动计算一日/三日收益", "../processing/backfill_return_fields.py"),
     ]
 
     results = []
     for step_name, script_name in steps:
-        script_path = scripts_dir / script_name
+        # 处理相对路径
+        if script_name.startswith("../"):
+            script_path = processing_dir / script_name[3:]
+        else:
+            script_path = scripts_dir / script_name
+
         if not script_path.exists():
             results.append({
                 "step": step_name,
@@ -325,7 +333,11 @@ async def sync_official_data_update(
             })
             continue
 
+        # 收益计算脚本需要 --recent-days 参数
         cmd = ["python", str(script_path)]
+        if "backfill_return" in script_name:
+            cmd.extend(["--recent-days", "5"])
+
         try:
             proc = subprocess.run(
                 cmd,
