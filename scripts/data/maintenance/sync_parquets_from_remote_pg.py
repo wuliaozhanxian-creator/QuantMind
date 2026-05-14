@@ -347,6 +347,19 @@ def sync_one(engine, spec: SyncSpec, chunk_size: int, dry_run: bool) -> None:
         LOGGER.info("%s metadata sidecar refreshed", spec.target_path.name)
 
 
+def invalidate_data_status_cache() -> bool:
+    """清除 Redis 中的数据状态缓存，确保前端获取最新数据。"""
+    try:
+        from backend.shared.redis_sentinel_client import get_redis_sentinel_client
+        redis = get_redis_sentinel_client()
+        redis.delete("qm:admin:data_status")
+        LOGGER.info("Redis cache invalidated: qm:admin:data_status")
+        return True
+    except Exception as e:
+        LOGGER.warning("Failed to invalidate Redis cache: %s", e)
+        return False
+
+
 def main() -> None:
     args = parse_args()
     root = project_root()
@@ -357,8 +370,17 @@ def main() -> None:
         SyncSpec("fundamental_aligned", root / "db" / "custom" / "fundamental_aligned.parquet"),
         SyncSpec("feature_snapshots", root / "db" / "feature_snapshots" / "model_features_2026.parquet"),
     ]
+    any_synced = False
     for spec in specs:
+        local_rows, local_min, local_max = get_local_coverage(spec.target_path)
+        remote_rows, remote_min, remote_max = get_remote_coverage(engine, spec.source_table)
+        if remote_max is not None and (local_max is None or remote_max > local_max):
+            any_synced = True
         sync_one(engine, spec, chunk_size=args.chunk_size, dry_run=args.dry_run)
+
+    # 同步完成后清除 Redis 缓存
+    if any_synced and not args.dry_run:
+        invalidate_data_status_cache()
 
 
 if __name__ == "__main__":

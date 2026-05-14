@@ -179,6 +179,19 @@ def upsert_rows(db_url: str, columns: list[str], rows: list[tuple], batch_size: 
         conn.close()
 
 
+def invalidate_data_status_cache() -> bool:
+    """清除 Redis 中的数据状态缓存，确保前端获取最新数据。"""
+    try:
+        from backend.shared.redis_sentinel_client import get_redis_sentinel_client
+        redis = get_redis_sentinel_client()
+        redis.delete("qm:admin:data_status")
+        LOGGER.info("Redis cache invalidated: qm:admin:data_status")
+        return True
+    except Exception as e:
+        LOGGER.warning("Failed to invalidate Redis cache: %s", e)
+        return False
+
+
 def main() -> None:
     args = parse_args()
     root = project_root()
@@ -218,6 +231,9 @@ def main() -> None:
 
     rows = to_rows(normalized, list(normalized.columns))
     upsert_rows(db_url, list(normalized.columns), rows, args.batch_size)
+
+    # 同步完成后清除 Redis 缓存
+    invalidate_data_status_cache()
 
     local_rows, local_min, local_max = get_table_coverage(engine)
     LOGGER.info(

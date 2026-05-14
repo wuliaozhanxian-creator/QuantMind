@@ -130,6 +130,20 @@ def update_instruments(instruments_dir: Path, latest_date: str, dry_run: bool) -
             txt_file.write_text("\n".join(output) + "\n")
 
 
+def invalidate_data_status_cache() -> bool:
+    """清除 Redis 中的数据状态缓存，确保前端获取最新数据。"""
+    try:
+        import os
+        from backend.shared.redis_sentinel_client import get_redis_sentinel_client
+        redis = get_redis_sentinel_client()
+        redis.delete("qm:admin:data_status")
+        print("Redis cache invalidated: qm:admin:data_status")
+        return True
+    except Exception as e:
+        print(f"Warning: Failed to invalidate Redis cache: {e}")
+        return False
+
+
 def main() -> None:
     args = parse_args()
     parquet_path = Path(args.parquet_path).expanduser().resolve()
@@ -172,6 +186,10 @@ def main() -> None:
     if not args.dry_run:
         cal_path.write_text("\n".join(full_calendar) + "\n")
     update_instruments(instruments_dir, full_calendar[-1], args.dry_run)
+
+    # 清除 Redis 缓存，确保前端获取最新数据状态
+    if not args.dry_run:
+        invalidate_data_status_cache()
 
     print(
         f"qlib_data synced: symbols={updated_symbols}, dates={missing_dates[0]}..{missing_dates[-1]}, "
