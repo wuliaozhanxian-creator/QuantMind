@@ -72,7 +72,7 @@ async def _load_sdl_day_map(session, trade_date: date) -> dict[str, dict[str, An
             COALESCE(pb, 0) AS pb,
             COALESCE(roe, 0) AS roe,
             COALESCE(adj_factor, 1) AS adj_factor,
-            COALESCE(turnover_rate, 0) * 100 AS turnover_rate,
+            COALESCE(turnover_rate, 0) AS turnover_rate,
             COALESCE(amount, 0) AS amount,
             COALESCE(total_mv, 0) AS total_mv,
             COALESCE(float_mv, 0) AS float_mv,
@@ -717,6 +717,7 @@ async def get_available_models(tid: str, uid: str) -> dict[str, Any]:
                                         AND um.user_id = ir.user_id
                                         AND um.model_id = ir.model_id
             WHERE ir.tenant_id = :tid AND ir.user_id = :uid AND ir.status = 'completed'
+              AND (um.status IS NULL OR um.status != 'archived')
         """
         res = await session.execute(text(sql), {"tid": tid, "uid": uid})
         models = []
