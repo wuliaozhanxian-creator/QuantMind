@@ -25,14 +25,7 @@ logger = logging.getLogger(__name__)
 _FEATURE_CATALOG_FALLBACK = Path(os.getcwd()) / "config" / "features" / "model_training_feature_catalog_v1.json"
 _ALLOWED_TARGET_MODE = {"return", "classification"}
 _ALLOWED_DEAL_PRICE = {"open", "close"}
-_TRAINING_BASE_FEATURES = [
-    "mom_ret_1d",
-    "mom_ret_5d",
-    "mom_ret_20d",
-    "liq_volume",
-    "liq_amount",
-    "liq_turnover_os",
-]
+_TRAINING_BASE_FEATURES = []
 _training_log_stream = TrainingRunLogStream()
 DEFAULT_TRAINING_IMAGE = (
     os.getenv("TRAINING_IMAGE") or "quantmind-oss:latest"
@@ -165,9 +158,16 @@ def _normalize_context(context: dict[str, Any]) -> dict[str, Any]:
     if slippage < 0:
         raise HTTPException(status_code=422, detail="context.slippage must be >= 0")
 
-    deal_price = str(context.get("deal_price") or context.get("dealPrice") or "close").strip().lower()
+    deal_price = str(context.get("deal_price") or context.get("dealPrice") or "open").strip().lower()
     if deal_price not in _ALLOWED_DEAL_PRICE:
         raise HTTPException(status_code=422, detail="context.deal_price must be one of: open, close")
+
+    limit_up_weight = _coerce_float(context.get("limit_up_weight"))
+    if limit_up_weight is None:
+        limit_up_weight = _coerce_float(context.get("limitUpWeight"))
+    limit_up_weight = limit_up_weight if limit_up_weight is not None else 0.5
+    if limit_up_weight < 0 or limit_up_weight > 1:
+        raise HTTPException(status_code=422, detail="context.limit_up_weight must be between 0 and 1")
 
     return {
         "initial_capital": initial_capital,
@@ -175,6 +175,7 @@ def _normalize_context(context: dict[str, Any]) -> dict[str, Any]:
         "commission_rate": commission_rate,
         "slippage": slippage,
         "deal_price": deal_price,
+        "limit_up_weight": limit_up_weight,
     }
 
 

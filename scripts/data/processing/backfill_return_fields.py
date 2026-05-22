@@ -3,8 +3,12 @@
 
 计算逻辑:
   adj_close = close * adj_factor
-  return_1d = adj_close[t+1] / adj_close[t] - 1  (次日收益率)
-  return_3d = adj_close[t+3] / adj_close[t] - 1  (3日收益率)
+  return_1d = (adj_close[t+1] / adj_close[t] - 1) * 100  (次日收益率，百分比点)
+  return_3d = (adj_close[t+3] / adj_close[t] - 1) * 100  (3日收益率，百分比点)
+
+单位说明:
+  根据 fundamental_aligned_填充规范，return_1d/return_3d 存储为"百分比点"格式。
+  例如: -1.32% 存储为 -1.32，而非 -0.0132。
 
 用法:
   # 全量回填
@@ -141,11 +145,11 @@ def backfill_return_fields(conn, full: bool = False, recent_days: int = 5, dry_r
             SET
                 return_1d = CASE
                     WHEN lc.close_next_1d IS NOT NULL AND NULLIF(lc.adj_close, 0) IS NOT NULL
-                    THEN lc.close_next_1d / lc.adj_close - 1
+                    THEN (lc.close_next_1d / lc.adj_close - 1) * 100
                 END,
                 return_3d = CASE
                     WHEN lc.close_next_3d IS NOT NULL AND NULLIF(lc.adj_close, 0) IS NOT NULL
-                    THEN lc.close_next_3d / lc.adj_close - 1
+                    THEN (lc.close_next_3d / lc.adj_close - 1) * 100
                 END
             FROM lead_calc lc
             INNER JOIN targets t ON t.row_id = lc.row_id

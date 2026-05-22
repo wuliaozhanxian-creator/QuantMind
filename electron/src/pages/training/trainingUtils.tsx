@@ -42,6 +42,7 @@ export interface TrainingContext {
   commissionRate: number;
   slippage: number;
   dealPrice: DealPrice;
+  limitUpWeight: number;
 }
 
 export interface TrainingRequestPayload {
@@ -230,25 +231,20 @@ export const DEFAULT_FEATURE_CATEGORIES: FeatureCategory[] = [
 ];
 
 export const PRESET_DEFAULT_FEATURES = [
-  'open', 'high', 'low', 'close', 'volume', 'factor',
-  'mom_ret_1d', 'mom_ret_5d', 'mom_ret_10d', 'mom_ret_20d',
-  'mom_ma_gap_5', 'mom_ma_gap_20', 'mom_macd_hist', 'mom_rsi_14',
-  'mom_kdj_k', 'mom_breakout_20d',
-  'vol_std_20', 'vol_atr_14', 'vol_parkinson_20', 'vol_gk_20',
-  'vol_rs_20', 'vol_downside_20', 'vol_realized_rv', 'vol_jump_zadj',
-  'liq_volume', 'liq_amount', 'liq_turnover_os',
-  'liq_volume_ma_20', 'liq_volume_ratio_5', 'liq_amount_ma_20', 'liq_amount_ratio_5',
-  'liq_mfi_14', 'liq_amihud_20', 'liq_amihud_60', 'liq_accdist_20',
-  'flow_net_amount', 'flow_net_amount_ratio', 'flow_large_net_amount',
-  'flow_vpin', 'flow_vpin_ma_5', 'flow_vpin_ma_20',
-  'style_ln_mv_total', 'style_ln_mv_float', 'style_beta_20', 'style_beta_60',
-  'style_idio_vol_20', 'style_residual_ret_20',
-  'ind_ret_1d', 'ind_ret_20d', 'ind_strength_20', 'ind_momentum_rank_20',
+  'mom_ret_5d', 'mom_ret_20d', 'mom_ret_60d', 'mom_ret_120d', 'mom_ma_gap_5', 
+  'mom_ma_gap_20', 'mom_ma_gap_60', 'mom_macd_hist', 'mom_rsi_14', 'mom_breakout_20d',
+  'vol_std_10', 'vol_std_20', 'vol_std_60', 'vol_atr_14', 'vol_parkinson_20', 
+  'vol_downside_20', 'vol_realized_rv',
+  'liq_turnover_tl', 'liq_volume_ratio_5', 'liq_volume_ratio_20', 'liq_amount_ma_20', 
+  'liq_avg_trade_size', 'liq_obv_20', 'liq_amihud_20', 'liq_amihud_60', 'liq_mfi_14',
+  'flow_net_amount_ratio', 'flow_large_net_ratio', 'flow_net_order_ratio', 'flow_vpin_ma_20', 
+  'micro_imbalance_volume', 'micro_effective_spread', 'micro_pressure_score', 'micro_jump_flag',
+  'style_ln_mv_float', 'style_bp', 'style_ep_ttm', 'style_beta_60', 'style_idio_vol_60', 
+  'style_residual_ret_20', 'style_valuation_composite', 'style_size_percentile', 'style_value_percentile',
+  'ind_relative_volume_20', 'ind_relative_volatility_20', 'ind_strength_20', 'ind_momentum_rank_20', 'ind_value_rank',
 ];
 
-export const TRAINING_BASE_FEATURES = [
-  'mom_ret_1d', 'mom_ret_5d', 'mom_ret_20d', 'liq_volume', 'liq_amount', 'liq_turnover_os',
-];
+export const TRAINING_BASE_FEATURES: string[] = [];
 
 export const EXTRA_FEATURE_LABELS: Record<string, string> = {
   liq_volume: '当日成交量',
@@ -287,9 +283,9 @@ export const FEATURE_CATEGORY_ICON_MAP: Record<string, React.ReactNode> = {
 export const TARGET_PRESETS = [1, 3, 5, 10];
 
 export const DEFAULT_TIME_PERIODS: TimePeriodMap = {
-  train: [dayjs('2016-01-01'), dayjs('2023-12-31')],
-  val: [dayjs('2024-01-01'), dayjs('2024-12-31')],
-  test: [dayjs('2025-01-01'), dayjs('2025-12-31')],
+  train: [dayjs('2016-01-01'), dayjs('2024-12-31')],
+  val: [dayjs('2025-01-01'), dayjs('2025-09-30')],
+  test: [dayjs('2025-10-01'), dayjs('2026-05-20')],
 };
 
 export const LEGACY_DEFAULT_TIME_PERIODS: TimePeriodMap = {
@@ -302,13 +298,13 @@ export const DEFAULT_PARAMS: TrainingParams = {
   learning_rate: 0.02,
   num_leaves: 31,
   max_depth: -1,
-  min_data_in_leaf: 300,
+  min_data_in_leaf: 500,
   lambda_l1: 0.5,
   lambda_l2: 1.0,
-  feature_fraction: 0.7,
-  bagging_fraction: 0.8,
-  num_boost_round: 2000,
-  early_stopping_rounds: 50,
+  feature_fraction: 0.6,
+  bagging_fraction: 0.7,
+  num_boost_round: 1500,
+  early_stopping_rounds: 150,
   objective: 'regression',
   metric: 'l2',
 };
@@ -319,6 +315,7 @@ export const DEFAULT_CONTEXT: TrainingContext = {
   commissionRate: 0.00025,
   slippage: 0.0005,
   dealPrice: 'open',
+  limitUpWeight: 0.5,
 };
 
 export const DEFAULT_TARGET: TrainingTarget = {
@@ -500,10 +497,10 @@ export const buildBackendTrainingPayload = (
     generated_at: request.generatedAt,
     context: {
       initial_capital: request.context.initialCapital,
-      benchmark: request.context.benchmark,
       commission_rate: request.context.commissionRate,
       slippage: request.context.slippage,
       deal_price: request.context.dealPrice,
+      limit_up_weight: request.context.limitUpWeight,
     },
     lgb_params: {
       learning_rate: request.params.learning_rate,
@@ -531,15 +528,11 @@ const normalizeFeatureKeys = (features?: Array<string | null | undefined> | null
   );
 };
 
-const TRAINING_BASE_FEATURES_NAMES = [
-  'mom_ret_1d', 'mom_ret_5d', 'mom_ret_20d', 'liq_volume', 'liq_amount', 'liq_turnover_os',
-];
+const TRAINING_BASE_FEATURES_NAMES: string[] = [];
 
 export const resolveAutoAppendedFeatures = (request: TrainingRequestPayload, metadata: TrainingResult['metadata']): string[] => {
-  const requestedFeatures = normalizeFeatureKeys(metadata.requested_features?.length ? metadata.requested_features : request.selectedFeatures);
-  const autoAppendedFromMeta = normalizeFeatureKeys(metadata.auto_appended_features);
-  if (autoAppendedFromMeta.length > 0) return autoAppendedFromMeta;
-  return TRAINING_BASE_FEATURES_NAMES.filter((feature) => !requestedFeatures.includes(feature));
+  // 彻底关闭自动强制追加特征逻辑，确保特征集纯净
+  return [];
 };
 
 export const parseTrainingResult = (

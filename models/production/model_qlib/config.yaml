@@ -2,100 +2,97 @@ cache:
   dir: /tmp
 callback:
   secret: 83fcf31f7620827251fb4516adf1f928f0ed689b6238407c7d80e617f31d4e5b
-  url: http://114.132.80.206:8000/api/v1/models/training-runs/train_20260511130320_8be99c27/complete
+  url: http://114.132.80.206:8000/api/v1/models/training-runs/train_20260522210032_3189c6c7/complete
 context:
-  benchmark: SH000300
   commission_rate: 0.00025
   deal_price: open
   initial_capital: 1000000.0
+  limit_up_weight: 0.5
   slippage: 0.0005
 data:
   features:
-  - mom_ret_1d
   - mom_ret_5d
   - mom_ret_20d
-  - liq_volume
-  - liq_amount
-  - liq_turnover_os
-  - open
-  - high
-  - low
-  - close
-  - volume
-  - factor
-  - mom_ret_10d
+  - mom_ret_60d
+  - mom_ret_120d
   - mom_ma_gap_5
   - mom_ma_gap_20
+  - mom_ma_gap_60
   - mom_macd_hist
   - mom_rsi_14
-  - mom_kdj_k
   - mom_breakout_20d
+  - vol_std_10
   - vol_std_20
+  - vol_std_60
   - vol_atr_14
   - vol_parkinson_20
-  - vol_gk_20
-  - vol_rs_20
   - vol_downside_20
   - vol_realized_rv
-  - vol_jump_zadj
-  - liq_volume_ma_20
+  - liq_turnover_tl
   - liq_volume_ratio_5
+  - liq_volume_ratio_20
   - liq_amount_ma_20
-  - liq_amount_ratio_5
-  - liq_mfi_14
+  - liq_avg_trade_size
+  - liq_obv_20
   - liq_amihud_20
   - liq_amihud_60
-  - liq_accdist_20
-  - flow_net_amount
+  - liq_mfi_14
   - flow_net_amount_ratio
-  - flow_large_net_amount
-  - flow_vpin
-  - flow_vpin_ma_5
+  - flow_large_net_ratio
+  - flow_net_order_ratio
   - flow_vpin_ma_20
-  - style_ln_mv_total
+  - micro_imbalance_volume
+  - micro_effective_spread
+  - micro_pressure_score
+  - micro_jump_flag
   - style_ln_mv_float
-  - style_beta_20
+  - style_bp
+  - style_ep_ttm
   - style_beta_60
-  - style_idio_vol_20
+  - style_idio_vol_60
   - style_residual_ret_20
-  - ind_ret_1d
-  - ind_ret_20d
+  - style_valuation_composite
+  - style_size_percentile
+  - style_value_percentile
+  - ind_relative_volume_20
+  - ind_relative_volatility_20
   - ind_strength_20
   - ind_momentum_rank_20
+  - ind_value_rank
   local_dir: /tmp/feature_snapshots
   source_mode: LOCAL
-  train_end: '2023-03-31'
+  train_end: '2023-04-09'
   train_start: '2016-01-04'
 explain:
   enable_shap: true
   shap_sample_rows: 30000
   shap_split: valid
-job_name: model_train_t5_20260511130320
+job_name: model_train_t5_20260522210032
 label:
-  effective_trade_date: '2024-10-23'
+  effective_trade_date: '2024-11-03'
   label_formula: label = future_return(T, T+5) = open(T+5) / open(T) - 1
   target_horizon_days: 5
   target_mode: return
-  training_window: 2016-01-04 → 2023-03-31 | 2023-04-01 → 2024-10-17 | 2024-10-18
-    → 2026-05-08
+  training_window: 2016-01-04 → 2023-04-09 | 2023-04-10 → 2024-10-28 | 2024-10-29
+    → 2026-05-21
 model:
-  early_stopping_rounds: 50
-  num_boost_round: 2000
+  early_stopping_rounds: 150
+  num_boost_round: 1500
   params:
-    bagging_fraction: 0.8
-    feature_fraction: 0.7
+    bagging_fraction: 0.7
+    feature_fraction: 0.6
     lambda_l1: 0.5
     lambda_l2: 1
     learning_rate: 0.02
     max_depth: -1
     metric: l2
-    min_data_in_leaf: 300
+    min_data_in_leaf: 500
     num_leaves: 31
     objective: regression
   type: lightgbm
   val_ratio: null
 output:
-  cos_prefix: models/candidates/train_20260511130320_8be99c27/
+  cos_prefix: models/candidates/train_20260522210032_3189c6c7/
   log_path: /workspace/training.log
   required_artifacts:
   - model.lgb
@@ -104,14 +101,14 @@ output:
   - config.yaml
   - result.json
   result_path: /workspace/result.json
-run_id: train_20260511130320_8be99c27
+run_id: train_20260522210032_3189c6c7
 split:
   test:
-  - '2024-10-22'
-  - '2026-05-08'
+  - '2024-11-02'
+  - '2026-05-21'
   train:
   - '2016-01-04'
-  - '2023-03-31'
+  - '2023-04-09'
   valid:
-  - '2023-04-05'
-  - '2024-10-17'
+  - '2023-04-14'
+  - '2024-10-28'

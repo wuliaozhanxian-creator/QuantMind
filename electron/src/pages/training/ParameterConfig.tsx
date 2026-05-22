@@ -184,15 +184,14 @@ export const ParameterConfig: React.FC<ParameterConfigProps> = ({
                 />
               </div>
               <div>
-                <div className="mb-1 text-xs text-slate-500">基准指数</div>
+                <div className="mb-1 text-xs text-slate-500">成交价格</div>
                 <Select
-                  value={context.benchmark}
+                  value={context.dealPrice}
                   className="w-full"
-                  onChange={(value) => onContextChange({ ...context, benchmark: value })}
+                  onChange={(value) => onContextChange({ ...context, dealPrice: value as DealPrice })}
                   options={[
-                    { label: '沪深300', value: 'SH000300' },
-                    { label: '中证500', value: 'SH000905' },
-                    { label: '中证1000', value: 'SH000852' },
+                    { label: '开盘价 (open)', value: 'open' },
+                    { label: '收盘价 (close)', value: 'close' },
                   ]}
                 />
               </div>
@@ -218,16 +217,16 @@ export const ParameterConfig: React.FC<ParameterConfigProps> = ({
                   onChange={(value) => onContextChange({ ...context, slippage: Number(value ?? context.slippage) })}
                 />
               </div>
-              <div className="md:col-span-2">
-                <div className="mb-1 text-xs text-slate-500">成交价格</div>
-                <Select
-                  value={context.dealPrice}
+
+              <div>
+                <div className="mb-1 text-xs text-slate-500">涨停软降权 (0~1)</div>
+                <InputNumber
+                  value={context.limitUpWeight ?? 0.5}
+                  min={0}
+                  max={1}
+                  step={0.1}
                   className="w-full"
-                  onChange={(value) => onContextChange({ ...context, dealPrice: value as DealPrice })}
-                  options={[
-                    { label: '开盘价 (open)', value: 'open' },
-                    { label: '收盘价 (close)', value: 'close' },
-                  ]}
+                  onChange={(value) => onContextChange({ ...context, limitUpWeight: Number(value ?? context.limitUpWeight ?? 0.5) })}
                 />
               </div>
             </div>

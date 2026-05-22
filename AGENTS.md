@@ -81,6 +81,12 @@ Required `.env` keys (defaults in `docker-compose.yml`):
 - Python: Line length 88, use ruff for linting/formatting
 - TypeScript: Run `npm run typecheck` before committing frontend changes
 
+## Development Constraints (CRITICAL)
+
+- **Single-Machine Deployment**: The current project is a standalone/single-machine project. After completing code modifications, always promptly restart or rebuild the Docker container to apply changes.
+- **Database Access Restriction**: Aside from the project's own internal database, the system ONLY supports reading market data. **Do NOT connect to or modify any external databases.**
+- **Service Name Standardization**: Always standardize and strictly follow the service names defined above (`api`, `engine`, `trade`, `stream`).
+
 ## Deployment Workflow
 
 After making code changes, always:

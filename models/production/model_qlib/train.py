@@ -11,7 +11,7 @@ config.yaml 结构：
   run_id / job_name
   data.train_start / data.train_end / data.features
   model.type / model.num_boost_round / model.val_ratio / model.params
-  output.result_path
+  output.result_path / output.cos_prefix
   callback.url / callback.secret
 """
 
@@ -19,19 +19,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import logging
+import os
 import sys
 import time
 from datetime import datetime
+from datetime import date
 from pathlib import Path
 from typing import Any
-
-import lightgbm as lgb
-import numpy as np
-import pandas as pd
-import pyarrow.parquet as pq
-import requests
-import yaml
+from urllib.parse import urlparse
 
 logging.basicConfig(
     level=logging.INFO,
@@ -39,6 +36,42 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger("quantmind.train")
+_TRAINING_LOG_FILE = (os.getenv("TRAINING_LOG_FILE") or "").strip() or "/workspace/training.log"
+
+
+def _attach_training_file_logger(log_path: str) -> None:
+    if not log_path:
+        return
+    path = Path(log_path)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        return
+    root_logger = logging.getLogger()
+    for handler in root_logger.handlers:
+        if isinstance(handler, logging.FileHandler) and Path(getattr(handler, "baseFilename", "")).resolve() == path.resolve():
+            return
+    try:
+        file_handler = logging.FileHandler(path, encoding="utf-8")
+        file_handler.setLevel(logging.INFO)
+        file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+        root_logger.addHandler(file_handler)
+    except Exception as exc:
+        logger.warning("Failed to attach training log file handler %s: %s", path, exc)
+
+
+_attach_training_file_logger(_TRAINING_LOG_FILE)
+
+try:
+    import lightgbm as lgb
+    import numpy as np
+    import pandas as pd
+    import requests
+    import yaml
+    from qcloud_cos import CosConfig, CosS3Client
+except Exception as exc:  # pragma: no cover - import-time dependency guard
+    logger.exception("Failed to import training dependencies: %s", exc)
+    raise
 
 # ── LightGBM 默认参数 ────────────────────────────────────────────────────────
 DEFAULT_LGB_PARAMS: dict[str, Any] = {
@@ -54,15 +87,6 @@ DEFAULT_LGB_PARAMS: dict[str, Any] = {
     "n_jobs":            -1,
     "verbosity":         -1,
 }
-
-TRAINING_BASE_FEATURES: list[str] = [
-    "mom_ret_1d",
-    "mom_ret_5d",
-    "mom_ret_20d",
-    "liq_volume",
-    "liq_amount",
-    "liq_turnover_os",
-]
 _ALLOWED_SHAP_SPLIT = {"valid", "test", "train"}
 _DEFAULT_EXPLAIN_CFG: dict[str, Any] = {
     "enable_shap": True,
@@ -73,52 +97,166 @@ _DEFAULT_SHAP_SAMPLE_ROWS = 30000
 _MIN_SHAP_SAMPLE_ROWS = 1000
 _MAX_SHAP_SAMPLE_ROWS = 100000
 _SHAP_SAMPLE_RANDOM_STATE = 42
+_INFERENCE_TEMPLATE_CANDIDATES = [
+    Path(os.getenv("TRAINING_INFERENCE_TEMPLATE_PATH", "")),
+    Path("/app/inference_parquet.py"),
+    Path("/app/backend/services/engine/inference/templates/inference_parquet.py"),
+    Path("/workspace/backend/services/engine/inference/templates/inference_parquet.py"),
+]
 
 
-def _load_local_parquet(
-    local_dir: Path,
-    year: int,
-    required_columns: list[str],
-    clip_start: pd.Timestamp | None = None,
-    clip_end: pd.Timestamp | None = None,
-) -> pd.DataFrame | None:
+
+# ── COS 辅助 ─────────────────────────────────────────────────────────────────
+def _cos_client() -> CosS3Client:
+    region = os.getenv("TENCENT_REGION", "ap-guangzhou")
+    # 训练链路强制使用 COS SDK（Bucket + Key）访问，避免自定义公网域名下载产生流量费。
+    # EnableInternalDomain=True 会优先走腾讯云内网解析（同地域场景）。
+    return CosS3Client(CosConfig(
+        Region=region,
+        SecretId=os.getenv("TENCENT_SECRET_ID", ""),
+        SecretKey=os.getenv("TENCENT_SECRET_KEY", ""),
+        Scheme="https",
+        EnableInternalDomain=True,
+        AutoSwitchDomainOnRetry=True,
+    ))
+
+
+def _load_local_parquet(local_dir: Path, year: int, columns: list[str] | None = None) -> pd.DataFrame | None:
     file_path = local_dir / f"model_features_{year}.parquet"
     if not file_path.exists():
         return None
     try:
-        logger.info(f"Local data hit: {file_path}")
-
-        schema_cols = set(pq.ParquetFile(file_path).schema_arrow.names)
-        selected_cols = [c for c in required_columns if c in schema_cols]
-        if "trade_date" not in selected_cols or "symbol" not in selected_cols:
-            logger.warning(
-                "Skip parquet missing required base columns trade_date/symbol: %s",
-                file_path,
-            )
-            return None
-        df = pd.read_parquet(file_path, columns=selected_cols, engine="pyarrow")
-
-        # 先按日期裁剪每年数据，避免把无关年份全量堆进内存
-        if "trade_date" in df.columns and (clip_start is not None or clip_end is not None):
-            df["trade_date"] = pd.to_datetime(df["trade_date"], errors="coerce")
-            mask = pd.Series(True, index=df.index)
-            if clip_start is not None:
-                mask &= df["trade_date"] >= clip_start
-            if clip_end is not None:
-                mask &= df["trade_date"] <= clip_end
-            df = df.loc[mask].copy()
-
-        # 数值列统一降为 float32，降低内存峰值
-        for col in df.columns:
-            if col in {"trade_date", "symbol"}:
-                continue
-            if pd.api.types.is_numeric_dtype(df[col]):
-                df[col] = df[col].astype(np.float32, copy=False)
-
-        return df
+        logger.info(f"Local data hit: {file_path} (reading {len(columns) if columns else 'all'} columns)")
+        return pd.read_parquet(file_path, engine="pyarrow", columns=columns)
     except Exception as exc:
         logger.warning(f"  ⚠ Failed to read local parquet {file_path}: {exc}")
         return None
+
+
+def _upload_bytes(client: CosS3Client, bucket: str, key: str, data: bytes, content_type: str = "application/octet-stream") -> str:
+    client.put_object(Bucket=bucket, Key=key, Body=data, ContentType=content_type)
+    logger.info(f"Uploaded cos://{bucket}/{key}  ({len(data):,} bytes)")
+    return key
+
+
+def _normalize_cos_key(raw: str) -> str:
+    val = (raw or "").strip()
+    if not val:
+        return ""
+    if val.startswith(("http://", "https://")):
+        parsed = urlparse(val)
+        path_key = parsed.path.lstrip("/")
+        logger.warning(
+            "config-cos-key is URL (%s), normalized to object key '%s'; "
+            "training should use COS key instead of public URL",
+            parsed.netloc,
+            path_key,
+        )
+        return path_key
+    return val
+
+
+def _load_inference_template() -> str:
+    for candidate in _INFERENCE_TEMPLATE_CANDIDATES:
+        if not str(candidate):
+            continue
+        try:
+            if candidate.exists() and candidate.is_file():
+                logger.info("Using inference template: %s", candidate)
+                return candidate.read_text(encoding="utf-8")
+        except Exception as exc:
+            logger.warning("Failed to read inference template %s: %s", candidate, exc)
+    raise FileNotFoundError(
+        "inference_parquet.py template not found; mount it to /app/inference_parquet.py "
+        "or set TRAINING_INFERENCE_TEMPLATE_PATH"
+    )
+
+
+def _download_config_from_cos(cos_key: str, dest_path: Path) -> Path:
+    bucket = os.getenv("TENCENT_BUCKET", "quantmind-1255718505")
+    key = _normalize_cos_key(cos_key)
+    if not key:
+        raise RuntimeError("empty config cos key")
+    client = _cos_client()
+    logger.info(f"Downloading config from cos://{bucket}/{key} -> {dest_path}")
+    resp = client.get_object(Bucket=bucket, Key=key)
+    raw = resp["Body"].get_raw_stream().read()
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    dest_path.write_bytes(raw)
+    logger.info(f"Config downloaded: {len(raw):,} bytes")
+    return dest_path
+
+
+def _json_safe_value(value: Any) -> Any:
+    """把结果结构中的非有限浮点转换为 JSON 可序列化值。"""
+    if isinstance(value, dict):
+        return {str(k): _json_safe_value(v) for k, v in value.items()}
+    if isinstance(value, (list, set, frozenset)):
+        return [_json_safe_value(v) for v in value]
+    if isinstance(value, tuple):
+        return [_json_safe_value(v) for v in value]
+    if hasattr(value, "tolist") and not isinstance(value, (str, bytes, bytearray)):
+        try:
+            return _json_safe_value(value.tolist())
+        except Exception:
+            pass
+    if isinstance(value, np.generic):
+        return _json_safe_value(value.item())
+    if isinstance(value, pd.Series):
+        return [_json_safe_value(v) for v in value.tolist()]
+    if isinstance(value, pd.Index):
+        return [_json_safe_value(v) for v in value.tolist()]
+    if isinstance(value, pd.DataFrame):
+        return _json_safe_value(value.to_dict(orient="records"))
+    if isinstance(value, (datetime, date, pd.Timestamp)):
+        return value.isoformat()
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    return value
+
+
+def _json_default(value: Any) -> Any:
+    """json.dumps 的兜底转换器，保证剩余的日期/路径/标量都能落成原生 JSON。"""
+    if isinstance(value, (datetime, date, pd.Timestamp)):
+        return value.isoformat()
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, np.generic):
+        return _json_safe_value(value)
+    if hasattr(value, "tolist") and not isinstance(value, (str, bytes, bytearray)):
+        try:
+            return _json_safe_value(value.tolist())
+        except Exception:
+            return str(value)
+    return str(value)
+
+
+def _find_nonfinite_paths(value: Any, path: str = "root", out: list[str] | None = None) -> list[str]:
+    """递归定位结构内仍残留的非有限浮点，便于训练日志定位问题字段。"""
+    if out is None:
+        out = []
+
+    if isinstance(value, dict):
+        for key, item in value.items():
+            _find_nonfinite_paths(item, f"{path}.{key}", out)
+        return out
+
+    if isinstance(value, (list, tuple, set, frozenset)):
+        for idx, item in enumerate(list(value)):
+            _find_nonfinite_paths(item, f"{path}[{idx}]", out)
+        return out
+
+    if isinstance(value, np.generic):
+        return _find_nonfinite_paths(value.item(), path, out)
+
+    if isinstance(value, (datetime, date, pd.Timestamp, Path)):
+        return out
+
+    if isinstance(value, float) and not math.isfinite(value):
+        out.append(path)
+        return out
+
+    return out
 
 
 # ── 评估指标 ─────────────────────────────────────────────────────────────────
@@ -298,7 +436,7 @@ def load_data(
     source_mode: str = "LOCAL",
     local_dir: str | None = None,
     limit_up_weight: float = 0.5,
-) -> tuple:
+) -> tuple[pd.DataFrame, list[str]]:
     start_year = pd.Timestamp(train_start).year
 
     # 获取最晚的年份，确保包含 验证/测试 集所需的数据
@@ -307,41 +445,28 @@ def load_data(
     if test_end: ends.append(test_end)
     end_year = max(pd.Timestamp(e).year for e in ends)
 
+    # 自动计算必要的核心列
+    core_columns = ["trade_date", "symbol", "open", "close"]
+    # 尝试加载当前周期对应的预置收益特征
+    _horizon = max(1, int(target_horizon_days or 1))
+    
+    # 最终合并列：核心列 + 用户请求特征（去重）
+    load_cols = list(dict.fromkeys(core_columns + features))
+    logger.info(f"Memory optimization: Planning to load {len(load_cols)} columns from {len(range(start_year - 1, end_year + 1))} years")
+
     local_root = Path(local_dir).expanduser() if local_dir else None
     if local_root is None:
         raise RuntimeError("local_dir must be provided; COS data download has been removed")
 
-    # 仅读取训练必需列，避免整表加载导致 OOM
-    horizon = max(1, int(target_horizon_days or 1))
-    horizon_col = f"mom_ret_{horizon}d"
-    required_columns = list(
-        dict.fromkeys(
-            ["trade_date", "symbol", "mom_ret_1d", horizon_col] + list(features)
-        )
-    )
-    logger.info(
-        "Memory-optimized read: selected %d columns (horizon=%s)",
-        len(required_columns),
-        horizon,
-    )
-
-    # 给标签构建预留边界，避免裁剪过早影响 shift/rolling
-    range_start = pd.Timestamp(train_start) - pd.Timedelta(days=max(7, horizon + 3))
-    upper_bound = test_end or valid_end or train_end
-    range_end = pd.Timestamp(upper_bound) + pd.Timedelta(days=max(7, horizon + 3))
-
     chunks = []
-    for year in range(max(start_year - 1, 2016), end_year + 1):
-        df_year = _load_local_parquet(
-            local_root,
-            year,
-            required_columns=required_columns,
-            clip_start=range_start,
-            clip_end=range_end,
-        )
+    # 支持更早或更晚的数据年份（由训练起止时间动态决定）
+    for year in range(start_year - 1, end_year + 1):
+        df_year = _load_local_parquet(local_root, year, columns=load_cols)
         if df_year is not None:
-            if not df_year.empty:
-                chunks.append(df_year)
+            # 过滤北交所代码（4/8开头），减少后续 concat 后的物理内存占用
+            df_year["symbol"] = df_year["symbol"].astype(str).str.zfill(6)
+            df_year = df_year[~df_year["symbol"].str.startswith(("4", "8"))]
+            chunks.append(df_year)
         else:
             logger.warning(f"No data file found for year {year} in {local_root}, skipping")
 
@@ -349,52 +474,73 @@ def load_data(
         raise RuntimeError("No data loaded from local storage")
 
     df = pd.concat(chunks, axis=0, ignore_index=True)
-    df["trade_date"] = pd.to_datetime(df["trade_date"], errors="coerce")
-    df = df[df["trade_date"].notna()].copy()
+    del chunks # 及时释放列表引用
+    df["trade_date"] = pd.to_datetime(df["trade_date"])
     logger.info(f"Raw concat size: {len(df)} rows. Date range: {df['trade_date'].min()} to {df['trade_date'].max()}")
 
-    # 过滤北交所代码（4/8开头）
-    df["symbol"] = df["symbol"].astype(str).str.zfill(6)
-    df = df[~df["symbol"].str.startswith(("4", "8"))].copy()
+    # 过滤符号（已在分块加载时完成，此处仅保留逻辑自洽）
     logger.info(f"After symbol filter: {len(df)} rows")
 
-    # 标签：基于 target_horizon_days 构建 N 日远期收益
-    if "mom_ret_1d" not in df.columns:
-        raise RuntimeError("Column 'mom_ret_1d' not found in parquet")
+    # 标签：基于 target_horizon_days 构建 N 日远期收益（实盘可交易口径）
+    if "open" not in df.columns or "close" not in df.columns:
+        raise RuntimeError("Columns 'open' and 'close' are required for tradable label calculation")
 
     # 从参数读取预测周期（不依赖全局 cfg）
     _horizon = max(1, int(target_horizon_days or 1))
 
     df = df.sort_values(["symbol", "trade_date"]).reset_index(drop=True)
-    # 优先使用 parquet 内置的 N 日收益特征（精确复权），否则用累积 shift
-    _mom_col = f"mom_ret_{_horizon}d"
-    if _horizon == 1:
-        df["label"] = df.groupby("symbol")["mom_ret_1d"].shift(-1)
-    elif _mom_col in df.columns:
-        df["label"] = df.groupby("symbol")[_mom_col].shift(-_horizon)
-    else:
-        # 回退：通过滚动累乘 1d 收益构造 N 日远期收益
-        df["label"] = (
-            df.groupby("symbol")["mom_ret_1d"]
-            .transform(lambda s: (1 + s).rolling(_horizon).apply(np.prod, raw=True) - 1)
-            .shift(-_horizon)
-        )
-    logger.info(f"Label built with target_horizon_days={_horizon} (column={_mom_col if _mom_col in df.columns else 'rolling'})")
+    
+    # 构造实盘可交易收益率：T+1开盘买入，T+H收盘卖出 (Close_{T+H} / Open_{T+1} - 1)
+    # 彻底剔除 T收盘 到 T+1开盘 的不可交易隔夜跳空，防止模型过度学习反转并掩盖真实Alpha
+    grouped = df.groupby("symbol")
+    future_close = grouped["close"].shift(-_horizon)
+    next_open = grouped["open"].shift(-1)
+    
+    # 获取 T 日收盘价，用于判断 T+1 开盘是否一字涨停
+    current_close = df["close"]
+    
+    # 智能识别涨跌幅限制 (科创板/创业板 20%, 北交所 30%, 其他主板 10%)
+    # DataFrame 中的 symbol 为大写前缀，如 SH688001, SZ300001, BJ830001
+    symbols = df["symbol"].astype(str)
+    is_star_gem = symbols.str.startswith("SH68") | symbols.str.startswith("SZ30")
+    is_bse = symbols.str.startswith("BJ")
+    
+    # 设置 T+1 开盘涨停阈值 (留 0.5% 容错余量：20%->19.5%, 30%->29.5%, 10%->9.5%)
+    limit_threshold = np.where(is_bse, 0.295, np.where(is_star_gem, 0.195, 0.095))
+    
+    # 精细化涨跌停识别
+    is_limit_up_open = (next_open / current_close - 1) >= limit_threshold
+    is_limit_down_open = (next_open / current_close - 1) <= -limit_threshold
+    is_extreme = is_limit_up_open | is_limit_down_open
+    
+    # 避免除以0的情况
+    raw_label = np.where(next_open > 0, (future_close / next_open) - 1, np.nan)
+    
+    # 【改为软降权】：不再把极端样本的 label 设为 NaN，而是保留真实收益率，让模型能够学习到它们的特征分布
+    df["label"] = raw_label
+    
+    # 新增 weight 列：正常样本权重为 1.0，开盘涨跌停的极端样本权重动态配置 (软降权)
+    df["weight"] = np.where(is_extreme, limit_up_weight, 1.0)
+    
+    logger.info(f"Tradable label built with target_horizon_days={_horizon} (Close_T+{_horizon} / Open_T+1 - 1)")
+    logger.info(f"Soft weighted {int(is_limit_up_open.sum())} limit-up and {int(is_limit_down_open.sum())} limit-down samples to {limit_up_weight}.")
 
     valid_count_before = len(df)
     df = df[df["label"].notna()].copy()
     logger.info(f"After label shift & dropna: {len(df)} rows (dropped {valid_count_before - len(df)} rows with missing labels)")
 
-    # 裁剪到请求日期范围
-    mask = (df["trade_date"] >= train_start) & (df["trade_date"] <= train_end)
+    # 裁剪到请求日期范围 (使用 pd.Timestamp 确保类型一致)
+    ts_start = pd.Timestamp(train_start)
+    ts_train_end = pd.Timestamp(train_end)
+    mask = (df["trade_date"] >= ts_start) & (df["trade_date"] <= ts_train_end)
     # 如果有验证集/测试集，扩大 mask 范围以包含它们
     if valid_end:
-        mask = (df["trade_date"] >= train_start) & (df["trade_date"] <= valid_end)
+        mask = (df["trade_date"] >= ts_start) & (df["trade_date"] <= pd.Timestamp(valid_end))
     if test_end:
-        mask = (df["trade_date"] >= train_start) & (df["trade_date"] <= test_end)
+        mask = (df["trade_date"] >= ts_start) & (df["trade_date"] <= pd.Timestamp(test_end))
 
     df = df[mask].copy()
-    logger.info(f"After date range clip ({train_start} to {test_end or valid_end or train_end}): {len(df)} rows")
+    logger.info(f"After date range clip ({ts_start.date()} to {pd.Timestamp(test_end or valid_end or train_end).date()}): {len(df)} rows")
 
     # 校验特征列
     missing = [f for f in features if f not in df.columns]
@@ -404,8 +550,12 @@ def load_data(
     if not features:
         raise RuntimeError("No valid feature columns found")
 
-    keep_cols = ["symbol", "trade_date", "label"] + features
+    keep_cols = ["symbol", "trade_date", "label", "weight"] + features
     df = df[keep_cols].reset_index(drop=True)
+
+    # 截面 rank 标准化特征，消除绝对数值随时间漂移的问题
+    logger.info("Applying cross-sectional percent rank normalization to features...")
+    df[features] = df.groupby("trade_date")[features].rank(pct=True)
 
     # 截面 rank 标准化标签
     df["label"] = df.groupby("trade_date")["label"].rank(pct=True) - 0.5
@@ -437,7 +587,10 @@ def train_model(df: pd.DataFrame, features: list[str], cfg: dict) -> tuple:
         valid_start_str, valid_end_str = split_cfg["valid"]
         requested_train = f"{split_cfg['train'][0]}~{split_cfg['train'][1]}"
         requested_val = f"{valid_start_str}~{valid_end_str}"
-        train_df = df[df["trade_date"] <= pd.Timestamp(split_cfg["train"][1])].copy()
+        train_df = df[
+            (df["trade_date"] >= pd.Timestamp(split_cfg["train"][0])) &
+            (df["trade_date"] <= pd.Timestamp(split_cfg["train"][1]))
+        ].copy()
         val_df   = df[
             (df["trade_date"] >= pd.Timestamp(valid_start_str)) &
             (df["trade_date"] <= pd.Timestamp(valid_end_str))
@@ -458,17 +611,25 @@ def train_model(df: pd.DataFrame, features: list[str], cfg: dict) -> tuple:
         dates     = sorted(df["trade_date"].unique())
         if not dates:
             raise RuntimeError("No rows available for split after preprocessing. 请检查训练时间窗口与特征快照覆盖范围。")
-        val_start = dates[int(len(dates) * (1 - val_ratio))]
-        train_df  = df[df["trade_date"] < val_start].copy()
+        
+        val_idx = int(len(dates) * (1 - val_ratio))
+        val_start = dates[val_idx]
+        
+        # 增加 gap_days，防止训练集尾部标签包含验证集特征导致的数据泄露
+        _horizon = max(1, int((cfg.get("label", {}) or {}).get("target_horizon_days") or 1))
+        train_end_idx = max(0, val_idx - _horizon)
+        actual_train_end = dates[train_end_idx]
+        
+        train_df  = df[df["trade_date"] <= actual_train_end].copy()
         val_df    = df[df["trade_date"] >= val_start].copy()
         test_df = val_df.copy()
         train_start = pd.Timestamp(df["trade_date"].min()).date()
-        train_end = (pd.Timestamp(val_start) - pd.Timedelta(days=1)).date()
+        train_end = pd.Timestamp(actual_train_end).date()
         requested_train = f"{train_start}~{train_end}"
         requested_val = f"{pd.Timestamp(val_start).date()}~{pd.Timestamp(df['trade_date'].max()).date()}"
         requested_test = requested_val
         logger.info(
-            f"val_ratio mode: train~{pd.Timestamp(val_start).date() - pd.Timedelta(days=1)}"
+            f"val_ratio mode: train~{train_end}"
             f"  val {pd.Timestamp(val_start).date()}~"
         )
 
@@ -485,19 +646,23 @@ def train_model(df: pd.DataFrame, features: list[str], cfg: dict) -> tuple:
             "请调整 train/valid/test 时间窗口，确保三段均与可用数据重叠。"
         )
 
-    fill_values = train_df[features].median().to_dict()
+    # 因为特征已经过截面 Rank (0~1)，缺失值统一填充为 0.5 (中位数)
+    fill_values = {c: 0.5 for c in features}
 
     def _fill(frame: pd.DataFrame) -> np.ndarray:
         x = frame[features].copy()
         for c in features:
-            x[c] = x[c].astype("float32").fillna(fill_values[c])
+            x[c] = x[c].astype("float32").fillna(0.5)
         return x.to_numpy(dtype=np.float32)
 
     X_train, y_train = _fill(train_df), train_df["label"].astype("float32").to_numpy()
     X_val,   y_val   = _fill(val_df),   val_df["label"].astype("float32").to_numpy()
 
-    ds_train = lgb.Dataset(X_train, label=y_train, feature_name=features, free_raw_data=True)
-    ds_val   = lgb.Dataset(X_val,   label=y_val,   feature_name=features, free_raw_data=True)
+    w_train = train_df["weight"].astype("float32").to_numpy() if "weight" in train_df.columns else None
+    w_val   = val_df["weight"].astype("float32").to_numpy() if "weight" in val_df.columns else None
+
+    ds_train = lgb.Dataset(X_train, label=y_train, weight=w_train, feature_name=features, free_raw_data=True)
+    ds_val   = lgb.Dataset(X_val,   label=y_val,   weight=w_val,   feature_name=features, free_raw_data=True)
 
     callbacks = [
         lgb.early_stopping(stopping_rounds=early_stopping_rounds, verbose=True),
@@ -555,9 +720,12 @@ def main() -> int:
     # 最早期诊断日志：在任何处理之前打印，确保 Batch 环境中一定能看到
     print(f"[BOOT] python={sys.version}", flush=True)
     print(f"[BOOT] argv={sys.argv}", flush=True)
+    print(f"[BOOT] TRAIN_CONFIG_COS_KEY={os.getenv('TRAIN_CONFIG_COS_KEY','<unset>')}", flush=True)
+    print(f"[BOOT] TENCENT_SECRET_ID len={len(os.getenv('TENCENT_SECRET_ID',''))}", flush=True)
 
     parser = argparse.ArgumentParser(description="QuantMind Training — YAML config driven")
     parser.add_argument("--config", required=False, help="Path to config.yaml")
+    parser.add_argument("--config-cos-key", required=False, help="COS key of config.yaml")
     try:
         args, unknown_args = parser.parse_known_args()
     except SystemExit as exc:
@@ -566,40 +734,47 @@ def main() -> int:
         # Batch 运行时偶发注入畸形参数（如缺失值的已知 flag）会触发 argparse 退出码 2。
         # 这里降级为环境变量驱动启动，避免任务在入口阶段直接失败。
         logger.warning(f"Argparse failed with argv={sys.argv}; fallback to env-driven args")
-        args = argparse.Namespace(config=None)
+        args = argparse.Namespace(config=None, config_cos_key=os.getenv("TRAIN_CONFIG_COS_KEY", ""))
         unknown_args = []
     if unknown_args:
         logger.warning(f"Ignoring unknown CLI args from runtime: {unknown_args}")
 
-    # 本地挂载 config.yaml，CLI 参数作为可选覆盖
+    # 完全依赖环境变量（Batch 通过 EnvVars 注入），CLI 参数作为可选覆盖
     cfg_path = Path(args.config) if args.config else Path("/tmp/config.yaml")
+    config_cos_key = (args.config_cos_key or os.getenv("TRAIN_CONFIG_COS_KEY", "")).strip()
 
     run_id     = "unknown"
+    cos_prefix = "models/candidates/unknown/"
+    result_cos_key = f"{cos_prefix}result.json"
     result: dict = {}
     callback_url    = ""
     callback_secret = ""
     result_path = Path("/workspace/result.json")
 
     try:
+        # config 下载放入 try/except，避免 COS 异常导致 uncaught exit
+        if config_cos_key:
+            cfg_path = _download_config_from_cos(config_cos_key, cfg_path)
+
         if not cfg_path.exists():
             raise RuntimeError(f"Config file not found: {cfg_path}")
         cfg = yaml.safe_load(cfg_path.read_text())
+        _attach_training_file_logger(str((cfg.get("output") or {}).get("log_path") or _TRAINING_LOG_FILE))
 
         run_id          = cfg.get("run_id", "unknown")
         job_name        = cfg.get("job_name", "unnamed")
         result_path     = Path(cfg.get("output", {}).get("result_path", "/workspace/result.json"))
+        cos_prefix      = cfg.get("output", {}).get("cos_prefix", "models/candidates/{run_id}/").format(run_id=run_id)
         callback_url    = cfg.get("callback", {}).get("url", "")
         callback_secret = cfg.get("callback", {}).get("secret", "")
 
         logger.info("=== QuantMind Training Start ===")
         logger.info(f"run_id={run_id}  job={job_name}  config={cfg_path}")
-        # 数据加载（特征列自动补齐基础6列）
-        submitted_features = list(dict.fromkeys([str(item).strip() for item in (cfg["data"].get("features", []) or []) if str(item).strip()]))
-        auto_appended_features = [feature for feature in TRAINING_BASE_FEATURES if feature not in submitted_features]
-        features = list(dict.fromkeys(TRAINING_BASE_FEATURES + submitted_features))
-        source_mode = str((cfg.get("data", {}) or {}).get("source_mode") or "LOCAL").strip().upper()
+        # 数据加载（特征列严格遵循配置）
+        features = list(dict.fromkeys([str(item).strip() for item in (cfg["data"].get("features", []) or []) if str(item).strip()]))
+        source_mode = str((cfg.get("data", {}) or {}).get("source_mode") or "COS").strip().upper()
         local_data_dir = str((cfg.get("data", {}) or {}).get("local_dir") or "").strip() or None
-        explain_cfg = _normalize_explain_cfg(cfg.get("explain") or {})
+        explain_cfg = _normalize_explain_cfg((cfg.get("explain") or {}))
 
         df, valid_features = load_data(
             cfg["data"]["train_start"],
@@ -611,7 +786,10 @@ def main() -> int:
             test_end=cfg.get("split", {}).get("test", [None, None])[1],
             source_mode=source_mode,
             local_dir=local_data_dir,
+            limit_up_weight=float(cfg.get("context", {}).get("limit_up_weight", 0.5)),
         )
+        cos    = _cos_client()
+        bucket = os.getenv("TENCENT_BUCKET", "quantmind-1255718505")
         train_t0 = time.time()
         model, fill_values, train_m, val_m, test_m, pred_df, split_frames = train_model(df, valid_features, cfg)
         elapsed = float(time.time() - train_t0)
@@ -664,16 +842,17 @@ def main() -> int:
             logger.warning("SHAP summary failed: %s", shap_info.get("error") or "unknown")
 
         # 构造 metadata
+        cos_prefix_str = cos_prefix  # 供定时上传任务使用
         metadata = {
             "run_id": run_id, "job_name": job_name,
             "framework": "lightgbm",
             "model_type": cfg.get("model", {}).get("type", "lightgbm"),
             "model_file": "model.lgb",
             "feature_count": len(valid_features),
-            "requested_feature_count": len(submitted_features),
-            "requested_features": submitted_features,
-            "auto_appended_feature_count": len(auto_appended_features),
-            "auto_appended_features": auto_appended_features,
+            "requested_feature_count": len(features),
+            "requested_features": features,
+            "auto_appended_feature_count": 0,
+            "auto_appended_features": [],
             "features": valid_features,
             "feature_columns": valid_features,
             "fill_values": fill_values,
@@ -702,131 +881,43 @@ def main() -> int:
             "generated_at": datetime.utcnow().isoformat(),
             "elapsed_seconds": elapsed,
         }
-        metadata_bytes = json.dumps(metadata, ensure_ascii=False, indent=2).encode()
+        metadata_safe = _json_safe_value(metadata)
+        metadata_bytes = json.dumps(metadata_safe, ensure_ascii=False, indent=2).encode()
         Path("/workspace/metadata.json").write_bytes(metadata_bytes)
         logger.info("metadata.json saved locally")
 
-        # 复制统一推理脚本模板（而非内联生成旧版脚本）
-        template_path = Path("/app/backend/services/engine/inference/templates/inference_parquet.py")
-        inference_dest = Path("/workspace/inference.py")
-        if template_path.is_file():
-            inference_dest.write_text(template_path.read_text(encoding="utf-8"), encoding="utf-8")
-            logger.info("inference.py copied from unified template: %s", template_path)
-        else:
-            # 兜底：模板不存在时写入简化版（仅记录警告）
-            logger.warning("统一推理模板不存在: %s，使用简化版", template_path)
-            _INFERENCE_SCRIPT_FALLBACK = '''#!/usr/bin/env python3
-"""
-QuantMind Parquet 数据源推理脚本 (inference.py 模板)
-=====================================================
-适用于训练数据来自 feature_snapshots/*.parquet 的 LightGBM 模型。
+        # 自动生成推理脚本 inference.py
+        _INFERENCE_SCRIPT = _load_inference_template()
+        Path("/workspace/inference.py").write_text(_INFERENCE_SCRIPT, encoding="utf-8")
+        logger.info("inference.py generated in model directory")
 
-平台注入环境变量：
-    MODEL_DIR      模型目录绝对路径（含 metadata.json + model.lgb）
-    TRADE_DATE     推理日期（同 --date 参数，互为备份）
-    OUTPUT_FORMAT  固定值 json
-
-调用方式（由 InferenceScriptRunner 自动调用）：
-    python inference.py --date YYYY-MM-DD --output /path/to/out.json
-
-输出格式（写入 --output 文件）：
-    [{"symbol": "sh600519", "score": 0.82}, ...]
-
-exit code：
-    0  = 成功
-    1  = 致命错误（模型/元数据损坏）
-    2  = 该日期无可用数据（触发 alpha158 兜底）
-"""
-from __future__ import annotations
-import argparse, json, logging, os, sys
-from pathlib import Path
-import lightgbm as lgb
-import numpy as np
-import pandas as pd
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", stream=sys.stderr)
-logger = logging.getLogger("inference_parquet")
-
-_DEFAULT_DATA_DIR = "/app/db/feature_snapshots"
-
-def parse_args():
-    p = argparse.ArgumentParser()
-    p.add_argument("--date", "-d", type=str, default=os.getenv("TRADE_DATE", ""))
-    p.add_argument("--output", "-o", type=str, required=True)
-    p.add_argument("--model-dir", type=str, default=os.getenv("MODEL_DIR", str(Path(__file__).parent)))
-    p.add_argument("--data-dir", type=str, default=os.getenv("MODEL_TRAINING_DATA_DIR", _DEFAULT_DATA_DIR))
-    return p.parse_args()
-
-def load_metadata(model_dir):
-    meta_path = Path(model_dir) / "metadata.json"
-    if not meta_path.exists():
-        logger.error("metadata.json 不存在: %s", meta_path); sys.exit(1)
-    return json.loads(meta_path.read_text(encoding="utf-8"))
-
-def load_model(model_dir, meta):
-    model_path = Path(model_dir) / meta.get("model_file", "model.lgb")
-    if not model_path.exists():
-        candidates = list(Path(model_dir).glob("*.lgb")) + list(Path(model_dir).glob("*.txt"))
-        if not candidates:
-            logger.error("未找到 LightGBM 模型文件: %s", model_dir); sys.exit(1)
-        model_path = candidates[0]
-    logger.info("加载模型: %s", model_path.name)
-    return lgb.Booster(model_file=str(model_path))
-
-def load_date_data(trade_date, data_dir, meta):
-    year = int(trade_date[:4])
-    parquet_path = Path(data_dir) / f"model_features_{year}.parquet"
-    if not parquet_path.exists():
-        logger.warning("parquet 文件不存在: %s", parquet_path); return None
-    df = pd.read_parquet(parquet_path, engine="pyarrow")
-    df["trade_date"] = pd.to_datetime(df["trade_date"]).dt.strftime("%Y-%m-%d")
-    day_df = df[df["trade_date"] == trade_date].copy()
-    if len(day_df) == 0:
-        logger.warning("日期 %s 无数据", trade_date); return None
-    logger.info("找到 %d 条记录，日期=%s", len(day_df), trade_date)
-    return day_df
-
-def preprocess(df, meta):
-    feature_cols = meta.get("feature_columns") or meta.get("features", [])
-    fill_values  = meta.get("fill_values", {})
-    missing = [c for c in feature_cols if c not in df.columns]
-    if missing:
-        logger.warning("缺少 %d 个特征列，填 0: %s", len(missing), missing[:8])
-        for c in missing: df[c] = 0.0
-    X_df = df[feature_cols].copy()
-    for col, val in fill_values.items():
-        if col in X_df.columns: X_df[col] = X_df[col].fillna(val)
-    return X_df.fillna(0.0), df["symbol"].tolist()
-
-def main():
-    args = parse_args()
-    trade_date = (args.date or "").strip()
-    if not trade_date:
-        logger.error("未指定推理日期"); sys.exit(1)
-    model_dir, data_dir, out_path = Path(args.model_dir), Path(args.data_dir), Path(args.output)
-    logger.info("=== parquet 推理脚本 === date=%s  model_dir=%s", trade_date, model_dir)
-    meta  = load_metadata(model_dir)
-    day_df = load_date_data(trade_date, data_dir, meta)
-    if day_df is None:
-        print(f"日期 {trade_date} 无数据，触发兜底", file=sys.stderr); sys.exit(2)
-    model = load_model(model_dir, meta)
-    X_df, symbols = preprocess(day_df, meta)
-    if len(X_df) == 0:
-        print(f"日期 {trade_date} 预处理后无有效行", file=sys.stderr); sys.exit(2)
-    scores = model.predict(X_df.values.astype(np.float32), num_iteration=meta.get("best_iteration"))
-    signals = sorted(
-        [{"symbol": s, "score": float(v)} for s, v in zip(symbols, scores) if v == v],
-        key=lambda x: x["score"], reverse=True
-    )
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(signals, ensure_ascii=False), encoding="utf-8")
-    logger.info("已写入信号文件: %s  (%d 条)", out_path, len(signals))
-
-if __name__ == "__main__":
-    main()
-'''
-            inference_dest.write_text(_INFERENCE_SCRIPT_FALLBACK, encoding="utf-8")
-            logger.info("inference.py fallback version written to model directory")
+        # 写入 cos_upload_pending.json，供凌晨定时任务批量上传
+        upload_manifest = {
+            "cos_prefix": cos_prefix_str,
+            "bucket": bucket,
+            "files": [
+                {"local": "model.lgb",      "key": cos_prefix_str + "model.lgb",      "content_type": "application/octet-stream"},
+                {"local": "pred.parquet",   "key": cos_prefix_str + "pred.parquet",   "content_type": "application/octet-stream"},
+                {"local": "pred.pkl",       "key": cos_prefix_str + "pred.pkl",       "content_type": "application/octet-stream"},
+                {"local": "metadata.json",  "key": cos_prefix_str + "metadata.json",  "content_type": "application/json"},
+                {"local": "config.yaml",    "key": cos_prefix_str + "config.yaml",    "content_type": "application/x-yaml"},
+                {"local": "result.json",    "key": cos_prefix_str + "result.json",    "content_type": "application/json"},
+            ],
+            "created_at": datetime.utcnow().isoformat(),
+            "uploaded": False,
+        }
+        if shap_info.get("status") == "completed" and shap_summary_path.exists():
+            upload_manifest["files"].append(
+                {
+                    "local": "shap_summary.csv",
+                    "key": cos_prefix_str + "shap_summary.csv",
+                    "content_type": "text/csv",
+                }
+            )
+        Path("/workspace/cos_upload_pending.json").write_text(
+            json.dumps(upload_manifest, ensure_ascii=False, indent=2)
+        )
+        logger.info("cos_upload_pending.json written, artifacts will be uploaded by nightly job")
 
         result = {
             "status": "completed",
@@ -847,7 +938,7 @@ if __name__ == "__main__":
             ],
             "summary": {
                 "status": "训练完成",
-                "message": f"训练完成，best_iteration={model.best_iteration}，产物已保存到本地模型目录",
+                "message": f"训练完成，best_iteration={model.best_iteration}，产物已保存本地，待凌晨3:00上传至COS",
             },
             "metadata": metadata,
             "error": "",
@@ -862,15 +953,24 @@ if __name__ == "__main__":
 
     finally:
         result_path.parent.mkdir(parents=True, exist_ok=True)
-        result_json = json.dumps(result, ensure_ascii=False, indent=2)
+        result_safe = _json_safe_value(result)
+        nonfinite_paths = _find_nonfinite_paths(result_safe)
+        if nonfinite_paths:
+            logger.warning("Non-finite values remain after sanitization: %s", ", ".join(nonfinite_paths[:20]))
+        result_json = json.dumps(result_safe, ensure_ascii=False, indent=2, allow_nan=False, default=_json_default)
         result_path.write_text(result_json)
         logger.info(f"result.json → {result_path}")
 
         if callback_url:
             try:
+                callback_headers = {
+                    "X-Internal-Call-Secret": callback_secret,
+                    "Content-Type": "application/json",
+                }
                 resp = requests.post(
-                    callback_url, json=result,
-                    headers={"X-Internal-Call-Secret": callback_secret},
+                    callback_url,
+                    data=result_json.encode("utf-8"),
+                    headers=callback_headers,
                     timeout=15,
                 )
                 logger.info(f"Callback → HTTP {resp.status_code}")
