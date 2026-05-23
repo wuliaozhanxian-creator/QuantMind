@@ -1,31 +1,47 @@
 import React, { useEffect, useState } from 'react';
-import { Card, Row, Col, Typography, Spin, Alert, Badge, Statistic, Button, Divider, Tooltip } from 'antd';
-import { DatabaseOutlined, CloudServerOutlined, ReloadOutlined, CheckCircleOutlined, CloseCircleOutlined, SyncOutlined, ClockCircleOutlined } from '@ant-design/icons';
+import { Card, Row, Col, Typography, Spin, Alert, Badge, Button, Divider, Tag } from 'antd';
+import { DatabaseOutlined, CloudServerOutlined, ReloadOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
 import { adminService } from '../services/adminService';
 
-const { Title, Text, Paragraph } = Typography;
+const { Title, Text } = Typography;
+
+interface PostgresqlStatus {
+    status: string;
+    error?: string;
+}
+
+interface RedisStatus {
+    status: string;
+    error?: string;
+}
+
+interface FeatureSnapshotsStatus {
+    status: string;
+    latest_date: string | null;
+    row_count: number;
+}
+
+interface OnlineSourceStatus {
+    server_ip: string;
+    status: string;
+    postgresql: PostgresqlStatus;
+    redis: RedisStatus;
+    latest_date: string | null;
+    row_count: number;
+    error: string | null;
+}
+
+interface OfflineSourceStatus {
+    server_ip: string;
+    status: string;
+    postgresql: PostgresqlStatus;
+    feature_snapshots: FeatureSnapshotsStatus;
+    error: string | null;
+}
 
 interface MarketSourcesStatus {
-    online_source: {
-        status: string;
-        latest_date: string | null;
-        row_count: number;
-        error: string | null;
-    };
-    offline_source: {
-        checked_at: string;
-        trade_date: string;
-        qlib_data: {
-            exists: boolean;
-            calendar_last_date: string | null;
-            instruments: { total: number };
-        };
-        feature_snapshots: {
-            exists: boolean;
-            latest_date: string | null;
-        };
-        error?: string;
-    };
+    online_source: OnlineSourceStatus;
+    offline_source: OfflineSourceStatus;
 }
 
 export const AdminMarketMonitor: React.FC = () => {
@@ -58,23 +74,35 @@ export const AdminMarketMonitor: React.FC = () => {
         return () => clearInterval(interval);
     }, []);
 
-    const renderStatusBadge = (status: string, isError: boolean = false) => {
-        if (isError || status === 'unreachable' || status === 'error') {
-            return <Badge status="error" text="异常 / 离线" className="text-red-500 font-medium" />;
+    const renderStatusBadge = (status: string) => {
+        if (status === 'unreachable' || status === 'error') {
+            return <Badge status="error" text="异常" className="text-red-500 font-medium" />;
         }
         if (status === 'degraded' || status === 'empty') {
-            return <Badge status="warning" text="数据不完整 / 降级" className="text-orange-500 font-medium" />;
+            return <Badge status="warning" text="降级" className="text-orange-500 font-medium" />;
         }
-        if (status === 'checking') {
+        if (status === 'checking' || status === 'unknown') {
             return <Badge status="processing" text="检测中" className="text-blue-500 font-medium" />;
         }
-        return <Badge status="success" text="正常 / 在线" className="text-emerald-500 font-medium" />;
+        return <Badge status="success" text="正常" className="text-emerald-500 font-medium" />;
+    };
+
+    const renderServiceTag = (status: string) => {
+        if (status === 'healthy') {
+            return <Tag color="success" icon={<CheckCircleOutlined />}>正常</Tag>;
+        }
+        if (status === 'unreachable' || status === 'error') {
+            return <Tag color="error" icon={<CloseCircleOutlined />}>异常</Tag>;
+        }
+        return <Tag color="default">未知</Tag>;
     };
 
     if (loading && !data) {
         return (
             <div className="flex items-center justify-center h-64">
-                <Spin size="large" tip="加载行情源监控数据..." />
+                <Spin size="large" tip="加载行情源监控数据...">
+                    <div style={{ height: 100 }} />
+                </Spin>
             </div>
         );
     }
@@ -107,10 +135,10 @@ export const AdminMarketMonitor: React.FC = () => {
             <Row gutter={[24, 24]}>
                 {/* 106 Online Source */}
                 <Col xs={24} lg={12}>
-                    <Card 
-                        bordered={false} 
+                    <Card
+                        variant="borderless"
                         className="h-full rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow"
-                        bodyStyle={{ padding: '24px' }}
+                        styles={{ body: { padding: '24px' } }}
                     >
                         <div className="flex items-start justify-between mb-6">
                             <div className="flex items-center space-x-3">
@@ -119,7 +147,7 @@ export const AdminMarketMonitor: React.FC = () => {
                                 </div>
                                 <div>
                                     <Title level={4} className="!mb-0 !text-slate-800">在线行情源</Title>
-                                    <Text className="text-xs text-slate-400 font-mono">IP: 106.53.100.144</Text>
+                                    <Text className="text-xs text-slate-400 font-mono">{online?.server_ip || '106.53.100.144'}</Text>
                                 </div>
                             </div>
                             <div className="px-3 py-1 bg-slate-50 rounded-lg border border-slate-100">
@@ -131,40 +159,48 @@ export const AdminMarketMonitor: React.FC = () => {
 
                         <div className="space-y-4">
                             <div className="bg-slate-50 p-4 rounded-xl">
-                                <div className="flex items-center text-slate-500 mb-1">
-                                    <ClockCircleOutlined className="mr-2" />
-                                    <Text className="text-xs font-bold uppercase tracking-wider">最新行情日期</Text>
+                                <div className="flex items-center justify-between mb-2">
+                                    <Text className="text-xs font-bold text-slate-500 uppercase tracking-wider">PostgreSQL</Text>
+                                    {renderServiceTag(online?.postgresql?.status || 'unknown')}
                                 </div>
-                                <Text className="text-2xl font-black text-slate-700 font-mono">
-                                    {online?.latest_date ? online.latest_date : '--'}
-                                </Text>
+                                <div className="flex items-baseline space-x-2 mt-2">
+                                    <Text className="text-sm text-slate-500">最新行情日期:</Text>
+                                    <Text className="text-lg font-bold text-slate-700 font-mono">
+                                        {online?.latest_date || '--'}
+                                    </Text>
+                                </div>
+                                <div className="flex items-baseline space-x-2 mt-1">
+                                    <Text className="text-sm text-slate-500">数据量:</Text>
+                                    <Text className="text-lg font-bold text-slate-700 font-mono">
+                                        {online?.row_count?.toLocaleString() || 0}
+                                    </Text>
+                                    <Text className="text-xs text-slate-400">条</Text>
+                                    {online?.row_count && online.row_count < 4000 ? (
+                                        <Text className="text-xs text-orange-500">(偏少)</Text>
+                                    ) : null}
+                                </div>
+                                {online?.postgresql?.error && (
+                                    <Text className="text-xs text-red-500 mt-1 block">{online.postgresql.error}</Text>
+                                )}
                             </div>
 
                             <div className="bg-slate-50 p-4 rounded-xl">
-                                <div className="flex items-center text-slate-500 mb-1">
-                                    <DatabaseOutlined className="mr-2" />
-                                    <Text className="text-xs font-bold uppercase tracking-wider">最新交易日数据量</Text>
+                                <div className="flex items-center justify-between">
+                                    <Text className="text-xs font-bold text-slate-500 uppercase tracking-wider">Redis</Text>
+                                    {renderServiceTag(online?.redis?.status || 'unknown')}
                                 </div>
-                                <div className="flex items-baseline space-x-2">
-                                    <Text className="text-2xl font-black text-slate-700 font-mono">
-                                        {online?.row_count?.toLocaleString() || 0}
-                                    </Text>
-                                    <Text className="text-sm text-slate-400">条记录</Text>
-                                </div>
-                                {online?.row_count && online.row_count < 4000 ? (
-                                    <Text className="text-xs text-orange-500 mt-1 block">
-                                        ⚠️ 数据量偏少，可能尚未收盘或存在缺失
-                                    </Text>
-                                ) : null}
+                                {online?.redis?.error && (
+                                    <Text className="text-xs text-red-500 mt-1 block">{online.redis.error}</Text>
+                                )}
                             </div>
                         </div>
 
                         {online?.error && (
-                            <Alert 
-                                type="error" 
-                                message="连接异常" 
-                                description={online.error} 
-                                showIcon 
+                            <Alert
+                                type="error"
+                                message="连接异常"
+                                description={online.error}
+                                showIcon
                                 className="mt-4 rounded-xl"
                             />
                         )}
@@ -173,10 +209,10 @@ export const AdminMarketMonitor: React.FC = () => {
 
                 {/* 139 Offline Source */}
                 <Col xs={24} lg={12}>
-                    <Card 
-                        bordered={false} 
+                    <Card
+                        variant="borderless"
                         className="h-full rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow"
-                        bodyStyle={{ padding: '24px' }}
+                        styles={{ body: { padding: '24px' } }}
                     >
                         <div className="flex items-start justify-between mb-6">
                             <div className="flex items-center space-x-3">
@@ -184,73 +220,55 @@ export const AdminMarketMonitor: React.FC = () => {
                                     <DatabaseOutlined className="text-purple-600 text-2xl" />
                                 </div>
                                 <div>
-                                    <Title level={4} className="!mb-0 !text-slate-800">离线数据资产</Title>
-                                    <Text className="text-xs text-slate-400 font-mono">源: 139.199.75.121</Text>
+                                    <Title level={4} className="!mb-0 !text-slate-800">离线数据源</Title>
+                                    <Text className="text-xs text-slate-400 font-mono">{offline?.server_ip || '139.199.75.121'}</Text>
                                 </div>
                             </div>
                             <div className="px-3 py-1 bg-slate-50 rounded-lg border border-slate-100">
-                                {renderStatusBadge(offline?.error ? 'error' : 'healthy')}
+                                {renderStatusBadge(offline?.status || 'error')}
                             </div>
                         </div>
 
                         <Divider className="my-4" />
 
                         <div className="space-y-4">
-                            <div className="bg-slate-50 p-4 rounded-xl flex justify-between items-center">
-                                <div>
-                                    <div className="flex items-center text-slate-500 mb-1">
-                                        <SyncOutlined className="mr-2" />
-                                        <Text className="text-xs font-bold uppercase tracking-wider">Qlib 二进制引擎</Text>
-                                    </div>
-                                    <div className="flex items-baseline space-x-2">
-                                        <Text className="text-xl font-black text-slate-700 font-mono">
-                                            {offline?.qlib_data?.calendar_last_date || '--'}
-                                        </Text>
-                                        <Text className="text-xs text-slate-400">
-                                            ({offline?.qlib_data?.instruments?.total || 0} 标的)
-                                        </Text>
-                                    </div>
+                            <div className="bg-slate-50 p-4 rounded-xl">
+                                <div className="flex items-center justify-between mb-2">
+                                    <Text className="text-xs font-bold text-slate-500 uppercase tracking-wider">PostgreSQL</Text>
+                                    {renderServiceTag(offline?.postgresql?.status || 'unknown')}
                                 </div>
-                                {offline?.qlib_data?.exists ? (
-                                    <CheckCircleOutlined className="text-emerald-500 text-xl" />
-                                ) : (
-                                    <CloseCircleOutlined className="text-red-500 text-xl" />
-                                )}
                             </div>
 
-                            <div className="bg-slate-50 p-4 rounded-xl flex justify-between items-center">
-                                <div>
-                                    <div className="flex items-center text-slate-500 mb-1">
-                                        <DatabaseOutlined className="mr-2" />
-                                        <Text className="text-xs font-bold uppercase tracking-wider">AI 特征快照 (Parquet)</Text>
-                                    </div>
-                                    <Text className="text-xl font-black text-slate-700 font-mono">
+                            <div className="bg-slate-50 p-4 rounded-xl">
+                                <div className="flex items-center justify-between mb-2">
+                                    <Text className="text-xs font-bold text-slate-500 uppercase tracking-wider">Feature Snapshots</Text>
+                                    {renderServiceTag(offline?.feature_snapshots?.status || 'unknown')}
+                                </div>
+                                <div className="flex items-baseline space-x-2 mt-2">
+                                    <Text className="text-sm text-slate-500">最新快照日期:</Text>
+                                    <Text className="text-lg font-bold text-slate-700 font-mono">
                                         {offline?.feature_snapshots?.latest_date || '--'}
                                     </Text>
                                 </div>
-                                {offline?.feature_snapshots?.exists ? (
-                                    <CheckCircleOutlined className="text-emerald-500 text-xl" />
-                                ) : (
-                                    <CloseCircleOutlined className="text-red-500 text-xl" />
-                                )}
+                                <div className="flex items-baseline space-x-2 mt-1">
+                                    <Text className="text-sm text-slate-500">数据量:</Text>
+                                    <Text className="text-lg font-bold text-slate-700 font-mono">
+                                        {offline?.feature_snapshots?.row_count?.toLocaleString() || 0}
+                                    </Text>
+                                    <Text className="text-xs text-slate-400">条</Text>
+                                </div>
                             </div>
                         </div>
 
                         {offline?.error && (
-                            <Alert 
-                                type="error" 
-                                message="读取异常" 
-                                description={offline.error} 
-                                showIcon 
+                            <Alert
+                                type="error"
+                                message="连接异常"
+                                description={offline.error}
+                                showIcon
                                 className="mt-4 rounded-xl"
                             />
                         )}
-                        
-                        <div className="mt-4 text-right">
-                            <Text className="text-[10px] text-slate-400">
-                                最后检查时间: {offline?.checked_at ? new Date(offline.checked_at).toLocaleString() : '--'}
-                            </Text>
-                        </div>
                     </Card>
                 </Col>
             </Row>

@@ -241,52 +241,125 @@ async def get_market_sources_status(
     current_user: dict = Depends(require_admin),
 ):
     """
-    获取行情数据源状态 (在线库 106 + 离线库 139)
+    直接检测远端服务器状态 (106 PostgreSQL/Redis + 139 PostgreSQL)
     """
     from sqlalchemy import text
-    from backend.shared.database_manager_v2 import get_session
-    from backend.services.api.routers.admin.model_management_ops import get_data_status
-    
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from backend.shared.market_db_manager import get_market_session, MARKET_DB_HOST
+
+    # ========== 检测 106 服务器 ==========
     online_status = {
+        "server_ip": MARKET_DB_HOST,
         "status": "checking",
+        "postgresql": {"status": "unknown"},
+        "redis": {"status": "unknown"},
         "latest_date": None,
         "row_count": 0,
-        "error": None
+        "error": None,
     }
-    
+
+    # PostgreSQL 检测
     try:
-        # Check Online Source (106 PostgreSQL)
-        async with get_session(read_only=True) as session:
-            # Check stock_daily_latest
-            sql_max = text("SELECT MAX(trade_date) FROM stock_daily_latest")
-            res_max = await session.execute(sql_max)
-            max_date = res_max.scalar()
-            
+        async with get_market_session() as session:
+            res = await session.execute(text("SELECT MAX(trade_date) FROM stock_daily_latest"))
+            max_date = res.scalar()
+
             if max_date:
-                sql_count = text("SELECT COUNT(*) FROM stock_daily_latest WHERE trade_date = :d")
-                res_count = await session.execute(sql_count, {"d": max_date})
+                res_count = await session.execute(
+                    text("SELECT COUNT(*) FROM stock_daily_latest WHERE trade_date = :d"),
+                    {"d": max_date}
+                )
                 row_count = res_count.scalar() or 0
-                
+                online_status["postgresql"]["status"] = "healthy"
                 online_status["latest_date"] = max_date.isoformat() if hasattr(max_date, 'isoformat') else str(max_date)
                 online_status["row_count"] = row_count
-                online_status["status"] = "healthy" if row_count > 4000 else "degraded"
             else:
-                online_status["status"] = "empty"
+                online_status["postgresql"]["status"] = "empty"
     except Exception as e:
-        logger.error(f"106 DB connection failed: {e}")
-        online_status["status"] = "unreachable"
-        online_status["error"] = str(e)
-        
+        logger.error(f"106 PostgreSQL connection failed: {e}")
+        online_status["postgresql"]["status"] = "unreachable"
+        online_status["postgresql"]["error"] = str(e)
+
+    # Redis 检测
     try:
-        # Check Offline Source (139 Sync Parquet & Qlib)
-        offline_status_raw = await get_data_status(refresh=False, current_user=current_user)
+        from backend.services.stream.market_app.market_config import (
+            MARKET_REDIS_HOST,
+            MARKET_REDIS_PORT,
+            MARKET_REDIS_PASSWORD,
+            MARKET_REDIS_DB,
+        )
+        import redis.asyncio as aioredis
+
+        redis_client = aioredis.Redis(
+            host=MARKET_REDIS_HOST,
+            port=MARKET_REDIS_PORT,
+            password=MARKET_REDIS_PASSWORD,
+            db=MARKET_REDIS_DB,
+        )
+        await redis_client.ping()
+        online_status["redis"]["status"] = "healthy"
+        await redis_client.close()
     except Exception as e:
-        logger.error(f"139 Offline status check failed: {e}")
-        offline_status_raw = {"error": str(e), "message": "Failed to check offline status"}
+        logger.error(f"106 Redis connection failed: {e}")
+        online_status["redis"]["status"] = "unreachable"
+        online_status["redis"]["error"] = str(e)
+
+    # 综合状态判定
+    pg_ok = online_status["postgresql"]["status"] == "healthy"
+    redis_ok = online_status["redis"]["status"] == "healthy"
+    if pg_ok and redis_ok:
+        online_status["status"] = "healthy" if online_status["row_count"] > 4000 else "degraded"
+    elif pg_ok or redis_ok:
+        online_status["status"] = "degraded"
+    else:
+        online_status["status"] = "unreachable"
+
+    # ========== 检测 139 服务器 ==========
+    offline_status = {
+        "server_ip": "139.199.75.121",
+        "status": "checking",
+        "postgresql": {"status": "unknown"},
+        "feature_snapshots": {"status": "unknown", "latest_date": None, "row_count": 0},
+        "error": None,
+    }
+
+    remote_db_url = "postgresql+asyncpg://readonly_monitor:quantmind_monitor_2025@139.199.75.121:5432/quantmind"
+    engine = None
+
+    try:
+        engine = create_async_engine(remote_db_url, pool_pre_ping=True)
+        async with engine.connect() as conn:
+            # 检测 feature_snapshots 表
+            res = await conn.execute(text("SELECT MAX(trade_date) FROM feature_snapshots"))
+            max_date = res.scalar()
+
+            if max_date:
+                res_count = await conn.execute(
+                    text("SELECT COUNT(*) FROM feature_snapshots WHERE trade_date = :d"),
+                    {"d": max_date}
+                )
+                row_count = res_count.scalar() or 0
+                offline_status["feature_snapshots"]["status"] = "healthy"
+                offline_status["feature_snapshots"]["latest_date"] = max_date.isoformat() if hasattr(max_date, 'isoformat') else str(max_date)
+                offline_status["feature_snapshots"]["row_count"] = row_count
+            else:
+                offline_status["feature_snapshots"]["status"] = "empty"
+
+            offline_status["postgresql"]["status"] = "healthy"
+            offline_status["status"] = "healthy"
+    except Exception as e:
+        logger.error(f"139 PostgreSQL connection failed: {e}")
+        offline_status["postgresql"]["status"] = "unreachable"
+        offline_status["status"] = "unreachable"
+        offline_status["error"] = str(e)
+    finally:
+        if engine:
+            await engine.dispose()
 
     data = {
         "online_source": online_status,
-        "offline_source": offline_status_raw
+        "offline_source": offline_status,
     }
 
     return ApiResponse(success=True, code=200, message="获取成功", data=data)

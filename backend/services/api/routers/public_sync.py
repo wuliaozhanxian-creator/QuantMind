@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 router = APIRouter(prefix="/public/sync", tags=["Public Data Sync"])
 
 # 远程数据源（包含 152 维原始特征和行情）
-REMOTE_DB_URL = "postgresql://readonly_sync:qm_sync_2026_readonly@139.199.75.121:5432/quantmind"
+REMOTE_DB_URL = "postgresql://readonly_monitor:quantmind_monitor_2025@139.199.75.121:5432/quantmind"
 
 @router.get("/stock-daily")
 async def sync_processed_data(

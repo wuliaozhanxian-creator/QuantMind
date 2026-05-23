@@ -1799,7 +1799,7 @@ export const ResearchPlatformPage: React.FC = () => {
             <div className={`${PAGE_LAYOUT.contentOuterClass}`}>
               <div className="grid gap-4 2xl:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[300px_minmax(0,1fr)]">
                 {/* 左侧侧边栏 - 吸顶且固定高度 */}
-                <div className="flex flex-col gap-4 sticky top-4 h-[calc(100vh-120px)] z-30">
+                <div className="flex flex-col gap-4 sticky top-4 h-[calc(100vh-190px)] z-30">
                   <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm flex-shrink-0">
                     <div className="flex items-center gap-2 mb-4 text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">
                       <LibraryBig className="h-4 w-4" />
@@ -2124,7 +2124,7 @@ export const ResearchPlatformPage: React.FC = () => {
 
                 {/* 右侧主内容 */}
                 <motion.div
-                  className="flex flex-col gap-4 min-w-0 flex-1 pb-20"
+                  className="flex flex-col gap-4 min-w-0 flex-1 pb-4"
                   initial="hidden"
                   animate="visible"
                   variants={{
