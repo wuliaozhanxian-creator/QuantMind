@@ -92,15 +92,23 @@ export const StockPoolTable: React.FC = () => {
         const merged = workingPool.map((stock) => {
           const item: any = richMap.get(stock.symbol);
           if (!item) return stock;
+
+          const currentMarketCap = Number((stock as any).marketCap);
+          const fallbackMarketCap = Number(item.marketCap ?? item.market_cap ?? 0) || 0;
+          const currentPe = Number((stock as any).pe);
+          const fallbackPe = Number(item.pe ?? item.pe_ttm ?? item.peTtm ?? 0) || 0;
+          const currentPrice = Number((stock as any).price);
+          const fallbackPrice = Number(item.price ?? item.closePrice ?? 0) || 0;
+          const currentRoe = Number((stock as any).roe);
+          const fallbackRoe = Number(item.roe ?? 0) || 0;
+
           return {
             ...stock,
             name: isMissingName(stock, item.name) ? (item.name || stock.symbol) : stock.name,
-            marketCap: Number(stock.marketCap) > 0 ? stock.marketCap : item.marketCap,
-            pe: Number((stock as any).pe) !== 0
-              ? (stock as any).pe
-              : (item.pe ?? item.pe_ttm ?? item.peTtm ?? 0),
-            roe: stock.roe ?? item.roe,
-            price: stock.price ?? item.price ?? item.closePrice,
+            marketCap: Number.isFinite(currentMarketCap) && currentMarketCap > 0 ? currentMarketCap : fallbackMarketCap,
+            pe: Number.isFinite(currentPe) && currentPe > 0 ? currentPe : fallbackPe,
+            roe: Number.isFinite(currentRoe) && currentRoe > 0 ? currentRoe : fallbackRoe,
+            price: Number.isFinite(currentPrice) && currentPrice > 0 ? currentPrice : fallbackPrice,
           };
         });
         setWorkingPool(merged as any);

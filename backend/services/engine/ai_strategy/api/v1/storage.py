@@ -221,22 +221,6 @@ async def preview_pool_file(body: PreviewPoolFileRequest):
                     pool_file=rec.to_dict(),
                 )
 
-            if body.lite:
-                items = [PoolItem(symbol=c, name=c, metrics={}) for c in instruments]
-                return PreviewPoolFileResponse(
-                    success=True,
-                    items=items,
-                    summary={
-                        "matchRate": 0.0,
-                        "totalCandidates": len(items),
-                        "universeTotal": None,
-                        "asOf": None,
-                        "lite": True,
-                    },
-                    charts={},
-                    pool_file=rec.to_dict(),
-                )
-
             latest_columns = _get_table_columns(db, LATEST_TABLE)
             compat_table_sql = _build_compat_table_sql(LATEST_TABLE, latest_columns)
             sql = text(
@@ -277,6 +261,23 @@ async def preview_pool_file(body: PreviewPoolFileRequest):
                 r = metrics_map.get(c)
                 if r:
                     items.append(PoolItem(symbol=r["symbol"], name=r.get("name"), metrics=r.get("metrics") or {}))
+                else:
+                    items.append(PoolItem(symbol=c, name=c, metrics={}))
+
+            if body.lite:
+                return PreviewPoolFileResponse(
+                    success=True,
+                    items=items,
+                    summary={
+                        "matchRate": 0.0,
+                        "totalCandidates": len(items),
+                        "universeTotal": None,
+                        "asOf": None,
+                        "lite": True,
+                    },
+                    charts={},
+                    pool_file=rec.to_dict(),
+                )
 
             universe_total = _get_universe_total(body.user_id)
             summary, charts = _build_pool_summary(items, as_of_date=None, universe_total=universe_total)
