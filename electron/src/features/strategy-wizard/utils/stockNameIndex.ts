@@ -1,3 +1,5 @@
+import { SERVICE_ENDPOINTS } from '../../../config/services';
+
 type StockIndexEntry = {
   symbol?: string;
   code?: string;
@@ -8,8 +10,6 @@ type StockIndexEntry = {
 type StockIndexPayload = {
   items?: StockIndexEntry[];
 };
-
-const STOCK_INDEX_URL = '/data/stocks/stocks_index.json';
 
 let stockNameMapPromise: Promise<Map<string, string>> | null = null;
 
@@ -42,9 +42,9 @@ function buildLookupKeys(rawSymbol?: string): string[] {
 }
 
 async function loadStockNameMap(): Promise<Map<string, string>> {
-  const response = await fetch(STOCK_INDEX_URL);
+  const response = await fetch(`${SERVICE_ENDPOINTS.STOCKS}/index`);
   if (!response.ok) {
-    throw new Error(`load stocks_index.json failed: ${response.status}`);
+    throw new Error(`load stock index failed: ${response.status}`);
   }
 
   const payload = (await response.json()) as StockIndexPayload;

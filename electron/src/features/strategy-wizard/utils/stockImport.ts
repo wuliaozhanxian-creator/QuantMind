@@ -49,7 +49,7 @@ const parseRowCode = (value: unknown): string | null => {
 /**
  * Parses CSV and matches 6-digit codes against a provided index.
  * @param file The CSV file
- * @param indexItems The list of all stocks from stocks_index.json
+ * @param indexItems The list of all stocks from the backend stock index
  * @param columnIdx The column index (0-based, so 5 for 6th column)
  */
 export const parseAndMatchStocks = async (

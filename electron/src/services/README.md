@@ -84,6 +84,9 @@
   - 股票搜索/详情/热门/快速搜索/筛选/行业列表接口统一从 `/api/stocks/*` 切换为 `/api/v1/stocks/*`，与网关收敛路由保持一致；
   - 解决本地开发源 `http://127.0.0.1:3000` 直连 `https://www.quantmindai.cn` 时，旧路径触发预检但无有效 `Access-Control-Allow-Origin` 导致的 `ERR_NETWORK`。
   - `getStockDetail` 已切换为标准详情路径 `/api/v1/stocks/{symbol}`，并在详情接口异常时自动回退到 `/api/v1/stocks/search` 做名称匹配，降低持仓页“股票名称显示为代码”的概率。
+- `stockListService` 股票索引链路收敛（2026-05-24）：
+  - 策略/回测场景的股票列表不再从前端静态路径 `/data/stocks.min.json` 读取，而是统一调用后端 `GET /api/v1/stocks/index`；
+  - 这样 Electron 独立打包后也能直接使用同一份股票索引，避免 `file://` 路径失效。
 
 - 旧本地通知中心链路已移除（2026-03-10）：
   - 删除 `services/alert/*` 本地通知与价格/指标告警主链路；

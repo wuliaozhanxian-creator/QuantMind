@@ -181,6 +181,7 @@ export const SERVICE_ENDPOINTS = {
   get QLIB_SERVICE() { return `${SERVICE_URLS.QLIB_SERVICE}${API_PATHS.V1}`; },
   get STOCK_QUERY() { return `${SERVICE_URLS.STOCK_QUERY}${API_PATHS.V1}`; },
   get TRADING() { return `${SERVICE_URLS.TRADING}${API_PATHS.V1}`; },
+  get STOCKS() { return `${SERVICE_URLS.API_GATEWAY}${API_PATHS.V1}/stocks`; },
 } as const;
 
 export default {

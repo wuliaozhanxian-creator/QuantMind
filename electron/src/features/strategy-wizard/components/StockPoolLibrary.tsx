@@ -10,7 +10,6 @@ import {
   message, 
   Spin, 
   Tag, 
-  Badge, 
   Modal, 
   Popconfirm, 
   Table, 
@@ -30,6 +29,7 @@ import {
   SettingOutlined
 } from '@ant-design/icons';
 import { useWizardV2Store } from '../store/wizardV2Store';
+import { fetchStockIndex } from '../services/wizardService';
 // 使用按需导入以避免与其他模块的静态/动态导入冲突
 import { loadFeaturesBySymbolsInBatches } from '../utils/featureEnrichment';
 import { getWizardUserId } from '../utils/userId';
@@ -96,10 +96,8 @@ export const StockPoolLibrary: React.FC = () => {
     if (loadingId) return;
     setLoadingId('all-market');
     try {
-      message.loading({ content: '正在初始化全市场 5205 只标的...', key: 'allMarket', duration: 0 });
-      const response = await fetch('/data/stocks/stocks_index.json');
-      const data = await response.json();
-      const items = data.items || [];
+      const items = await fetchStockIndex();
+      message.loading({ content: `正在初始化全市场 ${items.length} 只标的...`, key: 'allMarket', duration: 0 });
       const symbols = items.map((s: any) => s.symbol);
       const itemMap = new Map<string, any>(items.map((s: any) => [s.symbol, s]));
 
@@ -377,17 +375,6 @@ export const StockPoolLibrary: React.FC = () => {
           ]}
         />
       </Modal>
-
-      {/* 底部装饰 */}
-      <div style={{ padding: '12px', background: '#fff', borderTop: '1px solid #eef0f2' }}>
-        <div style={{ 
-          padding: '8px', borderRadius: 8, background: '#f6ffed', 
-          border: '1px solid #b7eb8f', display: 'flex', alignItems: 'center', gap: 8
-        }}>
-          <Badge status="processing" color="#52c41a" />
-          <Text style={{ fontSize: 11, color: '#389e0d' }}>已连接 QuantMind 实时云端</Text>
-        </div>
-      </div>
 
       <style dangerouslySetInnerHTML={{ __html: `
         .library-item-hover:hover {

@@ -176,24 +176,17 @@ class AIStrategyService extends AIStrategyServiceFilesMixin {
     }
 
     try {
-      console.log('发送请求到:', apiClient.defaults.baseURL + '/strategy/generate');
-
-      // 构建股票池上下文信息，帮助LLM更好地理解选股意图
       const stockPoolContext = params.symbols && params.symbols.length > 0
         ? `\n\n股票池信息：\n- 包含 ${params.symbols.length} 只股票\n- 股票代码：${params.symbols.join(', ')}\n- 请基于这些股票生成针对性的交易策略`
         : '';
 
-      // 增强策略描述，将股票池信息注入到提示词中
-      const enhancedDescription = params.description + stockPoolContext;
-
       const requestData = {
-        description: enhancedDescription,
+        description: params.description + stockPoolContext,
         market: params.market || 'CN',
         risk_level: params.riskLevel || 'medium',
         style: params.style || 'custom',
         symbols: params.symbols || [],
         timeframe: params.timeframe || '1d',
-        // 基础参数
         initial_capital: params.initialCapital || 100000,
         position_size: params.positionSize || 10,
         max_positions: params.maxPositions || 5,
@@ -201,7 +194,6 @@ class AIStrategyService extends AIStrategyServiceFilesMixin {
         take_profit: params.takeProfit || 20,
         strategy_length: params.strategyLength || 'unlimited',
         backtest_period: params.backtestPeriod || '1year',
-        // 新增高级参数
         max_drawdown: params.maxDrawdown || undefined,
         commission_rate: params.commissionRate || undefined,
         slippage: params.slippage || undefined,
@@ -209,21 +201,13 @@ class AIStrategyService extends AIStrategyServiceFilesMixin {
         user_id: 'desktop-user'
       };
 
-      console.log('请求数据:', requestData);
-
       const response = await apiClient.post('/strategy/generate', requestData);
-
-      console.log('API响应状态:', response.status);
-      console.log('API响应数据:', response.data);
-
-      // 统一解包 success/data 格式
       const data = response.data?.data ?? response.data;
-      const payload = data?.data ?? data;  // 双层 data 容错
+      const payload = data?.data ?? data;
       let code = '';
       let rationale = '';
       const metadata = payload?.metadata ?? {};
 
-      // 优先从artifacts中获取代码
       if (payload?.artifacts?.[0]?.code) {
         code = this.normalizeCode(payload.artifacts[0].code);
       } else if (payload?.python_code) {
@@ -232,19 +216,16 @@ class AIStrategyService extends AIStrategyServiceFilesMixin {
         code = this.normalizeCode(payload.code);
       }
 
-      // 获取策略说明，处理部分响应的情况
       rationale = payload?.rationale ?? data?.rationale ?? '';
       if (rationale.includes('部分响应') && code) {
         rationale = `AI生成策略：${params.description}`;
       }
 
-      // 确保metadata结构完整
       if (!metadata.factors) metadata.factors = [];
       if (!metadata.risk_controls) metadata.risk_controls = [];
       if (!metadata.assumptions) metadata.assumptions = [];
       if (!metadata.notes) metadata.notes = rationale.includes('部分响应') ? '策略代码已从AI响应中完整提取' : '';
 
-      // 转换后端响应格式到前端格式
       const displayMetadata: StrategyMetadata = {
         factors: metadata?.factors || payload?.factors || [],
         risk_controls: metadata?.risk_controls || payload?.risk_controls || [],
@@ -557,112 +538,15 @@ class AIStrategyService extends AIStrategyServiceFilesMixin {
     if (!params.description?.trim()) {
       throw new Error('策略描述不能为空');
     }
-
-    return new Promise((resolve, reject) => {
-      // 构建查询参数
-      const queryParams = new URLSearchParams({
-        description: params.description,
-        market: params.market || 'CN',
-        risk_level: params.riskLevel || 'medium',
-        style: params.style || 'simple',
-        symbols: (params.symbols || []).join(','),
-        timeframe: params.timeframe || '1d',
-        initial_capital: String(params.initialCapital || 100000),
-        position_size: String(params.positionSize || 10),
-        max_positions: String(params.maxPositions || 5),
-        stop_loss: String(params.stopLoss || 5),
-        take_profit: String(params.takeProfit || 20),
-        strategy_length: params.strategyLength || 'unlimited',
-        backtest_period: params.backtestPeriod || '1year',
-        user_id: 'desktop-user'
-      });
-
-      // 由于原生 EventSource 不支持 Header，我们将 Token 放入 Query 参数中
-      const token = authService.getAccessToken();
-      if (token) {
-        queryParams.append('token', token);
-      }
-      
-      const eventSource = new EventSource(`${resolveAiStrategyBaseURL()}/strategy/generate/stream?${queryParams.toString()}`);
-
-      const strategy: Strategy = {
-        id: this.generateId(),
-        name: this.generateStrategyName(params.description),
-        description: params.description,
-        code: '',
-        parameters: params,
-        metadata: {
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          version: 1,
-          tags: this.extractTags(params.description, params.riskLevel),
-          rationale: '',
-          factors: [],
-          riskControls: [],
-          assumptions: [],
-          notes: ''
-        },
-        conversation: []
-      };
-
-      eventSource.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          console.log('收到SSE数据:', data);
-
-          if (data.type === 'progress') {
-            // 处理进度更新
-            console.log('生成进度:', data.message);
-            // 这里可以触发UI更新回调
-          } else if (data.type === 'code_chunk') {
-            // 处理代码片段
-            strategy.code += data.content + '\n';
-          } else if (data.type === 'rationale') {
-            // 处理策略说明
-            strategy.metadata.rationale += data.content;
-          } else if (data.type === 'metadata') {
-            // 处理元数据
-            Object.assign(strategy.metadata, data.content);
-          } else if (data.type === 'complete') {
-            // 生成完成
-            console.log('策略生成完成:', strategy);
-            eventSource.close();
-            resolve(strategy);
-          } else if (data.type === 'error') {
-            // 处理错误
-            console.error('策略生成错误:', data.message);
-            eventSource.close();
-            reject(new Error(data.message));
-          }
-        } catch (error) {
-          console.error('解析SSE数据失败:', error);
-          eventSource.close();
-          reject(error);
-        }
-      };
-
-      eventSource.onerror = (error) => {
-        console.error('SSE连接错误:', error);
-        eventSource.close();
-        reject(new Error('流式生成策略失败，请检查网络连接'));
-      };
-
-      // 设置超时
-      setTimeout(() => {
-        if (eventSource.readyState !== EventSource.CLOSED) {
-          console.warn('SSE连接超时');
-          eventSource.close();
-          reject(new Error('策略生成超时，AI模型需要较长时间处理，请稍后重试'));
-        }
-      }, 300000); // 5分钟超时
-    });
+    return this.generateStrategyInternal(params);
   }
 
   // 生成策略（兼容旧接口）
   async generateStrategyLegacy(request: StrategyGenerationRequest): Promise<StrategyGenerationResult> {
     try {
       const response = await apiClient.post('/strategy/generate', request);
-      return response.data;
+      const payload = response.data?.data ?? response.data;
+      return payload?.data ?? payload;
     } catch (error) {
       console.error('生成策略失败:', error);
       throw error;

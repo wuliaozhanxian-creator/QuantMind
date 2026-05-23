@@ -83,6 +83,23 @@ export async function searchStocks(query: string) {
   }
 }
 
+/**
+ * 获取完整股票索引列表，统一由后端提供，避免前端依赖 file:// 静态路径。
+ */
+export async function fetchStockIndex() {
+  const res = await client.get('/stocks/index');
+  const payload = res?.data || {};
+  const items = Array.isArray(payload.items) ? payload.items : [];
+
+  return items
+    .map((item: any) => ({
+      symbol: String(item?.symbol || item?.code || '').trim(),
+      code: String(item?.code || item?.symbol || '').trim(),
+      name: String(item?.name || '').trim(),
+    }))
+    .filter((item: any) => item.symbol && item.name);
+}
+
 // ========== Phase 2: New APIs ==========
 
 

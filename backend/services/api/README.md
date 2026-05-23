@@ -305,6 +305,7 @@
 
 ## 股票搜索索引更新（2026-03-12）
 - 新增网关本地股票搜索接口：`GET /api/v1/stocks/search`（`q`、`limit`）。
+- 新增完整股票索引接口：`GET /api/v1/stocks/index`，供前端独立打包后统一拉取股票列表。
 - 新增索引状态接口：`GET /api/v1/stocks/search/status`。
 - 搜索数据源由服务器本地 JSON 索引提供（默认路径 `data/stocks/stocks_index.json`，可由 `STOCK_INDEX_JSON_PATH` 覆盖），避免前端直连第三方服务导致的 CORS 问题。
 - 新增索引构建脚本：`backend/services/api/scripts/build_stock_index.py`，优先从 `stocks` 表抽取，若不存在则自动回退 `symbols` 表生成 JSON。

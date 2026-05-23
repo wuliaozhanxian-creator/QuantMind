@@ -17,6 +17,8 @@ import {
   ValidationResult,
   ChatMessage
 } from '../../types/strategy';
+import { SERVICE_ENDPOINTS } from '../../config/services';
+import { authService } from '../../features/auth/services/authService';
 // Local ValidationError type (strategy types file did not export this symbol)
 export type ValidationError = {
   parameter: string;
@@ -76,6 +78,20 @@ export interface AIStrategy {
   strategy_name?: string;
   rationale?: string;
   artifacts?: any[];
+}
+
+
+function buildApiHeaders(): HeadersInit {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  const token = authService.getAccessToken();
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  const tenantId = authService.getTenantId?.() || localStorage.getItem('tenant_id') || 'default';
+  headers['X-Tenant-Id'] = String(tenantId || 'default');
+  return headers;
 }
 
 export interface BacktestResult {
@@ -347,22 +363,19 @@ export const generateStrategy = createAsyncThunk(
   'aiStrategy/generateStrategy',
   async (params: AIStrategyParams, { rejectWithValue }) => {
     try {
-      // 这里会调用 AI 策略服务
-      const response = await fetch('/api/v1/strategy/generate', {
+      const response = await fetch(`${SERVICE_ENDPOINTS.API_GATEWAY}/strategy/generate`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: buildApiHeaders(),
         body: JSON.stringify(params),
       });
 
+      const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        const error = await response.json();
-        return rejectWithValue(error.message || '策略生成失败');
+        const message = payload?.detail?.message || payload?.message || payload?.detail || '策略生成失败';
+        return rejectWithValue(message);
       }
 
-      const data = await response.json();
-      return data.data;
+      return payload?.data ?? payload;
     } catch (error) {
       return rejectWithValue(error instanceof Error ? error.message : '网络错误');
     }
@@ -373,21 +386,19 @@ export const saveStrategy = createAsyncThunk(
   'aiStrategy/saveStrategy',
   async (strategy: Partial<AIStrategy>, { rejectWithValue }) => {
     try {
-      const response = await fetch('/api/v1/strategies', {
+      const response = await fetch(`${SERVICE_ENDPOINTS.API_GATEWAY}/strategies`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: buildApiHeaders(),
         body: JSON.stringify(strategy),
       });
 
+      const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        const error = await response.json();
-        return rejectWithValue(error.message || '策略保存失败');
+        const message = payload?.detail?.message || payload?.message || payload?.detail || '策略保存失败';
+        return rejectWithValue(message);
       }
 
-      const data = await response.json();
-      return data.data;
+      return payload?.data ?? payload;
     } catch (error) {
       return rejectWithValue(error instanceof Error ? error.message : '网络错误');
     }
@@ -398,15 +409,17 @@ export const fetchStrategies = createAsyncThunk(
   'aiStrategy/fetchStrategies',
   async (_, { rejectWithValue }) => {
     try {
-      const response = await fetch('/api/v1/strategies');
+      const response = await fetch(`${SERVICE_ENDPOINTS.API_GATEWAY}/strategies`, {
+        headers: buildApiHeaders(),
+      });
 
+      const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        const error = await response.json();
-        return rejectWithValue(error.message || '获取策略列表失败');
+        const message = payload?.detail?.message || payload?.message || payload?.detail || '获取策略列表失败';
+        return rejectWithValue(message);
       }
 
-      const data = await response.json();
-      return data.data;
+      return payload?.data ?? payload;
     } catch (error) {
       return rejectWithValue(error instanceof Error ? error.message : '网络错误');
     }

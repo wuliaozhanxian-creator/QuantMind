@@ -104,6 +104,7 @@
   - 成交金额在 `totalAmount` 缺失时按 `displayPrice * displayQuantity` 回退计算，避免复权口径导致的展示偏差。
 - StockCodeInput / MultiStockCodeInput 搜索链路收敛（2026-03-12）：
   - 股票搜索降级链路由“浏览器直连腾讯 Smartbox”改为“调用后端网关 `GET /api/v1/stocks/search`”，避免本地开发环境 CORS 拦截。
+  - 股票列表/名称索引已统一改为后端 `GET /api/v1/stocks/index`，不再依赖前端静态 `/data/stocks.min.json`。
   - 兼容后端 `results/data` 两种响应结构，统一映射前端 `symbol/name` 字段并保持标准代码格式（如 `000001.SZ`）。
 - QlibQuickBacktest 股票池输入改造（2026-03-11）：
   - 移除“股票代码手动输入/搜索框（MultiStockCodeInput）”。

@@ -1,20 +1,15 @@
 /**
  * 股票列表服务
- * 从本地JSON文件加载股票列表，支持内存搜索
+ * 从后端股票索引接口加载股票列表，支持内存搜索
  */
+
+import { SERVICE_ENDPOINTS } from '../config/services';
 
 interface Stock {
   symbol: string;
   code: string;
   market: string;
   name?: string;
-}
-
-interface StocksData {
-  version: string;
-  updated_at: string;
-  total: number;
-  stocks: Stock[];
 }
 
 class StockListService {
@@ -43,17 +38,23 @@ class StockListService {
   private async _loadData(): Promise<void> {
     try {
       console.log('[StockList] 加载股票列表...');
-      const response = await fetch('/data/stocks.min.json');
+      const response = await fetch(`${SERVICE_ENDPOINTS.STOCKS}/index`);
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
-      const data: StocksData = await response.json();
-      this.stocks = data.stocks;
+      const data = await response.json();
+      const items = Array.isArray(data?.items) ? data.items : [];
+      this.stocks = items.map((item: any) => ({
+        symbol: String(item?.symbol || item?.code || '').trim(),
+        code: String(item?.code || item?.symbol || '').trim(),
+        market: String(item?.market || item?.exchange || '').trim(),
+        name: String(item?.name || '').trim() || undefined,
+      })).filter((item: Stock) => item.symbol && item.code);
       this.loaded = true;
 
-      console.log(`[StockList] 成功加载 ${data.total} 只股票 (版本: ${data.version})`);
+      console.log(`[StockList] 成功加载 ${this.stocks.length} 只股票 (后端索引)`);
     } catch (error) {
       console.error('[StockList] 加载失败:', error);
       throw error;

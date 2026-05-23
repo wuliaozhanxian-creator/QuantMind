@@ -51,8 +51,8 @@ export const MultiStockCodeInput: React.FC<Props> = ({
     }
   };
 
-  // 搜索腾讯API
-  const searchTencentStocks = async (query: string): Promise<StockOption[]> => {
+  // 搜索策略专用后端索引
+  const searchStrategyStocks = async (query: string): Promise<StockOption[]> => {
     try {
       const keyword = String(query || '').trim();
       if (!keyword) return [];
@@ -82,7 +82,7 @@ export const MultiStockCodeInput: React.FC<Props> = ({
         .filter((s): s is StockOption => s !== null)
         .slice(0, 10);
     } catch (error) {
-      console.error('Gateway stock search failed:', error);
+      console.error('Strategy stock search failed:', error);
       return [];
     }
   };
@@ -103,11 +103,11 @@ export const MultiStockCodeInput: React.FC<Props> = ({
         setDataSource('local');
 
         if (results.length === 0) {
-          results = await searchTencentStocks(query);
+          results = await searchStrategyStocks(query);
           setDataSource('api');
         }
       } else {
-        results = await searchTencentStocks(query);
+        results = await searchStrategyStocks(query);
         setDataSource('api');
       }
 
@@ -282,7 +282,7 @@ export const MultiStockCodeInput: React.FC<Props> = ({
           <div className="flex items-center gap-1 text-xs text-gray-500 ml-auto">
             <span>
               {dataSource === 'local'
-                ? `数据源：本地 (${stockListService.getTotal()}只)`
+                ? `数据源：后端索引 (${stockListService.getTotal()}只)`
                 : '数据源：腾讯财经（含实时价格）'}
             </span>
           </div>

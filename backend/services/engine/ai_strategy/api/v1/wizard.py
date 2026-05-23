@@ -93,6 +93,7 @@ from ...steps.step2_pool_confirmation import (
 )
 from ...steps.step2_pool_confirmation import query_pool as _step2_query_pool
 from .validation import router as validation_router
+from .stock_index import router as stock_index_router
 from .storage import router as storage_router
 from .generation import router as generation_router
 from .pool_management import router as pool_management_router
@@ -142,6 +143,7 @@ TOTAL_MV_TO_YUAN = 1.0  # 已经是元口径，无需二次换算
 
 router = APIRouter(prefix="/strategy", tags=["strategy-wizard"])
 router.include_router(validation_router)
+router.include_router(stock_index_router)
 router.include_router(storage_router)
 router.include_router(generation_router)
 router.include_router(pool_management_router)

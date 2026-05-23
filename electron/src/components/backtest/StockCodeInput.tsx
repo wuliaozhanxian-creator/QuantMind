@@ -1,6 +1,6 @@
 /**
  * 股票代码输入组件
- * 优先使用本地JSON数据（极快），降级到腾讯API（有价格和名称）
+ * 优先使用本地索引数据（极快），降级到策略专用股票搜索服务（有名称回填）
  */
 import React, { useState, useRef, useEffect } from 'react';
 import { Search, X, Info } from 'lucide-react';
@@ -49,8 +49,8 @@ export const StockCodeInput: React.FC<Props> = ({
     }
   };
 
-  // 搜索腾讯API（降级方案，包含实时价格和名称）
-  const searchTencentStocks = async (query: string): Promise<StockOption[]> => {
+  // 搜索策略专用后端索引（降级方案，包含名称回填）
+  const searchStrategyStocks = async (query: string): Promise<StockOption[]> => {
     try {
       const keyword = String(query || '').trim();
       if (!keyword) return [];
@@ -80,7 +80,7 @@ export const StockCodeInput: React.FC<Props> = ({
         .filter((s): s is StockOption => s !== null)
         .slice(0, 10);
     } catch (error) {
-      console.error('Gateway stock search failed:', error);
+      console.error('Strategy stock search failed:', error);
       return [];
     }
   };
@@ -101,15 +101,15 @@ export const StockCodeInput: React.FC<Props> = ({
         results = searchLocalStocks(query);
         setDataSource('local');
 
-        // 如果本地搜索没结果，尝试使用腾讯API（可能是简称搜索）
+        // 如果本地搜索没结果，尝试使用策略专用索引服务（可能是简称搜索）
         if (results.length === 0) {
-          console.log('[StockCodeInput] 本地无结果，尝试腾讯API');
-          results = await searchTencentStocks(query);
+          console.log('[StockCodeInput] 本地无结果，尝试策略专用索引服务');
+          results = await searchStrategyStocks(query);
           setDataSource('api');
         }
       } else {
-        // 本地数据未加载，使用腾讯API
-        results = await searchTencentStocks(query);
+        // 本地数据未加载，使用策略专用索引服务
+        results = await searchStrategyStocks(query);
         setDataSource('api');
       }
 
@@ -255,7 +255,7 @@ export const StockCodeInput: React.FC<Props> = ({
           <div className="flex items-center gap-1 text-xs text-gray-500 ml-auto">
             <span>
               {dataSource === 'local'
-                ? `数据源：本地 (${stockListService.getTotal()}只)`
+                ? `数据源：后端索引 (${stockListService.getTotal()}只)`
                 : '数据源：腾讯财经（含实时价格）'}
             </span>
           </div>

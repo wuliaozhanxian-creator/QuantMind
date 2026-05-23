@@ -21,6 +21,7 @@ import {
 import { useWizardV2Store } from '../store/wizardV2Store';
 import { parseAndMatchStocks, StockIndexItem } from '../utils/stockImport';
 import { loadFeaturesBySymbolsInBatches } from '../utils/featureEnrichment';
+import { fetchStockIndex } from '../services/wizardService';
 
 const { Text } = Typography;
 
@@ -47,10 +48,8 @@ export const StockPoolTable: React.FC = () => {
   useEffect(() => {
     const loadIndex = async () => {
       try {
-        const response = await fetch('/data/stocks/stocks_index.json');
-        if (!response.ok) throw new Error('Failed to load stock index');
-        const data = await response.json();
-        setStockIndex(data.items || []);
+        const items = await fetchStockIndex();
+        setStockIndex(items);
       } catch (err) {
         console.error('Error loading stock index:', err);
       }
