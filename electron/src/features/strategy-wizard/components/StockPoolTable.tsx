@@ -20,7 +20,6 @@ import {
 } from '@ant-design/icons';
 import { useWizardV2Store } from '../store/wizardV2Store';
 import { parseAndMatchStocks, StockIndexItem } from '../utils/stockImport';
-import { loadFeaturesBySymbolsInBatches } from '../utils/featureEnrichment';
 import { fetchStockIndex } from '../services/wizardService';
 
 const { Text } = Typography;
@@ -73,24 +72,35 @@ export const StockPoolTable: React.FC = () => {
       });
       if (!needHydrate) return;
 
+      const isMissingName = (stock: any, fallbackName?: string) => {
+        const currentName = String(stock?.name || '').trim();
+        const symbol = String(stock?.symbol || '').trim();
+        if (!currentName) return true;
+        if (fallbackName && currentName === fallbackName) return true;
+        return symbol && currentName === symbol;
+      };
+
       try {
         setAutoRefreshing(true);
-        const richData = await loadFeaturesBySymbolsInBatches(symbols);
-        if (!richData.length) return;
-        const richMap = new Map(richData.map((item) => [item.code, item]));
+        const richMap = new Map(
+          stockIndex
+            .map((item) => [String(item.symbol || '').trim(), item] as const)
+            .filter(([symbol, item]) => Boolean(symbol) && Boolean(item))
+        );
+        if (!richMap.size) return;
 
         const merged = workingPool.map((stock) => {
           const item: any = richMap.get(stock.symbol);
           if (!item) return stock;
           return {
             ...stock,
-            name: stock.name || item.name || stock.symbol,
+            name: isMissingName(stock, item.name) ? (item.name || stock.symbol) : stock.name,
             marketCap: Number(stock.marketCap) > 0 ? stock.marketCap : item.marketCap,
             pe: Number((stock as any).pe) !== 0
               ? (stock as any).pe
               : (item.pe ?? item.pe_ttm ?? item.peTtm ?? 0),
             roe: stock.roe ?? item.roe,
-            price: stock.price ?? item.closePrice,
+            price: stock.price ?? item.price ?? item.closePrice,
           };
         });
         setWorkingPool(merged as any);
@@ -103,7 +113,7 @@ export const StockPoolTable: React.FC = () => {
     };
 
     hydrateMissingFeatures();
-  }, [workingPool, autoRefreshing, setWorkingPool]);
+  }, [workingPool, autoRefreshing, setWorkingPool, stockIndex]);
 
   const handleImport = async (file: File) => {
     if (stockIndex.length === 0) {
@@ -118,30 +128,27 @@ export const StockPoolTable: React.FC = () => {
       if (importedStocks.length === 0) {
         message.warning('未在指定列解析到有效的股票代码');
       } else {
-        const symbols = importedStocks.map(s => s.symbol);
-        message.loading({ content: '正在同步投研特征数据...', key: 'syncData', duration: 0 });
-        const richData = await loadFeaturesBySymbolsInBatches(symbols);
-        
+        const stockIndexMap = new Map(stockIndex.map((item) => [item.symbol, item]));
         const existingSymbols = new Set((workingPool || []).map(s => s.symbol));
         const newItems: any[] = [];
         
-        richData.forEach(item => {
-          if (!existingSymbols.has(item.code)) {
+        importedStocks.forEach((s) => {
+          const indexed = stockIndexMap.get(s.symbol);
+          if (indexed && !existingSymbols.has(indexed.symbol)) {
             newItems.push({
-              symbol: item.code,
-              name: item.name,
-              marketCap: item.marketCap,
-              pe: (item as any).pe ?? (item as any).pe_ttm ?? (item as any).peTtm,
-              roe: item.roe,
-              price: item.closePrice
+              symbol: indexed.symbol,
+              name: indexed.name || s.name || indexed.symbol,
+              marketCap: Number(indexed.marketCap ?? 0) || 0,
+              pe: Number(indexed.pe ?? 0) || 0,
+              roe: Number(indexed.roe ?? 0) || 0,
+              price: Number(indexed.price ?? indexed.closePrice ?? 0) || 0
             });
-            existingSymbols.add(item.code);
+            existingSymbols.add(indexed.symbol);
           }
         });
 
-        const foundSymbols = new Set(richData.map(d => d.code));
         importedStocks.forEach(s => {
-          if (!foundSymbols.has(s.symbol) && !existingSymbols.has(s.symbol)) {
+          if (!existingSymbols.has(s.symbol)) {
             newItems.push(s);
             existingSymbols.add(s.symbol);
           }
@@ -151,7 +158,7 @@ export const StockPoolTable: React.FC = () => {
           setWorkingPool([...(workingPool || []), ...newItems]);
         }
 
-        message.success({ content: `成功导入 ${importedStocks.length} 只股票，已同步最新特征`, key: 'syncData' });
+        message.success(`成功导入 ${importedStocks.length} 只股票`);
         setPendingImported(true);
         setSaveName(currentPoolName || '我的股票池');
         message.info('已导入新股票池，请点击“保存”并命名后同步到云端');

@@ -28,6 +28,7 @@ _INDEX_CACHE_TTL_SECONDS = int(os.getenv("STOCK_INDEX_CACHE_TTL_SECONDS", "300")
 _INDEX_CACHE_MAX_ENTRIES = int(os.getenv("STOCK_INDEX_CACHE_MAX_ENTRIES", "4"))
 _INDEX_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _INDEX_LOCK = asyncio.Lock()
+_MONEY_UNIT_TO_YI = 1.0 / 100000000.0
 
 
 def _now_iso() -> str:
@@ -40,6 +41,9 @@ class StockIndexItem:
     code: str
     exchange: str
     name: str
+    market_cap: float = 0.0
+    pe: float = 0.0
+    price: float = 0.0
 
     def searchable_text(self) -> str:
         return " ".join([self.symbol.lower(), self.code.lower(), self.name.lower()]).strip()
@@ -50,6 +54,11 @@ class StockIndexItem:
             "code": self.code,
             "name": self.name,
             "market": self.exchange,
+            "marketCap": self.market_cap,
+            "market_cap": self.market_cap,
+            "pe": self.pe,
+            "price": self.price,
+            "closePrice": self.price,
         }
 
 
@@ -97,12 +106,28 @@ async def _load_stock_index_payload() -> dict[str, Any]:
         if cached is not None:
             return cached
 
+        columns_res = await session.execute(text("SELECT * FROM stock_daily_latest LIMIT 0"))
+        columns = {str(name).lower() for name in columns_res.keys()}
+        name_col = "stock_name" if "stock_name" in columns else ("name" if "name" in columns else None)
+        market_cap_col = "total_mv" if "total_mv" in columns else ("market_cap" if "market_cap" in columns else None)
+        pe_col = "pe_ttm" if "pe_ttm" in columns else ("pe" if "pe" in columns else None)
+        close_col = "close" if "close" in columns else None
+        adj_factor_col = "adj_factor" if "adj_factor" in columns else None
+
+        select_fields = [
+            "symbol",
+            f"COALESCE({name_col}, '') AS stock_name" if name_col else "'' AS stock_name",
+            f"COALESCE({market_cap_col}, 0) AS market_cap_raw" if market_cap_col else "0 AS market_cap_raw",
+            f"COALESCE({pe_col}, 0) AS pe" if pe_col else "0 AS pe",
+            f"COALESCE({close_col}, 0) AS close_price" if close_col else "0 AS close_price",
+            f"COALESCE({adj_factor_col}, 1) AS adj_factor" if adj_factor_col else "1 AS adj_factor",
+        ]
+
         result = await session.execute(
             text(
-                """
+                f"""
                 SELECT
-                    symbol,
-                    COALESCE(stock_name, '') AS stock_name
+                    {", ".join(select_fields)}
                 FROM stock_daily_latest
                 WHERE trade_date = :trade_date
                   AND COALESCE(symbol, '') <> ''
@@ -119,11 +144,23 @@ async def _load_stock_index_payload() -> dict[str, Any]:
         if not symbol:
             continue
         name = str(row.get("stock_name") or "").strip() or symbol
+        market_cap_raw = float(row.get("market_cap_raw") or 0)
+        pe = float(row.get("pe") or 0)
+        close_price_raw = float(row.get("close_price") or 0)
+        adj_factor = float(row.get("adj_factor") or 1) or 1
         exchange = _symbol_to_exchange(symbol)
         code = _symbol_to_code(symbol)
         items_map.setdefault(
             symbol,
-            StockIndexItem(symbol=symbol, code=code, exchange=exchange, name=name),
+            StockIndexItem(
+                symbol=symbol,
+                code=code,
+                exchange=exchange,
+                name=name,
+                market_cap=round(market_cap_raw * _MONEY_UNIT_TO_YI, 2) if market_cap_raw else 0.0,
+                pe=round(pe, 2) if pe else 0.0,
+                price=round(close_price_raw / adj_factor, 2) if close_price_raw else 0.0,
+            ),
         )
 
     items = [items_map[key] for key in sorted(items_map.keys())]

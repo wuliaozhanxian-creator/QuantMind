@@ -1,7 +1,7 @@
 """AI 策略向导 - 股票池相关 Schema 定义"""
 
 from datetime import datetime
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -120,6 +120,7 @@ class PreviewPoolFileRequest(BaseModel):
     tenant_id: str | None = None
     user_id: str
     file_key: str
+    lite: bool = False
 
 
 class PreviewPoolFileResponse(BaseModel):

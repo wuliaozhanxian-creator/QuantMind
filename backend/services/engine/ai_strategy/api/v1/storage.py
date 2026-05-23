@@ -5,7 +5,7 @@ import os
 import hashlib
 import math
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request
@@ -221,6 +221,22 @@ async def preview_pool_file(body: PreviewPoolFileRequest):
                     pool_file=rec.to_dict(),
                 )
 
+            if body.lite:
+                items = [PoolItem(symbol=c, name=c, metrics={}) for c in instruments]
+                return PreviewPoolFileResponse(
+                    success=True,
+                    items=items,
+                    summary={
+                        "matchRate": 0.0,
+                        "totalCandidates": len(items),
+                        "universeTotal": None,
+                        "asOf": None,
+                        "lite": True,
+                    },
+                    charts={},
+                    pool_file=rec.to_dict(),
+                )
+
             latest_columns = _get_table_columns(db, LATEST_TABLE)
             compat_table_sql = _build_compat_table_sql(LATEST_TABLE, latest_columns)
             sql = text(
@@ -329,7 +345,7 @@ async def save_pool_file(body: SavePoolFileRequest, request: Request):
                 if existing_record:
                     deactivate_query = db.query(StockPoolFile).filter(
                         StockPoolFile.user_id.in_(uid_variants),
-                        StockPoolFile.is_active == True,
+                        StockPoolFile.is_active,
                     )
                     if body.tenant_id:
                         deactivate_query = deactivate_query.filter(StockPoolFile.tenant_id == body.tenant_id)
@@ -377,7 +393,7 @@ async def save_pool_file(body: SavePoolFileRequest, request: Request):
                 uid_variants = _user_id_variants(body.user_id)
                 query = db.query(StockPoolFile).filter(
                     StockPoolFile.user_id.in_(uid_variants),
-                    StockPoolFile.is_active == True,
+                    StockPoolFile.is_active,
                 )
                 if body.tenant_id:
                     query = query.filter(StockPoolFile.tenant_id == body.tenant_id)
@@ -435,7 +451,7 @@ async def get_active_pool_file(body: GetActivePoolFileRequest, request: Request)
         uid_variants = _user_id_variants(body.user_id)
         with get_db() as db:
             query = db.query(StockPoolFile).filter(
-                StockPoolFile.user_id.in_(uid_variants), StockPoolFile.is_active == True
+                StockPoolFile.user_id.in_(uid_variants), StockPoolFile.is_active
             )
             if body.tenant_id:
                 query = query.filter(StockPoolFile.tenant_id == body.tenant_id)

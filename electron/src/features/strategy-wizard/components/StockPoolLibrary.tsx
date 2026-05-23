@@ -30,8 +30,6 @@ import {
 } from '@ant-design/icons';
 import { useWizardV2Store } from '../store/wizardV2Store';
 import { fetchStockIndex } from '../services/wizardService';
-// 使用按需导入以避免与其他模块的静态/动态导入冲突
-import { loadFeaturesBySymbolsInBatches } from '../utils/featureEnrichment';
 import { getWizardUserId } from '../utils/userId';
 import dayjs from 'dayjs';
 
@@ -49,6 +47,7 @@ export const StockPoolLibrary: React.FC = () => {
 
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [isManageModalOpen, setIsManageModalOpen] = useState(false);
+  const [allMarketCount, setAllMarketCount] = useState<number | null>(null);
   const refreshingPoolsRef = useRef(false);
 
   const refreshPools = async (silent = true) => {
@@ -84,6 +83,16 @@ export const StockPoolLibrary: React.FC = () => {
   };
 
   useEffect(() => {
+    const loadIndexCount = async () => {
+      try {
+        const items = await fetchStockIndex();
+        setAllMarketCount(items.length);
+      } catch (err) {
+        console.error('Error loading stock index count:', err);
+        setAllMarketCount(0);
+      }
+    };
+    loadIndexCount();
     refreshPools(true);
   }, []);
 
@@ -98,20 +107,14 @@ export const StockPoolLibrary: React.FC = () => {
     try {
       const items = await fetchStockIndex();
       message.loading({ content: `正在初始化全市场 ${items.length} 只标的...`, key: 'allMarket', duration: 0 });
-      const symbols = items.map((s: any) => s.symbol);
-      const itemMap = new Map<string, any>(items.map((s: any) => [s.symbol, s]));
-
-      const richData = await loadFeaturesBySymbolsInBatches(symbols, 800, { lite: true });
-      const richMap = new Map(richData.map((item) => [item.code, item]));
-      const fullStocks = symbols.map((symbol: string) => {
-        const item = richMap.get(symbol);
+      const fullStocks = items.map((item: any) => {
         return {
-          symbol,
-          name: item?.name || itemMap.get(symbol)?.name || symbol,
-          marketCap: item?.marketCap,
-          pe: (item as any)?.pe ?? (item as any)?.pe_ttm ?? (item as any)?.peTtm,
-          roe: item?.roe,
-          price: item?.closePrice,
+          symbol: String(item?.symbol || item?.code || '').trim(),
+          name: String(item?.name || '').trim() || String(item?.symbol || item?.code || '').trim(),
+          marketCap: Number(item?.marketCap ?? item?.market_cap ?? 0) || 0,
+          pe: Number(item?.pe ?? item?.pe_ttm ?? 0) || 0,
+          roe: Number(item?.roe ?? 0) || 0,
+          price: Number(item?.price ?? item?.closePrice ?? 0) || 0,
         };
       });
 
@@ -129,11 +132,12 @@ export const StockPoolLibrary: React.FC = () => {
     if (loadingId) return;
     setLoadingId(pool.id);
     try {
+      message.loading({ content: `正在复用股票池「${pool.name || '未命名'}」...`, key: `pool-${pool.id}`, duration: 0 });
       const userId = getWizardUserId();
-      const { previewPoolFile } = await import('../services/wizardService');
-      const res = await previewPoolFile({ user_id: userId, file_key: pool.id });
+      const { previewPoolFileLite } = await import('../services/wizardService');
+      const res = await previewPoolFileLite({ user_id: userId, file_key: pool.id });
       
-      if (res.success && res.items) {
+      if ((res?.success !== false) && Array.isArray(res?.items)) {
         const fullStocks = res.items.map((x: any) => ({
           symbol: x.symbol,
           name: x.name || x.symbol,
@@ -146,10 +150,12 @@ export const StockPoolLibrary: React.FC = () => {
         setCurrentPoolName(pool.name);
         setWorkingPool(fullStocks as any);
         await activateVersion(pool.id);
-        message.success(`已复用股票池: ${pool.name}`);
+        message.success({ content: `已复用股票池: ${pool.name}`, key: `pool-${pool.id}` });
+      } else {
+        message.error({ content: '复用失败：未获取到股票池内容', key: `pool-${pool.id}` });
       }
     } catch (err) {
-      message.error('复用失败');
+      message.error({ content: '复用失败', key: `pool-${pool.id}` });
     } finally {
       setLoadingId(null);
       setIsManageModalOpen(false);
@@ -215,7 +221,9 @@ export const StockPoolLibrary: React.FC = () => {
                   <AppstoreOutlined style={{ color: loadingId === 'all-market' ? '#3b82f6' : '#64748b' }} />
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 600, color: '#1e293b' }}>全部市场 (A股)</div>
-                    <Text type="secondary" style={{ fontSize: 10 }}>5205 只标的</Text>
+                    <Text type="secondary" style={{ fontSize: 10 }}>
+                      {allMarketCount === null ? '加载中...' : `${allMarketCount} 只标的`}
+                    </Text>
                   </div>
                 </Space>
                 {loadingId === 'all-market' ? <Spin size="small" /> : <RightOutlined style={{ fontSize: 10, color: '#bfbfbf' }} />}

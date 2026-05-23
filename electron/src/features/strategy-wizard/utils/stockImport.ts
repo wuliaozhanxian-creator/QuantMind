@@ -5,6 +5,11 @@ export interface StockIndexItem {
   symbol: string;
   code: string;
   name: string;
+  marketCap?: number;
+  pe?: number;
+  roe?: number;
+  price?: number;
+  closePrice?: number;
 }
 
 /**

@@ -96,6 +96,10 @@ export async function fetchStockIndex() {
       symbol: String(item?.symbol || item?.code || '').trim(),
       code: String(item?.code || item?.symbol || '').trim(),
       name: String(item?.name || '').trim(),
+      marketCap: Number(item?.marketCap ?? item?.market_cap ?? 0) || 0,
+      pe: Number(item?.pe ?? item?.pe_ttm ?? 0) || 0,
+      price: Number(item?.price ?? item?.closePrice ?? 0) || 0,
+      closePrice: Number(item?.closePrice ?? item?.price ?? 0) || 0,
     }))
     .filter((item: any) => item.symbol && item.name);
 }
@@ -191,6 +195,11 @@ export async function listPoolFiles(payload: { user_id: string; limit?: number }
  */
 export async function previewPoolFile(payload: { user_id: string; file_key: string }) {
   const res = await client.post('/strategy/preview-pool-file', payload, { timeout: 60000 });
+  return res.data;
+}
+
+export async function previewPoolFileLite(payload: { user_id: string; file_key: string }) {
+  const res = await client.post('/strategy/preview-pool-file', { ...payload, lite: true }, { timeout: 20000 });
   return res.data;
 }
 
