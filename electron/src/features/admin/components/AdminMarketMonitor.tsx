@@ -101,7 +101,7 @@ export const AdminMarketMonitor: React.FC = () => {
         return (
             <div className="flex items-center justify-center h-64">
                 <Spin size="large" tip="加载行情源监控数据...">
-                    <div style={{ height: 100 }} />
+                    <div style={{ height: 100, width: 100 }} />
                 </Spin>
             </div>
         );

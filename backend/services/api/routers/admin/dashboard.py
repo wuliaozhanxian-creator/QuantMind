@@ -294,12 +294,13 @@ async def get_market_sources_status(
         redis_client = aioredis.Redis(
             host=MARKET_REDIS_HOST,
             port=MARKET_REDIS_PORT,
+            username="readonly_monitor",
             password=MARKET_REDIS_PASSWORD,
             db=MARKET_REDIS_DB,
         )
         await redis_client.ping()
         online_status["redis"]["status"] = "healthy"
-        await redis_client.close()
+        await redis_client.aclose()
     except Exception as e:
         logger.error(f"106 Redis connection failed: {e}")
         online_status["redis"]["status"] = "unreachable"

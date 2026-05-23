@@ -14,7 +14,7 @@ ROOT_ENV = Path(__file__).resolve().parents[4] / ".env"
 # ============================================================
 _MARKET_REDIS_FERNET_KEY = b"sPe1LUze878C7xz8Ekvy4wCK9kURt70Vr-uWnfpqJyg="
 _MARKET_REDIS_ENCRYPTED_PASSWORD = (
-    b"gAAAAABp-ibRrZocS4wY2cULfQuTe64sH6ZgPWtB0nU3J2RW4MrPVXAXp0GoFxzoEOm58ocE7POB53XbMX9TmrIasUtB6oe0Bg=="
+    b"gAAAAABqETroSPxwmJVPPGuLXfkCI9si_8Z2_-Cblwt3TTSwxsSIPWLut9myWSVMnC4JiCt426nnbmEJbCxi5cWVlhdkTUuERYkQBt-T7wEGdLOQNu_r-T8="
 )
 
 
