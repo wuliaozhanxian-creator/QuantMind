@@ -4,9 +4,8 @@ import { Card, Table, Statistic, Row, Col, Button, Typography, Space, Empty, Ale
 import ReactECharts from 'echarts-for-react';
 import { useWizardV2Store } from '../store/wizardV2Store';
 import { type WorkingPoolItemV2 } from '../services/wizardV2Service';
-import { previewPoolFile, deletePoolFile } from '../services/wizardService';
+import { fetchStockIndex, previewPoolFile } from '../services/wizardService';
 import { getWizardUserId } from '../utils/userId';
-import { loadFeaturesBySymbolsInBatches } from '../utils/featureEnrichment';
 
 const { Text } = Typography;
 
@@ -47,6 +46,7 @@ export const PoolPreview = React.forwardRef<PoolPreviewHandle, { onNext: () => v
   const [featureHydrating, setFeatureHydrating] = useState(false);
   const [historySelectedKey, setHistorySelectedKey] = useState<string>('__current__');
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+  const [stockIndex, setStockIndex] = useState<Array<{ symbol: string; code: string; name: string; marketCap?: number; pe?: number; roe?: number; price?: number; closePrice?: number }>>([]);
 
   // 设置默认股票池名称
   useEffect(() => {
@@ -73,6 +73,18 @@ export const PoolPreview = React.forwardRef<PoolPreviewHandle, { onNext: () => v
   }, []);
 
   useEffect(() => {
+    const loadIndex = async () => {
+      try {
+        const items = await fetchStockIndex();
+        setStockIndex(items);
+      } catch (err) {
+        console.error('[PoolPreview] load stock index failed:', err);
+      }
+    };
+    loadIndex();
+  }, []);
+
+  useEffect(() => {
     if (!activePoolVersionId) {
       if (historySelectedKey !== '__current__') {
         setHistorySelectedKey('__current__');
@@ -90,38 +102,48 @@ export const PoolPreview = React.forwardRef<PoolPreviewHandle, { onNext: () => v
     }
   }, [activePoolVersionId, poolHistory, historySelectedKey]);
 
-  // 特征补全
+  // 指标补全：统一使用 stock_daily_latest 股票索引
   useEffect(() => {
     const hydrateMissingFeatures = async () => {
-      if (featureHydrating || !workingPool.length) return;
-      
+      if (featureHydrating || !workingPool.length || !stockIndex.length) return;
+
       const hydrateKey = workingPool.map((item) => item.symbol).join(',');
       if (hydrateKey && hydrateKey === lastHydratedKeyRef.current) return;
 
       const needHydrate = workingPool.some((item) => {
         const marketCap = Number(item?.marketCap);
         const pe = Number((item as any)?.pe);
-        return !Number.isFinite(marketCap) || marketCap <= 0 || !Number.isFinite(pe) || pe === 0;
+        const price = Number((item as any)?.price);
+        return !Number.isFinite(marketCap) || marketCap <= 0 || !Number.isFinite(pe) || pe <= 0 || !Number.isFinite(price) || price <= 0;
       });
       if (!needHydrate) return;
 
       try {
         setFeatureHydrating(true);
-        const symbols = workingPool.map((item) => item.symbol);
-        const features = await loadFeaturesBySymbolsInBatches(symbols);
-        if (!features.length) return;
+        const indexMap = new Map(
+          stockIndex.map((item) => [String(item.symbol || '').trim().toUpperCase(), item] as const)
+        );
 
-        const featureMap = new Map(features.map((f: any) => [f.code, f]));
         const merged = workingPool.map((item) => {
-          const f: any = featureMap.get(item.symbol);
+          const f: any = indexMap.get(String(item.symbol || '').trim().toUpperCase());
           if (!f) return item;
+
+          const currentMarketCap = Number((item as any).marketCap);
+          const currentPe = Number((item as any).pe);
+          const currentPrice = Number((item as any).price);
+          const currentRoe = Number((item as any).roe);
+          const fallbackMarketCap = Number(f.marketCap ?? f.market_cap ?? 0) || 0;
+          const fallbackPe = Number(f.pe ?? f.pe_ttm ?? f.peTtm ?? 0) || 0;
+          const fallbackPrice = Number(f.price ?? f.closePrice ?? 0) || 0;
+          const fallbackRoe = Number(f.roe ?? 0) || 0;
+
           return {
             ...item,
-            name: item.name || f.name,
-            marketCap: Number(item?.marketCap) > 0 ? item.marketCap : (f.marketCap ?? 0),
-            pe: ((item as any)?.pe !== undefined && (item as any)?.pe !== null && (item as any)?.pe !== 0) ? (item as any).pe : (f.pe ?? f.pe_ttm ?? f.peTtm ?? 0),
-            roe: item?.roe ?? f.roe ?? 0,
-            price: (item as any)?.price ?? f.closePrice ?? 0,
+            name: item.name || f.name || item.symbol,
+            marketCap: Number.isFinite(currentMarketCap) && currentMarketCap > 0 ? currentMarketCap : fallbackMarketCap,
+            pe: Number.isFinite(currentPe) && currentPe > 0 ? currentPe : fallbackPe,
+            roe: Number.isFinite(currentRoe) && currentRoe > 0 ? currentRoe : fallbackRoe,
+            price: Number.isFinite(currentPrice) && currentPrice > 0 ? currentPrice : fallbackPrice,
           };
         });
 
@@ -135,7 +157,7 @@ export const PoolPreview = React.forwardRef<PoolPreviewHandle, { onNext: () => v
     };
 
     hydrateMissingFeatures();
-  }, [workingPool, setWorkingPool, featureHydrating]);
+  }, [workingPool, setWorkingPool, featureHydrating, stockIndex]);
 
   const handleSelectHistoryPool = async (fileKey: string) => {
     setHistorySelectedKey(fileKey);
@@ -160,14 +182,19 @@ export const PoolPreview = React.forwardRef<PoolPreviewHandle, { onNext: () => v
         throw new Error(res?.error || '加载失败');
       }
 
-      const items = res.items.map((x: any) => ({
-        symbol: String(x?.symbol || '').trim(),
-        name: String(x?.name || '').trim(),
-        marketCap: Number(x?.metrics?.market_cap ?? 0),
-        pe: Number(x?.metrics?.pe ?? 0),
-        roe: Number(x?.metrics?.roe ?? 0),
-        price: Number(x?.metrics?.close ?? 0),
-      }));
+      const indexMap = new Map(stockIndex.map((item) => [String(item.symbol || '').trim().toUpperCase(), item] as const));
+      const items = res.items.map((x: any) => {
+        const symbol = String(x?.symbol || '').trim();
+        const indexed: any = indexMap.get(symbol.toUpperCase());
+        return {
+          symbol,
+          name: String(x?.name || indexed?.name || '').trim() || symbol,
+          marketCap: Number(x?.metrics?.market_cap ?? indexed?.marketCap ?? indexed?.market_cap ?? 0),
+          pe: Number(x?.metrics?.pe ?? indexed?.pe ?? indexed?.pe_ttm ?? 0),
+          roe: Number(x?.metrics?.roe ?? indexed?.roe ?? 0),
+          price: Number(x?.metrics?.close ?? indexed?.price ?? indexed?.closePrice ?? 0),
+        };
+      });
 
       const historyPoolName = res.pool_file?.pool_name || '历史股票池';
 
