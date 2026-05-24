@@ -83,6 +83,67 @@ def test_format_candidate_record_keeps_bidirectional_volume_trend():
     assert payload_flat["volumeTrend3d"] == pytest.approx(0.0)
 
 
+def test_format_candidate_record_falls_back_to_stock_index_json(tmp_path, monkeypatch):
+    stock_index = tmp_path / "stocks_index.json"
+    stock_index.write_text(
+        '{"items": [{"symbol": "SZ300274", "code": "300274", "name": "阳光电源"}]}',
+        encoding="utf-8",
+    )
+
+    research_service = research._research_service  # noqa: SLF001
+    research_service._STOCK_META_CACHE.clear()  # noqa: SLF001
+    monkeypatch.setenv("STOCK_INDEX_JSON_PATH", str(stock_index))
+    monkeypatch.setattr(research_service, "_STOCK_INDEX_JSON_PATH", str(stock_index))
+
+    payload = research._format_candidate_record(  # noqa: SLF001
+        {
+            "symbol": "SZ300274",
+            "run_id": "run_demo",
+            "fusion_score": 0.1,
+            "stock_name": "",
+        }
+    )
+
+    assert payload["name"] == "阳光电源"
+
+
+def test_format_candidate_record_falls_back_to_stock_index_industry(tmp_path, monkeypatch):
+    stock_index = tmp_path / "stocks_index.json"
+    stock_index.write_text(
+        '{"items": [{"symbol": "SZ300274", "code": "300274", "name": "阳光电源", "csrc1_industry":"制造业"}]}',
+        encoding="utf-8",
+    )
+
+    research_service = research._research_service  # noqa: SLF001
+    research_service._STOCK_META_CACHE.clear()  # noqa: SLF001
+    monkeypatch.setenv("STOCK_INDEX_JSON_PATH", str(stock_index))
+    monkeypatch.setattr(research_service, "_STOCK_INDEX_JSON_PATH", str(stock_index))
+
+    payload = research._format_candidate_record(  # noqa: SLF001
+        {
+            "symbol": "SZ300274",
+            "run_id": "run_demo",
+            "fusion_score": 0.1,
+            "industry": "",
+        }
+    )
+
+    assert payload["sector"] == "制造业"
+
+
+def test_format_candidate_record_normalizes_amount_wanyuan_to_yi():
+    payload = research._format_candidate_record(  # noqa: SLF001
+        {
+            "symbol": "SH600000",
+            "run_id": "run_demo",
+            "fusion_score": 0.1,
+            "amount": 16385.371147,  # 万元口径
+        }
+    )
+
+    assert payload["amount"] == pytest.approx(1.6385)
+
+
 @pytest.mark.asyncio
 async def test_do_get_overview_uses_run_date_market_snapshot(monkeypatch):
     captured = {"sql": ""}

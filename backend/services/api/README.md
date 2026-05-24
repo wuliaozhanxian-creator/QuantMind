@@ -170,6 +170,10 @@
 - 投研候选池进一步提速（2026-05-11）：
   - 新增短 TTL 热点缓存（按 `tenant_id + user_id + run_id + limit` 维度缓存 90 秒），重复刷新同一批次时可直接命中，减少数据库压力。
   - `stock_daily_latest` 热点查询新增本地短缓存（120 秒）：覆盖 `POST /api/v1/research/symbols/features?lite=true` 与 `GET /api/v1/research/kline/{symbol}` 的高频读取场景，按 `symbol/trade_date` 相关键复用，降低行情表重复访问。
+- 投研口径与元数据兜底修复（2026-05-24）：
+  - `routers/research_service.py::_format_candidate_record` 的成交额换算从固定“元->亿（/1e8）”改为自适应兼容元/万元/亿三种来源，避免源数据为“万元”时前端显示大量 `0.00亿`。
+  - 候选简称兜底增强：当 `stock_daily_latest.stock_name` 为空时，从 `data/stocks/stocks_index.json` 回退补齐，且按文件 `mtime` 自动刷新本地缓存。
+  - 候选行业兜底增强：当 `stock_daily_latest.industry` 为空时，从 `stocks_index.json` 回退补齐，优先级为 `csrc1_industry` > `sw_l1_industry`，降低行业筛选全空风险。
 
 ## 用户态模型训练闭环（2026-04-04）
 

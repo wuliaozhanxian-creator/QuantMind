@@ -7,6 +7,7 @@ import math
 import os
 import time
 from datetime import date, datetime
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import text
@@ -24,6 +25,12 @@ _SDL_CACHE_MAX_ENTRIES = 512
 _SDL_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _SDL_REDIS_YEAR = int(os.getenv("RESEARCH_SDL_REDIS_YEAR", "2026"))
 _SDL_REDIS_TTL_SECONDS = int(os.getenv("RESEARCH_SDL_REDIS_TTL_SECONDS", "1800"))
+_STOCK_META_CACHE: dict[str, dict[str, str]] = {}
+_STOCK_META_CACHE_MTIME: float | None = None
+_STOCK_INDEX_JSON_PATH = os.getenv(
+    "STOCK_INDEX_JSON_PATH",
+    str(Path(__file__).resolve().parents[4] / "data" / "stocks" / "stocks_index.json"),
+)
 
 
 def _redis_get_json(key: str) -> dict[str, Any] | None:
@@ -414,7 +421,78 @@ def _resolve_stock_name(row, symbol):
         val = row.get(field)
         if val and val != symbol:
             return val
+    fallback = _resolve_stock_name_from_index(symbol)
+    if fallback and fallback != symbol:
+        return fallback
     return symbol
+
+
+def _resolve_industry(row, symbol: str) -> str:
+    val = row.get("industry")
+    if isinstance(val, str) and val.strip():
+        return val.strip()
+    meta = _resolve_stock_meta_from_index(symbol)
+    if not meta:
+        return ""
+    for key in ("csrc1_industry", "sw_l1_industry"):
+        v = str(meta.get(key) or "").strip()
+        if v:
+            return v
+    return ""
+
+
+def _resolve_stock_name_from_index(symbol: str) -> str | None:
+    meta = _resolve_stock_meta_from_index(symbol)
+    if not meta:
+        return None
+    name = str(meta.get("name") or "").strip()
+    return name or None
+
+
+def _resolve_stock_meta_from_index(symbol: str) -> dict[str, str] | None:
+    global _STOCK_META_CACHE_MTIME
+    symbol_norm = StockCodeUtil.to_prefix(str(symbol or ""))
+    if not symbol_norm:
+        return None
+
+    path = Path(_STOCK_INDEX_JSON_PATH)
+    try:
+        stat = path.stat()
+    except Exception:
+        return None
+
+    need_reload = (not _STOCK_META_CACHE) or (_STOCK_META_CACHE_MTIME != stat.st_mtime)
+    if need_reload:
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            items = raw.get("items", []) if isinstance(raw, dict) else []
+            new_map: dict[str, dict[str, str]] = {}
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                name = str(item.get("name") or "").strip()
+                sw_l1_industry = str(item.get("sw_l1_industry") or "").strip()
+                csrc1_industry = str(item.get("csrc1_industry") or "").strip()
+                meta = {
+                    "name": name,
+                    "sw_l1_industry": sw_l1_industry,
+                    "csrc1_industry": csrc1_industry,
+                }
+                sym = StockCodeUtil.to_prefix(str(item.get("symbol") or ""))
+                if sym:
+                    new_map[sym] = meta
+                code = str(item.get("code") or "").strip()
+                if code:
+                    code_sym = StockCodeUtil.to_prefix(code)
+                    if code_sym:
+                        new_map[code_sym] = meta
+            _STOCK_META_CACHE.clear()
+            _STOCK_META_CACHE.update(new_map)
+            _STOCK_META_CACHE_MTIME = stat.st_mtime
+        except Exception:
+            return _STOCK_META_CACHE.get(symbol_norm)
+
+    return _STOCK_META_CACHE.get(symbol_norm)
 
 
 def _format_candidate_record(row: dict[str, Any]) -> dict[str, Any]:
@@ -423,8 +501,15 @@ def _format_candidate_record(row: dict[str, Any]) -> dict[str, Any]:
     stock_name = _resolve_stock_name(row, symbol)
 
     def to_yi(v):
-        val = _serialize_float(v) or 0.0
-        return val / 100000000.0
+        val = _serialize_float(v)
+        if val is None:
+            return 0.0
+        abs_val = abs(val)
+        if abs_val >= 10_000_000:
+            return val / 100_000_000.0
+        if abs_val >= 1_000:
+            return val / 10_000.0
+        return val
 
     def parse_json(v):
         if not v:
@@ -465,7 +550,7 @@ def _format_candidate_record(row: dict[str, Any]) -> dict[str, Any]:
         "totalMv": round(to_yi(row.get("total_mv")), 2),
         "floatMv": round(to_yi(row.get("float_mv")), 2),
         "listedDays": _serialize_int(row.get("listed_days")) or 0,
-        "sector": row.get("industry") or "",
+        "sector": _resolve_industry(row, symbol),
         "concept": " / ".join(concept_tags[:3]) if isinstance(concept_tags, list) and concept_tags else "",
         "conceptTags": concept_tags if isinstance(concept_tags, list) else [],
         "indexTags": index_tags if isinstance(index_tags, list) else [],
