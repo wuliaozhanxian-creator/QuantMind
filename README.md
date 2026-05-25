@@ -17,6 +17,8 @@
   <a href="#-快速开始">快速开始</a> •
   <a href="#-功能演示">功能演示</a> •
   <a href="#-技术架构">技术架构</a> •
+  <a href="https://www.quantmindai.cn/docs/QuantMind_Trading_Manual.pdf">上手指南</a> •
+  <a href="https://www.quantmindai.cn/download">软件下载</a> •
   <a href="#-文档导航">文档导航</a>
 </p>
 
