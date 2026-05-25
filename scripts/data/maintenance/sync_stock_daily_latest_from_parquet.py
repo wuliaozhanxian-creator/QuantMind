@@ -163,6 +163,8 @@ def load_incremental_frame(parquet_path: Path, local_max_date: pd.Timestamp | No
 
     # 导库口径：stock_daily_latest 仅保留股票，排除所有指数命名空间与指数代码
     if "symbol" in frame.columns:
+        from backend.shared.stock_utils import StockCodeUtil
+        frame["symbol"] = frame["symbol"].apply(lambda s: StockCodeUtil.to_prefix(str(s).strip()))
         sym = frame["symbol"].astype(str).str.upper().str.strip()
         is_stock = sym.map(lambda s: bool(STOCK_SYMBOL_PATTERN.match(s)))
         is_index = sym.str.startswith("IDX_") | sym.isin(INDEX_SYMBOLS)
@@ -195,17 +197,28 @@ def normalize_frame(frame: pd.DataFrame, target_columns: list[str]) -> tuple[pd.
     skipped_columns = [col for col in target_columns if col not in frame.columns]
     normalized = frame.reindex(columns=common_columns).copy()
 
+    str_cols = {
+        "stock_name", "listing_market", "industry", "province",
+        "ind_code_l1", "ind_code_l2", "symbol"
+    }
+
     for col in common_columns:
         if col == "trade_date":
             normalized[col] = pd.to_datetime(normalized[col]).dt.date
             continue
         if col in INT_COLUMNS:
             normalized[col] = normalized[col].apply(
-                lambda v: None if pd.isna(v) else int(v)
+                lambda v: None if (pd.isna(v) or v == "" or str(v).strip() == "") else int(float(v))
             )
             continue
+        if col in str_cols:
+            normalized[col] = normalized[col].apply(
+                lambda v: "" if pd.isna(v) else str(v).strip()
+            )
+            continue
+        # Float columns
         normalized[col] = normalized[col].apply(
-            lambda v: None if pd.isna(v) else (float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else v)
+            lambda v: None if (pd.isna(v) or v == "" or str(v).strip() == "") else float(v)
         )
 
     return normalized, skipped_columns
