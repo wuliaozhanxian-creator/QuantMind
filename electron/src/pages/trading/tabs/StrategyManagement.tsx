@@ -467,7 +467,9 @@ const StrategyManagement: React.FC<StrategyManagementProps> = ({
 
     const selectedStrategy = strategies.find(s => s.id === selectedStrategyId);
     const isGlobalSim = tradingMode === 'simulation';
-    const isDeployDisabled = !selectedStrategyId || !selectedStrategy?.is_verified;
+    const isStrategyVerified = Boolean(selectedStrategy?.is_verified);
+    // 模拟盘与实盘是独立链路：模拟盘仅要求选中策略，实盘/影子仍要求策略已验证。
+    const isDeployDisabled = !selectedStrategyId || (!isGlobalSim && !isStrategyVerified);
     const runtimeMode = status?.mode;
     const runtimeStatus = status?.status;
     const latestHostedTask = status?.latest_hosted_task || null;
@@ -788,7 +790,7 @@ const StrategyManagement: React.FC<StrategyManagementProps> = ({
                                         className={`px-8 py-2.5 rounded-xl text-sm font-bold text-white transition-all ${isDeployDisabled ? 'bg-slate-300' : (isShadowMode || isGlobalSim ? 'bg-indigo-500 hover:bg-indigo-600' : 'bg-blue-600 hover:bg-blue-700')}`}
                                     >
                                         <Play size={18} className="inline mr-2" />
-                                        {selectedStrategy?.is_verified ? (isGlobalSim ? '开启实时模拟' : (isShadowMode ? '开启影子运行' : '启动实盘交易')) : '未经验证'}
+                                        {isGlobalSim ? '开启实时模拟' : (isStrategyVerified ? (isShadowMode ? '开启影子运行' : '启动实盘交易') : '未经验证')}
                                     </button>
                                 </div>
                                 {error && <div className="text-[11px] text-rose-500 flex items-center gap-1"><AlertCircle size={10} /> {error}</div>}

@@ -607,3 +607,11 @@ pytest -q backend/services/tests
   - 回写失败不影响启停主流程成功响应。
 - 异常口径：
   - 运行态 `error` 不自动降级生命周期，策略仍保持 `live_trading`，由前端基于 `runtime_state=error` 展示异常。
+
+## 修复记录（2026-05-25，模拟盘托管任务误依赖实盘组合）
+
+- 问题：`SIMULATION` 托管任务在 `validating` 阶段仍强制检查“活跃实盘组合”，并读取实盘账户快照，导致报错 `当前未发现可用的实盘组合` 或 `请先确认 QMT Agent 已上报账户数据`。
+- 修复：
+  - `manual_execution_service` 在 `SIMULATION` 模式下跳过实盘组合检查；
+  - `_load_latest_account_snapshot` 增加按 `trading_mode` 分流，`SIMULATION` 从 Redis `simulation:account:{tenant}:{user}` 读取账户快照；
+  - 托管任务构建执行预案与账户等待逻辑统一透传 `trading_mode`，避免模拟盘回退到实盘快照链路。

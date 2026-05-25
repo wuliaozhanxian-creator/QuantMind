@@ -38,8 +38,8 @@ export function validateLiveTradeConfig(config: LiveTradeConfig): ValidationIssu
   }
 
   const sessionRanges = {
-    AM: ['00:00', '23:59'],
-    PM: ['00:00', '23:59'],
+    AM: ['09:30', '11:30'],
+    PM: ['13:00', '15:00'],
   } as const;
 
   if (config.sell_time) {

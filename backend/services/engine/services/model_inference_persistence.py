@@ -407,6 +407,47 @@ class ModelInferencePersistence:
         items = [self._row_to_run(dict(row)) for row in rows]
         return {"page": page, "page_size": page_size, "total": total, "items": items}
 
+    async def get_latest_completed_run_by_model(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        model_id: str,
+    ) -> dict[str, Any] | None:
+        """按业务交易目标日获取某模型最新 completed 推理批次。"""
+        async with get_session(read_only=True) as session:
+            row = (
+                (
+                    await session.execute(
+                        text(
+                            """
+                            SELECT *
+                            FROM qm_model_inference_runs
+                            WHERE tenant_id = :tenant_id
+                              AND user_id = :user_id
+                              AND model_id = :model_id
+                              AND status = 'completed'
+                            ORDER BY
+                              prediction_trade_date DESC,
+                              updated_at DESC NULLS LAST,
+                              created_at DESC
+                            LIMIT 1
+                            """
+                        ),
+                        {
+                            "tenant_id": tenant_id,
+                            "user_id": user_id,
+                            "model_id": model_id,
+                        },
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        if not row:
+            return None
+        return self._row_to_run(dict(row))
+
     async def get_settings(
         self,
         *,

@@ -52,6 +52,7 @@ async def lifespan(app: FastAPI):
     ledger_settlement_task = None
     manual_execution_task = None
     sandbox_signal_task = None
+    sim_fund_snapshot_worker = None
 
     try:
         await init_unified_config(service_name="quantmind-trade")
@@ -145,6 +146,23 @@ async def lifespan(app: FastAPI):
         app.state.startup_healthy = False
         logger.error("trade sandbox signal consumer start failed: %s", e, exc_info=True)
 
+    # 模拟盘资金快照后台任务
+    try:
+        snapshot_enabled = str(os.getenv("SIM_FUND_SNAPSHOT_ENABLED", "true")).strip().lower() != "false"
+        interval_raw = str(os.getenv("SIM_FUND_SNAPSHOT_INTERVAL_SECONDS", "30")).strip()
+        interval = int(interval_raw or "30")
+        if snapshot_enabled and interval > 0:
+            from backend.services.trade.redis_client import redis_client
+            from backend.services.trade.simulation.services.fund_snapshot_service import (
+                SimulationFundSnapshotWorker,
+            )
+
+            sim_fund_snapshot_worker = SimulationFundSnapshotWorker(redis_client, interval_seconds=interval)
+            await sim_fund_snapshot_worker.start()
+    except Exception as e:
+        app.state.startup_healthy = False
+        logger.error("trade simulation fund snapshot worker start failed: %s", e, exc_info=True)
+
     # 启动模拟盘定时调度器
     simulation_scheduler_task = None
     try:
@@ -173,6 +191,12 @@ async def lifespan(app: FastAPI):
             pass
         except Exception as e:
             logger.warning("trade background task stop failed: %s", e)
+
+    if sim_fund_snapshot_worker is not None:
+        try:
+            await sim_fund_snapshot_worker.stop()
+        except Exception as e:
+            logger.warning("trade simulation fund snapshot worker stop failed: %s", e)
 
     exec_consumer = getattr(app.state, "execution_stream_consumer", None)
     if exec_consumer is not None:

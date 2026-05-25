@@ -101,8 +101,8 @@ export const useTradeRecords = (options: UseTradeRecordsOptions = {}): UseTradeR
                 setLoading(true);
             }
             setError(null);
-
-            const result = await tradingService.getRecentTrades(limit, tradingMode);
+            const normalizedUserId = userId ? String(userId) : undefined;
+            const result = await tradingService.getRecentTrades(limit, tradingMode, normalizedUserId);
             const normalizedRecords = normalizeRecords(result.records);
 
             // 批量获取股票名称并补全

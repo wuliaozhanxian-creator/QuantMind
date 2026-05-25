@@ -13,6 +13,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Dict, List, Optional, Tuple
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -21,6 +22,7 @@ from backend.services.trade.simulation.models.fund_snapshot import (
     SimulationFundSnapshot,
 )
 from backend.shared.database_manager_v2 import get_session
+from backend.shared.trade_account_cache import write_trade_account_cache
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +45,62 @@ def _local_today() -> datetime.date:
         return datetime.now(ZoneInfo(tz_name)).date()
     except Exception:
         return datetime.now().date()
+
+
+async def _fetch_latest_price(symbol: str, market_url: str) -> float:
+    """从行情服务获取最新价，失败时返回 0.0。"""
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            resp = await client.get(f"{market_url}/api/v1/quotes/{symbol}")
+            if resp.status_code == 200:
+                data = resp.json()
+                px = float(data.get("current_price") or data.get("last_price") or 0)
+                if px > 0:
+                    return px
+    except Exception as exc:
+        logger.debug("Snapshot price fetch failed for %s: %s", symbol, exc)
+    return 0.0
+
+
+async def _recalculate_account_market_value(account: dict) -> dict:
+    """
+    用最新行情重算持仓市值，更新 account 的 market_value 和 total_asset。
+    只处理多头仓位（long）；空头仓位的 market_value 来自 short_market_value 字段。
+    """
+    market_url = os.getenv("MARKET_DATA_SERVICE_URL", "http://127.0.0.1:8003").rstrip("/")
+    positions = dict(account.get("positions") or {})
+    if not positions:
+        return account
+
+    new_market_value = 0.0
+    for sym, pos in positions.items():
+        if not isinstance(pos, dict):
+            continue
+        volume = float(pos.get("volume") or 0.0)
+        if volume <= 0:
+            continue
+        # 只获取非空头仓位的市价（空头仓位用 side 标记）
+        side = str(pos.get("side") or "long").lower()
+        if side == "short":
+            # 空头市值已在 short_market_value 单独跟踪，此处跳过
+            mv = float(pos.get("market_value") or 0.0)
+            new_market_value -= mv  # 空头负贡献
+            continue
+        px = await _fetch_latest_price(sym, market_url)
+        if px > 0:
+            mv = volume * px
+            pos["price"] = px
+            pos["market_value"] = mv
+        else:
+            mv = float(pos.get("market_value") or 0.0)
+        new_market_value += mv
+
+    cash = float(account.get("cash") or 0.0)
+    short_proceeds = float(account.get("short_proceeds") or 0.0)
+    account["positions"] = positions
+    account["market_value"] = round(new_market_value, 4)
+    account["total_asset"] = round(cash + short_proceeds + new_market_value, 4)
+    return account
 
 
 def _parse_account_key(key: str) -> tuple[str, str] | None:
@@ -81,18 +139,27 @@ class SimulationFundSnapshotService:
         return _to_decimal(data.get("initial_cash"), Decimal("0"))
 
     @classmethod
-    def _build_row(cls, tenant_id: str, user_id: str, account: dict[str, object]) -> dict[str, object]:
+    def _build_row(
+        cls,
+        tenant_id: str,
+        user_id: str,
+        account: dict[str, object],
+        prev_total_asset: Decimal | None = None,
+    ) -> dict[str, object]:
         total_asset = _to_decimal(account.get("total_asset"))
         available_balance = _to_decimal(account.get("cash") or account.get("available_balance"))
         frozen_balance = _to_decimal(account.get("frozen_balance"))
         market_value = _to_decimal(account.get("market_value"))
         initial_capital = _to_decimal(account.get("initial_capital"))
-        today_pnl = _to_decimal(account.get("today_pnl"))
-        total_pnl = _to_decimal(account.get("total_pnl"))
+        # total_pnl = total_asset - initial_capital
         if initial_capital == 0:
             initial_capital = total_asset
-        if total_pnl == 0:
-            total_pnl = total_asset - initial_capital
+        total_pnl = total_asset - initial_capital
+        # today_pnl = total_asset - yesterday's total_asset (if available)
+        if prev_total_asset is not None and prev_total_asset > 0:
+            today_pnl = total_asset - prev_total_asset
+        else:
+            today_pnl = _to_decimal(account.get("today_pnl"))
 
         return {
             "tenant_id": tenant_id,
@@ -113,7 +180,15 @@ class SimulationFundSnapshotService:
         if not redis.client:
             return SnapshotUpsertResult(upserted_rows=0, scanned_accounts=0)
 
-        keys = list(redis.client.scan_iter(match="simulation:account:*", count=500))
+        if hasattr(redis.client, "scan_iter"):
+            keys = list(redis.client.scan_iter(match="simulation:account:*", count=500))
+        elif hasattr(redis.client, "keys"):
+            keys = redis.client.keys("simulation:account:*")
+        elif hasattr(redis.client, "store") and isinstance(redis.client.store, dict):
+            import fnmatch
+            keys = [k for k in redis.client.store.keys() if fnmatch.fnmatch(str(k), "simulation:account:*")]
+        else:
+            keys = []
         rows: list[dict[str, object]] = []
         for key in keys:
             parsed = _parse_account_key(str(key))
@@ -128,12 +203,46 @@ class SimulationFundSnapshotService:
             except Exception:
                 continue
 
-            row = cls._build_row(tenant_id, user_id, account)
+            # 用最新行情重算市值（避免快照时价格陈旧）
+            try:
+                account = await _recalculate_account_market_value(account)
+            except Exception as exc:
+                logger.warning("Market value recalc failed for %s/%s: %s", tenant_id, user_id, exc)
+            else:
+                # 实时重算后立即回写 simulation 账户与交易账户缓存，供前端/交易链路统一消费。
+                try:
+                    redis.client.set(key, json.dumps(account, ensure_ascii=False))
+                    write_trade_account_cache(redis, tenant_id, user_id, dict(account))
+                except Exception as exc:
+                    logger.warning("Simulation account cache writeback failed for %s/%s: %s", tenant_id, user_id, exc)
+
+            # 查询昨日快照 total_asset 用于计算 today_pnl
+            prev_total_asset: Decimal | None = None
+            try:
+                from datetime import date, timedelta
+                yesterday = _local_today() - timedelta(days=1)
+                async with get_session(read_only=True) as s:
+                    q = await s.execute(
+                        select(SimulationFundSnapshot.total_asset).where(
+                            SimulationFundSnapshot.tenant_id == tenant_id,
+                            SimulationFundSnapshot.user_id == user_id,
+                            SimulationFundSnapshot.snapshot_date == yesterday,
+                        )
+                    )
+                    prev_row = q.scalar_one_or_none()
+                    if prev_row is not None:
+                        prev_total_asset = _to_decimal(prev_row)
+            except Exception as exc:
+                logger.debug("Could not fetch yesterday snapshot for %s/%s: %s", tenant_id, user_id, exc)
+
+            row = cls._build_row(tenant_id, user_id, account, prev_total_asset=prev_total_asset)
             if row["initial_capital"] == 0:
                 row["initial_capital"] = cls._read_settings_initial_cash(redis, tenant_id, user_id)
                 if row["initial_capital"] == 0:
                     row["initial_capital"] = row["total_asset"]
                     row["total_pnl"] = Decimal("0")
+                else:
+                    row["total_pnl"] = row["total_asset"] - row["initial_capital"]
             rows.append(row)
 
         if not rows:
@@ -186,7 +295,7 @@ class SimulationFundSnapshotService:
 class SimulationFundSnapshotWorker:
     def __init__(self, redis: RedisClient, interval_seconds: int):
         self.redis = redis
-        self.interval_seconds = max(60, int(interval_seconds))
+        self.interval_seconds = max(5, int(interval_seconds))
         self._stopped = asyncio.Event()
         self._task: asyncio.Task | None = None
 

@@ -110,8 +110,15 @@ class SimulationExecutionEngine:
         user_id: int | None = None,
         tenant_id: str | None = None,
     ) -> MarketSnapshot:
+        raw_symbol = str(symbol or "").strip().upper()
+        prefix_symbol = raw_symbol
+        suffix_symbol = raw_symbol
+        if raw_symbol.endswith((".SH", ".SZ", ".BJ")) and len(raw_symbol) > 3:
+            prefix_symbol = f"{raw_symbol[-2:]}{raw_symbol[:-3]}"
+        elif raw_symbol.startswith(("SH", "SZ", "BJ")) and len(raw_symbol) > 2:
+            suffix_symbol = f"{raw_symbol[2:]}.{raw_symbol[:2]}"
+
         market_url = settings.MARKET_DATA_SERVICE_URL.rstrip("/")
-        endpoint = f"{market_url}/api/v1/quotes/{symbol}"
 
         # Level 1: 实时行情服务
         try:
@@ -120,8 +127,14 @@ class SimulationExecutionEngine:
             if user_id is not None:
                 headers["X-User-Id"] = str(user_id)
                 headers["X-Tenant-Id"] = str(tenant_id or "default")
-            resp = await client.get(endpoint, headers=headers)
-            if resp.status_code == 200:
+
+            for candidate in [raw_symbol, prefix_symbol, suffix_symbol]:
+                if not candidate:
+                    continue
+                endpoint = f"{market_url}/api/v1/quotes/{candidate}"
+                resp = await client.get(endpoint, headers=headers)
+                if resp.status_code != 200:
+                    continue
                 data = resp.json()
                 px = self._as_float(data.get("current_price") or data.get("last_price"))
                 if px and px > 0:
@@ -153,7 +166,7 @@ class SimulationExecutionEngine:
                         suspended=suspended,
                     )
         except Exception as e:
-            logger.warning("Failed to fetch market quote for %s: %s", symbol, e)
+            logger.warning("Failed to fetch market quote for %s: %s", raw_symbol, e)
 
         # Level 2: 数据库兜底 (L2 Fallback)
         try:
@@ -168,13 +181,16 @@ class SimulationExecutionEngine:
                 """
             )
             try:
-                result = await self.db.execute(query_with_limits, {"symbol": symbol})
+                result = await self.db.execute(query_with_limits, {"symbol": prefix_symbol})
                 row = result.fetchone()
+                if not row and suffix_symbol != prefix_symbol:
+                    result = await self.db.execute(query_with_limits, {"symbol": suffix_symbol})
+                    row = result.fetchone()
                 if row:
                     hfq_close = float(row[0])
                     adj_factor = float(row[1] or 1.0)
                     price = hfq_close / adj_factor if adj_factor > 0 else hfq_close
-                    logger.info("Fallback to DB nominal price for %s: %s", symbol, price)
+                    logger.info("Fallback to DB nominal price for %s: %s", raw_symbol, price)
                     return MarketSnapshot(
                         price=price,
                         price_source="db_fallback",
@@ -191,16 +207,19 @@ class SimulationExecutionEngine:
                     ORDER BY trade_date DESC LIMIT 1
                     """
                 )
-                legacy_result = await self.db.execute(query_legacy, {"symbol": symbol})
+                legacy_result = await self.db.execute(query_legacy, {"symbol": prefix_symbol})
                 legacy_row = legacy_result.fetchone()
+                if not legacy_row and suffix_symbol != prefix_symbol:
+                    legacy_result = await self.db.execute(query_legacy, {"symbol": suffix_symbol})
+                    legacy_row = legacy_result.fetchone()
                 if legacy_row:
                     hfq_close = float(legacy_row[0])
                     adj_factor = float(legacy_row[1] or 1.0)
                     price = hfq_close / adj_factor if adj_factor > 0 else hfq_close
-                    logger.info("Fallback to DB legacy nominal price for %s: %s", symbol, price)
+                    logger.info("Fallback to DB legacy nominal price for %s: %s", raw_symbol, price)
                     return MarketSnapshot(price=price, price_source="db_fallback")
         except Exception as e:
-            logger.error("Database fallback failed for %s: %s", symbol, e)
+            logger.error("Database fallback failed for %s: %s", raw_symbol, e)
 
         # Level 3: 最终保底
         return MarketSnapshot(

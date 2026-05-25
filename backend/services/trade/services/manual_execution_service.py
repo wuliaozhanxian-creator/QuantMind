@@ -228,77 +228,180 @@ def _should_request_cancel_for_buy_status(status_text: str) -> bool:
     return status_text in {"submitted", "partially_filled"}
 
 
-def _rebuild_buy_orders_with_budget(
-    *,
+def _rebuild_buy_orders_by_available_cash(
     buy_orders: list[dict[str, Any]],
-    buy_budget: float,
+    *,
+    available_cash: float,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], float]:
-    """
-    根据“卖出成交后可用资金”重算买单数量。
-    返回: (可执行买单, 新增跳过项, 预估剩余现金)
-    """
-    normalized_rows: list[dict[str, Any]] = []
-    skipped_items: list[dict[str, Any]] = []
-    remaining_budget = max(0.0, _to_float(buy_budget, 0.0))
+    rebuilt: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    remaining_cash = max(0.0, _to_float(available_cash, 0.0))
 
     for row in buy_orders:
-        if not isinstance(row, dict):
-            continue
         symbol = str(row.get("symbol") or "").strip().upper()
-        if not symbol:
-            continue
-        normalized_rows.append(dict(row, symbol=symbol))
-
-    recalculated: list[dict[str, Any]] = []
-    for index, row in enumerate(normalized_rows):
-        slots = max(1, len(normalized_rows) - index)
-        per_slot_budget = remaining_budget / slots
-
-        symbol = row["symbol"]
         reference_price = _to_float(
             row.get("reference_price") or row.get("price"),
             0.0,
         )
         if reference_price <= 0:
-            reference_price = _to_float(_get_realtime_price(symbol), 0.0)
-        if reference_price <= 0:
-            skipped_items.append(
+            skipped.append(
                 {
                     "symbol": symbol,
                     "action": "BUY",
-                    "reason": "卖后买阶段缺少实时价格，无法重算买入数量",
-                    "source": "buy_signal",
+                    "reason": "缺少买入参考价格，无法按最新资金重算",
+                    "source": "buy_rebudget",
+                }
+            )
+            continue
+
+        planned_budget = _to_float(
+            row.get("planned_budget")
+            or row.get("allocated_budget")
+            or row.get("estimated_notional"),
+            0.0,
+        )
+        if planned_budget <= 0:
+            lot_size = _resolve_board_lot_size(symbol)
+            planned_budget = round(reference_price * lot_size, 2)
+
+        if remaining_cash + 1e-6 < planned_budget:
+            skipped.append(
+                {
+                    "symbol": symbol,
+                    "action": "BUY",
+                    "reason": (
+                        f"最新可用资金不足预分配预算 {planned_budget:.2f}，"
+                        f"当前仅 {remaining_cash:.2f}"
+                    ),
+                    "source": "buy_rebudget",
                 }
             )
             continue
 
         lot_size = _resolve_board_lot_size(symbol)
-        quantity = _floor_board_lot(per_slot_budget / reference_price, lot_size)
+        quantity = _floor_board_lot(planned_budget / reference_price, lot_size)
         if quantity <= 0:
-            skipped_items.append(
+            skipped.append(
                 {
                     "symbol": symbol,
                     "action": "BUY",
-                    "reason": f"卖后买阶段可用资金不足以买入最小手数 {lot_size} 股",
-                    "source": "buy_signal",
+                    "reason": (
+                        f"预分配预算 {planned_budget:.2f} 不足以买入最小手数 {lot_size} 股"
+                    ),
+                    "source": "buy_rebudget",
                 }
             )
             continue
 
         estimated_notional = round(quantity * reference_price, 2)
-        remaining_budget = max(0.0, remaining_budget - estimated_notional)
+        if estimated_notional > remaining_cash + 1e-6:
+            skipped.append(
+                {
+                    "symbol": symbol,
+                    "action": "BUY",
+                    "reason": (
+                        f"最新可用资金不足以覆盖重算买入金额 {estimated_notional:.2f}"
+                    ),
+                    "source": "buy_rebudget",
+                }
+            )
+            continue
 
-        updated = dict(row)
-        updated["quantity"] = quantity
-        updated["reference_price"] = reference_price
-        updated["price"] = reference_price
-        updated["estimated_notional"] = estimated_notional
-        updated["reason"] = (
-            f"{str(row.get('reason') or '').strip()}；账户快照资金重算"
-        ).strip("；")
-        recalculated.append(updated)
+        remaining_cash = max(0.0, remaining_cash - estimated_notional)
+        rebuilt_row = dict(row)
+        rebuilt_row["planned_budget"] = round(planned_budget, 2)
+        rebuilt_row["quantity"] = quantity
+        rebuilt_row["estimated_notional"] = estimated_notional
+        rebuilt_row["reason"] = "按预分配预算并基于最新可用资金顺序重算"
+        rebuilt.append(rebuilt_row)
 
-    return recalculated, skipped_items, remaining_budget
+    return rebuilt, skipped, round(remaining_cash, 2)
+
+
+def _rebuild_buy_orders_for_simulation_cash(
+    buy_orders: list[dict[str, Any]],
+    *,
+    available_cash: float,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], float]:
+    """模拟盘重算买单：按当前可用资金等额分配，不沿用旧预案预算。"""
+    price_drift_threshold = _to_float(
+        os.getenv("SIM_BUY_REBUDGET_PRICE_DRIFT_THRESHOLD", "0.2"),
+        0.2,
+    )
+    price_drift_threshold = min(max(price_drift_threshold, 0.0), 1.0)
+    candidates: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    remaining_cash = max(0.0, _to_float(available_cash, 0.0))
+
+    for row in buy_orders:
+        symbol = str(row.get("symbol") or "").strip().upper()
+        plan_reference_price = _to_float(
+            row.get("reference_price") or row.get("price"),
+            0.0,
+        )
+        realtime_price = _to_float(_get_realtime_price(symbol), 0.0)
+        reference_price = realtime_price if realtime_price > 0 else plan_reference_price
+        drift_ratio = 0.0
+        if plan_reference_price > 0 and realtime_price > 0:
+            drift_ratio = abs(realtime_price - plan_reference_price) / plan_reference_price
+            if drift_ratio >= price_drift_threshold:
+                reference_price = realtime_price
+        if reference_price <= 0:
+            skipped.append(
+                {
+                    "symbol": symbol,
+                    "action": "BUY",
+                    "reason": "缺少实时参考价格且无预置价格，无法重算买入数量",
+                    "source": "buy_rebudget",
+                }
+            )
+            continue
+        candidates.append(
+            dict(
+                row,
+                symbol=symbol,
+                reference_price=reference_price,
+                plan_reference_price=plan_reference_price,
+                realtime_price=realtime_price,
+                price_drift_ratio=round(drift_ratio, 6),
+            )
+        )
+
+    if not candidates or remaining_cash <= 0:
+        return [], skipped, round(remaining_cash, 2)
+
+    rebuilt: list[dict[str, Any]] = []
+    for index, row in enumerate(candidates):
+        slots = max(1, len(candidates) - index)
+        alloc_budget = remaining_cash / slots
+
+        symbol = row["symbol"]
+        reference_price = row["reference_price"]
+        lot_size = _resolve_board_lot_size(symbol)
+        quantity = _floor_board_lot(alloc_budget / reference_price, lot_size)
+
+        if quantity <= 0:
+            skipped.append(
+                {
+                    "symbol": symbol,
+                    "action": "BUY",
+                    "reason": f"可用重算资金不足以买入最小手数 {lot_size} 股",
+                    "source": "buy_rebudget",
+                }
+            )
+            continue
+
+        estimated_notional = round(quantity * reference_price, 2)
+        remaining_cash = max(0.0, remaining_cash - estimated_notional)
+
+        rebuilt_row = dict(row)
+        rebuilt_row["planned_budget"] = round(alloc_budget, 2)
+        rebuilt_row["quantity"] = quantity
+        rebuilt_row["estimated_notional"] = estimated_notional
+        rebuilt_row["reason"] = "模拟盘按当前可用资金等额重算买单（实时价优先）"
+        rebuilt.append(rebuilt_row)
+
+    return rebuilt, skipped, round(remaining_cash, 2)
 
 
 def _stable_json(value: Any) -> str:
@@ -837,8 +940,24 @@ class ManualExecutionService:
         return snapshot
 
     async def _load_latest_account_snapshot(
-        self, *, tenant_id: str, user_id: str
+        self, *, tenant_id: str, user_id: str, trading_mode: Any = "REAL"
     ) -> dict[str, Any] | None:
+        mode = _normalize_trading_mode(trading_mode)
+        if mode == "SIMULATION":
+            redis_client = get_redis().client
+            if not redis_client:
+                return None
+            raw = redis_client.get(f"simulation:account:{tenant_id}:{user_id}")
+            if not raw:
+                return None
+            try:
+                data = json.loads(raw)
+            except Exception:
+                return None
+            if isinstance(data, dict):
+                return data
+            return None
+
         async with get_session(read_only=True) as session:
             from backend.services.trade.routers.real_trading_utils import (
                 _fetch_latest_real_account_snapshot,
@@ -1787,11 +1906,16 @@ class ManualExecutionService:
         latest_snapshot = await self._load_latest_account_snapshot(
             tenant_id=prepared.tenant_id,
             user_id=prepared.user_id,
+            trading_mode=mode,
         )
         if not latest_snapshot:
             raise HTTPException(
                 status_code=400,
-                detail="未检测到最新实盘账户快照，请先确认 QMT Agent 已上报账户数据",
+                detail=(
+                    "未检测到最新模拟账户快照，请先确认模拟账户已初始化并有最新资金快照"
+                    if mode == "SIMULATION"
+                    else "未检测到最新实盘账户快照，请先确认 QMT Agent 已上报账户数据"
+                ),
             )
         normalized_signals = await self._load_signal_rows(
             tenant_id=prepared.tenant_id,
@@ -2047,56 +2171,66 @@ class ManualExecutionService:
             return
 
         async with get_session() as db:
-            manual_execution_log_stream.append_log(
-                task_id=task_id,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                level="info",
-                stage="validating",
-                line="[链路诊断] 正在检查活跃实盘组合...",
-            )
-
-            stmt = (
-                select(Portfolio)
-                .where(
-                    and_(
-                        Portfolio.tenant_id == tenant_id,
-                        Portfolio.user_id == user_id,
-                        Portfolio.status == "active",
-                        Portfolio.is_deleted.is_(False),
-                    )
-                )
-                .order_by(Portfolio.updated_at.desc())
-                .limit(1)
-            )
-            portfolio = (await db.execute(stmt)).scalar_one_or_none()
-            if not portfolio:
-                error_msg = "当前未发现可用的实盘组合，请先启动实盘策略或完成组合初始化"
+            if trading_mode == "SIMULATION":
                 manual_execution_log_stream.append_log(
                     task_id=task_id,
                     tenant_id=tenant_id,
                     user_id=user_id,
-                    level="error",
+                    level="info",
                     stage="validating",
-                    line=error_msg,
+                    line="[链路诊断] 模拟盘模式：跳过实盘组合检查",
                 )
-                await manual_execution_persistence.update_task(
+            else:
+                manual_execution_log_stream.append_log(
                     task_id=task_id,
-                    status="failed",
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    level="info",
                     stage="validating",
-                    error_stage="portfolio_lookup",
-                    error_message=error_msg,
+                    line="[链路诊断] 正在检查活跃实盘组合...",
                 )
-                return
 
-            manual_execution_log_stream.append_log(
-                task_id=task_id,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                level="info",
-                stage="validating",
-                line=f"[链路诊断] 发现活跃组合: {portfolio.name} (ID: {portfolio.id})",
-            )
+                stmt = (
+                    select(Portfolio)
+                    .where(
+                        and_(
+                            Portfolio.tenant_id == tenant_id,
+                            Portfolio.user_id == user_id,
+                            Portfolio.status == "active",
+                            Portfolio.is_deleted.is_(False),
+                        )
+                    )
+                    .order_by(Portfolio.updated_at.desc())
+                    .limit(1)
+                )
+                portfolio = (await db.execute(stmt)).scalar_one_or_none()
+                if not portfolio:
+                    error_msg = "当前未发现可用的实盘组合，请先启动实盘策略或完成组合初始化"
+                    manual_execution_log_stream.append_log(
+                        task_id=task_id,
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        level="error",
+                        stage="validating",
+                        line=error_msg,
+                    )
+                    await manual_execution_persistence.update_task(
+                        task_id=task_id,
+                        status="failed",
+                        stage="validating",
+                        error_stage="portfolio_lookup",
+                        error_message=error_msg,
+                    )
+                    return
+
+                manual_execution_log_stream.append_log(
+                    task_id=task_id,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    level="info",
+                    stage="validating",
+                    line=f"[链路诊断] 发现活跃组合: {portfolio.name} (ID: {portfolio.id})",
+                )
 
             execution_plan = (
                 request_json.get("execution_plan")
@@ -2104,19 +2238,16 @@ class ManualExecutionService:
                 else None
             )
             if not execution_plan:
-                async with get_session(read_only=True) as account_session:
-                    from backend.services.trade.routers.real_trading_utils import (
-                        _fetch_latest_real_account_snapshot,
-                    )
-
-                    latest_snapshot = await _fetch_latest_real_account_snapshot(
-                        account_session,
-                        tenant_id=tenant_id,
-                        user_id=user_id,
-                    )
+                latest_snapshot = await self._load_latest_account_snapshot(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    trading_mode=trading_mode,
+                )
                 if not latest_snapshot:
                     error_msg = (
-                        "未检测到最新实盘账户快照，请先确认 QMT Agent 已上报账户数据"
+                        "未检测到最新模拟账户快照，请先确认模拟账户已初始化并有最新资金快照"
+                        if trading_mode == "SIMULATION"
+                        else "未检测到最新实盘账户快照，请先确认 QMT Agent 已上报账户数据"
                     )
                     await manual_execution_persistence.update_task(
                         task_id=task_id,
@@ -2517,6 +2648,7 @@ class ManualExecutionService:
                 baseline_snapshot = await self._load_latest_account_snapshot(
                     tenant_id=tenant_id,
                     user_id=user_id,
+                    trading_mode=trading_mode,
                 )
                 baseline_snapshot_at = _parse_iso_datetime(
                     (baseline_snapshot or {}).get("snapshot_at")
@@ -2601,6 +2733,7 @@ class ManualExecutionService:
                         latest_snapshot = await self._load_latest_account_snapshot(
                             tenant_id=tenant_id,
                             user_id=user_id,
+                            trading_mode=trading_mode,
                         )
                         latest_snapshot_at = _parse_iso_datetime(
                             (latest_snapshot or {}).get("snapshot_at")
@@ -2697,10 +2830,20 @@ class ManualExecutionService:
                     next_snapshot.get("available_cash") or next_snapshot.get("cash"),
                     0.0,
                 )
-                recalculated_buy_orders, buy_skipped_items, buy_remaining_cash = _rebuild_buy_orders_with_budget(
-                    buy_orders=buy_orders,
-                    buy_budget=buy_budget_from_snapshot,
-                )
+                if trading_mode == "SIMULATION":
+                    recalculated_buy_orders, buy_skipped_items, buy_remaining_cash = (
+                        _rebuild_buy_orders_for_simulation_cash(
+                            buy_orders=buy_orders,
+                            available_cash=buy_budget_from_snapshot,
+                        )
+                    )
+                else:
+                    recalculated_buy_orders, buy_skipped_items, buy_remaining_cash = (
+                        _rebuild_buy_orders_by_available_cash(
+                            buy_orders=buy_orders,
+                            available_cash=buy_budget_from_snapshot,
+                        )
+                    )
                 if buy_skipped_items:
                     skipped_items.extend(buy_skipped_items)
                     manual_execution_log_stream.append_log(

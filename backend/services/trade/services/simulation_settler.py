@@ -99,18 +99,27 @@ class SimulationSettler:
         import httpx
 
         stream_url = os.getenv("STREAM_SERVICE_URL", "http://127.0.0.1:8003/api/v1/quotes")
+        internal_secret = (os.getenv("INTERNAL_CALL_SECRET") or "").strip()
+        headers = {"X-Internal-Call": internal_secret} if internal_secret else {}
         results = {}
 
         async with httpx.AsyncClient() as client:
             for symbol in symbols:
                 try:
-                    resp = await client.get(f"{stream_url}/{symbol}", params={"source": "remote_redis"}, timeout=2.0)
+                    resp = await client.get(
+                        f"{stream_url}/{symbol}",
+                        params={"source": "remote_redis"},
+                        headers=headers,
+                        timeout=2.0,
+                    )
                     if resp.status_code == 200:
                         d = resp.json()
                         results[symbol] = {
                             "current_price": d.get("current_price"),
                             "last_close": d.get("close_price"),  # remote_redis 驱动已对齐此字段
                         }
+                    else:
+                        logger.warning(f"[SimSettle] 获取行情失败 {symbol}: status={resp.status_code}")
                 except Exception as e:
                     logger.error(f"获取行情失败 {symbol}: {e}")
         return results

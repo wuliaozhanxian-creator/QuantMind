@@ -1125,11 +1125,41 @@ async def get_model_inference_latest(
     tenant_id, user_id = _owner_scope(current_user)
     redis_client = get_redis_sentinel_client()
     latest_key = f"qm:signal:latest:{tenant_id}:{user_id}"
+    latest_run_id = ""
     try:
         val = redis_client.get(latest_key)
         latest_run_id = val.decode("utf-8") if val else ""
     except Exception as exc:
         logger.warning("读取最新推理版本失败: %s", exc)
+
+    # 当传入 model_id 时，优先返回该模型最新 completed 批次，避免 Redis 消费指针落后时
+    # “生产批次摘要”误显示旧 run。
+    if model_id:
+        latest_model_run = await model_inference_persistence.get_latest_completed_run_by_model(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            model_id=str(model_id),
+        )
+        if isinstance(latest_model_run, dict):
+            target_date = str(
+                latest_model_run.get("prediction_trade_date")
+                or latest_model_run.get("target_date")
+                or ""
+            )
+            return {
+                "latest_key": latest_key,
+                "run_id": str(latest_model_run.get("run_id") or ""),
+                "model_id": str(latest_model_run.get("model_id") or ""),
+                "prediction_trade_date": target_date,
+                "target_date": target_date,
+                "status": str(latest_model_run.get("status") or ""),
+                "updated_at": str(
+                    latest_model_run.get("updated_at")
+                    or latest_model_run.get("created_at")
+                    or ""
+                ),
+                "matched_model": True,
+            }
 
     if not latest_run_id:
         return {

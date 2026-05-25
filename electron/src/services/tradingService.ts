@@ -321,21 +321,33 @@ class TradingService {
     async getRecentTrades(
         limit = 10,
         tradingMode?: TradingMode,
+        userId?: string,
     ): Promise<{ records: TradeRecord[]; isOffline: boolean; isFallbackToOrders: boolean }> {
         const normalizedTradingMode = this.normalizeTradingMode(tradingMode);
         try {
             const trades = await this.listTrades({
                 limit,
                 trading_mode: normalizedTradingMode,
+                user_id: userId,
             });
             const records = trades.map((trade) => this.mapTradeToTradeRecord(trade));
             return { records, isOffline: false, isFallbackToOrders: false };
         } catch (tradeError) {
             // 成交接口失败时降级回订单接口，避免卡片直接空白
             try {
+                if (normalizedTradingMode === 'simulation' && userId) {
+                    const { realTradingService } = await import('./realTradingService');
+                    const orders = await realTradingService.getOrders(userId, undefined, 'simulation', {
+                        limit,
+                        offset: 0,
+                    });
+                    const records = orders.map((order) => this.mapOrderToTradeRecord(order as unknown as Order));
+                    return { records, isOffline: false, isFallbackToOrders: true };
+                }
                 const response = await this.listOrders({
                     limit,
                     trading_mode: normalizedTradingMode,
+                    user_id: userId,
                 });
                 const orders = this.extractOrders(response);
                 const records = orders.map((order) => this.mapOrderToTradeRecord(order));

@@ -71,6 +71,15 @@ const getErrorHttpStatus = (err: unknown): number | undefined => {
     return response?.status;
 };
 
+const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> => {
+    return await Promise.race([
+        promise,
+        new Promise<T>((_, reject) => {
+            window.setTimeout(() => reject(new Error(`${label} timeout after ${timeoutMs}ms`)), timeoutMs);
+        }),
+    ]);
+};
+
 const RealTradingPage: React.FC = () => {
     const [activeTab, setActiveTab] = useState<ActiveTab>('manage');
     const [tenantId] = useState<string>(getEnvTenantId);
@@ -132,9 +141,17 @@ const RealTradingPage: React.FC = () => {
         isFetchingRef.current = true;
         try {
             const { realTradingService } = await import('../../services/realTradingService');
-            const statusData = await realTradingService.getStatus(userId, tradingMode, tenantId);
+            const statusData = await withTimeout(
+                realTradingService.getStatus(userId, tradingMode, tenantId),
+                8000,
+                'getStatus',
+            );
             const runtimeMode = resolveTradingAccountMode(statusData?.mode, tradingMode);
-            const accountData = await realTradingService.getRuntimeAccount(userId, tenantId, runtimeMode).catch(() => null);
+            const accountData = await withTimeout(
+                realTradingService.getRuntimeAccount(userId, tenantId, runtimeMode).catch(() => null),
+                8000,
+                'getRuntimeAccount',
+            );
 
             setStatus(statusData);
             setAccountInfo(accountData);
@@ -173,7 +190,7 @@ const RealTradingPage: React.FC = () => {
             return;
         }
         fetchData();
-        const interval = setInterval(fetchData, 5000);
+        const interval = setInterval(fetchData, 30000);
         
         // Listen for manual refresh events
         const handleManualRefresh = () => {

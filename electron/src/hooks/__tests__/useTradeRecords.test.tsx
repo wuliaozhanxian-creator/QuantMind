@@ -4,6 +4,10 @@ import { useTradeRecords } from '../useTradeRecords';
 import { tradingService } from '../../services/tradingService';
 import { refreshOrchestrator } from '../../services/refreshOrchestrator';
 
+vi.mock('react-redux', () => ({
+    useSelector: (selector: (state: any) => unknown) => selector({ auth: { user: { id: 'u-test' } } }),
+}));
+
 vi.mock('../../services/tradingService', () => ({
     tradingService: {
         getRecentTrades: vi.fn(),
@@ -32,7 +36,7 @@ describe('useTradeRecords', () => {
         await waitFor(() => {
             expect(tradingService.getRecentTrades).toHaveBeenCalled();
         });
-        expect(tradingService.getRecentTrades).toHaveBeenCalledWith(10, 'real');
+        expect(tradingService.getRecentTrades).toHaveBeenCalledWith(10, 'real', 'u-test');
     });
 
     it('模拟盘模式应透传 simulation 给服务层', async () => {
@@ -41,7 +45,7 @@ describe('useTradeRecords', () => {
         await waitFor(() => {
             expect(tradingService.getRecentTrades).toHaveBeenCalled();
         });
-        expect(tradingService.getRecentTrades).toHaveBeenCalledWith(10, 'simulation');
+        expect(tradingService.getRecentTrades).toHaveBeenCalledWith(10, 'simulation', 'u-test');
     });
 
     it('autoRefresh=true 时应注册刷新协调器', async () => {

@@ -44,25 +44,37 @@ class _FakeRedis:
 
 
 @pytest.mark.asyncio
-async def test_reset_with_initial_cash_keeps_initial_equity_consistent():
+async def test_reset_ignores_custom_initial_cash_and_returns_to_default(monkeypatch):
     redis = _FakeRedis()
     auth = AuthContext(user_id="1001", tenant_id="default", raw_sub="1001", roles=["user"])
     manager = SimulationAccountManager(redis)
 
+    async def _fake_build_realtime_positions_from_db(*, tenant_id, user_id, since_at=None):
+        return {}, 0.0
+
+    monkeypatch.setattr(
+        simulation_router,
+        "_build_realtime_positions_from_db",
+        _fake_build_realtime_positions_from_db,
+    )
+
+    # 先写入一个历史 settings，模拟旧口径值
     await manager.set_initial_cash(user_id=1001, initial_cash=300_000, tenant_id="default")
 
+    # 即便前端仍传入其它值，重置也应统一回到默认 100 万
     await simulation_router.reset_simulation_account(
         request=simulation_router.AccountResetRequest(initial_cash=500_000),
         auth=auth,
         redis=redis,
     )
 
+    # 读取账户时 initial_equity 应与默认重置资金一致
     resp = await simulation_router.get_simulation_account(auth=auth, redis=redis)
     data = resp["data"]
-    assert data["cash"] == 500_000
-    assert data["total_asset"] == 500_000
-    assert data["initial_equity"] == 500_000
-    assert data["baseline"]["initial_equity"] == 500_000
+    assert data["cash"] == 1_000_000
+    assert data["total_asset"] == 1_000_000
+    assert data["initial_equity"] == 1_000_000
+    assert data["baseline"]["initial_equity"] == 1_000_000
 
     settings = await manager.get_settings(
         user_id=1001,
@@ -70,4 +82,59 @@ async def test_reset_with_initial_cash_keeps_initial_equity_consistent():
         default_initial_cash=1_000_000,
         cooldown_days=30,
     )
-    assert settings["initial_cash"] == 500_000
+    assert settings["initial_cash"] == 1_000_000
+
+
+@pytest.mark.asyncio
+async def test_get_simulation_account_casts_numeric_user_id_before_db_query(monkeypatch):
+    redis = _FakeRedis()
+    auth = AuthContext(
+        user_id="40455298",
+        tenant_id="default",
+        raw_sub="40455298",
+        roles=["user"],
+    )
+    manager = SimulationAccountManager(redis)
+    await manager.init_account(user_id=auth.user_id, initial_cash=1_000_000, tenant_id="default")
+
+    captured = {"user_id": None}
+
+    async def _fake_build_realtime_positions_from_db(*, tenant_id, user_id, since_at=None):
+        captured["user_id"] = user_id
+        return {}, 0.0
+
+    monkeypatch.setattr(
+        simulation_router,
+        "_build_realtime_positions_from_db",
+        _fake_build_realtime_positions_from_db,
+    )
+
+    resp = await simulation_router.get_simulation_account(auth=auth, redis=redis)
+    assert resp["success"] is True
+    assert captured["user_id"] == 40455298
+
+
+@pytest.mark.asyncio
+async def test_get_simulation_account_non_numeric_user_id_skips_db_query(monkeypatch):
+    redis = _FakeRedis()
+    auth = AuthContext(
+        user_id="sandbox-user",
+        tenant_id="default",
+        raw_sub="sandbox-user",
+        roles=["user"],
+    )
+    manager = SimulationAccountManager(redis)
+    await manager.init_account(user_id=auth.user_id, initial_cash=1_000_000, tenant_id="default")
+
+    async def _should_not_run(*args, **kwargs):
+        raise AssertionError("db aggregation should be skipped for non-numeric user_id")
+
+    monkeypatch.setattr(
+        simulation_router,
+        "_build_realtime_positions_from_db",
+        _should_not_run,
+    )
+
+    resp = await simulation_router.get_simulation_account(auth=auth, redis=redis)
+    assert resp["success"] is True
+    assert resp["data"]["cash"] == 1_000_000

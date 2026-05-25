@@ -1,5 +1,7 @@
-from datetime import date
+import asyncio
+from datetime import date, datetime
 from decimal import Decimal
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status, File, UploadFile
 from pydantic import BaseModel
@@ -13,68 +15,16 @@ from backend.services.trade.simulation.services.simulation_manager import (
     SimulationAccountManager,
 )
 from backend.services.trade.simulation.services.ocr_service import SimulationOCRService
-from backend.services.trade.simulation.engine import simulation_engine
 from backend.services.trade.trade_config import settings
-from backend.shared.database_manager_v2 import get_db_manager
-from backend.shared.stock_utils import StockCodeUtil
+from backend.shared.database_manager_v2 import get_db_manager, get_session
 import logging
 import httpx
 from sqlalchemy import text
-import pandas as pd
+from backend.shared.auth import get_internal_call_secret
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-FUNDAMENTAL_PARQUET_PATH = "/app/db/custom/fundamental_aligned.parquet"
-_PARQUET_LATEST_PRICE_MAP: dict[str, float] | None = None
-
-
-def _load_latest_price_map_from_parquet() -> dict[str, float]:
-    global _PARQUET_LATEST_PRICE_MAP
-    if _PARQUET_LATEST_PRICE_MAP is not None:
-        return _PARQUET_LATEST_PRICE_MAP
-
-    try:
-        df = pd.read_parquet(
-            FUNDAMENTAL_PARQUET_PATH,
-            columns=["trade_date", "symbol", "close", "adj_factor"],
-        )
-        if df.empty:
-            _PARQUET_LATEST_PRICE_MAP = {}
-            return _PARQUET_LATEST_PRICE_MAP
-
-        latest_trade_date = df["trade_date"].max()
-        latest_df = df[df["trade_date"] == latest_trade_date].copy()
-        latest_df = latest_df.dropna(subset=["symbol", "close"])
-
-        _PARQUET_LATEST_PRICE_MAP = {
-            str(row["symbol"]): float(row["close"])
-            for _, row in latest_df.iterrows()
-        }
-        logger.info(
-            "Loaded OCR price map from parquet: %s symbols, latest_trade_date=%s",
-            len(_PARQUET_LATEST_PRICE_MAP),
-            latest_trade_date,
-        )
-    except Exception as e:
-        logger.error(f"Failed to load price map from parquet: {e}", exc_info=True)
-        _PARQUET_LATEST_PRICE_MAP = {}
-
-    return _PARQUET_LATEST_PRICE_MAP
-
-
-async def _get_latest_close_from_sdl(symbol: str) -> float:
-    """
-    从 fundamental_aligned.parquet 最新交易日读取未复权现价。
-    """
-    try:
-        price_map = _load_latest_price_map_from_parquet()
-        return float(price_map.get(symbol) or 0.0)
-    except Exception as e:
-        logger.error(f"Failed to fetch parquet price for {symbol}: {e}")
-
-    return 0.0
 
 
 async def _get_latest_price(symbol: str) -> float:
@@ -85,43 +35,77 @@ async def _get_latest_price(symbol: str) -> float:
     """
     market_url = settings.MARKET_DATA_SERVICE_URL.rstrip("/")
     price = 0.0
+    raw_symbol = str(symbol or "").strip().upper()
+    prefix_symbol = raw_symbol
+    suffix_symbol = raw_symbol
+    if raw_symbol.endswith((".SH", ".SZ", ".BJ")) and len(raw_symbol) > 3:
+        prefix_symbol = f"{raw_symbol[-2:]}{raw_symbol[:-3]}"
+    elif raw_symbol.startswith(("SH", "SZ", "BJ")) and len(raw_symbol) > 2:
+        suffix_symbol = f"{raw_symbol[2:]}.{raw_symbol[:2]}"
 
     # Level 1: 实时行情
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
-            resp = await client.get(f"{market_url}/api/v1/quotes/{symbol}")
-            if resp.status_code == 200:
+            headers = {"X-Internal-Call": get_internal_call_secret()}
+            for candidate in [raw_symbol, prefix_symbol, suffix_symbol]:
+                if not candidate:
+                    continue
+                resp = await client.get(f"{market_url}/api/v1/quotes/{candidate}", headers=headers)
+                if resp.status_code != 200:
+                    continue
                 q_data = resp.json()
                 price = float(q_data.get("current_price") or q_data.get("last_price") or 0)
+                if price > 0:
+                    break
     except Exception as e:
-        logger.warning(f"Failed to fetch real-time price for {symbol}: {e}")
+        logger.warning(f"Failed to fetch real-time price for {raw_symbol}: {e}")
 
     # Level 2: 数据库兜底
     if price <= 0:
-        price = await _get_latest_close_from_sdl(symbol)
-        if price > 0:
-            logger.info(f"Fallback to SDL close for {symbol}: {price}")
+        try:
+            db_manager = get_db_manager()
+            # 数据库 stock_daily_latest 使用 Prefix 格式 (SH600191)
+            query = text("""
+                SELECT close, adj_factor FROM stock_daily_latest
+                WHERE symbol = :symbol
+                ORDER BY trade_date DESC LIMIT 1
+            """)
 
+            async with db_manager.get_master_session() as session:
+                result = await session.execute(query, {"symbol": prefix_symbol})
+                row = result.fetchone()
+                if not row and suffix_symbol != prefix_symbol:
+                    result = await session.execute(query, {"symbol": suffix_symbol})
+                    row = result.fetchone()
+                if row:
+                    hfq_close = float(row[0])
+                    adj_factor = float(row[1] or 1.0)
+                    # 计算名义价格 (除权价)
+                    price = hfq_close / adj_factor if adj_factor > 0 else hfq_close
+                    logger.info(f"Fallback to DB nominal price for {raw_symbol}: {price} (Hfq: {hfq_close}, Adj: {adj_factor})")
+        except Exception as e:
+            logger.error(f"Database fallback failed for {raw_symbol}: {e}")
+            
     return price
 
 
-async def _resolve_symbol_by_name(name: str) -> str | None:
+async def _resolve_symbol_by_name(name: str) -> Optional[str]:
     """
     通过股票名称反查标准 Prefix 代码
     """
     if not name:
         return None
-
+        
     try:
         db_manager = get_db_manager()
         # 清理名称中的特殊字符，如 *ST
         clean_name = name.replace("*", "").strip()
         query = text("""
-            SELECT symbol FROM stock_daily_latest
+            SELECT symbol FROM stock_daily_latest 
             WHERE stock_name LIKE :name
             ORDER BY trade_date DESC LIMIT 1
         """)
-
+        
         async with db_manager.get_master_session() as session:
             # 先试完全匹配
             result = await session.execute(query, {"name": f"%{clean_name}%"})
@@ -130,35 +114,149 @@ async def _resolve_symbol_by_name(name: str) -> str | None:
                 return row[0]
     except Exception as e:
         logger.error(f"Failed to resolve symbol for name {name}: {e}")
-
+        
     return None
 
 
-async def _resolve_user_api_key(user_id: str) -> str | None:
-    """从 user_profiles 读取用户级 API Key，兼容常见 user_id 形态。"""
-    uid = str(user_id or "").strip()
-    if not uid:
-        return None
+async def _build_realtime_positions_from_db(
+    *,
+    tenant_id: str,
+    user_id: int,
+    since_at: Optional[datetime] = None,
+) -> tuple[dict[str, dict[str, float]], float]:
+    """从 sim_trades 聚合当前持仓，并用最新行情重算持仓市值。支持多空双向。"""
+    since_naive = None
+    if isinstance(since_at, datetime):
+        since_naive = (
+            since_at.replace(tzinfo=None)
+            if since_at.tzinfo is None
+            else since_at.astimezone().replace(tzinfo=None)
+        )
 
-    candidates = [uid]
-    if uid.isdigit():
-        candidates.extend([uid.zfill(8), str(int(uid))])
+    base_filter = "WHERE tenant_id = :tenant_id AND user_id = :user_id"
+    extra_filter = ""
+    params: dict = {"tenant_id": tenant_id, "user_id": user_id}
+    if since_naive is not None:
+        extra_filter = " AND executed_at >= :since_at"
+        params["since_at"] = since_naive
+
+    # 多头净量：buy_to_open 增仓 / sell_to_close 平仓
+    # trade_action 为空时（旧数据）保持原先 buy=+/sell=- 逻辑
+    long_sql = f"""
+        SELECT symbol,
+               SUM(CASE
+                       WHEN trade_action IN ('buy_to_open', 'buy') OR (trade_action IS NULL AND side = 'buy')
+                           THEN quantity
+                       WHEN trade_action IN ('sell_to_close') OR (trade_action IS NULL AND side = 'sell')
+                           THEN -quantity
+                       ELSE 0
+                   END) AS volume
+        FROM sim_trades
+        {base_filter}{extra_filter}
+        GROUP BY symbol
+        HAVING SUM(CASE
+                       WHEN trade_action IN ('buy_to_open', 'buy') OR (trade_action IS NULL AND side = 'buy')
+                           THEN quantity
+                       WHEN trade_action IN ('sell_to_close') OR (trade_action IS NULL AND side = 'sell')
+                           THEN -quantity
+                       ELSE 0
+                   END) > 0.000001
+        ORDER BY symbol
+    """
+
+    # 空头净量：sell_to_open 开空 / buy_to_close 平空
+    short_sql = f"""
+        SELECT symbol,
+               SUM(CASE
+                       WHEN trade_action = 'sell_to_open' THEN quantity
+                       WHEN trade_action = 'buy_to_close' THEN -quantity
+                       ELSE 0
+                   END) AS volume
+        FROM sim_trades
+        {base_filter}{extra_filter}
+          AND trade_action IN ('sell_to_open', 'buy_to_close')
+        GROUP BY symbol
+        HAVING SUM(CASE
+                       WHEN trade_action = 'sell_to_open' THEN quantity
+                       WHEN trade_action = 'buy_to_close' THEN -quantity
+                       ELSE 0
+                   END) > 0.000001
+        ORDER BY symbol
+    """
 
     try:
-        db_manager = get_db_manager()
-        query = text("SELECT api_key FROM user_profiles WHERE user_id = :uid LIMIT 1")
-        async with db_manager.get_master_session() as session:
-            for cand in candidates:
-                row = await session.execute(query, {"uid": cand})
-                found = row.fetchone()
-                if found and found[0]:
-                    key = str(found[0]).strip()
-                    if key:
-                        return key
+        async with get_session(read_only=True) as session:
+            long_rows = (await session.execute(text(long_sql), params)).mappings().all()
+            short_rows = (await session.execute(text(short_sql), params)).mappings().all()
     except Exception as e:
-        logger.warning(f"Failed to resolve user API key for OCR, user_id={uid}: {e}")
+        logger.warning(f"Database query failed in _build_realtime_positions_from_db: {e}")
+        long_rows = []
+        short_rows = []
 
-    return None
+    positions: dict[str, dict[str, float]] = {}
+    total_market_value = 0.0
+
+    long_candidates: list[tuple[str, float]] = []
+    short_candidates: list[tuple[str, float]] = []
+    symbols: set[str] = set()
+
+    for row in long_rows:
+        symbol = str(row.get("symbol") or "").strip().upper()
+        volume = float(row.get("volume") or 0.0)
+        if not symbol or volume <= 0:
+            continue
+        long_candidates.append((symbol, volume))
+        symbols.add(symbol)
+
+    for row in short_rows:
+        symbol = str(row.get("symbol") or "").strip().upper()
+        volume = float(row.get("volume") or 0.0)
+        if not symbol or volume <= 0:
+            continue
+        short_candidates.append((symbol, volume))
+        symbols.add(symbol)
+
+    price_pairs = await asyncio.gather(
+        *[_get_latest_price(sym) for sym in sorted(symbols)],
+        return_exceptions=True,
+    )
+    latest_price_map: dict[str, float] = {}
+    for sym, price in zip(sorted(symbols), price_pairs):
+        latest_price_map[sym] = float(price) if isinstance(price, (int, float)) else 0.0
+
+    for symbol, volume in long_candidates:
+        last_price = float(latest_price_map.get(symbol) or 0.0)
+        if last_price <= 0:
+            continue
+        market_value = round(last_price * volume, 2)
+        positions[symbol] = {
+            "volume": volume,
+            "available_volume": volume,
+            "price": round(last_price, 4),
+            "last_price": round(last_price, 4),
+            "market_value": market_value,
+            "side": "long",
+        }
+        total_market_value += market_value
+
+    for symbol, volume in short_candidates:
+        last_price = float(latest_price_map.get(symbol) or 0.0)
+        if last_price <= 0:
+            continue
+        market_value = round(last_price * volume, 2)
+        key = f"{symbol}:short"
+        positions[key] = {
+            "symbol": symbol,
+            "volume": volume,
+            "available_volume": volume,
+            "price": round(last_price, 4),
+            "last_price": round(last_price, 4),
+            "market_value": market_value,
+            "side": "short",
+        }
+        total_market_value += market_value
+
+    return positions, round(total_market_value, 2)
 
 
 DEFAULT_INITIAL_CASH = 1_000_000.0
@@ -173,13 +271,12 @@ class AccountResetRequest(BaseModel):
 class HoldingItem(BaseModel):
     symbol: str
     quantity: float
-    name: str | None = None
-    current_price: float | None = None
+    name: Optional[str] = None
 
 
 class SyncHoldingsRequest(BaseModel):
-    holdings: list[HoldingItem]
-    available_cash: float | None = None
+    holdings: List[HoldingItem]
+    available_cash: Optional[float] = None
 
 
 # SimulationSettingsRequest removed as it is deprecated.
@@ -219,7 +316,7 @@ async def get_simulation_settings(
         cooldown_days=COOLDOWN_DAYS,
     )
     return {
-        "success": True,
+        "success": True, 
         "data": {
             "initial_cash": data.get("initial_cash", DEFAULT_INITIAL_CASH),
             "can_modify": False, # Modification deprecated
@@ -256,26 +353,10 @@ async def reset_simulation_account(
     Reset simulation account with initial cash.
     """
     manager = SimulationAccountManager(redis)
-    if request.initial_cash is None:
-        settings = await manager.get_settings(
-            user_id=auth.user_id,
-            tenant_id=auth.tenant_id,
-            default_initial_cash=DEFAULT_INITIAL_CASH,
-            cooldown_days=COOLDOWN_DAYS,
-        )
-        initial_cash = float(settings.get("initial_cash", DEFAULT_INITIAL_CASH))
-    else:
-        initial_cash = float(request.initial_cash)
-    if initial_cash < SIM_AMOUNT_STEP or int(initial_cash) % SIM_AMOUNT_STEP != 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"初始金额必须为{int(SIM_AMOUNT_STEP / 10000)}万元的整数倍",
-        )
+    initial_cash = DEFAULT_INITIAL_CASH
 
-    # 当显式传入 initial_cash 时，同步更新 settings，保证后续 initial_equity 口径一致。
-    if request.initial_cash is not None:
-        await manager.set_initial_cash(auth.user_id, initial_cash, tenant_id=auth.tenant_id)
-
+    # 模拟盘重置口径固定回到 100 万，不再接受外部初始资金参数。
+    await manager.set_initial_cash(auth.user_id, initial_cash, tenant_id=auth.tenant_id)
     account = await manager.init_account(auth.user_id, initial_cash, tenant_id=auth.tenant_id)
     await _capture_simulation_snapshot(redis)
     return {"success": True, "message": "Simulation account reset", "data": account}
@@ -313,12 +394,156 @@ async def get_simulation_account(
         cooldown_days=COOLDOWN_DAYS,
     )
     initial_equity = float(settings.get("initial_cash", DEFAULT_INITIAL_CASH))
+    reset_anchor_raw = settings.get("last_modified_at")
+    reset_anchor = None
+    if isinstance(reset_anchor_raw, str) and reset_anchor_raw.strip():
+        try:
+            reset_anchor = datetime.fromisoformat(
+                reset_anchor_raw.replace("Z", "+00:00")
+            )
+        except Exception:
+            reset_anchor = None
+
+    # 从数据库成交表聚合持仓，并按最新行情重算实时市值（优先口径）。
+    try:
+        user_id_int = int(auth.user_id)
+    except (TypeError, ValueError):
+        user_id_int = 0
+
+    db_positions: dict[str, dict[str, float]] = {}
+    db_market_value = 0.0
+    if user_id_int > 0:
+        db_positions, db_market_value = await _build_realtime_positions_from_db(
+            tenant_id=auth.tenant_id,
+            user_id=user_id_int,
+            since_at=reset_anchor,
+        )
+
+    cash = float(account.get("cash") or account.get("available_balance") or 0.0)
+    market_value = db_market_value
+    positions = db_positions
+    redis_positions_map = account.get("positions") if isinstance(account.get("positions"), dict) else {}
+    if not positions:
+        # 兼容历史链路：若数据库尚无成交，则回退到 Redis 仓位。
+        raw_positions = account.get("positions") or {}
+        if isinstance(raw_positions, dict):
+            for sym, pos in raw_positions.items():
+                symbol = str(sym or "").strip().upper()
+                if not symbol or not isinstance(pos, dict):
+                    continue
+                volume = float(pos.get("volume") or 0.0)
+                last_price = float(pos.get("price") or pos.get("last_price") or 0.0)
+                if volume <= 0 or last_price <= 0:
+                    continue
+                market_val = round(volume * last_price, 2)
+                positions[symbol] = {
+                    "volume": volume,
+                    "available_volume": float(pos.get("available_volume") or volume),
+                    "price": round(last_price, 4),
+                    "last_price": round(last_price, 4),
+                    "market_value": market_val,
+                }
+                market_value += market_val
+        market_value = round(market_value, 2)
+    else:
+        # DB 聚合口径优先时，补齐仓位成本价（来自 Redis 持仓对象）用于浮动盈亏计算。
+        if isinstance(redis_positions_map, dict):
+            for symbol, pos in positions.items():
+                if not isinstance(pos, dict):
+                    continue
+                candidates = [
+                    redis_positions_map.get(symbol),
+                    redis_positions_map.get(f"{symbol}::long"),
+                ]
+                # Prefix / Suffix 双格式匹配
+                if symbol.endswith((".SH", ".SZ", ".BJ")) and len(symbol) > 3:
+                    prefix = f"{symbol[-2:]}{symbol[:-3]}"
+                    candidates.append(redis_positions_map.get(prefix))
+                    candidates.append(redis_positions_map.get(f"{prefix}::long"))
+                elif symbol.startswith(("SH", "SZ", "BJ")) and len(symbol) > 2:
+                    suffix = f"{symbol[2:]}.{symbol[:2]}"
+                    candidates.append(redis_positions_map.get(suffix))
+                    candidates.append(redis_positions_map.get(f"{suffix}::long"))
+
+                redis_pos = next((item for item in candidates if isinstance(item, dict)), None)
+                if redis_pos:
+                    cost_price = float(
+                        redis_pos.get("cost")
+                        or redis_pos.get("cost_price")
+                        or redis_pos.get("avg_cost")
+                        or redis_pos.get("avg_price")
+                        or 0.0
+                    )
+                    if cost_price > 0:
+                        pos["cost_price"] = round(cost_price, 4)
+
+    total_asset = round(cash + market_value, 2)
+    floating_pnl = 0.0
+    for pos in positions.values():
+        if not isinstance(pos, dict):
+            continue
+        volume = float(pos.get("volume") or 0.0)
+        last_price = float(pos.get("last_price") or pos.get("price") or 0.0)
+        cost_price = float(
+            pos.get("cost_price")
+            or pos.get("avg_cost")
+            or pos.get("avg_price")
+            or pos.get("cost")
+            or 0.0
+        )
+        side = str(pos.get("side") or "long").lower()
+        if volume <= 0 or last_price <= 0 or cost_price <= 0:
+            continue
+        if side == "short":
+            floating_pnl += (cost_price - last_price) * volume
+        else:
+            floating_pnl += (last_price - cost_price) * volume
+    floating_pnl = round(floating_pnl, 2)
+
+    # 今日盈亏基线优先取上一交易日资金快照；没有历史快照时回退初始权益。
+    day_open_equity = initial_equity
+    try:
+        today = date.today()
+        async with get_session(read_only=True) as session:
+            prev_stmt = text("""
+                SELECT total_asset
+                FROM simulation_fund_snapshots
+                WHERE tenant_id = :tenant_id
+                  AND user_id = :user_id
+                  AND snapshot_date < :today
+                ORDER BY snapshot_date DESC
+                LIMIT 1
+            """)
+            prev_row = (
+                await session.execute(
+                    prev_stmt,
+                    {"tenant_id": auth.tenant_id, "user_id": str(auth.user_id), "today": today},
+                )
+            ).first()
+            if prev_row and prev_row[0] is not None:
+                day_open_equity = float(prev_row[0])
+    except Exception:
+        day_open_equity = initial_equity
+    today_pnl = round(total_asset - day_open_equity, 2)
+    total_pnl = round(total_asset - initial_equity, 2)
 
     # 添加 initial_equity 和 baseline 字段
+    account["cash"] = cash
+    account["available_cash"] = cash
+    account["market_value"] = market_value
+    account["total_asset"] = total_asset
+    account["today_pnl"] = today_pnl
+    account["daily_pnl"] = today_pnl
+    account["floating_pnl"] = floating_pnl
+    account["total_pnl"] = total_pnl
+    account["day_open_equity"] = day_open_equity
+    account["positions"] = positions
+    account["position_count"] = len(positions)
     account["initial_equity"] = initial_equity
+    account["valuation_source"] = "sim_trades_plus_realtime_quote"
     account["baseline"] = {
         "initial_equity": initial_equity,
-        "day_open_equity": initial_equity,  # 简化处理，日开盘权益也用初始权益
+        "day_open_equity": day_open_equity,
         "month_open_equity": initial_equity,
     }
 
@@ -368,56 +593,49 @@ async def list_simulation_fund_snapshots(
         )
         for s in snapshots
     ]
+
+
 @router.post("/sync/ocr")
 async def ocr_sync_holdings(
-    images: list[UploadFile] = File(...),
+    images: List[UploadFile] = File(...),
     auth: AuthContext = Depends(get_auth_context),
     redis: RedisClient = Depends(get_redis),
 ):
-    user_api_key = await _resolve_user_api_key(str(auth.user_id))
-    ocr_service = SimulationOCRService(api_key=user_api_key)
+    ocr_service = SimulationOCRService()
     image_data = []
     for img in images:
         content = await img.read()
         image_data.append(content)
-
+        
     ocr_result = await ocr_service.analyze_images(image_data)
-    recognized_items = ocr_result if isinstance(ocr_result, list) else (ocr_result.get("holdings", []) if isinstance(ocr_result, dict) else [])
-    available_cash = ocr_result.get("available_cash") if isinstance(ocr_result, dict) else None
-
-    # 4. 后处理：纠偏代码 & 统一价格口径（OCR 识别价优先，后端仅兜底）
+    recognized_items = ocr_result.get("holdings", [])
+    available_cash = ocr_result.get("available_cash")
+    
+    # 4. 后处理：纠偏代码 & 获取实时行情
     results = []
-
+    
     for item in recognized_items:
         original_symbol = item.get("symbol")
         name = item.get("name")
-
+        
         # 优先使用 OCR 识别出的代码（已在服务层通过 stocks_index.json 对齐）
         symbol = original_symbol if original_symbol else await _resolve_symbol_by_name(name)
-
+        
         if not symbol:
             logger.warning(f"Skipping holding {name}: Symbol could not be resolved.")
             continue
-
-        raw_price = item.get("current_price")
-        try:
-            current_price = float(raw_price or 0)
-        except (TypeError, ValueError):
-            current_price = 0.0
-
-        # OCR 未识别到有效价格时，才用后端价格源兜底
-        if current_price <= 0:
-            current_price = await _get_latest_close_from_sdl(symbol)
-
+            
+        current_price = await _get_latest_price(symbol)
+            
         results.append({
             **item,
             "symbol": symbol,
             "current_price": current_price,
             "market_value": round(current_price * item["quantity"], 2)
         })
-
+            
     return {
-        "success": True,
+        "success": True, 
         "data": results,
         "available_cash": available_cash
     }
@@ -434,26 +652,20 @@ async def confirm_holding_sync(
     逻辑：根据识别出的股票和数量，拉取当前最新市价，并重新计算账户初始金额，使同步后的盈亏对齐。
     """
     manager = SimulationAccountManager(redis)
-
+    
     # 1. 预先获取所有股票的最新价格并计算总市值
     sync_positions = []
     total_market_value = 0.0
-
+    
     for item in request.holdings:
-        # 与预览一致：优先使用前端回传的 OCR 识别价，仅在缺失时兜底
-        try:
-            price = float(item.current_price or 0)
-        except (TypeError, ValueError):
-            price = 0.0
-        if price <= 0:
-            price = await _get_latest_close_from_sdl(item.symbol)
-
+        price = await _get_latest_price(item.symbol)
+        
         if price <= 0:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"无法获取股票 {item.symbol} 的实时价格或历史收盘价，同步中止。请检查代码是否正确。"
             )
-
+        
         total_market_value += price * item.quantity
         sync_positions.append({
             "symbol": item.symbol,
@@ -484,142 +696,8 @@ async def confirm_holding_sync(
             delta_volume=pos["quantity"],
             price=pos["price"]
         )
-
+            
     # 5. 捕获快照
     await _capture_simulation_snapshot(redis)
-
+    
     return {"success": True, "message": f"持仓同步成功，初始资产已对齐至 {calculated_initial_cash:,.2f}"}
-
-
-class BindStrategyRequest(BaseModel):
-    strategy_id: str
-
-
-class StrategyParams(BaseModel):
-    """策略参数，前端可覆盖"""
-    topk: int | None = None
-    weight_mode: str | None = None  # "equal" | "score_weighted" | "custom"
-    custom_weights: dict[str, float] | None = None
-    min_score: float | None = None
-    max_position_pct: float | None = None
-    lot_size: int | None = None
-
-
-class RunRebalanceRequest(BaseModel):
-    strategy_id: str | None = None
-    run_id: str | None = None
-    params: StrategyParams | None = None  # 前端可传递策略参数覆盖
-
-
-@router.post("/bind-strategy")
-async def bind_strategy(
-    request: BindStrategyRequest,
-    auth: AuthContext = Depends(get_auth_context),
-    redis: RedisClient = Depends(get_redis),
-):
-    """
-    绑定策略到模拟盘账户。
-    绑定后，定时调度器会自动执行该策略的调仓。
-    """
-    manager = SimulationAccountManager(redis)
-
-    # 确保账户存在
-    account = await manager.get_account(auth.user_id, tenant_id=auth.tenant_id)
-    if not account:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="模拟盘账户不存在，请先重置账户",
-        )
-
-    # 更新账户的策略绑定
-    import json
-    account["strategy_id"] = request.strategy_id
-    key = f"simulation:account:{auth.tenant_id}:{auth.user_id}"
-    redis.client.set(key, json.dumps(account))
-
-    logger.info(
-        "模拟盘绑定策略: tenant=%s user=%s strategy=%s",
-        auth.tenant_id,
-        auth.user_id,
-        request.strategy_id,
-    )
-
-    return {
-        "success": True,
-        "message": f"策略 {request.strategy_id} 已绑定",
-    }
-
-
-@router.post("/run")
-async def run_rebalance(
-    request: RunRebalanceRequest,
-    auth: AuthContext = Depends(get_auth_context),
-    redis: RedisClient = Depends(get_redis),
-):
-    """
-    手动触发一次模拟盘调仓。
-
-    Args:
-        strategy_id: 策略 ID，若不传则使用账户绑定的策略
-        run_id: 信号批次 ID，若不传则使用最新信号
-        params: 策略参数，可覆盖策略配置中的参数
-            - topk: TopK 数量
-            - weight_mode: 权重模式 ("equal" | "score_weighted" | "custom")
-            - custom_weights: 自定义权重 {symbol: weight}
-            - min_score: 最小得分阈值
-            - max_position_pct: 单只股票最大仓位比例
-            - lot_size: 最小交易单位
-    """
-    manager = SimulationAccountManager(redis)
-
-    # 获取账户
-    account = await manager.get_account(auth.user_id, tenant_id=auth.tenant_id)
-    if not account:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="模拟盘账户不存在，请先重置账户",
-        )
-
-    # 确定策略 ID
-    strategy_id = request.strategy_id or account.get("strategy_id")
-    if not strategy_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="未指定策略，请先绑定策略或传入 strategy_id",
-        )
-
-    # 构建策略参数覆盖
-    params_override = None
-    if request.params:
-        params_override = {
-            "topk": request.params.topk,
-            "weight_mode": request.params.weight_mode,
-            "custom_weights": request.params.custom_weights,
-            "min_score": request.params.min_score,
-            "max_position_pct": request.params.max_position_pct,
-            "lot_size": request.params.lot_size,
-        }
-
-    # 执行调仓
-    report = await simulation_engine.run_cycle(
-        tenant_id=auth.tenant_id,
-        user_id=str(auth.user_id),
-        strategy_id=strategy_id,
-        run_id=request.run_id,
-        params_override=params_override,
-    )
-
-    return {
-        "success": report.error is None,
-        "message": report.error or "调仓执行完成",
-        "data": {
-            "run_id": report.run_id,
-            "signal_count": report.signal_count,
-            "order_count": report.order_count,
-            "filled_count": report.filled_count,
-            "rejected_count": report.rejected_count,
-            "total_commission": report.total_commission,
-            "orders": report.orders,
-            "account": report.account_snapshot,
-        },
-    }

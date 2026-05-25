@@ -34,6 +34,10 @@ const toFiniteNumber = (value: unknown, fallback = 0): number => {
   return Number.isFinite(num) ? num : fallback;
 };
 
+const roughlyEqual = (a: number, b: number, tolerance = 0.01): boolean => {
+  return Math.abs(a - b) <= tolerance;
+};
+
 const pickPreferredRatio = (candidates: unknown[], derivedRatio: number): number => {
   for (const value of candidates) {
     if (value === null || value === undefined) continue;
@@ -125,7 +129,9 @@ const deriveFloatingPnl = (accountInfo: AccountInfo | null): number => {
   if (Number.isFinite(explicitFloating)) return explicitFloating;
 
   const raw = (accountInfo as any)?.positions;
-  const positions: any[] = Array.isArray(raw) ? raw : [];
+  const positions: any[] = Array.isArray(raw)
+    ? raw
+    : (raw && typeof raw === 'object' ? Object.values(raw as Record<string, any>) : []);
   if (positions.length === 0) return 0;
 
   return positions.reduce((sum: number, pos: any) => {
@@ -133,6 +139,10 @@ const deriveFloatingPnl = (accountInfo: AccountInfo | null): number => {
     const lastPrice = toFiniteNumber(pos.last_price ?? pos.price ?? pos.current_price, 0);
     const costPrice = toFiniteNumber(pos.cost_price ?? pos.avg_cost ?? pos.avg_price ?? pos.cost, 0);
     if (volume <= 0 || lastPrice <= 0 || costPrice <= 0) return sum;
+    const side = String(pos.side || 'long').toLowerCase();
+    if (side === 'short') {
+      return sum + ((costPrice - lastPrice) * volume);
+    }
     return sum + ((lastPrice - costPrice) * volume);
   }, 0);
 };
@@ -194,10 +204,18 @@ export const buildTradingTopBarAccountInfo = (
   const dailyPnl = Number.isFinite(accountDailyPnl)
     ? accountDailyPnl
     : (Number.isFinite(accountTodayPnl) ? accountTodayPnl : statusDailyPnl);
-  const totalPnl = Number.isFinite(accountTotalPnl) ? accountTotalPnl : statusTotalPnl;
+  const explicitInitialEquity = toFiniteNumber((accountInfo as any)?.initial_equity, Number.NaN);
+  const derivedTotalPnlFromEquity = Number.isFinite(explicitInitialEquity) ? (totalAsset - explicitInitialEquity) : Number.NaN;
+  const totalPnlRaw = Number.isFinite(accountTotalPnl) ? accountTotalPnl : statusTotalPnl;
+  const totalPnl = Number.isFinite(derivedTotalPnlFromEquity)
+    ? (
+      roughlyEqual(totalPnlRaw, derivedTotalPnlFromEquity, 0.5)
+        ? totalPnlRaw
+        : derivedTotalPnlFromEquity
+    )
+    : totalPnlRaw;
   const floatingPnl = Number.isFinite(accountFloatingPnl) ? accountFloatingPnl : deriveFloatingPnl(accountInfo);
   const positionCount = extractPositionCount(accountInfo) || toFiniteNumber(status?.portfolio?.position_count, 0);
-  const explicitInitialEquity = toFiniteNumber((accountInfo as any)?.initial_equity, Number.NaN);
   const initialEquity = Number.isFinite(explicitInitialEquity)
     ? explicitInitialEquity
     : (Number.isFinite(totalAsset) && Number.isFinite(totalPnl)
