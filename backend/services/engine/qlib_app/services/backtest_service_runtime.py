@@ -488,105 +488,51 @@ class QlibBacktestServiceRuntimeMixin(QlibBacktestServiceQueryMixin):
                 ),
             )
 
-            use_vect = getattr(request, "use_vectorized", False)
-            task_log.info(
-                "engine_mode",
-                "回测引擎模式",
-                use_vectorized=use_vect,
-                mode="vectorized" if use_vect else "step",
+            # 统一合并回测引擎：废弃极速向量化回测引擎，全部请求强制走 Qlib 步进回测逻辑。
+            # Qlib 步进回测支持前视偏差纠正（T+1 开盘成交）、A 股最低 5 元佣金等精确费用计算。
+            use_vect_param = getattr(request, "use_vectorized", False)
+            if use_vect_param:
+                task_log.warning(
+                    "vectorized_deprecated",
+                    "向量化回测引擎已弃用，统一合并重定向为 Qlib 步进回测引擎，以确保数据口径与成本一致",
+                    use_vectorized=use_vect_param
+                )
+
+            portfolio_dict, indicator_dict = await asyncio.to_thread(
+                backtest,
+                strategy=strategy,
+                executor=executor,
+                **backtest_config,
             )
 
-            if use_vect:
-                task_log.info("vectorized_start", "启动驻留内存的极速向量化回测引擎")
-                from backend.shared.vectorized_backtest.engine import (
-                    VectorizedBacktestEngine,
-                    VectorizedBacktestConfig,
+            execution_time = time.time() - start_time
+            task_log.info(
+                "run_done", "回测完成", execution_time=f"{execution_time:.2f}"
+            )
+
+            # 使用 RiskAnalyzer 提取指标
+            async def analysis_progress_callback(
+                val: float, msg: str | None = None
+            ):
+                await self._notify_progress(
+                    backtest_id,
+                    request.user_id,
+                    status="running",
+                    progress=val,
+                    strategy_name=request.strategy_type,
+                    message=msg,
                 )
 
-                if isinstance(signal_data, str) and signal_data.startswith("$"):
-                    raise ValueError(
-                        "Vectorized backtest requires pre-computed predictions (DataFrame), not raw feature strings."
-                    )
-
-                price_df = D.features(
-                    D.instruments(request.universe),
-                    ["$close"],
-                    start_time=request.start_date,
-                    end_time=request.end_date,
-                )
-
-                cfg = VectorizedBacktestConfig(
-                    initial_capital=request.initial_capital,
-                    commission=comm + tax + tf,
-                    slippage=request.impact_cost_coefficient,
-                    topk=request.strategy_params.topk,
-                )
-
-                v_engine = VectorizedBacktestEngine(cfg)
-                v_res = await asyncio.to_thread(
-                    v_engine.run_backtest, signals=signal_data, prices=price_df
-                )
-
-                if not v_res.success:
-                    raise RuntimeError(f"向量化极速回测执行失败: {v_res.error_message}")
-
-                execution_time = time.time() - start_time
-                task_log.info(
-                    "vectorized_done",
-                    "向量化极速回测完成",
-                    execution_time=f"{execution_time:.2f}",
-                )
-
-                result = QlibBacktestResult(
-                    backtest_id=backtest_id,
-                    tenant_id=request.tenant_id,
-                    status="completed",
-                    created_at=created_at,
-                    completed_at=datetime.now(),
-                    config=self._build_config_payload(request, signal_meta=signal_meta),
-                    annual_return=v_res.annual_return,
-                    sharpe_ratio=v_res.sharpe_ratio,
-                    max_drawdown=v_res.max_drawdown,
-                    total_return=v_res.total_return,
-                    win_rate=v_res.win_rate,
-                    execution_time=execution_time,
-                )
-            else:
-                portfolio_dict, indicator_dict = await asyncio.to_thread(
-                    backtest,
-                    strategy=strategy,
-                    executor=executor,
-                    **backtest_config,
-                )
-
-                execution_time = time.time() - start_time
-                task_log.info(
-                    "run_done", "回测完成", execution_time=f"{execution_time:.2f}"
-                )
-
-                # 使用 RiskAnalyzer 提取指标
-                async def analysis_progress_callback(
-                    val: float, msg: str | None = None
-                ):
-                    await self._notify_progress(
-                        backtest_id,
-                        request.user_id,
-                        status="running",
-                        progress=val,
-                        strategy_name=request.strategy_type,
-                        message=msg,
-                    )
-
-                result = await RiskAnalyzer.analyze(
-                    portfolio_dict=portfolio_dict,
-                    request=request,
-                    backtest_id=backtest_id,
-                    created_at=created_at,
-                    execution_time=execution_time,
-                    signal_data=signal_data,
-                    signal_meta=signal_meta,
-                    on_progress=analysis_progress_callback,
-                )
+            result = await RiskAnalyzer.analyze(
+                portfolio_dict=portfolio_dict,
+                request=request,
+                backtest_id=backtest_id,
+                created_at=created_at,
+                execution_time=execution_time,
+                signal_data=signal_data,
+                signal_meta=signal_meta,
+                on_progress=analysis_progress_callback,
+            )
 
             self._runs[backtest_id].update(
                 {

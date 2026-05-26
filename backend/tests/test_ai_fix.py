@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from backend.services.engine.qlib_app.api.backtest import ai_fix_strategy
+from backend.services.engine.qlib_app.api.ai_fix import ai_fix_strategy
 from backend.services.engine.qlib_app.schemas.backtest import QlibAIFixRequest
 
 

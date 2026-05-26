@@ -47,6 +47,19 @@ class StrategyBuilder(ABC):
             "redis_password": os.getenv("REDIS_PASSWORD"),
         }
 
+    def _get_fundamental_filter_kwargs(self, request: QlibBacktestRequest) -> dict[str, Any]:
+        """仅在请求显式要求时注入 ST 基本面过滤参数。"""
+        strategy_params = getattr(request, "strategy_params", None)
+        exclude_st = getattr(strategy_params, "exclude_st", None)
+
+        kwargs: dict[str, Any] = {}
+        if exclude_st:
+            kwargs["exclude_st"] = True
+        f_is_st_not = getattr(strategy_params, "f_is_st_not", None)
+        if f_is_st_not is not None:
+            kwargs["f_is_st_not"] = int(f_is_st_not)
+        return kwargs
+
     def _sanitize_module_path_config(self, value: Any) -> Any:
         if isinstance(value, dict):
             normalized: dict[str, Any] = {}
@@ -101,6 +114,7 @@ class TopkDropoutBuilder(StrategyBuilder):
                 "rebalance_days": request.strategy_params.rebalance_days,
                 "account_stop_loss": request.strategy_params.account_stop_loss,
                 "max_leverage": request.strategy_params.max_leverage,
+                **self._get_fundamental_filter_kwargs(request),
                 **market_state_kwargs,
                 **self._get_redis_config(backtest_id),
             },
@@ -128,6 +142,7 @@ class WeightStrategyBuilder(StrategyBuilder):
                 "rebalance_days": request.strategy_params.rebalance_days,
                 "account_stop_loss": request.strategy_params.account_stop_loss,
                 "max_leverage": request.strategy_params.max_leverage,
+                **self._get_fundamental_filter_kwargs(request),
                 **market_state_kwargs,
                 **self._get_redis_config(backtest_id),
             },
@@ -164,6 +179,7 @@ class SimpleTopkBuilder(StrategyBuilder):
                 "rebalance_days": request.strategy_params.rebalance_days,
                 "account_stop_loss": request.strategy_params.account_stop_loss,
                 "max_leverage": request.strategy_params.max_leverage,
+                **self._get_fundamental_filter_kwargs(request),
                 **market_state_kwargs,
                 **self._get_redis_config(backtest_id),
             },
@@ -205,6 +221,8 @@ class DeepTimeSeriesBuilder(StrategyBuilder):
             },
         }
         return self._sanitize_module_path_config(strategy)
+
+
 
 
 class AdaptiveDriftBuilder(StrategyBuilder):
@@ -278,6 +296,7 @@ class CustomStrategyBuilder(StrategyBuilder):
             # 或者总是注入，让类自行决定是否 pop
             kwargs.update(self._get_redis_config(backtest_id))
             kwargs.update(market_state_kwargs)
+            kwargs.update(self._get_fundamental_filter_kwargs(request))
 
             # --- Parameter Merging & Filtering [START] ---
             # Try to find the class in namespace to inspect for support
@@ -338,6 +357,8 @@ class CustomStrategyBuilder(StrategyBuilder):
                         "max_short_exposure",
                         "max_leverage",
                         "account_stop_loss",
+                        "exclude_st",
+                        "f_is_st_not",
                     ]
                     # 调仓周期属于平台关键业务参数：即使用户代码中未显式声明，也应透传给支持 **kwargs 的策略。
                     force_passthrough_ui_params = {"rebalance_days"}
@@ -406,12 +427,14 @@ class CustomStrategyBuilder(StrategyBuilder):
                     "max_short_exposure",
                     "max_leverage",
                     "account_stop_loss",
+                    "exclude_st",
+                    "f_is_st_not",
                 ]
                 for key in ui_params:
                     val = getattr(request.strategy_params, key, None)
                     if val is None:
                         continue
-                    if key == "rebalance_days" or key in kwargs:
+                    if key == "rebalance_days" or key in kwargs or key in original_kwargs:
                         logger.info(
                             "fallback_merge_ui_param",
                             "CustomStrategyBuilder fallback merge UI param",
@@ -442,7 +465,15 @@ class CustomStrategyBuilder(StrategyBuilder):
                     class_name=class_name,
                 )
                 try:
-                    return cls(**strategy.get("kwargs", {}))
+                    kwargs = strategy.get("kwargs", {})
+                    # 信号兼容性处理：解决 Qlib SignalStrategy 不支持字典配置导致的 NotImplementedError
+                    if "signal" in kwargs and isinstance(kwargs["signal"], dict):
+                        from qlib.utils import init_instance_by_config
+                        try:
+                            kwargs["signal"] = init_instance_by_config(kwargs["signal"])
+                        except Exception:
+                            pass
+                    return cls(**kwargs)
                 except TypeError:
                     import inspect
 
@@ -702,6 +733,7 @@ class StopLossBuilder(StrategyBuilder):
                 "take_profit": request.strategy_params.take_profit,
                 "account_stop_loss": request.strategy_params.account_stop_loss,
                 "max_leverage": request.strategy_params.max_leverage,
+                **self._get_fundamental_filter_kwargs(request),
                 **market_state_kwargs,
                 **self._get_redis_config(backtest_id),
             },
@@ -738,6 +770,7 @@ class VolatilityWeightedBuilder(StrategyBuilder):
                 "max_weight": request.strategy_params.max_weight,
                 "account_stop_loss": request.strategy_params.account_stop_loss,
                 "max_leverage": request.strategy_params.max_leverage,
+                **self._get_fundamental_filter_kwargs(request),
                 **market_state_kwargs,
                 **self._get_redis_config(backtest_id),
             },
@@ -776,6 +809,7 @@ class LongShortTopkBuilder(StrategyBuilder):
                 "rebalance_days": request.strategy_params.rebalance_days,
                 "account_stop_loss": request.strategy_params.account_stop_loss,
                 "max_leverage": request.strategy_params.max_leverage,
+                **self._get_fundamental_filter_kwargs(request),
                 **market_state_kwargs,
                 **self._get_redis_config(backtest_id),
             },
@@ -810,6 +844,7 @@ class FullAlphaCrossSectionBuilder(StrategyBuilder):
                 "rebalance_days": request.strategy_params.rebalance_days,
                 "account_stop_loss": request.strategy_params.account_stop_loss,
                 "max_leverage": request.strategy_params.max_leverage,
+                **self._get_fundamental_filter_kwargs(request),
                 **market_state_kwargs,
                 **self._get_redis_config(backtest_id),
             },
