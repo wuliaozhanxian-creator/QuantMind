@@ -170,16 +170,34 @@ def preprocess(df: pd.DataFrame, meta: dict) -> tuple[pd.DataFrame, list[str]]:
     feature_cols = meta.get("feature_columns") or meta.get("features", [])
     fill_values  = meta.get("fill_values", {})
 
-    # 缺失列补 0
+    # 1. 缺失列补 0.0 (对应 Z-Score 的均值)
     missing = [c for c in feature_cols if c not in df.columns]
     if missing:
-        logger.warning("缺少 %d 个特征列，将填 0: %s", len(missing), missing[:8])
+        logger.warning("缺少 %d 个特征列，将填 0.0: %s", len(missing), missing[:8])
         for c in missing:
             df[c] = 0.0
 
     X_df = df[feature_cols].copy()
 
-    # 按 metadata 的 fill_values 填 NaN
+    # 2. 截面 MAD 去极值 + Z-Score 标准化
+    # 这一步极其关键！必须与训练时的预处理完全一致
+    mad_multiplier = 5.0
+    for f in feature_cols:
+        if f not in X_df.columns:
+            continue
+        median = X_df[f].median()
+        mad = (X_df[f] - median).abs().median()
+        upper = median + mad_multiplier * mad
+        lower = median - mad_multiplier * mad
+        X_df[f] = X_df[f].clip(lower=lower, upper=upper)
+        
+        mean = X_df[f].mean()
+        std = X_df[f].std()
+        if pd.isna(std) or std == 0:
+            std = 1e-8
+        X_df[f] = (X_df[f] - mean) / std
+
+    # 3. 按 metadata 的 fill_values 填 NaN (若缺失则以 0.0 兜底)
     for col, val in fill_values.items():
         if col in X_df.columns:
             X_df[col] = X_df[col].fillna(_safe_fill_value(val))

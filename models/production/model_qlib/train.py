@@ -446,7 +446,7 @@ def load_data(
     end_year = max(pd.Timestamp(e).year for e in ends)
 
     # 自动计算必要的核心列
-    core_columns = ["trade_date", "symbol", "open", "close"]
+    core_columns = ["trade_date", "symbol", "open", "close", "factor"]
     # 尝试加载当前周期对应的预置收益特征
     _horizon = max(1, int(target_horizon_days or 1))
     
@@ -463,9 +463,9 @@ def load_data(
     for year in range(start_year - 1, end_year + 1):
         df_year = _load_local_parquet(local_root, year, columns=load_cols)
         if df_year is not None:
-            # 过滤北交所代码（4/8开头），减少后续 concat 后的物理内存占用
-            df_year["symbol"] = df_year["symbol"].astype(str).str.zfill(6)
-            df_year = df_year[~df_year["symbol"].str.startswith(("4", "8"))]
+            # 过滤北交所代码（大写前缀BJ开头），减少后续 concat 后的物理内存占用
+            df_year["symbol"] = df_year["symbol"].astype(str)
+            df_year = df_year[~df_year["symbol"].str.startswith("BJ")]
             chunks.append(df_year)
         else:
             logger.warning(f"No data file found for year {year} in {local_root}, skipping")
@@ -496,8 +496,17 @@ def load_data(
     future_close = grouped["close"].shift(-_horizon)
     next_open = grouped["open"].shift(-1)
     
+    # 将不复权价格转换为复权价格，以修复除权除息导致的收益率计算失真
+    if "factor" in df.columns:
+        future_factor = grouped["factor"].shift(-_horizon)
+        next_factor = grouped["factor"].shift(-1)
+        future_close = future_close * future_factor
+        next_open = next_open * next_factor
+    
     # 获取 T 日收盘价，用于判断 T+1 开盘是否一字涨停
     current_close = df["close"]
+    if "factor" in df.columns:
+        current_close = current_close * df["factor"]
     
     # 智能识别涨跌幅限制 (科创板/创业板 20%, 北交所 30%, 其他主板 10%)
     # DataFrame 中的 symbol 为大写前缀，如 SH688001, SZ300001, BJ830001
@@ -553,12 +562,28 @@ def load_data(
     keep_cols = ["symbol", "trade_date", "label", "weight"] + features
     df = df[keep_cols].reset_index(drop=True)
 
-    # 截面 rank 标准化特征，消除绝对数值随时间漂移的问题
-    logger.info("Applying cross-sectional percent rank normalization to features...")
-    df[features] = df.groupby("trade_date")[features].rank(pct=True)
+    logger.info("Applying cross-sectional MAD + Z-Score normalization to features and labels...")
+    def _cs_zscore_with_mad_series(series, mad_multiplier=5.0):
+        median = series.median()
+        abs_dev = (series - median).abs()
+        mad = abs_dev.median()
+        if mad == 0:
+            mad = abs_dev.mean()
+        if mad == 0:
+            return series - median
+        upper = median + mad_multiplier * mad
+        lower = median - mad_multiplier * mad
+        clipped = series.clip(lower=lower, upper=upper)
+        return (clipped - clipped.mean()) / (clipped.std() + 1e-9)
 
-    # 截面 rank 标准化标签
-    df["label"] = df.groupby("trade_date")["label"].rank(pct=True) - 0.5
+    chunk_size = 50
+    for i in range(0, len(features), chunk_size):
+        chunk_cols = features[i : i + chunk_size]
+        # 对每个 chunk_cols 中的特征逐一应用 _cs_zscore_with_mad_series
+        df[chunk_cols] = df.groupby("trade_date")[chunk_cols].transform(_cs_zscore_with_mad_series)
+
+    # 截面 MAD + Z-score 标准化标签
+    df["label"] = df.groupby("trade_date")["label"].transform(_cs_zscore_with_mad_series)
 
     logger.info(
         f"Data ready: {len(df):,} rows, {len(features)} features, "
@@ -587,13 +612,17 @@ def train_model(df: pd.DataFrame, features: list[str], cfg: dict) -> tuple:
         valid_start_str, valid_end_str = split_cfg["valid"]
         requested_train = f"{split_cfg['train'][0]}~{split_cfg['train'][1]}"
         requested_val = f"{valid_start_str}~{valid_end_str}"
+        # 增加 gap_days 保护，防止训练集尾部标签包含验证集特征导致数据泄漏
+        _horizon = max(1, int((cfg.get("label", {}) or {}).get("target_horizon_days") or 1))
+        train_end_limit = pd.Timestamp(split_cfg['train'][1]) - pd.Timedelta(days=_horizon)
+        
         train_df = df[
             (df["trade_date"] >= pd.Timestamp(split_cfg["train"][0])) &
-            (df["trade_date"] <= pd.Timestamp(split_cfg["train"][1]))
+            (df["trade_date"] <= train_end_limit)
         ].copy()
         val_df   = df[
-            (df["trade_date"] >= pd.Timestamp(valid_start_str)) &
-            (df["trade_date"] <= pd.Timestamp(valid_end_str))
+            (df["trade_date"] >= pd.Timestamp(split_cfg["valid"][0])) &
+            (df["trade_date"] <= pd.Timestamp(split_cfg["valid"][1]))
         ].copy()
         if split_cfg.get("test"):
             test_start_str, test_end_str = split_cfg["test"]
@@ -646,58 +675,132 @@ def train_model(df: pd.DataFrame, features: list[str], cfg: dict) -> tuple:
             "请调整 train/valid/test 时间窗口，确保三段均与可用数据重叠。"
         )
 
-    # 因为特征已经过截面 Rank (0~1)，缺失值统一填充为 0.5 (中位数)
-    fill_values = {c: 0.5 for c in features}
+    # 因为特征已经过截面 ZScore标准化 (均值为0)，缺失值统一填充为 0.0
+    fill_values = {c: 0.0 for c in features}
 
     def _fill(frame: pd.DataFrame) -> np.ndarray:
         x = frame[features].copy()
         for c in features:
-            x[c] = x[c].astype("float32").fillna(0.5)
+            x[c] = x[c].astype("float32").fillna(0.0)
         return x.to_numpy(dtype=np.float32)
 
-    X_train, y_train = _fill(train_df), train_df["label"].astype("float32").to_numpy()
-    X_val,   y_val   = _fill(val_df),   val_df["label"].astype("float32").to_numpy()
+    explain_cfg = _normalize_explain_cfg(cfg.get("explain"))
+    shap_sample_limit = int(explain_cfg.get("shap_sample_rows", 30000))
+    logger.info(f"Pre-sampling datasets for SHAP explainability (max {shap_sample_limit:,} rows per split)...")
+    # 仅保留这三段的超小采样版本作为 split_frames 返回给外部，其余大 DataFrame 尽早释放！
+    def _sample_for_shap(frame: pd.DataFrame) -> pd.DataFrame:
+        if len(frame) > shap_sample_limit:
+            return frame.sample(shap_sample_limit, random_state=42).copy()
+        return frame.copy()
+
+    split_frames_sample = {
+        "train": _sample_for_shap(train_df),
+        "valid": _sample_for_shap(val_df),
+        "test":  _sample_for_shap(test_df),
+    }
+
+    logger.info("Filling missing values for training and validation sets...")
+    X_train = _fill(train_df)
+    y_train = train_df["label"].astype("float32").to_numpy()
+    X_val   = _fill(val_df)
+    y_val   = val_df["label"].astype("float32").to_numpy()
 
     w_train = train_df["weight"].astype("float32").to_numpy() if "weight" in train_df.columns else None
     w_val   = val_df["weight"].astype("float32").to_numpy() if "weight" in val_df.columns else None
 
+    # 提取超窄 DataFrame 用于后续指标计算，彻底释放原有的宽表 DataFrame
+    train_meta_df = train_df[["symbol", "trade_date"]].copy()
+    val_meta_df   = val_df[["symbol", "trade_date"]].copy()
+    test_meta_df  = test_df[["symbol", "trade_date"]].copy()
+    df_meta       = df[["symbol", "trade_date", "label"]].copy()
+
+    # 主动回收垃圾以释放临时 DataFrame 内存
+    import gc
+    del train_df, val_df
+    gc.collect()
+
+    logger.info("Constructing LightGBM Datasets...")
     ds_train = lgb.Dataset(X_train, label=y_train, weight=w_train, feature_name=features, free_raw_data=True)
-    ds_val   = lgb.Dataset(X_val,   label=y_val,   weight=w_val,   feature_name=features, free_raw_data=True)
+    ds_val   = lgb.Dataset(X_val,   label=y_val,   weight=w_val,   feature_name=features, reference=ds_train, free_raw_data=True)
+
+    # 单随机种子训练
+    seed = params.get("seed", 42)
+    logger.info(f"--- Training LightGBM model with seed {seed} ---")
+    train_params = {**params}
+    if "seed" not in train_params:
+        train_params["seed"] = seed
+    if "feature_fraction_seed" not in train_params:
+        train_params["feature_fraction_seed"] = seed
+    if "bagging_seed" not in train_params:
+        train_params["bagging_seed"] = seed
+    if "bagging_fraction" in train_params and "bagging_freq" not in train_params:
+        train_params["bagging_freq"] = 5
 
     callbacks = [
-        lgb.early_stopping(stopping_rounds=early_stopping_rounds, verbose=True),
+        lgb.early_stopping(stopping_rounds=early_stopping_rounds, verbose=False),
         lgb.log_evaluation(100),
     ]
     model = lgb.train(
-        params, ds_train,
+        train_params, ds_train,
         num_boost_round=num_boost_round,
         valid_sets=[ds_train, ds_val],
         valid_names=["train", "valid"],
         callbacks=callbacks,
     )
+    gc.collect()
 
-    y_train_pred = model.predict(_fill(train_df))
-    y_val_pred = model.predict(_fill(val_df))
-    y_test_pred = model.predict(_fill(test_df))
-    train_m = _compute_metrics(train_df, y_train, y_train_pred)
-    val_m   = _compute_metrics(val_df,   y_val,   y_val_pred)
-    test_m  = _compute_metrics(test_df,  test_df["label"].astype("float32").to_numpy(), y_test_pred)
+    # 训练完成，立即释放 Dataset 占用的内存
+    del ds_train, ds_val
+    gc.collect()
+
+    # ------------------ 串行化预测与内存逐个释放 ------------------
+    logger.info("Generating predictions for training set...")
+    y_train_pred = model.predict(X_train)
+    del X_train
+    gc.collect()
+
+    logger.info("Generating predictions for validation set...")
+    y_val_pred = model.predict(X_val)
+    del X_val
+    gc.collect()
+
+    logger.info("Generating predictions for test set...")
+    X_test = _fill(test_df)
+    y_test_label = test_df["label"].astype("float32").to_numpy()
+    del test_df
+    gc.collect()
+    y_test_pred = model.predict(X_test)
+    del X_test
+    gc.collect()
+
+    logger.info("Generating predictions for full dataset...")
+    X_full = _fill(df)
+    del df
+    gc.collect()
+    y_full_pred = model.predict(X_full)
+    del X_full
+    gc.collect()
+
+    # 指标计算
+    train_m = _compute_metrics(train_meta_df, y_train, y_train_pred)
+    val_m   = _compute_metrics(val_meta_df,   y_val,   y_val_pred)
+    test_m  = _compute_metrics(test_meta_df,  y_test_label, y_test_pred)
 
     logger.info(f"Train IC={train_m['ic']:.4f}  RankIC={train_m['rank_ic']:.4f}")
     logger.info(f"Val   IC={val_m['ic']:.4f}    RankIC={val_m['rank_ic']:.4f}  ICIR={val_m['rank_icir']:.4f}")
 
-    # 生成全窗口预测：覆盖 train/valid/test 三段，供后续完整回测使用
-    full_pred_df = df[["symbol", "trade_date", "label"]].copy()
-    full_pred_df["pred"] = model.predict(_fill(df))
+    # 生成全窗口预测：覆盖 train/valid/test 三段，使用预测值
+    full_pred_df = df_meta.copy()
+    full_pred_df["pred"] = y_full_pred
     full_pred_df["split"] = "train"
     full_pred_df.loc[
-        (full_pred_df["trade_date"] >= val_df["trade_date"].min()) &
-        (full_pred_df["trade_date"] <= val_df["trade_date"].max()),
+        (full_pred_df["trade_date"] >= val_meta_df["trade_date"].min()) &
+        (full_pred_df["trade_date"] <= val_meta_df["trade_date"].max()),
         "split",
     ] = "valid"
     full_pred_df.loc[
-        (full_pred_df["trade_date"] >= test_df["trade_date"].min()) &
-        (full_pred_df["trade_date"] <= test_df["trade_date"].max()),
+        (full_pred_df["trade_date"] >= test_meta_df["trade_date"].min()) &
+        (full_pred_df["trade_date"] <= test_meta_df["trade_date"].max()),
         "split",
     ] = "test"
     return (
@@ -707,11 +810,7 @@ def train_model(df: pd.DataFrame, features: list[str], cfg: dict) -> tuple:
         val_m,
         test_m,
         full_pred_df.reset_index(drop=True),
-        {
-            "train": train_df.reset_index(drop=True),
-            "valid": val_df.reset_index(drop=True),
-            "test": test_df.reset_index(drop=True),
-        },
+        split_frames_sample,
     )
 
 
@@ -863,7 +962,7 @@ def main() -> int:
             "test_start":  (cfg.get("split", {}).get("test")  or [None, None])[0] or "",
             "test_end":    (cfg.get("split", {}).get("test")  or [None, None])[1] or "",
             "data_source": "parquet",
-            "best_iteration": model.best_iteration,
+            "best_iteration": int(model.best_iteration),
             "target_horizon_days": int((cfg.get("label", {}) or {}).get("target_horizon_days") or 1),
             "target_mode": str((cfg.get("label", {}) or {}).get("target_mode") or "return"),
             "label_formula": str((cfg.get("label", {}) or {}).get("label_formula") or ""),

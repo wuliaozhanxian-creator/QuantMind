@@ -283,9 +283,9 @@ export const FEATURE_CATEGORY_ICON_MAP: Record<string, React.ReactNode> = {
 export const TARGET_PRESETS = [1, 3, 5, 10];
 
 export const DEFAULT_TIME_PERIODS: TimePeriodMap = {
-  train: [dayjs('2016-01-01'), dayjs('2024-12-31')],
-  val: [dayjs('2025-01-01'), dayjs('2025-09-30')],
-  test: [dayjs('2025-10-01'), dayjs('2026-05-20')],
+  train: [dayjs('2016-01-04'), dayjs('2023-04-09')],
+  val:   [dayjs('2023-04-14'), dayjs('2024-10-28')],
+  test:  [dayjs('2024-11-02'), dayjs('2026-05-21')],
 };
 
 export const LEGACY_DEFAULT_TIME_PERIODS: TimePeriodMap = {
@@ -295,13 +295,13 @@ export const LEGACY_DEFAULT_TIME_PERIODS: TimePeriodMap = {
 };
 
 export const DEFAULT_PARAMS: TrainingParams = {
-  learning_rate: 0.02,
-  num_leaves: 31,
-  max_depth: -1,
-  min_data_in_leaf: 500,
-  lambda_l1: 0.5,
-  lambda_l2: 1.0,
-  feature_fraction: 0.6,
+  learning_rate: 0.01,
+  num_leaves: 7,
+  max_depth: 4,
+  min_data_in_leaf: 1500,
+  lambda_l1: 10,
+  lambda_l2: 50,
+  feature_fraction: 0.3,
   bagging_fraction: 0.7,
   num_boost_round: 1500,
   early_stopping_rounds: 150,
@@ -378,7 +378,7 @@ export const buildLabelFormula = (target: TrainingTarget) => {
   if (target.mode === 'classification') {
     return `label = 1[ future_return(T, T+${target.horizonDays}) > 0 ]`;
   }
-  return `label = future_return(T, T+${target.horizonDays}) = close(T+${target.horizonDays}) / close(T) - 1`;
+  return `label = CSZScore(future_return(T, T+${target.horizonDays})) = CSZScore(open(T+${target.horizonDays}) / open(T) - 1)`;
 };
 
 export const buildEffectiveTradeDate = (target: TrainingTarget, referenceDate: Dayjs) => {

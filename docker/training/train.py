@@ -298,7 +298,7 @@ def load_data(
     source_mode: str = "LOCAL",
     local_dir: str | None = None,
     limit_up_weight: float = 0.5,
-) -> tuple:
+) -> tuple[pd.DataFrame, list[str]]:
     start_year = pd.Timestamp(train_start).year
 
     # 获取最晚的年份，确保包含 验证/测试 集所需的数据
@@ -307,40 +307,37 @@ def load_data(
     if test_end: ends.append(test_end)
     end_year = max(pd.Timestamp(e).year for e in ends)
 
+    # 自动计算必要的核心列
+    core_columns = ["trade_date", "symbol", "open", "close", "factor"]
+    _horizon = max(1, int(target_horizon_days or 1))
+    
+    # 最终合并列：核心列 + 用户请求特征（去重）
+    load_cols = list(dict.fromkeys(core_columns + features))
+    logger.info(f"Memory optimization: Planning to load {len(load_cols)} columns from {len(range(max(start_year - 1, 2016), end_year + 1))} years")
+
     local_root = Path(local_dir).expanduser() if local_dir else None
     if local_root is None:
         raise RuntimeError("local_dir must be provided; COS data download has been removed")
 
-    # 仅读取训练必需列，避免整表加载导致 OOM
-    horizon = max(1, int(target_horizon_days or 1))
-    horizon_col = f"mom_ret_{horizon}d"
-    required_columns = list(
-        dict.fromkeys(
-            ["trade_date", "symbol", "mom_ret_1d", horizon_col] + list(features)
-        )
-    )
-    logger.info(
-        "Memory-optimized read: selected %d columns (horizon=%s)",
-        len(required_columns),
-        horizon,
-    )
-
     # 给标签构建预留边界，避免裁剪过早影响 shift/rolling
-    range_start = pd.Timestamp(train_start) - pd.Timedelta(days=max(7, horizon + 3))
+    range_start = pd.Timestamp(train_start) - pd.Timedelta(days=max(7, _horizon + 3))
     upper_bound = test_end or valid_end or train_end
-    range_end = pd.Timestamp(upper_bound) + pd.Timedelta(days=max(7, horizon + 3))
+    range_end = pd.Timestamp(upper_bound) + pd.Timedelta(days=max(7, _horizon + 3))
 
     chunks = []
     for year in range(max(start_year - 1, 2016), end_year + 1):
         df_year = _load_local_parquet(
             local_root,
             year,
-            required_columns=required_columns,
+            required_columns=load_cols,
             clip_start=range_start,
             clip_end=range_end,
         )
         if df_year is not None:
             if not df_year.empty:
+                # 过滤北交所代码（4/8开头）
+                df_year["symbol"] = df_year["symbol"].astype(str).str.zfill(6)
+                df_year = df_year[~df_year["symbol"].str.startswith(("4", "8"))]
                 chunks.append(df_year)
         else:
             logger.warning(f"No data file found for year {year} in {local_root}, skipping")
@@ -352,49 +349,70 @@ def load_data(
     df["trade_date"] = pd.to_datetime(df["trade_date"], errors="coerce")
     df = df[df["trade_date"].notna()].copy()
     logger.info(f"Raw concat size: {len(df)} rows. Date range: {df['trade_date'].min()} to {df['trade_date'].max()}")
-
-    # 过滤北交所代码（4/8开头）
-    df["symbol"] = df["symbol"].astype(str).str.zfill(6)
-    df = df[~df["symbol"].str.startswith(("4", "8"))].copy()
     logger.info(f"After symbol filter: {len(df)} rows")
 
     # 标签：基于 target_horizon_days 构建 N 日远期收益
-    if "mom_ret_1d" not in df.columns:
-        raise RuntimeError("Column 'mom_ret_1d' not found in parquet")
-
-    # 从参数读取预测周期（不依赖全局 cfg）
-    _horizon = max(1, int(target_horizon_days or 1))
+    if "open" not in df.columns or "close" not in df.columns:
+        raise RuntimeError("Columns 'open' and 'close' are required for tradable label calculation")
 
     df = df.sort_values(["symbol", "trade_date"]).reset_index(drop=True)
-    # 优先使用 parquet 内置的 N 日收益特征（精确复权），否则用累积 shift
-    _mom_col = f"mom_ret_{_horizon}d"
-    if _horizon == 1:
-        df["label"] = df.groupby("symbol")["mom_ret_1d"].shift(-1)
-    elif _mom_col in df.columns:
-        df["label"] = df.groupby("symbol")[_mom_col].shift(-_horizon)
-    else:
-        # 回退：通过滚动累乘 1d 收益构造 N 日远期收益
-        df["label"] = (
-            df.groupby("symbol")["mom_ret_1d"]
-            .transform(lambda s: (1 + s).rolling(_horizon).apply(np.prod, raw=True) - 1)
-            .shift(-_horizon)
-        )
-    logger.info(f"Label built with target_horizon_days={_horizon} (column={_mom_col if _mom_col in df.columns else 'rolling'})")
+    
+    # 构造实盘可交易收益率：T+1开盘买入，T+H收盘卖出 (Close_{T+H} / Open_{T+1} - 1)
+    grouped = df.groupby("symbol")
+    future_close = grouped["close"].shift(-_horizon)
+    next_open = grouped["open"].shift(-1)
+    
+    # 将不复权价格转换为复权价格，以修复除权除息导致的收益率计算失真
+    if "factor" in df.columns:
+        future_factor = grouped["factor"].shift(-_horizon)
+        next_factor = grouped["factor"].shift(-1)
+        future_close = future_close * future_factor
+        next_open = next_open * next_factor
+    
+    # 获取 T 日收盘价，用于判断 T+1 开盘是否一字涨停
+    current_close = df["close"]
+    if "factor" in df.columns:
+        current_close = current_close * df["factor"]
+    
+    # 智能识别涨跌幅限制 (科创板/创业板 20%, 主板 10%)
+    symbols = df["symbol"].astype(str).str.zfill(6)
+    is_star_gem = symbols.str.startswith(("688", "300"))
+    
+    # 设置 T+1 开盘涨停阈值 (留 0.5% 容错余量：20%->19.5%, 10%->9.5%)
+    limit_threshold = np.where(is_star_gem, 0.195, 0.095)
+    
+    # 精细化涨跌停识别
+    is_limit_up_open = (next_open / current_close - 1) >= limit_threshold
+    is_limit_down_open = (next_open / current_close - 1) <= -limit_threshold
+    is_extreme = is_limit_up_open | is_limit_down_open
+    
+    # 避免除以0的情况
+    raw_label = np.where(next_open > 0, (future_close / next_open) - 1, np.nan)
+    
+    # 【改为软降权】：不再把极端样本的 label 设为 NaN，而是保留真实收益率，让模型能够学习到它们的特征分布
+    df["label"] = raw_label
+    
+    # 新增 weight 列：正常样本权重为 1.0，开盘涨跌停的极端样本权重动态配置 (软降权)
+    df["weight"] = np.where(is_extreme, limit_up_weight, 1.0)
+    
+    logger.info(f"Tradable label built with target_horizon_days={_horizon} (Close_T+{_horizon} / Open_T+1 - 1)")
+    logger.info(f"Soft weighted {int(is_limit_up_open.sum())} limit-up and {int(is_limit_down_open.sum())} limit-down samples to {limit_up_weight}.")
 
     valid_count_before = len(df)
     df = df[df["label"].notna()].copy()
     logger.info(f"After label shift & dropna: {len(df)} rows (dropped {valid_count_before - len(df)} rows with missing labels)")
 
     # 裁剪到请求日期范围
-    mask = (df["trade_date"] >= train_start) & (df["trade_date"] <= train_end)
-    # 如果有验证集/测试集，扩大 mask 范围以包含它们
+    ts_start = pd.Timestamp(train_start)
+    ts_train_end = pd.Timestamp(train_end)
+    mask = (df["trade_date"] >= ts_start) & (df["trade_date"] <= ts_train_end)
     if valid_end:
-        mask = (df["trade_date"] >= train_start) & (df["trade_date"] <= valid_end)
+        mask = (df["trade_date"] >= ts_start) & (df["trade_date"] <= pd.Timestamp(valid_end))
     if test_end:
-        mask = (df["trade_date"] >= train_start) & (df["trade_date"] <= test_end)
+        mask = (df["trade_date"] >= ts_start) & (df["trade_date"] <= pd.Timestamp(test_end))
 
     df = df[mask].copy()
-    logger.info(f"After date range clip ({train_start} to {test_end or valid_end or train_end}): {len(df)} rows")
+    logger.info(f"After date range clip ({ts_start.date()} to {pd.Timestamp(test_end or valid_end or train_end).date()}): {len(df)} rows")
 
     # 校验特征列
     missing = [f for f in features if f not in df.columns]
@@ -404,11 +422,30 @@ def load_data(
     if not features:
         raise RuntimeError("No valid feature columns found")
 
-    keep_cols = ["symbol", "trade_date", "label"] + features
+    keep_cols = ["symbol", "trade_date", "label", "weight"] + features
     df = df[keep_cols].reset_index(drop=True)
 
-    # 截面 rank 标准化标签
-    df["label"] = df.groupby("trade_date")["label"].rank(pct=True) - 0.5
+    logger.info("Applying cross-sectional MAD + Z-Score normalization to features and labels...")
+    def _cs_zscore_with_mad_series(series, mad_multiplier=5.0):
+        median = series.median()
+        abs_dev = (series - median).abs()
+        mad = abs_dev.median()
+        if mad == 0:
+            mad = abs_dev.mean()
+        if mad == 0:
+            return series - median
+        upper = median + mad_multiplier * mad
+        lower = median - mad_multiplier * mad
+        clipped = series.clip(lower=lower, upper=upper)
+        return (clipped - clipped.mean()) / (clipped.std() + 1e-9)
+
+    chunk_size = 50
+    for i in range(0, len(features), chunk_size):
+        chunk_cols = features[i : i + chunk_size]
+        df[chunk_cols] = df.groupby("trade_date")[chunk_cols].transform(_cs_zscore_with_mad_series)
+
+    # 截面 MAD + Z-score 标准化标签
+    df["label"] = df.groupby("trade_date")["label"].transform(_cs_zscore_with_mad_series)
 
     logger.info(
         f"Data ready: {len(df):,} rows, {len(features)} features, "
@@ -485,9 +522,8 @@ def train_model(df: pd.DataFrame, features: list[str], cfg: dict) -> tuple:
             "请调整 train/valid/test 时间窗口，确保三段均与可用数据重叠。"
         )
 
-    # 计算填充值：使用训练集特征中位数，过滤掉 NaN（全 NaN 列用 0.0 填充）
-    fill_values = train_df[features].median().to_dict()
-    fill_values = {k: (v if not (isinstance(v, float) and np.isnan(v)) else 0.0) for k, v in fill_values.items()}
+    # 计算填充值：因为特征已经过截面 ZScore 标准化 (均值为0)，缺失值统一填充为 0.0
+    fill_values = {c: 0.0 for c in features}
 
     def _fill(frame: pd.DataFrame) -> np.ndarray:
         x = frame[features].copy()
@@ -498,7 +534,9 @@ def train_model(df: pd.DataFrame, features: list[str], cfg: dict) -> tuple:
     X_train, y_train = _fill(train_df), train_df["label"].astype("float32").to_numpy()
     X_val,   y_val   = _fill(val_df),   val_df["label"].astype("float32").to_numpy()
 
-    ds_train = lgb.Dataset(X_train, label=y_train, feature_name=features, free_raw_data=True)
+    w_train = train_df["weight"].astype("float32").to_numpy() if "weight" in train_df.columns else None
+
+    ds_train = lgb.Dataset(X_train, label=y_train, weight=w_train, feature_name=features, free_raw_data=True)
     ds_val   = lgb.Dataset(X_val,   label=y_val,   feature_name=features, free_raw_data=True)
 
     callbacks = [

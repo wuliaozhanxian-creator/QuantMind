@@ -220,35 +220,11 @@ class CnExchange(Exchange):
             order, trade_account=trade_account, position=position, dealt_order_amount=dealt_order_amount
         )
 
-        # Log trade if it was executed and backtest_id is provided
-        if self.redis_client and trade_val > 0:
-            try:
-                action = "buy" if order.direction == OrderDir.BUY else "sell"
-                factor_val = getattr(order, "factor", None)
-                # Qlib 在 trade_w_adj_price=False 模式下，deal_amount 是复权调整单位（adjusted units）
-                # 需要乘以 factor 还原为真实股数
-                if factor_val and float(factor_val) > 0 and not self.trade_w_adj_price:
-                    real_quantity = float(order.deal_amount) * float(factor_val)
-                else:
-                    real_quantity = float(order.deal_amount)
-                trade_record = {
-                    "date": order.start_time.strftime("%Y-%m-%d"),
-                    "symbol": str(order.stock_id),
-                    "action": action,
-                    "price": float(trade_price),  # 真实不复权市价
-                    "quantity": real_quantity,  # 存储真实股数
-                    "amount": float(trade_val),
-                    "commission": float(trade_cost),
-                    "timestamp": datetime.now().isoformat(),
-                    # 保留复权口径字段，便于对账
-                    "adj_price": float(trade_price),
-                    "adj_quantity": float(order.deal_amount),
-                    "factor": float(factor_val) if factor_val else None,
-                }
-                self.redis_client.rpush(self.trades_key, json.dumps(trade_record))
-            except Exception:
-                # Suppress errors to avoid interrupting backtest
-                pass
+        # 注意：交易记录统一由 recording_strategy.log_executed_trades() 负责写入 Redis，
+        # 该路径会附带 cash_after / position_value_after / equity_after 等完整的账户快照字段。
+        # 此处（cn_exchange.deal_order）不再重复写入，避免产生双份记录：
+        #   一份来自此处（无 equity_after），一份来自 recording_strategy（有 equity_after），
+        # 从而触发 export_utils 误判"不可信"并错误抛弃权益快照。
 
         return trade_val, trade_cost, trade_price
 

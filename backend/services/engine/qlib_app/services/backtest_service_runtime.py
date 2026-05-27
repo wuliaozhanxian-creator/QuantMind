@@ -264,7 +264,9 @@ class QlibBacktestServiceRuntimeMixin(QlibBacktestServiceQueryMixin):
                     "Qlib calendar 加载失败，使用默认日期范围",
                     error=str(cal_err),
                 )
-                full_cal = pd.date_range(start=request.start_date, end=request.end_date, freq="B")
+                full_cal = pd.date_range(
+                    start=request.start_date, end=request.end_date, freq="B"
+                )
             cal_max_ts = pd.Timestamp(full_cal[-1].date())
             end_ts = pd.Timestamp(request.end_date)
 
@@ -495,7 +497,7 @@ class QlibBacktestServiceRuntimeMixin(QlibBacktestServiceQueryMixin):
                 task_log.warning(
                     "vectorized_deprecated",
                     "向量化回测引擎已弃用，统一合并重定向为 Qlib 步进回测引擎，以确保数据口径与成本一致",
-                    use_vectorized=use_vect_param
+                    use_vectorized=use_vect_param,
                 )
 
             portfolio_dict, indicator_dict = await asyncio.to_thread(
@@ -511,9 +513,7 @@ class QlibBacktestServiceRuntimeMixin(QlibBacktestServiceQueryMixin):
             )
 
             # 使用 RiskAnalyzer 提取指标
-            async def analysis_progress_callback(
-                val: float, msg: str | None = None
-            ):
+            async def analysis_progress_callback(val: float, msg: str | None = None):
                 await self._notify_progress(
                     backtest_id,
                     request.user_id,
@@ -818,6 +818,27 @@ class QlibBacktestServiceRuntimeMixin(QlibBacktestServiceQueryMixin):
                             getattr(request, "signal_lag_days", 1) or 0
                         ),
                     }
+
+                # 自动规范化索引名称，兼容 datetime/date 和 instrument/symbol
+                if hasattr(pred, "index") and pred.index.names:
+                    new_names = []
+                    changed = False
+                    for name in pred.index.names:
+                        if name == "symbol":
+                            new_names.append("instrument")
+                            changed = True
+                        elif name == "date" and "datetime" not in pred.index.names:
+                            new_names.append("datetime")
+                            changed = True
+                        else:
+                            new_names.append(name)
+                    if changed:
+                        pred.index.names = new_names
+                        task_logger.info(
+                            "pred_index_normalized",
+                            "自动规范化 pred.pkl 索引名称",
+                            new_names=new_names,
+                        )
 
                 if not (
                     hasattr(pred, "index")
