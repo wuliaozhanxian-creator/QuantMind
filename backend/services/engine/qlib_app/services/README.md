@@ -45,9 +45,9 @@
   - 解析到模型后自动读取该模型目录下的 `pred.pkl`（用户模型或系统模型），不再依赖全局单一 `QLIB_PRED_PATH`，实现多租户互不冲突。
   - 若模型目录缺失 `pred.pkl`，才回退旧 `QLIB_PRED_PATH` 逻辑；信号元数据会记录 `effective_model_id/model_source/fallback_reason` 便于排障。
 - **全量截面 Alpha 新模板（2026-03-29）**：
-  - 新增模板：`strategy_templates/full_alpha_cross_section.py`、`strategy_templates/full_alpha_cross_section.json`。
+  - 新增模板：`strategy_templates/value_growth.py`、`strategy_templates/value_growth.json`。
   - 新增策略类映射：`RedisFullAlphaStrategy -> backend.services.engine.qlib_app.utils.extended_strategies`。
-  - `StrategyFactory` 新增 `full_alpha_cross_section` Builder，支持“跌出 TopK 全卖 + 涨停/停牌顺延补位”的全量调仓逻辑。
+  - `StrategyFactory` 新增 `value_growth` Builder，支持”跌出 TopK 全卖 + 涨停/停牌顺延补位”的全量调仓逻辑。
 - **管理员模板“即建即用”执行链路（2026-03-28）**：
   - 回测服务新增未知策略 ID 解析：当 `strategy_type` 未命中 `StrategyFactory` 时，会自动按模板 ID 查找 `strategy_templates/<id>.py`。
   - 若模板存在，则自动将该模板代码注入并路由到 `CustomStrategyBuilder` 执行，无需再手工修改 `StrategyFactory` 映射。

@@ -9,7 +9,7 @@
 ## 更新记录
 
 - 2026-03-29：`n_drop` 自动补全逻辑按策略类型细化。
-- 对包含 `max_weight` 且未声明 `n_drop` 的权重型模板（如 `alpha_cross_section`、`full_alpha_cross_section`）不再注入 `n_drop`，避免前端误显示“每日最大调仓数”。
+- 对包含 `max_weight` 且未声明 `n_drop` 的权重型模板（如 `alpha_cross_section`、`value_growth`）不再注入 `n_drop`，避免前端误显示”每日最大调仓数”。
 - 2026-03-29：统一模板默认调仓比例为 20%。
 - `strategyParams` 默认值改为按 `n_drop = topk * 20%`（四舍五入，最少为 1）自动推导。
 - 2026-03-29：修复 `long_short_topk` 默认参数容错。

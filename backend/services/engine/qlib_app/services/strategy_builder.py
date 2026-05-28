@@ -861,7 +861,7 @@ class StrategyFactory:
         # Frontend Template Mapping (Native Call)
         "standard_topk": SimpleTopkBuilder(),
         "alpha_cross_section": WeightStrategyBuilder(),
-        "full_alpha_cross_section": FullAlphaCrossSectionBuilder(),
+        "value_growth": FullAlphaCrossSectionBuilder(),
         "long_short_topk": LongShortTopkBuilder(),
         "deep_time_series": DeepTimeSeriesBuilder(),
         "adaptive_drift": AdaptiveDriftBuilder(),
@@ -888,7 +888,7 @@ class StrategyFactory:
         "simple_topk": "simple_topk",
         "score_weighted": "score_weighted",
         "alpha_cross_section": "alpha_cross_section",
-        "full_alpha_cross_section": "full_alpha_cross_section",
+        "value_growth": "value_growth",
         "long_short_topk": "long_short_topk",
         "deep_time_series": "deep_time_series",
         "stoploss": "StopLoss",
