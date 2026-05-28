@@ -25,7 +25,7 @@ _SDL_CACHE_MAX_ENTRIES = 512
 _SDL_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _SDL_REDIS_YEAR = int(os.getenv("RESEARCH_SDL_REDIS_YEAR", "2026"))
 _SDL_REDIS_TTL_SECONDS = int(os.getenv("RESEARCH_SDL_REDIS_TTL_SECONDS", "1800"))
-_SDL_TABLE = os.getenv("RESEARCH_SDL_TABLE", "stock_daily_latest_2026_cache")
+_SDL_TABLE = os.getenv("RESEARCH_SDL_TABLE", "stock_daily_latest")
 _STOCK_META_CACHE: dict[str, dict[str, str]] = {}
 _STOCK_META_CACHE_MTIME: float | None = None
 _DEFAULT_STOCK_INDEX_JSON_PATH = str(
@@ -180,7 +180,11 @@ async def _load_sdl_day_map(session, trade_date: date) -> dict[str, dict[str, An
     """
     used_trade_date = trade_date
     fallback_used = False
-    trade_date_param = trade_date.isoformat() if isinstance(trade_date, date) else str(trade_date)
+    # asyncpg 需要 date 对象，不能传字符串
+    if isinstance(trade_date, str):
+        trade_date_param = datetime.strptime(trade_date, "%Y-%m-%d").date()
+    else:
+        trade_date_param = trade_date
     async with get_market_session() as m_session:
         res = await m_session.execute(text(sql), {"trade_date": trade_date_param})
         rows = res.mappings().all()
@@ -189,10 +193,10 @@ async def _load_sdl_day_map(session, trade_date: date) -> dict[str, dict[str, An
                 text(f"SELECT MAX(trade_date) FROM {_SDL_TABLE}")
             )
             fallback_date = fallback_date_res.scalar()
-            if isinstance(fallback_date, date):
+            if fallback_date is not None:
                 fallback_used = True
                 used_trade_date = fallback_date
-                res = await m_session.execute(text(sql), {"trade_date": fallback_date.isoformat()})
+                res = await m_session.execute(text(sql), {"trade_date": fallback_date})
                 rows = res.mappings().all()
 
     symbol_map: dict[str, dict[str, Any]] = {}

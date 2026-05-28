@@ -44,43 +44,6 @@ logger = logging.getLogger("inference_parquet")
 _DEFAULT_DATA_DIR = "/app/db/feature_snapshots"
 
 
-def filter_untradable_rows(df: pd.DataFrame) -> pd.DataFrame:
-    """过滤零成交或无效价格行，避免停牌/不可交易标的进入排名。"""
-    if df.empty:
-        return df
-
-    filtered = df.copy()
-    removed = 0
-
-    if "close" in filtered.columns:
-        valid_close = pd.to_numeric(filtered["close"], errors="coerce") > 0
-        removed += int((~valid_close).sum())
-        filtered = filtered.loc[valid_close].copy()
-
-    if "volume" in filtered.columns:
-        valid_volume = pd.to_numeric(filtered["volume"], errors="coerce") > 0
-        removed += int((~valid_volume).sum())
-        filtered = filtered.loc[valid_volume].copy()
-
-    if removed:
-        logger.info("过滤不可交易记录: removed=%d, kept=%d", removed, len(filtered))
-
-    return filtered
-
-
-def _safe_fill_value(value: object) -> float:
-    """将 metadata 里的填充值规整成可直接用于 fillna 的有限浮点。"""
-    if value is None:
-        return 0.0
-    try:
-        number = float(value)
-    except Exception:
-        return 0.0
-    if not np.isfinite(number):
-        return 0.0
-    return number
-
-
 # ═══════════════════════════════════════════════════════════════════════════
 # 1. 参数解析
 # ═══════════════════════════════════════════════════════════════════════════
@@ -136,6 +99,31 @@ def load_model(model_dir: Path, meta: dict) -> lgb.Booster:
 # 4. 数据加载
 # ═══════════════════════════════════════════════════════════════════════════
 
+def filter_untradable_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """过滤不可交易记录（停牌、零成交等）。
+
+    剔除条件：
+    - close <= 0（价格异常）
+    - volume <= 0（零成交/停牌）
+    """
+    if df.empty:
+        return df
+
+    filtered = df.copy()
+
+    if "close" in filtered.columns:
+        filtered = filtered.loc[
+            pd.to_numeric(filtered["close"], errors="coerce") > 0
+        ].copy()
+
+    if "volume" in filtered.columns:
+        filtered = filtered.loc[
+            pd.to_numeric(filtered["volume"], errors="coerce") > 0
+        ].copy()
+
+    return filtered
+
+
 def load_date_data(trade_date: str, data_dir: Path, meta: dict) -> pd.DataFrame | None:
     """加载指定日期的特征数据。返回 None 表示该日期无数据（exit 2）。"""
     year = int(trade_date[:4])
@@ -152,13 +140,22 @@ def load_date_data(trade_date: str, data_dir: Path, meta: dict) -> pd.DataFrame 
         logger.warning("日期 %s 在 parquet 中无数据", trade_date)
         return None
 
-    filtered_df = filter_untradable_rows(day_df)
-    if len(filtered_df) == 0:
-        logger.warning("日期 %s 全部记录均不可交易", trade_date)
+    # 过滤不可交易记录（停牌、零成交等）
+    before_filter = len(day_df)
+    day_df = filter_untradable_rows(day_df)
+    after_filter = len(day_df)
+    if before_filter != after_filter:
+        logger.info(
+            "过滤不可交易记录: %d -> %d (剔除 %d 条)",
+            before_filter, after_filter, before_filter - after_filter
+        )
+
+    if len(day_df) == 0:
+        logger.warning("日期 %s 过滤后无可交易数据", trade_date)
         return None
 
-    logger.info("找到 %d 条可交易记录，日期=%s", len(filtered_df), trade_date)
-    return filtered_df
+    logger.info("找到 %d 条可交易记录，日期=%s", len(day_df), trade_date)
+    return day_df
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -170,37 +167,19 @@ def preprocess(df: pd.DataFrame, meta: dict) -> tuple[pd.DataFrame, list[str]]:
     feature_cols = meta.get("feature_columns") or meta.get("features", [])
     fill_values  = meta.get("fill_values", {})
 
-    # 1. 缺失列补 0.0 (对应 Z-Score 的均值)
+    # 缺失列补 0
     missing = [c for c in feature_cols if c not in df.columns]
     if missing:
-        logger.warning("缺少 %d 个特征列，将填 0.0: %s", len(missing), missing[:8])
+        logger.warning("缺少 %d 个特征列，将填 0: %s", len(missing), missing[:8])
         for c in missing:
             df[c] = 0.0
 
     X_df = df[feature_cols].copy()
 
-    # 2. 截面 MAD 去极值 + Z-Score 标准化
-    # 这一步极其关键！必须与训练时的预处理完全一致
-    mad_multiplier = 5.0
-    for f in feature_cols:
-        if f not in X_df.columns:
-            continue
-        median = X_df[f].median()
-        mad = (X_df[f] - median).abs().median()
-        upper = median + mad_multiplier * mad
-        lower = median - mad_multiplier * mad
-        X_df[f] = X_df[f].clip(lower=lower, upper=upper)
-        
-        mean = X_df[f].mean()
-        std = X_df[f].std()
-        if pd.isna(std) or std == 0:
-            std = 1e-8
-        X_df[f] = (X_df[f] - mean) / std
-
-    # 3. 按 metadata 的 fill_values 填 NaN (若缺失则以 0.0 兜底)
+    # 按 metadata 的 fill_values 填 NaN
     for col, val in fill_values.items():
         if col in X_df.columns:
-            X_df[col] = X_df[col].fillna(_safe_fill_value(val))
+            X_df[col] = X_df[col].fillna(val)
     X_df = X_df.fillna(0.0)
 
     symbols = df["symbol"].tolist()
