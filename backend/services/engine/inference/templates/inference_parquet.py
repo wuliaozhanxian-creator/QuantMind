@@ -46,7 +46,14 @@ _DEFAULT_DATA_DIR = "/app/db/feature_snapshots"
 
 
 def filter_untradable_rows(df: pd.DataFrame) -> pd.DataFrame:
-    """过滤零成交或无效价格行，避免停牌/不可交易标的进入排名。"""
+    """过滤零成交、无效价格行以及B股，避免停牌/不可交易/非A股标的进入排名。
+
+    过滤规则：
+    1. close <= 0（无效价格 / 停牌）
+    2. volume <= 0（零成交）
+    3. SH9xxxxx（上海B股，美元计价）
+    4. SZ2xxxxx（深圳B股，港元计价）
+    """
     if df.empty:
         return df
 
@@ -63,8 +70,21 @@ def filter_untradable_rows(df: pd.DataFrame) -> pd.DataFrame:
         removed += int((~valid_volume).sum())
         filtered = filtered.loc[valid_volume].copy()
 
+    # 过滤B股：SH9xxxxx（上海B股）和 SZ2xxxxx（深圳B股）
+    if "symbol" in filtered.columns:
+        is_b_share = (
+            filtered["symbol"].str.match(r"^SH9\d{5}$", na=False)
+            | filtered["symbol"].str.match(r"^SZ2\d{5}$", na=False)
+        )
+        b_count = int(is_b_share.sum())
+        if b_count:
+            logger.info("过滤B股记录(非A股): removed=%d, symbols=%s",
+                        b_count, sorted(filtered.loc[is_b_share, "symbol"].unique())[:10])
+            removed += b_count
+            filtered = filtered.loc[~is_b_share].copy()
+
     if removed:
-        logger.info("过滤不可交易记录: removed=%d, kept=%d", removed, len(filtered))
+        logger.info("过滤不可交易记录合计: removed=%d, kept=%d", removed, len(filtered))
 
     return filtered
 
@@ -272,7 +292,7 @@ def main():
                 else:
                     norm_tilt = np.zeros_like(raw_tilt)
                 
-                # 倾斜特征波动范围绑定 to scores 的 std * weight 比例上
+                # 倾斜特征波动范围绑定到 scores 的 std * weight 比例上
                 tilt_values = norm_tilt * (std_score * weight)
                 scores += tilt_values
                 logger.info("已对特征 %s 施加权重 %s 的自适应倾斜 (原 scores 标准差: %.6f)", feature, weight, std_score)
