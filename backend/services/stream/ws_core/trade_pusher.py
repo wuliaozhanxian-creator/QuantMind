@@ -24,30 +24,17 @@ import os
 
 
 def _build_redis_client() -> aioredis.Redis:
-    # OSS Edition: 使用统一 Redis 实例
-    host = os.getenv("TRADE_EVENTS_REDIS_HOST", settings.REDIS_HOST)
-    port = int(os.getenv("TRADE_EVENTS_REDIS_PORT", settings.REDIS_PORT))
-    password = os.getenv("TRADE_EVENTS_REDIS_PASSWORD", settings.REDIS_PASSWORD)
-    db = int(os.getenv("TRADE_EVENTS_REDIS_DB", "0"))
+    # 交易事件推送使用本地 Redis，不是远程行情 Redis
+    # 优先使用环境变量，否则使用本地 Docker Redis
+    host = os.getenv("TRADE_EVENTS_REDIS_HOST", "redis")
+    port = int(os.getenv("TRADE_EVENTS_REDIS_PORT", "6379"))
+    password = os.getenv("TRADE_EVENTS_REDIS_PASSWORD") or None
+    db = int(os.getenv("TRADE_EVENTS_REDIS_DB", "2"))  # 交易 Redis db2
 
-    if settings.REDIS_USE_SENTINEL:
-        from redis.asyncio.sentinel import Sentinel
-
-        sentinel = Sentinel(
-            settings.REDIS_SENTINELS,
-            socket_timeout=0.5,
-            password=password or None,
-        )
-        return sentinel.master_for(
-            settings.REDIS_MASTER_NAME,
-            socket_timeout=1.0,
-            password=password or None,
-            db=db,
-        )
     return aioredis.Redis(
         host=host,
         port=port,
-        password=password or None,
+        password=password,
         db=db,
         decode_responses=True,
         socket_connect_timeout=3,

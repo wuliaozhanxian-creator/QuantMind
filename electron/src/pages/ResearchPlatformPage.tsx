@@ -521,6 +521,8 @@ export const ResearchPlatformPage: React.FC = () => {
             latestChange: safeNum(item?.latestChange, 0),
             nextDayReturn: item?.nextDayReturn !== null && item?.nextDayReturn !== undefined ? safeNum(item?.nextDayReturn, 0) : null,
             day3Return: item?.day3Return !== null && item?.day3Return !== undefined ? safeNum(item?.day3Return, 0) : null,
+            return5d: item?.return5d !== null && item?.return5d !== undefined ? safeNum(item?.return5d, 0) : null,
+            return10d: item?.return10d !== null && item?.return10d !== undefined ? safeNum(item?.return10d, 0) : null,
             return20d: item?.return20d !== null && item?.return20d !== undefined ? safeNum(item?.return20d, 0) : null,
             consecutiveLimitUpDays: safeNum(item?.consecutiveLimitUpDays, 0),
             turnoverRate: safeNum(item?.turnoverRate, 0),
@@ -1316,6 +1318,54 @@ export const ResearchPlatformPage: React.FC = () => {
       {
         title: <span className="whitespace-nowrap">3日收益</span>,
         dataIndex: 'day3Return',
+        width: 96,
+        align: 'center',
+        render: (value: number | null | undefined) => {
+          if (value === null || value === undefined) {
+            return <span className="text-slate-300 font-medium">-</span>;
+          }
+          return (
+            <span className={`whitespace-nowrap ${value >= 0 ? 'font-semibold text-rose-500' : 'font-semibold text-emerald-500'}`}>
+              {value >= 0 ? '+' : ''}{value.toFixed(2)}%
+            </span>
+          );
+        },
+      },
+      {
+        title: <span className="whitespace-nowrap">5日收益</span>,
+        dataIndex: 'return5d',
+        width: 96,
+        align: 'center',
+        render: (value: number | null | undefined) => {
+          if (value === null || value === undefined) {
+            return <span className="text-slate-300 font-medium">-</span>;
+          }
+          return (
+            <span className={`whitespace-nowrap ${value >= 0 ? 'font-semibold text-rose-500' : 'font-semibold text-emerald-500'}`}>
+              {value >= 0 ? '+' : ''}{value.toFixed(2)}%
+            </span>
+          );
+        },
+      },
+      {
+        title: <span className="whitespace-nowrap">10日收益</span>,
+        dataIndex: 'return10d',
+        width: 96,
+        align: 'center',
+        render: (value: number | null | undefined) => {
+          if (value === null || value === undefined) {
+            return <span className="text-slate-300 font-medium">-</span>;
+          }
+          return (
+            <span className={`whitespace-nowrap ${value >= 0 ? 'font-semibold text-rose-500' : 'font-semibold text-emerald-500'}`}>
+              {value >= 0 ? '+' : ''}{value.toFixed(2)}%
+            </span>
+          );
+        },
+      },
+      {
+        title: <span className="whitespace-nowrap">20日收益</span>,
+        dataIndex: 'return20d',
         width: 96,
         align: 'center',
         render: (value: number | null | undefined) => {

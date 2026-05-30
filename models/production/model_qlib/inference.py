@@ -32,6 +32,7 @@ from pathlib import Path
 import lightgbm as lgb
 import numpy as np
 import pandas as pd
+from backend.shared.feature_preprocess import apply_cs_mad_zscore
 
 logging.basicConfig(
     level=logging.INFO,
@@ -42,6 +43,63 @@ logger = logging.getLogger("inference_parquet")
 
 # ── 默认路径 ──────────────────────────────────────────────────────────────
 _DEFAULT_DATA_DIR = "/app/db/feature_snapshots"
+
+
+def filter_untradable_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """过滤零成交、无效价格行以及B股，避免停牌/不可交易/非A股标的进入排名。
+
+    过滤规则：
+    1. close <= 0（无效价格 / 停牌）
+    2. volume <= 0（零成交）
+    3. SH9xxxxx（上海B股，美元计价）
+    4. SZ2xxxxx（深圳B股，港元计价）
+    """
+    if df.empty:
+        return df
+
+    filtered = df.copy()
+    removed = 0
+
+    if "close" in filtered.columns:
+        valid_close = pd.to_numeric(filtered["close"], errors="coerce") > 0
+        removed += int((~valid_close).sum())
+        filtered = filtered.loc[valid_close].copy()
+
+    if "volume" in filtered.columns:
+        valid_volume = pd.to_numeric(filtered["volume"], errors="coerce") > 0
+        removed += int((~valid_volume).sum())
+        filtered = filtered.loc[valid_volume].copy()
+
+    # 过滤B股：SH9xxxxx（上海B股）和 SZ2xxxxx（深圳B股）
+    if "symbol" in filtered.columns:
+        is_b_share = (
+            filtered["symbol"].str.match(r"^SH9\d{5}$", na=False)
+            | filtered["symbol"].str.match(r"^SZ2\d{5}$", na=False)
+        )
+        b_count = int(is_b_share.sum())
+        if b_count:
+            logger.info("过滤B股记录(非A股): removed=%d, symbols=%s",
+                        b_count, sorted(filtered.loc[is_b_share, "symbol"].unique())[:10])
+            removed += b_count
+            filtered = filtered.loc[~is_b_share].copy()
+
+    if removed:
+        logger.info("过滤不可交易记录合计: removed=%d, kept=%d", removed, len(filtered))
+
+    return filtered
+
+
+def _safe_fill_value(value: object) -> float:
+    """将 metadata 里的填充值规整成可直接用于 fillna 的有限浮点。"""
+    if value is None:
+        return 0.0
+    try:
+        number = float(value)
+    except Exception:
+        return 0.0
+    if not np.isfinite(number):
+        return 0.0
+    return number
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -99,31 +157,6 @@ def load_model(model_dir: Path, meta: dict) -> lgb.Booster:
 # 4. 数据加载
 # ═══════════════════════════════════════════════════════════════════════════
 
-def filter_untradable_rows(df: pd.DataFrame) -> pd.DataFrame:
-    """过滤不可交易记录（停牌、零成交等）。
-
-    剔除条件：
-    - close <= 0（价格异常）
-    - volume <= 0（零成交/停牌）
-    """
-    if df.empty:
-        return df
-
-    filtered = df.copy()
-
-    if "close" in filtered.columns:
-        filtered = filtered.loc[
-            pd.to_numeric(filtered["close"], errors="coerce") > 0
-        ].copy()
-
-    if "volume" in filtered.columns:
-        filtered = filtered.loc[
-            pd.to_numeric(filtered["volume"], errors="coerce") > 0
-        ].copy()
-
-    return filtered
-
-
 def load_date_data(trade_date: str, data_dir: Path, meta: dict) -> pd.DataFrame | None:
     """加载指定日期的特征数据。返回 None 表示该日期无数据（exit 2）。"""
     year = int(trade_date[:4])
@@ -140,22 +173,13 @@ def load_date_data(trade_date: str, data_dir: Path, meta: dict) -> pd.DataFrame 
         logger.warning("日期 %s 在 parquet 中无数据", trade_date)
         return None
 
-    # 过滤不可交易记录（停牌、零成交等）
-    before_filter = len(day_df)
-    day_df = filter_untradable_rows(day_df)
-    after_filter = len(day_df)
-    if before_filter != after_filter:
-        logger.info(
-            "过滤不可交易记录: %d -> %d (剔除 %d 条)",
-            before_filter, after_filter, before_filter - after_filter
-        )
-
-    if len(day_df) == 0:
-        logger.warning("日期 %s 过滤后无可交易数据", trade_date)
+    filtered_df = filter_untradable_rows(day_df)
+    if len(filtered_df) == 0:
+        logger.warning("日期 %s 全部记录均不可交易", trade_date)
         return None
 
-    logger.info("找到 %d 条可交易记录，日期=%s", len(day_df), trade_date)
-    return day_df
+    logger.info("找到 %d 条可交易记录，日期=%s", len(filtered_df), trade_date)
+    return filtered_df
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -167,19 +191,31 @@ def preprocess(df: pd.DataFrame, meta: dict) -> tuple[pd.DataFrame, list[str]]:
     feature_cols = meta.get("feature_columns") or meta.get("features", [])
     fill_values  = meta.get("fill_values", {})
 
-    # 缺失列补 0
+    # 1. 缺失列补 0.0 (对应 Z-Score 的均值)
     missing = [c for c in feature_cols if c not in df.columns]
     if missing:
-        logger.warning("缺少 %d 个特征列，将填 0: %s", len(missing), missing[:8])
+        logger.warning("缺少 %d 个特征列，将填 0.0: %s", len(missing), missing[:8])
         for c in missing:
             df[c] = 0.0
 
     X_df = df[feature_cols].copy()
 
-    # 按 metadata 的 fill_values 填 NaN
+    # 2. 截面 MAD 去极值 + Z-Score 标准化（与训练端共享同一实现）
+    x_with_trade_date = X_df.copy()
+    x_with_trade_date["trade_date"] = pd.to_datetime(df["trade_date"])
+    x_with_trade_date = apply_cs_mad_zscore(
+        x_with_trade_date,
+        feature_columns=feature_cols,
+        label_column=None,
+        chunk_size=50,
+        mad_multiplier=5.0,
+    )
+    X_df = x_with_trade_date[feature_cols].copy()
+
+    # 3. 按 metadata 的 fill_values 填 NaN (若缺失则以 0.0 兜底)
     for col, val in fill_values.items():
         if col in X_df.columns:
-            X_df[col] = X_df[col].fillna(val)
+            X_df[col] = X_df[col].fillna(_safe_fill_value(val))
     X_df = X_df.fillna(0.0)
 
     symbols = df["symbol"].tolist()
@@ -236,6 +272,7 @@ def main():
     # 5. 推理
     best_iter = meta.get("best_iteration")
     scores = model.predict(X_df.values.astype(np.float32), num_iteration=best_iter)
+
     logger.info("推理完成，生成 %d 条信号", len(scores))
 
     # 6. 输出 JSON

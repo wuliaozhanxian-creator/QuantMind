@@ -21,30 +21,23 @@ from .manager import manager
 
 logger = logging.getLogger(__name__)
 
+import os
+
 NOTIFICATION_EVENTS_STREAM = "notification_events"
 
 
 def _build_redis_client() -> aioredis.Redis:
-    if settings.REDIS_USE_SENTINEL:
-        from redis.asyncio.sentinel import Sentinel
+    # 通知推送使用本地 Redis，不是远程行情 Redis
+    host = os.getenv("NOTIFICATION_REDIS_HOST", "redis")
+    port = int(os.getenv("NOTIFICATION_REDIS_PORT", "6379"))
+    password = os.getenv("NOTIFICATION_REDIS_PASSWORD") or None
+    db = int(os.getenv("NOTIFICATION_REDIS_DB", "0"))  # 通知 Redis db0
 
-        sentinel = Sentinel(
-            settings.REDIS_SENTINELS,
-            socket_timeout=0.5,
-            password=settings.REDIS_PASSWORD or None,
-        )
-        return sentinel.master_for(
-            settings.REDIS_MASTER_NAME,
-            socket_timeout=1.0,
-            password=settings.REDIS_PASSWORD or None,
-            db=0,
-            decode_responses=True,
-        )
     return aioredis.Redis(
-        host=settings.REDIS_HOST,
-        port=settings.REDIS_PORT,
-        password=settings.REDIS_PASSWORD or None,
-        db=0,
+        host=host,
+        port=port,
+        password=password,
+        db=db,
         decode_responses=True,
         socket_connect_timeout=3,
         socket_timeout=5,

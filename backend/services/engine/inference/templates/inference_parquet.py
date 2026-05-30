@@ -272,32 +272,6 @@ def main():
     # 5. 推理
     best_iter = meta.get("best_iteration")
     scores = model.predict(X_df.values.astype(np.float32), num_iteration=best_iter)
-    
-    # === 5.1 显式因子倾斜 (Factor Tilt) ===
-    # 针对之前因 Bug 导致的无意杠杆，采用白盒、合法的特征加权后处理。
-    # 方案 A：自适应倾斜缩放。使倾斜项标准差与 scores 的标准差处于同一数量级，防止原生 Alpha 信号被大权重淹没。
-    factor_tilt = meta.get("factor_tilt", {})
-    if factor_tilt:
-        logger.info("应用显式因子倾斜: %s", factor_tilt)
-        std_score = np.std(scores)
-        if std_score == 0 or np.isnan(std_score):
-            std_score = 1e-4  # 兜底防止除以0
-            
-        for feature, weight in factor_tilt.items():
-            if feature in X_df.columns:
-                raw_tilt = X_df[feature].values
-                std_tilt = np.std(raw_tilt)
-                if std_tilt > 0:
-                    norm_tilt = (raw_tilt - np.mean(raw_tilt)) / std_tilt
-                else:
-                    norm_tilt = np.zeros_like(raw_tilt)
-                
-                # 倾斜特征波动范围绑定到 scores 的 std * weight 比例上
-                tilt_values = norm_tilt * (std_score * weight)
-                scores += tilt_values
-                logger.info("已对特征 %s 施加权重 %s 的自适应倾斜 (原 scores 标准差: %.6f)", feature, weight, std_score)
-            else:
-                logger.warning("特征 %s 不在推理数据中，跳过倾斜", feature)
 
     logger.info("推理完成，生成 %d 条信号", len(scores))
 

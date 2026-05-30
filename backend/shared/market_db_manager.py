@@ -1,5 +1,5 @@
-import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -10,25 +10,22 @@ from sqlalchemy.orm import sessionmaker
 logger = logging.getLogger(__name__)
 
 # ============================================================
-# 行情专用 PostgreSQL 硬编码配置 (106.53.100.144 只读用户)
-# 密码使用 Fernet 对称加密存储，运行时解密
+# 行情专用 PostgreSQL 配置 (密码加密存储)
 # ============================================================
-_MARKET_DB_FERNET_KEY = b"-cP0xGlpx1dyqj58DZhuUShHH3cvkgG71ee-9xCpR6c="
-_MARKET_DB_ENCRYPTED_PASSWORD = (
-    b"gAAAAABqEGoR4G_jR-ldndJ7dGP8g_WoCRztHJxkbs9kveFdAwbyxSfYuVfe7BlBTTB1vbchc5_QhWyBxJ9dVkARszQSqrHdi2hs79wxtL4HVdQT7CHcRO0="
-)
+_MARKET_DB_FERNET_KEY = b"Cfqb_ncv06D9FSIzna990Jrwv3QgYZr56epuuGCcexo="
+_ENCRYPTED_MARKET_DB_PASSWORD = b"gAAAAABqGyFF3-Xp66XijJaQ38dlpQfXwAXObn-B9rTSpjLWkoOWCTgvlNUlYMNStjj0NDAyXGmZ4BehUZ0nF2tp5hJruwG9sA=="
 
 
-def _decrypt_market_db_password() -> str:
-    """解密行情数据库密码"""
-    return Fernet(_MARKET_DB_FERNET_KEY).decrypt(_MARKET_DB_ENCRYPTED_PASSWORD).decode()
+def _decrypt_password(encrypted: bytes) -> str:
+    """解密密码"""
+    return Fernet(_MARKET_DB_FERNET_KEY).decrypt(encrypted).decode()
 
 
-MARKET_DB_HOST = "106.53.100.144"
-MARKET_DB_PORT = 5432
-MARKET_DB_USER = "quantmind_market"
-MARKET_DB_PASSWORD = _decrypt_market_db_password()
-MARKET_DB_NAME = "quantmind"
+MARKET_DB_HOST = os.getenv("REMOTE_MARKET_DB_HOST", "106.53.100.144")
+MARKET_DB_PORT = int(os.getenv("REMOTE_MARKET_DB_PORT", "5432"))
+MARKET_DB_USER = os.getenv("REMOTE_MARKET_DB_USER", "quantmind_market")
+MARKET_DB_PASSWORD = os.getenv("REMOTE_MARKET_DB_PASSWORD") or _decrypt_password(_ENCRYPTED_MARKET_DB_PASSWORD)
+MARKET_DB_NAME = os.getenv("REMOTE_MARKET_DB_NAME", "quantmind")
 
 MARKET_DB_URL = f"postgresql+asyncpg://{MARKET_DB_USER}:{MARKET_DB_PASSWORD}@{MARKET_DB_HOST}:{MARKET_DB_PORT}/{MARKET_DB_NAME}"
 

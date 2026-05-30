@@ -2,7 +2,7 @@ cache:
   dir: /tmp
 callback:
   secret: 83fcf31f7620827251fb4516adf1f928f0ed689b6238407c7d80e617f31d4e5b
-  url: http://114.132.80.206:8000/api/v1/models/training-runs/train_20260527201114_268301ab/complete
+  url: http://114.132.80.206:8000/api/v1/models/training-runs/train_20260530233605_37cfc5d5/complete
 context:
   commission_rate: 0.00025
   deal_price: open
@@ -67,7 +67,7 @@ explain:
   enable_shap: true
   shap_sample_rows: 30000
   shap_split: valid
-job_name: model_train_t5_20260527201114
+job_name: model_train_t5_20260530233604
 label:
   effective_trade_date: '2024-11-07'
   label_formula: label = CSZScore(future_return(T, T+5)) = CSZScore(open(T+5) / open(T)
@@ -78,22 +78,25 @@ label:
     → 2026-05-21
 model:
   early_stopping_rounds: 150
+  inference_best_iteration: null
   num_boost_round: 1500
   params:
     bagging_fraction: 0.7
+    bagging_freq: 5
     feature_fraction: 0.3
     lambda_l1: 10
-    lambda_l2: 10
+    lambda_l2: 50
     learning_rate: 0.01
     max_depth: 4
     metric: l2
+    min_child_samples: 3000
     min_data_in_leaf: 1500
     num_leaves: 7
     objective: regression
   type: lightgbm
   val_ratio: null
 output:
-  cos_prefix: models/candidates/train_20260527201114_268301ab/
+  cos_prefix: models/candidates/train_20260530233605_37cfc5d5/
   log_path: /workspace/training.log
   required_artifacts:
   - model.lgb
@@ -102,7 +105,7 @@ output:
   - config.yaml
   - result.json
   result_path: /workspace/result.json
-run_id: train_20260527201114_268301ab
+run_id: train_20260530233605_37cfc5d5
 split:
   test:
   - '2024-11-02'

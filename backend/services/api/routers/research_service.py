@@ -14,7 +14,7 @@ from sqlalchemy import text
 
 from backend.shared.database_manager_v2 import get_session
 from backend.shared.market_db_manager import get_market_session
-from backend.shared.redis_sentinel_client import get_redis_sentinel_client
+from backend.shared.remote_redis_client import get_remote_redis_client
 from backend.shared.stock_utils import StockCodeUtil
 
 _UNIVERSE_CACHE_TTL_SECONDS = 90
@@ -64,7 +64,7 @@ def _resolve_stock_index_json_path() -> Path | None:
 
 def _redis_get_json(key: str) -> dict[str, Any] | None:
     try:
-        redis = get_redis_sentinel_client()
+        redis = get_remote_redis_client()
         raw = redis.get(key)
         if not raw:
             return None
@@ -78,7 +78,7 @@ def _redis_get_json(key: str) -> dict[str, Any] | None:
 
 def _redis_set_json(key: str, value: dict[str, Any], ttl_seconds: int) -> None:
     try:
-        redis = get_redis_sentinel_client()
+        redis = get_remote_redis_client()
         payload = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         redis.setex(key, ttl_seconds, payload)
     except Exception:
@@ -89,10 +89,85 @@ def _sdl_redis_key(trade_date: date) -> str:
     return f"qm:research:sdl:{trade_date.isoformat()}:v2"
 
 
+def _load_sdl_from_remote_redis(trade_date: date) -> dict[str, dict[str, Any]]:
+    """从远程 Redis 加载 sdl:日期:股票代码 格式的缓存（使用 pipeline 批量读取）"""
+    try:
+        redis = get_remote_redis_client()
+        date_str = trade_date.isoformat()
+        pattern = f"sdl:{date_str}:*"
+        keys = redis.keys(pattern)
+        if not keys:
+            return {}
+
+        # 使用 pipeline 批量读取（需要 multi/exec 权限）
+        batch_size = 500
+        symbol_map: dict[str, dict[str, Any]] = {}
+
+        for i in range(0, len(keys), batch_size):
+            batch_keys = keys[i:i + batch_size]
+            pipe = redis.pipeline()
+            for key in batch_keys:
+                pipe.hgetall(key)
+            results = pipe.execute()
+
+            for key, data in zip(batch_keys, results):
+                if not data:
+                    continue
+                # key 格式: sdl:2026-04-30:SH600000
+                parts = key.split(":")
+                if len(parts) != 3:
+                    continue
+                symbol_suffix = parts[2]
+                symbol = StockCodeUtil.to_prefix(symbol_suffix)
+
+                symbol_map[symbol] = {
+                    "symbol": symbol,
+                    "stock_name": data.get("stock_name", ""),
+                    "industry": data.get("industry", ""),
+                    "close_price": float(data.get("close", 0) or 0),
+                    "pe": float(data.get("pe_ttm", 0) or 0),
+                    "pb": float(data.get("pb", 0) or 0),
+                    "roe": float(data.get("roe", 0) or 0),
+                    "turnover_rate": float(data.get("turnover_rate", 0) or 0),
+                    "amount": float(data.get("amount", 0) or 0),
+                    "total_mv": float(data.get("total_mv", 0) or 0),
+                    "float_mv": float(data.get("float_mv", 0) or 0),
+                    "listed_days": int(float(data.get("listed_days", 0) or 0)),
+                    "is_st": data.get("is_st", "0") == "1" or data.get("is_st") == True,
+                    "latest_change_pct": float(data.get("pct_change", 0) or 0),
+                    "return_1d": float(data.get("return_1d", 0) or 0) if data.get("return_1d") else None,
+                    "return_3d": float(data.get("return_3d", 0) or 0) if data.get("return_3d") else None,
+                    "return_5d": float(data.get("return_5d", 0) or 0) if data.get("return_5d") else None,
+                    "return_10d": float(data.get("return_10d", 0) or 0) if data.get("return_10d") else None,
+                    "return_20d": float(data.get("return_20d", 0) or 0) if data.get("return_20d") else None,
+                    "ma5": float(data.get("ma5", 0) or 0),
+                    "ma10": float(data.get("ma10", 0) or 0),
+                    "ma_gap_5": float(data.get("ma_gap_5", 0) or 0),
+                    "ma_gap_10": float(data.get("ma_gap_10", 0) or 0),
+                    "ma_gap_20": float(data.get("ma_gap_20", 0) or 0),
+                    "rsi": float(data.get("rsi_14", 0) or 0),
+                    "volume_ratio_5": float(data.get("volume_ratio_5", 0) or 0),
+                    "volume_ratio_20": float(data.get("volume_ratio_20", 0) or 0),
+                    "volume_trend_3d": float(data.get("volume_trend_3d", 0) or 0) if data.get("volume_trend_3d") else None,
+                    "consecutive_limit_up_days": int(float(data.get("consecutive_limit_up_days", 0) or 0)),
+                }
+        return symbol_map
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"Failed to load from remote Redis: {e}")
+        return {}
+
+
 async def _load_sdl_day_map(session, trade_date: date) -> dict[str, dict[str, Any]]:
     if trade_date.year != _SDL_REDIS_YEAR:
         return {}
 
+    # 优先从远程 Redis 读取
+    redis_data = _load_sdl_from_remote_redis(trade_date)
+    if redis_data:
+        return redis_data
+
+    # 回退到本地缓存
     cache_key = _sdl_redis_key(trade_date)
     cached = _redis_get_json(cache_key)
     if cached and "symbols" in cached and isinstance(cached["symbols"], dict):
@@ -121,6 +196,10 @@ async def _load_sdl_day_map(session, trade_date: date) -> dict[str, dict[str, An
             COALESCE(pct_change, 0) AS latest_change_pct,
             return_1d,
             return_3d,
+            return_5d,
+            return_10d,
+            return_20d,
+            return_60d,
             COALESCE(ma5, 0) AS ma5,
             COALESCE(ma10, 0) AS ma10,
             COALESCE(ma_gap_5, 0) AS ma_gap_5,
@@ -281,6 +360,22 @@ _SDL_SELECT_BY_RUN_DATE = """
         WHEN NULLIF(sdl_run.close, 0) IS NULL OR sdl_run.close_next_3d IS NULL THEN NULL
         ELSE sdl_run.close_next_3d / NULLIF(sdl_run.close, 0) - 1
     END AS return_3d,
+    CASE
+        WHEN NULLIF(sdl_run.close, 0) IS NULL OR sdl_run.close_next_5d IS NULL THEN NULL
+        ELSE sdl_run.close_next_5d / NULLIF(sdl_run.close, 0) - 1
+    END AS return_5d,
+    CASE
+        WHEN NULLIF(sdl_run.close, 0) IS NULL OR sdl_run.close_next_10d IS NULL THEN NULL
+        ELSE sdl_run.close_next_10d / NULLIF(sdl_run.close, 0) - 1
+    END AS return_10d,
+    CASE
+        WHEN NULLIF(sdl_run.close, 0) IS NULL OR sdl_run.close_next_20d IS NULL THEN NULL
+        ELSE sdl_run.close_next_20d / NULLIF(sdl_run.close, 0) - 1
+    END AS return_20d,
+    CASE
+        WHEN NULLIF(sdl_run.close, 0) IS NULL OR sdl_run.close_next_60d IS NULL THEN NULL
+        ELSE sdl_run.close_next_60d / NULLIF(sdl_run.close, 0) - 1
+    END AS return_60d,
     COALESCE(sdl_run.ma5, 0) AS ma5,
     COALESCE(sdl_run.ma10, 0) AS ma10,
     COALESCE(sdl_run.ma_gap_5, 0) AS ma_gap_5,
@@ -372,6 +467,10 @@ _SDL_SELECT_SIMPLE = """
     COALESCE(sdl_latest.pct_change, 0) AS latest_change_pct,
     0 AS return_1d,
     0 AS return_3d,
+    0 AS return_5d,
+    0 AS return_10d,
+    0 AS return_20d,
+    0 AS return_60d,
     COALESCE(sdl_latest.ma5, 0) AS ma5,
     COALESCE(sdl_latest.ma10, 0) AS ma10,
     COALESCE(sdl_latest.ma_gap_5, 0) AS ma_gap_5,
@@ -576,6 +675,10 @@ def _format_candidate_record(row: dict[str, Any]) -> dict[str, Any]:
     risk_flags = parse_json(row.get("risk_flags"))
     return_1d = _serialize_float(row.get("return_1d"))
     return_3d = _serialize_float(row.get("return_3d"))
+    return_5d = _serialize_float(row.get("return_5d"))
+    return_10d = _serialize_float(row.get("return_10d"))
+    return_20d = _serialize_float(row.get("return_20d"))
+    return_60d = _serialize_float(row.get("return_60d"))
     latest_change_pct = _serialize_float(row.get("latest_change_pct")) or 0.0
     market_join_status = str(row.get("_market_join_status") or "unknown")
     null_reasons: list[str] = []
@@ -632,6 +735,10 @@ def _format_candidate_record(row: dict[str, Any]) -> dict[str, Any]:
         "volumeTrend5d": False,
         "return1d": return_1d,
         "return3d": return_3d,
+        "return5d": return_5d,
+        "return10d": return_10d,
+        "return20d": return_20d,
+        "return60d": return_60d,
         "nextDayReturn": return_1d,
         "day3Return": return_3d,
         "nullReason": null_reasons,
@@ -1113,37 +1220,80 @@ async def get_symbols_features(tid: str, uid: str, symbols: list[str], lite: boo
 
 
 async def get_stock_kline(symbol: str, days: int) -> dict[str, Any]:
+    """从远程 Redis 批量读取多日 SDL 数据构建 K 线"""
     normalized_symbol = StockCodeUtil.to_prefix(symbol)
     cache_key = f"sdl-kline:{normalized_symbol}:{days}"
     cached = _get_local_cache(_SDL_CACHE, cache_key, _SDL_CACHE_TTL_SECONDS)
     if cached is not None:
         return cached
 
-    norm_symbol_sql = _norm_symbol_sql("symbol")
-    async with get_market_session() as session:
-        res = await session.execute(
-            text(
-                f"SELECT trade_date, open, high, low, close, volume, adj_factor FROM {_SDL_TABLE} "
-                f"WHERE {norm_symbol_sql} = :s "
-                "AND COALESCE(volume, 0) > 0 "
-                "ORDER BY trade_date DESC LIMIT :l"
-            ),
-            {"s": normalized_symbol, "l": days},
-        )
+    try:
+        redis = get_remote_redis_client()
+        # Redis key 格式: sdl:日期:股票代码 (如 sdl:2026-04-30:SH600036)
+        # 扫描该股票所有日期的数据
+        pattern = f"sdl:*:{normalized_symbol}"
+        all_keys = redis.keys(pattern)
+        if not all_keys:
+            # 尝试后缀格式兼容 (sdl:2026-04-30:600036.SH)
+            suffix_symbol = f"{normalized_symbol[2:]}.{normalized_symbol[:2]}"
+            pattern = f"sdl:*:{suffix_symbol}"
+            all_keys = redis.keys(pattern)
+
+        if not all_keys:
+            payload = {"code": 200, "data": {"symbol": normalized_symbol, "items": []}}
+            _set_local_cache(_SDL_CACHE, cache_key, payload, _SDL_CACHE_MAX_ENTRIES)
+            return payload
+
+        # 按日期排序，取最近 days 条
+        dated_keys = []
+        for key in all_keys:
+            parts = key.split(":")
+            if len(parts) >= 3:
+                try:
+                    date_str = parts[1]
+                    dated_keys.append((date_str, key))
+                except:
+                    continue
+
+        dated_keys.sort(reverse=True)  # 按日期降序
+        recent_keys = [k for _, k in dated_keys[:days]]
+
+        # 使用 pipeline 批量读取
+        pipe = redis.pipeline()
+        for key in recent_keys:
+            pipe.hgetall(key)
+        results = pipe.execute()
+
         items = []
-        for r in res:
-            adj_factor = r[6]
-            items.append(
-                {
-                    "date": str(r[0]),
-                    "open": _to_nominal_price(r[1], adj_factor),
-                    "high": _to_nominal_price(r[2], adj_factor),
-                    "low": _to_nominal_price(r[3], adj_factor),
-                    "close": _to_nominal_price(r[4], adj_factor),
-                    "volume": float(r[5]),
-                }
-            )
-        items.reverse()
-    payload = {"code": 200, "data": {"symbol": normalized_symbol, "items": items}}
-    _set_local_cache(_SDL_CACHE, cache_key, payload, _SDL_CACHE_MAX_ENTRIES)
-    return payload
+        for data in results:
+            if not data:
+                continue
+            try:
+                date_str = data.get("trade_date", "")
+                close = float(data.get("close", 0) or 0)
+                open_price = float(data.get("open", 0) or 0)
+                high = float(data.get("high", 0) or 0)
+                low = float(data.get("low", 0) or 0)
+                volume = float(data.get("volume", 0) or 0)
+                adj_factor = 1.0  # SDL 缓存已调整
+
+                if close > 0 and volume > 0:
+                    items.append({
+                        "date": date_str,
+                        "open": round(open_price / adj_factor, 2),
+                        "high": round(high / adj_factor, 2),
+                        "low": round(low / adj_factor, 2),
+                        "close": round(close / adj_factor, 2),
+                        "volume": volume,
+                    })
+            except Exception:
+                continue
+
+        items.reverse()  # 按时间升序返回
+        payload = {"code": 200, "data": {"symbol": normalized_symbol, "items": items}}
+        _set_local_cache(_SDL_CACHE, cache_key, payload, _SDL_CACHE_MAX_ENTRIES)
+        return payload
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"K-line Redis read failed for {symbol}: {e}")
+        return {"code": 200, "data": {"symbol": normalized_symbol, "items": []}}

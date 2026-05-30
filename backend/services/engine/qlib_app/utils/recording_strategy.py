@@ -56,6 +56,30 @@ _OUR_KWARGS = {
 }
 
 
+def _resolve_signal_kwarg(kwargs: dict) -> dict:
+    """
+    信号参数兼容性处理：将 dict 格式的 signal 转换为实例对象。
+
+    Qlib 的 create_signal_from() 不接受 dict 类型，必须提前实例化。
+    """
+    if "signal" not in kwargs:
+        return kwargs
+
+    sig = kwargs["signal"]
+    if not isinstance(sig, dict) or "class" not in sig:
+        return kwargs
+
+    from qlib.utils import init_instance_by_config
+
+    try:
+        kwargs["signal"] = init_instance_by_config(sig)
+    except Exception as e:
+        logger.warning("signal_instantiate_failed: %s, removing signal param", e)
+        kwargs.pop("signal", None)
+
+    return kwargs
+
+
 def _normalize_display_quantity(symbol: str, quantity: float) -> int:
     """A 股展示数量纠偏，避免复权因子日间漂移造成非整手抖动。"""
     qty_int = int(round(float(quantity)))

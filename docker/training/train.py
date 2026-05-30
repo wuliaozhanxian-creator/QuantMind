@@ -374,6 +374,19 @@ def load_data(
     df["trade_date"] = pd.to_datetime(df["trade_date"], errors="coerce")
     df = df[df["trade_date"].notna()].copy()
     logger.info(f"Raw concat size: {len(df)} rows. Date range: {df['trade_date'].min()} to {df['trade_date'].max()}")
+
+    # 剔除无效价格、零成交量以及 B 股，保证与推理侧一致的纯净可交易横截面股票池
+    if "close" in df.columns:
+        valid_close = pd.to_numeric(df["close"], errors="coerce") > 0
+        df = df[valid_close].copy()
+    if "volume" in df.columns:
+        valid_volume = pd.to_numeric(df["volume"], errors="coerce") > 0
+        df = df[valid_volume].copy()
+    if "symbol" in df.columns:
+        is_b_share = df["symbol"].str.match(r"^SH9\d{5}$", na=False) | df["symbol"].str.match(r"^SZ2\d{5}$", na=False)
+        df = df[~is_b_share].copy()
+    
+    logger.info(f"After untradable filtering (close>0, volume>0, non-B): {len(df)} rows")
     logger.info(f"After symbol filter: {len(df)} rows")
 
     # 标签：基于 target_horizon_days 构建 N 日远期收益
@@ -459,11 +472,6 @@ def load_data(
         contract_manifest_hash[:12],
     )
 
-    # 2. 接着再过滤掉没有有效标签的样本（用于 LightGBM 训练）
-    valid_count_before = len(df)
-    df = df[df["label"].notna()].copy()
-    logger.info(f"After label shift & dropna: {len(df)} rows (dropped {valid_count_before - len(df)} rows with missing labels)")
-
     keep_cols = ["symbol", "trade_date", "label", "weight"] + features
     df = df[keep_cols].reset_index(drop=True)
 
@@ -475,6 +483,11 @@ def load_data(
         chunk_size=50,
         mad_multiplier=5.0,
     )
+
+    # 2. 接着再过滤掉没有有效标签的样本（用于 LightGBM 训练）
+    valid_count_before = len(df)
+    df = df[df["label"].notna()].copy()
+    logger.info(f"After label shift & dropna: {len(df)} rows (dropped {valid_count_before - len(df)} rows with missing labels)")
 
     logger.info(
         f"Data ready: {len(df):,} rows, {len(features)} features, "
@@ -551,7 +564,7 @@ def train_model(df: pd.DataFrame, features: list[str], cfg: dict) -> tuple:
             "请调整 train/valid/test 时间窗口，确保三段均与可用数据重叠。"
         )
 
-    # 计算填充值：因为特征已经过截面 ZScore 标准化 (均值为0)，缺失值统一填充为 0.0
+    # 因为特征已经过截面 ZScore 标准化（均值为0），缺失值统一填充为 0.0
     fill_values = {c: 0.0 for c in features}
 
     def _fill(frame: pd.DataFrame) -> np.ndarray:
@@ -738,14 +751,6 @@ def main() -> int:
             "framework": "lightgbm",
             "model_type": cfg.get("model", {}).get("type", "lightgbm"),
             "model_file": "model.lgb",
-            # ====== Factor Tilt Injection ======
-            # 显式倾斜流动性和估值因子，取代旧版代码中因 1e-9 缺失带来的“意外” 10 倍方差膨胀，
-            # 以透明的手段合法拿回旧版的高额收益，防止因子溢出导致不可控风险。
-            "factor_tilt": {
-                "liq_amihud_20": 0.5,
-                "style_bp": 0.2
-            },
-            # ===================================
             "feature_count": len(valid_features),
             "requested_feature_count": len(submitted_features),
             "requested_features": submitted_features,

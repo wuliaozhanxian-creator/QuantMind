@@ -82,6 +82,8 @@ export interface ResearchStockRow {
   floatMv?: number;
   listedDays?: number;
   return3d?: number;
+  return5d?: number;
+  return10d?: number;
   maGap10?: number;
   maGap20?: number;
   rsi14?: number;

@@ -18,7 +18,6 @@ from qlib.contrib.strategy.signal_strategy import TopkDropoutStrategy, WeightStr
 from backend.services.engine.qlib_app.utils.qlib_utils import D
 from backend.services.engine.qlib_app.utils.recording_strategy import (
     _OUR_KWARGS,
-    _filter_buyable_score_candidates,
     _resolve_signal_kwarg,
     DynamicRiskMixin,
     FundamentalFilterMixin,
@@ -186,7 +185,6 @@ class RedisTopkStrategy(DynamicRiskMixin, FundamentalFilterMixin, TopkDropoutStr
 
         # 信号兼容性处理：必须在 _OUR_KWARGS 过滤循环之前调用。
         kwargs = _resolve_signal_kwarg(kwargs)
-        self._wrap_signal_with_fundamental_filter(kwargs)
 
         # 全局规则：选股时剔除涨停/跌停/停牌股，避免无效名额占用
         kwargs.setdefault("only_tradable", True)
@@ -292,7 +290,6 @@ class RedisRiskGuardTopkStrategy(DynamicRiskMixin, FundamentalFilterMixin, TopkD
 
         # 信号兼容性处理：必须在 _OUR_KWARGS 过滤循环之前调用。
         kwargs = _resolve_signal_kwarg(kwargs)
-        self._wrap_signal_with_fundamental_filter(kwargs)
 
         # 全局规则：选股时剔除涨跌停/停牌，避免无效名额占用
         kwargs.setdefault("only_tradable", True)

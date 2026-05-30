@@ -31,8 +31,9 @@ class RemoteRedisDataSource(DataSourceAdapter):
     def __init__(self):
         self._host = (settings.REDIS_HOST or "quantmind-redis").strip()
         self._port = int(settings.REDIS_PORT or 6379)
+        self._username = (settings.REDIS_USER or "").strip() or None
         self._password = (settings.REDIS_PASSWORD or "").strip() or None
-        self._db = int(settings.REDIS_DB or 3)
+        self._db = int(settings.REDIS_DB or 0)
         self._client: aioredis.Redis | None = None
 
     def _get_client(self) -> aioredis.Redis:
@@ -40,6 +41,7 @@ class RemoteRedisDataSource(DataSourceAdapter):
             self._client = aioredis.Redis(
                 host=self._host,
                 port=self._port,
+                username=self._username,
                 password=self._password,
                 db=self._db,
                 decode_responses=True,

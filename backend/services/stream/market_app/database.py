@@ -87,6 +87,7 @@ async def get_redis() -> Redis:
             return Redis(
                 host=settings.REDIS_HOST,
                 port=settings.REDIS_PORT,
+                username=settings.REDIS_USER if hasattr(settings, 'REDIS_USER') else None,
                 password=settings.REDIS_PASSWORD if settings.REDIS_PASSWORD else None,
                 db=settings.REDIS_DB,
             )

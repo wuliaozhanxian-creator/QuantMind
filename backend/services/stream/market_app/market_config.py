@@ -12,9 +12,9 @@ ROOT_ENV = Path(__file__).resolve().parents[4] / ".env"
 # 行情 Redis 硬编码配置 (quantmind-redis 访客只读用户)
 # 密码使用 Fernet 对称加密存储，运行时解密
 # ============================================================
-_MARKET_REDIS_FERNET_KEY = b"sPe1LUze878C7xz8Ekvy4wCK9kURt70Vr-uWnfpqJyg="
+_MARKET_REDIS_FERNET_KEY = b"Cfqb_ncv06D9FSIzna990Jrwv3QgYZr56epuuGCcexo="
 _MARKET_REDIS_ENCRYPTED_PASSWORD = (
-    b"gAAAAABqETroSPxwmJVPPGuLXfkCI9si_8Z2_-Cblwt3TTSwxsSIPWLut9myWSVMnC4JiCt426nnbmEJbCxi5cWVlhdkTUuERYkQBt-T7wEGdLOQNu_r-T8="
+    b"gAAAAABqGyJNjS_S84D3PlQoRRPK7w8lYPAPXy2WFLJgRRGZ6iIqsoNFWOPFQHbK3bedGCR5cZCoF0HSi5aCqIqngPsG0ofMsw=="
 )
 
 
@@ -27,8 +27,9 @@ def _decrypt_market_redis_password() -> str:
 
 MARKET_REDIS_HOST = "106.53.100.144"
 MARKET_REDIS_PORT = 6379
+MARKET_REDIS_USER = "readonly_monitor"
 MARKET_REDIS_PASSWORD = _decrypt_market_redis_password()
-MARKET_REDIS_DB = 3
+MARKET_REDIS_DB = 0
 
 
 class Settings(BaseSettings):
@@ -94,16 +95,37 @@ class Settings(BaseSettings):
     DB_ECHO: bool = False
 
     # Redis (Unified - OSS Edition)
-    # 行情 Redis 已硬编码为 quantmind-redis 访客只读用户
-    REDIS_HOST: str = Field(default=MARKET_REDIS_HOST)
-    REDIS_PORT: int = Field(default=MARKET_REDIS_PORT)
+    # 行情 Redis 硬编码为远程服务器，不受环境变量覆盖
+    # 使用 _ 属性避免 pydantic-settings 从环境变量读取
+    _REDIS_HOST_OVERRIDE: str = MARKET_REDIS_HOST
+    _REDIS_PORT_OVERRIDE: int = MARKET_REDIS_PORT
+    _REDIS_USER_OVERRIDE: str = MARKET_REDIS_USER
+    _REDIS_PASSWORD_OVERRIDE: str = MARKET_REDIS_PASSWORD
+    _REDIS_DB_OVERRIDE: int = MARKET_REDIS_DB
+
+    @property
+    def REDIS_HOST(self) -> str:
+        return self._REDIS_HOST_OVERRIDE
+
+    @property
+    def REDIS_PORT(self) -> int:
+        return self._REDIS_PORT_OVERRIDE
+
+    @property
+    def REDIS_USER(self) -> str:
+        return self._REDIS_USER_OVERRIDE
+
+    @property
+    def REDIS_PASSWORD(self) -> str:
+        return self._REDIS_PASSWORD_OVERRIDE
+
+    @property
+    def REDIS_DB(self) -> int:
+        return self._REDIS_DB_OVERRIDE
+
     REDIS_USE_SENTINEL: bool = Field(default=False)
     REDIS_SENTINELS_RAW: str = Field(default="localhost:26379")
     REDIS_MASTER_NAME: str = "quantmind-master"
-    REDIS_PASSWORD: str = Field(default=MARKET_REDIS_PASSWORD)
-    REDIS_DB: int = Field(
-        default=MARKET_REDIS_DB, validation_alias=AliasChoices("REDIS_DB", "REDIS_DB_MARKET")
-    )
 
     # 远程行情快照 Redis (OSS: 使用统一 Redis)
     REMOTE_QUOTE_REDIS_HOST: str = Field(default=MARKET_REDIS_HOST)

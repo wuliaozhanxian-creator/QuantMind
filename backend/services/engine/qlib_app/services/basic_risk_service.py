@@ -5,7 +5,6 @@
 """
 
 import logging
-from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -27,8 +26,12 @@ logger = logging.getLogger(__name__)
 class BasicRiskService:
     """基础风险指标分析服务"""
 
-    def __init__(self):
+    # 默认无风险利率（年化，使用中国十年期国债收益率约 2.5%）
+    DEFAULT_RISK_FREE_RATE = 0.025
+
+    def __init__(self, risk_free_rate: float | None = None):
         self._persistence = BacktestPersistence()
+        self.risk_free_rate = risk_free_rate if risk_free_rate is not None else self.DEFAULT_RISK_FREE_RATE
         StructuredTaskLogger(logger, "basic-risk-service").info("init", "BasicRiskService initialized")
 
     @staticmethod
@@ -153,6 +156,15 @@ class BasicRiskService:
             ).warning("equity_invalid", "equity_curve 全部为无效 value")
             return None
 
+        # 补全初始资金，解决首日收益被丢弃的问题
+        if result.config and isinstance(result.config, dict):
+            initial_capital = result.config.get("initial_capital")
+            if initial_capital is not None:
+                first_date = df.index[0]
+                prev_date = first_date - pd.Timedelta(days=1)
+                values.loc[prev_date] = float(initial_capital)
+                values = values.sort_index()
+
         # 首个 pct_change 为 NaN，不应被当作真实 0% 收益写入分布与统计。
         returns = values.pct_change()
         returns = returns.replace([np.inf, -np.inf], np.nan).dropna()
@@ -184,21 +196,17 @@ class BasicRiskService:
                 "max_drawdown": 0.0,
             }
 
-        # 改进：基于实际日期跨度计算年化因子
-        # 使用日历天数计算，以解决数据密度（如334点/年）不一致的问题
-        days_delta = (returns.index[-1] - returns.index[0]).days + 1
-        years_delta = max(days_delta / 365.25, 1 / 365.25)
+        # 统一使用 252 个交易日进行年化计算，对齐快速回测标准
+        trading_days = len(returns)
+        annual_freq = 252
 
         total_ret = (1 + returns).prod() - 1
-        annualized_return = (
-            (1 + total_ret) ** (1 / years_delta) - 1
-            if years_delta > 0 and (1 + total_ret) > 0
-            else returns.mean() * (len(returns) / years_delta)
-        )
+        
+        if trading_days > 0:
+            annualized_return = (1 + total_ret) ** (annual_freq / trading_days) - 1
+        else:
+            annualized_return = 0.0
 
-        # 波动率也需要根据实际密度进行年化处理
-        # 实际年频率 = 数据点数 / 年数
-        annual_freq = len(returns) / years_delta
         volatility = returns.std(ddof=1) * np.sqrt(annual_freq) if len(returns) > 1 else 0.0
         equity = (1 + returns).cumprod()
         drawdown = (equity / equity.cummax()) - 1
@@ -214,17 +222,12 @@ class BasicRiskService:
             StructuredTaskLogger(logger, "basic-risk-service").info("qlib_risk", "使用Qlib原生risk_analysis计算风险指标")
 
             res_dict = qlib_result["risk"].to_dict()
-            # 改进：不再盲目覆盖 annualized_return，因为 Qlib 的原生计算在数据密度异常时会有偏差
-            # 我们保留上面计算的、基于实际日历天数的 annualized_return
 
             max_drawdown = res_dict.get("max_drawdown", max_drawdown)
-            # qlib 返回 std 通常是日波动率，这里统一年化
-            # 注意：如果使用 Qlib 原生结果，我们需要由于数据密度导致的偏差
-            # 这里的 volatility 已经在上方基于 annual_freq 计算好了，
-            # 只有当 Qlib 提供了更精确的 annualized_return 时才覆盖
+            
+            # 使用原生结果中更精确的标准差，但统一用 252 交易日年化
             std = res_dict.get("std")
             if std is not None:
-                # 依然使用我们计算的 annual_freq 来修正 Qlib 的日波动率
                 volatility = float(std) * np.sqrt(annual_freq)
 
             return {
@@ -244,24 +247,22 @@ class BasicRiskService:
                 "max_drawdown": self._finite_or_zero(max_drawdown),
             }
 
-    def _calculate_supplementary_metrics(
-        self, returns: pd.Series, qlib_metrics: dict, risk_free_rate: float = 0.02
-    ) -> dict:
+    def _calculate_supplementary_metrics(self, returns: pd.Series, qlib_metrics: dict) -> dict:
         """计算补充指标（高级风险指标）"""
         clean_returns = pd.Series(returns).replace([np.inf, -np.inf], np.nan).dropna()
         if clean_returns.empty:
             clean_returns = pd.Series([0.0])
 
-        # 夏普比率（基于实际计算的年化频率缩放）
-        # 这里为了保持一致性，使用上面计算出的 annual_freq 进行年化
-        days_delta = (clean_returns.index[-1] - clean_returns.index[0]).days + 1
-        years_delta = max(days_delta / 365.25, 1 / 365.25)
-        annual_freq = len(clean_returns) / years_delta
+        # 统一使用 252 个交易日标准
+        annual_freq = 252
 
         std = clean_returns.std(ddof=1)
-        if std and std > 0:
-            annualized_return = clean_returns.mean() * annual_freq
-            sharpe_ratio = (annualized_return - risk_free_rate) / (std * np.sqrt(annual_freq))
+        annualized_return = qlib_metrics.get("annualized_return", 0.0)
+        annualized_vol = std * np.sqrt(annual_freq) if std and std > 0 else 0.0
+
+        # 夏普比率 = (年化收益率 - 无风险利率) / 年化波动率
+        if annualized_vol > 0:
+            sharpe_ratio = (annualized_return - self.risk_free_rate) / annualized_vol
         else:
             sharpe_ratio = 0.0
 
@@ -273,14 +274,15 @@ class BasicRiskService:
         )
 
         # Sortino比率（下行风险调整收益）
-        # MAR = 最小可接受收益率，使用日化无风险利率
-        daily_rf = risk_free_rate / max(annual_freq, 1)
-        downside_returns = clean_returns[clean_returns < daily_rf]
-        if len(downside_returns) > 0:
-            downside_deviation = downside_returns.std(ddof=1)
-            annualized_downside = downside_deviation * np.sqrt(annual_freq)
-            if downside_deviation and downside_deviation > 0:
-                sortino_ratio = (annualized_return - risk_free_rate) / annualized_downside
+        # Sortino = (年化收益率 - 无风险利率) / 下行波动率
+        # 下行收益定义：收益低于日化无风险利率的部分
+        daily_rf = self.risk_free_rate / annual_freq
+        downside_diff = clean_returns[clean_returns < daily_rf] - daily_rf
+        if len(downside_diff) > 1:
+            downside_deviation = np.sqrt((downside_diff ** 2).sum() / len(clean_returns))
+            annualized_downside_vol = downside_deviation * np.sqrt(annual_freq)
+            if annualized_downside_vol > 0:
+                sortino_ratio = (annualized_return - self.risk_free_rate) / annualized_downside_vol
             else:
                 sortino_ratio = 0.0
         else:

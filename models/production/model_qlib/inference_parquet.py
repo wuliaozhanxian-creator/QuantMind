@@ -32,6 +32,7 @@ from pathlib import Path
 import lightgbm as lgb
 import numpy as np
 import pandas as pd
+from backend.shared.feature_preprocess import apply_cs_mad_zscore
 
 logging.basicConfig(
     level=logging.INFO,
@@ -45,7 +46,14 @@ _DEFAULT_DATA_DIR = "/app/db/feature_snapshots"
 
 
 def filter_untradable_rows(df: pd.DataFrame) -> pd.DataFrame:
-    """过滤零成交或无效价格行，避免停牌/不可交易标的进入排名。"""
+    """过滤零成交、无效价格行以及B股，避免停牌/不可交易/非A股标的进入排名。
+
+    过滤规则：
+    1. close <= 0（无效价格 / 停牌）
+    2. volume <= 0（零成交）
+    3. SH9xxxxx（上海B股，美元计价）
+    4. SZ2xxxxx（深圳B股，港元计价）
+    """
     if df.empty:
         return df
 
@@ -62,8 +70,21 @@ def filter_untradable_rows(df: pd.DataFrame) -> pd.DataFrame:
         removed += int((~valid_volume).sum())
         filtered = filtered.loc[valid_volume].copy()
 
+    # 过滤B股：SH9xxxxx（上海B股）和 SZ2xxxxx（深圳B股）
+    if "symbol" in filtered.columns:
+        is_b_share = (
+            filtered["symbol"].str.match(r"^SH9\d{5}$", na=False)
+            | filtered["symbol"].str.match(r"^SZ2\d{5}$", na=False)
+        )
+        b_count = int(is_b_share.sum())
+        if b_count:
+            logger.info("过滤B股记录(非A股): removed=%d, symbols=%s",
+                        b_count, sorted(filtered.loc[is_b_share, "symbol"].unique())[:10])
+            removed += b_count
+            filtered = filtered.loc[~is_b_share].copy()
+
     if removed:
-        logger.info("过滤不可交易记录: removed=%d, kept=%d", removed, len(filtered))
+        logger.info("过滤不可交易记录合计: removed=%d, kept=%d", removed, len(filtered))
 
     return filtered
 
@@ -179,23 +200,17 @@ def preprocess(df: pd.DataFrame, meta: dict) -> tuple[pd.DataFrame, list[str]]:
 
     X_df = df[feature_cols].copy()
 
-    # 2. 截面 MAD 去极值 + Z-Score 标准化
-    # 这一步极其关键！必须与训练时的预处理完全一致
-    mad_multiplier = 5.0
-    for f in feature_cols:
-        if f not in X_df.columns:
-            continue
-        median = X_df[f].median()
-        mad = (X_df[f] - median).abs().median()
-        upper = median + mad_multiplier * mad
-        lower = median - mad_multiplier * mad
-        X_df[f] = X_df[f].clip(lower=lower, upper=upper)
-        
-        mean = X_df[f].mean()
-        std = X_df[f].std()
-        if pd.isna(std) or std == 0:
-            std = 1e-8
-        X_df[f] = (X_df[f] - mean) / std
+    # 2. 截面 MAD 去极值 + Z-Score 标准化（与训练端共享同一实现）
+    x_with_trade_date = X_df.copy()
+    x_with_trade_date["trade_date"] = pd.to_datetime(df["trade_date"])
+    x_with_trade_date = apply_cs_mad_zscore(
+        x_with_trade_date,
+        feature_columns=feature_cols,
+        label_column=None,
+        chunk_size=50,
+        mad_multiplier=5.0,
+    )
+    X_df = x_with_trade_date[feature_cols].copy()
 
     # 3. 按 metadata 的 fill_values 填 NaN (若缺失则以 0.0 兜底)
     for col, val in fill_values.items():
@@ -257,6 +272,7 @@ def main():
     # 5. 推理
     best_iter = meta.get("best_iteration")
     scores = model.predict(X_df.values.astype(np.float32), num_iteration=best_iter)
+
     logger.info("推理完成，生成 %d 条信号", len(scores))
 
     # 6. 输出 JSON
