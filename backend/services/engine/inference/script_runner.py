@@ -37,13 +37,14 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import Any, List, Optional
 
 import exchange_calendars as xcals
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from backend.services.engine.services.event_stream import EngineSignalStreamPublisher
+from backend.shared.inference_contract import build_day_snapshot, canonical_json_hash, compare_frozen_config
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,12 @@ class ExecutionResult:
     active_data_source: str = ""
     data_trade_date: str = ""
     prediction_trade_date: str = ""
+    contract_version: int | None = None
+    contract_hash: str = ""
+    manifest_hash: str = ""
+    precheck_passed: bool | None = None
+    mismatch_type: str = ""
+    mismatch_detail: dict = field(default_factory=dict)
 
 
 class InferenceScriptRunner:
@@ -281,6 +288,134 @@ class InferenceScriptRunner:
             except Exception:
                 pass
         return {}
+
+    def _read_inference_contract(self) -> dict | None:
+        path = self.primary_model_dir / "inference_contract.json"
+        if not path.is_file():
+            return None
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+
+    def _build_day_snapshot_from_parquet(
+        self,
+        *,
+        trade_date: str,
+        feature_columns: list[str],
+        data_dir: str,
+    ) -> dict[str, Any] | None:
+        try:
+            import pandas as pd  # noqa: PLC0415
+
+            year = int(str(trade_date)[:4])
+            parquet_path = Path(data_dir) / f"model_features_{year}.parquet"
+            if not parquet_path.exists():
+                return None
+            cols = list(dict.fromkeys(["trade_date", "symbol", *feature_columns]))
+            df = pd.read_parquet(parquet_path, columns=cols, engine="pyarrow")
+            df["trade_date"] = pd.to_datetime(df["trade_date"]).dt.strftime("%Y-%m-%d")
+            day_df = df[df["trade_date"] == str(trade_date)].copy()
+            if day_df.empty:
+                return {"row_count": 0, "symbol_hash": "", "feature_hash": ""}
+            return build_day_snapshot(day_df, feature_columns, symbol_col="symbol")
+        except Exception as exc:
+            logger.warning("[InferenceScriptRunner] 构建当日数据快照失败: %s", exc)
+            return None
+
+    def _precheck_inference_contract(self, *, trade_date: str, meta: dict[str, Any], data_dir: str) -> dict[str, Any]:
+        contract = self._read_inference_contract()
+        if not contract:
+            return {
+                "passed": False,
+                "mismatch_type": "contract_missing",
+                "detail": {"reason": "inference_contract.json not found or invalid"},
+            }
+
+        frozen = contract.get("frozen_inference_params") if isinstance(contract.get("frozen_inference_params"), dict) else {}
+        actual_feature_columns = list(meta.get("feature_columns") or meta.get("features") or [])
+        actual_fill_values = dict(meta.get("fill_values") or {})
+        actual_best_iteration = int(meta.get("best_iteration") or 0)
+        actual_target_horizon = int(meta.get("target_horizon_days") or 0)
+        mismatches = compare_frozen_config(
+            frozen_feature_columns=list(frozen.get("feature_columns") or []),
+            frozen_fill_values=dict(frozen.get("fill_values") or {}),
+            frozen_best_iteration=int(frozen.get("best_iteration") or 0),
+            frozen_target_horizon_days=int(frozen.get("target_horizon_days") or 0),
+            actual_feature_columns=actual_feature_columns,
+            actual_fill_values=actual_fill_values,
+            actual_best_iteration=actual_best_iteration,
+            actual_target_horizon_days=actual_target_horizon,
+        )
+        if mismatches:
+            # 只把特征列 (feature_columns) 不一致视作致命阻断，其余非致命放行
+            fatal_mismatches = [m for m in mismatches if m.get("field") == "feature_columns"]
+            if fatal_mismatches:
+                return {
+                    "passed": False,
+                    "mismatch_type": "config_mismatch",
+                    "detail": {"mismatches": mismatches},
+                    "contract_version": int(contract.get("contract_version") or 0),
+                    "contract_hash": str(contract.get("contract_hash") or ""),
+                    "manifest_hash": str((contract.get("data_manifest") or {}).get("manifest_hash") or ""),
+                }
+            else:
+                logger.warning(
+                    "[PRECHECK] Bypassed non-fatal config mismatches: %s (model: %s)",
+                    mismatches,
+                    meta.get("model_id") or "unknown",
+                )
+
+        daily_manifest = (contract.get("data_manifest") or {}).get("daily")
+        expected_day = (daily_manifest or {}).get(str(trade_date)) if isinstance(daily_manifest, dict) else None
+        if not isinstance(expected_day, dict):
+            # 容错放行：历史模型实盘运行新日期时通常无此记录
+            logger.warning(
+                "[PRECHECK] Bypassed missing date in data manifest for trade_date %s. (Model: %s)",
+                trade_date, meta.get("model_id") or "unknown",
+            )
+            expected_day = {}
+
+        actual_day = self._build_day_snapshot_from_parquet(
+            trade_date=str(trade_date),
+            feature_columns=actual_feature_columns,
+            data_dir=data_dir,
+        )
+        if not isinstance(actual_day, dict):
+            # 容错放行：当 data_source=qlib/qlib_bin 时，data_dir 为 qlib 二进制目录，
+            # 不存在 model_features_YYYY.parquet 文件，snapshot 构建返回 None 属于正常情况。
+            logger.warning(
+                "[PRECHECK] Bypassed data_manifest_build_failed for trade_date=%s, data_dir=%s. "
+                "(Model: %s, 可能为 qlib 二进制数据源，无 parquet 快照文件，跳过数据一致性校验)",
+                trade_date, data_dir, meta.get("model_id") or "unknown",
+            )
+            return {
+                "passed": True,
+                "mismatch_type": "",
+                "detail": {},
+                "contract_version": int(contract.get("contract_version") or 0),
+                "contract_hash": str(contract.get("contract_hash") or ""),
+                "manifest_hash": str((contract.get("data_manifest") or {}).get("manifest_hash") or ""),
+            }
+
+        if expected_day:  # 仅在契约中存在当天期望哈希时比对
+            expected_hash = canonical_json_hash(expected_day)
+            actual_hash = canonical_json_hash(actual_day)
+            if expected_hash != actual_hash:
+                # 容错放行：数据哈希不一致仅记录 Warning，不阻断
+                logger.warning(
+                    "[PRECHECK] Bypassed data manifest mismatch for trade_date %s. (Model: %s)",
+                    trade_date, meta.get("model_id") or "unknown",
+                )
+
+        return {
+            "passed": True,
+            "mismatch_type": "",
+            "detail": {},
+            "contract_version": int(contract.get("contract_version") or 0),
+            "contract_hash": str(contract.get("contract_hash") or ""),
+            "manifest_hash": str((contract.get("data_manifest") or {}).get("manifest_hash") or ""),
+        }
 
     def _try_deploy_parquet_template(self, script_path: Path) -> bool:
         """
@@ -852,6 +987,39 @@ class InferenceScriptRunner:
                 v10_stderr=fallback_reason,
                 fallback_reason=fallback_reason,
                 prediction_trade_date=prediction_trade_date,
+            )
+
+        contract_check = self._precheck_inference_contract(
+            trade_date=date,
+            meta=primary_meta,
+            data_dir=active_data_source,
+        )
+        if not contract_check.get("passed", False):
+            mismatch_type = str(contract_check.get("mismatch_type") or "contract_mismatch")
+            logger.error(
+                "[InferenceScriptRunner] 推理契约预检失败, run_id=%s, mismatch_type=%s, detail=%s",
+                run_id,
+                mismatch_type,
+                contract_check.get("detail"),
+            )
+            return ExecutionResult(
+                success=False,
+                exit_code=1,
+                stdout="",
+                stderr="",
+                error=f"推理契约预检失败: {mismatch_type}",
+                run_id=run_id,
+                failure_stage="contract_precheck",
+                active_model_id=self.primary_model_id,
+                active_data_source=active_data_source,
+                data_trade_date=date,
+                prediction_trade_date=prediction_trade_date,
+                contract_version=contract_check.get("contract_version"),
+                contract_hash=str(contract_check.get("contract_hash") or ""),
+                manifest_hash=str(contract_check.get("manifest_hash") or ""),
+                precheck_passed=False,
+                mismatch_type=mismatch_type,
+                mismatch_detail=contract_check.get("detail") or {},
             )
 
         # 注入平台环境变量

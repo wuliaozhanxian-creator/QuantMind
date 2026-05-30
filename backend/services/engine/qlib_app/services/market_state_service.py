@@ -6,6 +6,10 @@ from typing import Any, Dict, Optional, Tuple
 
 import pandas as pd
 from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
+from backend.services.engine.qlib_app.utils.benchmark_symbol import (
+    benchmark_candidates,
+    normalize_benchmark_symbol,
+)
 
 # 尝试导入本地的模拟 qlib 模块
 try:
@@ -105,8 +109,9 @@ class MarketStateService:
         window: int | None,
     ) -> dict[str, Any]:
         remote = self._fetch_remote_config(style)
+        normalized_symbol = normalize_benchmark_symbol(remote.get("symbol") or symbol)
         merged = {
-            "symbol": remote.get("symbol") or symbol,
+            "symbol": normalized_symbol,
             "window": int(remote.get("window") or window or DEFAULT_WINDOW),
             "thresholds": self._merge_thresholds(remote),
             "position_by_state": self._merge_position_map(remote),
@@ -159,19 +164,43 @@ class MarketStateService:
         window: int,
         thresholds: dict[str, float],
     ) -> dict[str, str]:
-        try:
-            df = D.features(
-                [symbol],
-                ["$close", "$volume"],
-                start_time=start_date,
-                end_time=end_date,
-            )
-        except Exception as exc:
-            task_logger.warning("fetch_market_data_failed", "拉取市场数据失败", symbol=symbol, error=str(exc))
-            return {}
+        df = None
+        selected_symbol = symbol
+        last_error: Exception | None = None
+        for candidate in benchmark_candidates(symbol):
+            try:
+                df = D.features(
+                    [candidate],
+                    ["$close", "$volume"],
+                    start_time=start_date,
+                    end_time=end_date,
+                )
+            except Exception as exc:
+                last_error = exc
+                task_logger.warning("fetch_market_data_failed", "拉取市场数据失败", symbol=candidate, error=str(exc))
+                continue
+
+            if df is not None and not df.empty:
+                selected_symbol = candidate
+                if candidate != symbol:
+                    task_logger.info(
+                        "market_data_candidate_selected",
+                        "市场状态数据使用候选指数代码",
+                        requested_symbol=symbol,
+                        selected_symbol=candidate,
+                    )
+                break
 
         if df is None or df.empty:
-            task_logger.warning("market_data_empty", "市场数据为空", symbol=symbol)
+            if last_error is not None:
+                task_logger.warning(
+                    "market_data_empty",
+                    "市场数据为空或全部候选代码不可用",
+                    symbol=symbol,
+                    error=str(last_error),
+                )
+            else:
+                task_logger.warning("market_data_empty", "市场数据为空", symbol=symbol)
             return {}
 
         if isinstance(df.index, pd.MultiIndex):
@@ -180,7 +209,7 @@ class MarketStateService:
             df = df.reset_index()
 
         if "instrument" in df.columns:
-            df = df[df["instrument"] == symbol]
+            df = df[df["instrument"] == selected_symbol]
 
         if "datetime" in df.columns:
             df["datetime"] = pd.to_datetime(df["datetime"])

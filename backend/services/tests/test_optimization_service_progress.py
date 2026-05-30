@@ -5,7 +5,7 @@ from backend.services.engine.qlib_app.schemas.backtest import (
     QlibBacktestRequest,
     QlibBacktestResult,
     QlibOptimizationRequest,
-    QlibStrategyParams,
+    TopkDropoutParams,
 )
 from backend.services.engine.qlib_app.services.optimization_service import OptimizationService
 
@@ -37,7 +37,7 @@ async def test_run_optimization_reports_incremental_progress():
     request = QlibOptimizationRequest(
         base_request=QlibBacktestRequest(
             strategy_type="TopkDropout",
-            strategy_params=QlibStrategyParams(topk=20, n_drop=1),
+            strategy_params=TopkDropoutParams(topk=20, n_drop=1),
             start_date="2025-01-01",
             end_date="2025-12-31",
             initial_capital=1_000_000,

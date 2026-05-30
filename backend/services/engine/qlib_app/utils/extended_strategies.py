@@ -1,7 +1,9 @@
 """Extended Strategy Implementations"""
 
+import copy
 import logging
 import os
+from collections import defaultdict
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -16,10 +18,19 @@ from qlib.contrib.strategy.signal_strategy import TopkDropoutStrategy, WeightStr
 from backend.services.engine.qlib_app.utils.qlib_utils import D
 from backend.services.engine.qlib_app.utils.recording_strategy import (
     _OUR_KWARGS,
+    _filter_buyable_score_candidates,
+    _resolve_signal_kwarg,
     DynamicRiskMixin,
+    FundamentalFilterMixin,
     RedisLoggerMixin,
     RedisWeightStrategy,
 )
+from backend.services.engine.qlib_app.services.market_state_service import (
+    DEFAULT_POSITION_BY_STATE,
+    DEFAULT_THRESHOLDS,
+    MarketStateService,
+)
+from backend.shared.fundamental_aligner import fundamental_aligner
 from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
 
 logger = logging.getLogger(__name__)
@@ -131,7 +142,36 @@ def get_margin_eligible_set(trade_date: pd.Timestamp) -> set[str] | None:
     return eligible
 
 
-class RedisTopkStrategy(DynamicRiskMixin, TopkDropoutStrategy, RedisLoggerMixin):
+def _safe_generate_trade_decision(
+    strategy: Any,
+    super_generate_fn: Any,
+    execute_result: Any,
+    *,
+    logger_name: str,
+) -> TradeDecisionWO:
+    """
+    兼容处理 qlib 在价格缺失时的已知异常:
+    TypeError: unsupported operand type(s) for /: 'float' and 'NoneType'
+    """
+    try:
+        return super_generate_fn(execute_result)
+    except TypeError as exc:
+        msg = str(exc)
+        if "unsupported operand type(s) for /" in msg and "NoneType" in msg:
+            StructuredTaskLogger(
+                logger,
+                logger_name,
+                {"backtest_id": getattr(strategy, "backtest_id", None)},
+            ).warning(
+                "skip_step_due_to_missing_price",
+                "检测到标的成交价缺失，已跳过当前步下单，避免任务崩溃",
+                error=msg,
+            )
+            return TradeDecisionWO([], strategy)
+        raise
+
+
+class RedisTopkStrategy(DynamicRiskMixin, FundamentalFilterMixin, TopkDropoutStrategy, RedisLoggerMixin):
     """
     Simple TopK Strategy
     """
@@ -142,15 +182,20 @@ class RedisTopkStrategy(DynamicRiskMixin, TopkDropoutStrategy, RedisLoggerMixin)
 
         self.init_redis(kwargs)
         self.init_dynamic_risk(kwargs)
+        self.init_fundamental_filter(kwargs)
 
-        # 必须显式剔除所有不被 BaseStrategy 接受的参数
-        # _OUR_KWARGS 可能未包含 rebalance_days，如果 recording_strategy.py 没有更新 _OUR_KWARGS
-        for k in list(kwargs.keys()):
-            if k in _OUR_KWARGS or k == "rebalance_days":
-                kwargs.pop(k, None)
+        # 信号兼容性处理：必须在 _OUR_KWARGS 过滤循环之前调用。
+        kwargs = _resolve_signal_kwarg(kwargs)
+        self._wrap_signal_with_fundamental_filter(kwargs)
 
         # 全局规则：选股时剔除涨停/跌停/停牌股，避免无效名额占用
         kwargs.setdefault("only_tradable", True)
+
+        # 剔除所有不被 BaseStrategy 接受的自定义参数
+        for k in list(kwargs.keys()):
+            if k in _OUR_KWARGS:
+                kwargs.pop(k, None)
+
         self._current_step = 0
         super().__init__(*args, **kwargs)
 
@@ -171,21 +216,6 @@ class RedisTopkStrategy(DynamicRiskMixin, TopkDropoutStrategy, RedisLoggerMixin)
                 return super().reset(*args, **filtered)
             except TypeError:
                 return super().reset()
-
-    def _safe_generate_trade_decision(self, execute_result=None):
-        """安全地生成交易决策，处理 get_deal_price 返回 None 的情况。"""
-        try:
-            return super().generate_trade_decision(execute_result)
-        except TypeError as e:
-            if "unsupported operand type(s) for /: 'float' and 'NoneType'" in str(e):
-                # 价格为 None，可能是股票停牌或数据缺失，跳过本次交易
-                StructuredTaskLogger(
-                    logger,
-                    "redis-topk-strategy",
-                    {"backtest_id": getattr(self, "backtest_id", None)},
-                ).warning("skip_trade_no_price", "Skip trade due to missing price data")
-                return TradeDecisionWO([], self)
-            raise
 
     def generate_trade_decision(self, execute_result=None):
         if hasattr(self, "check_account_stop_loss") and self.check_account_stop_loss():
@@ -212,8 +242,399 @@ class RedisTopkStrategy(DynamicRiskMixin, TopkDropoutStrategy, RedisLoggerMixin)
                     {"backtest_id": getattr(self, "backtest_id", None), "rebalance_days": self.rebalance_days},
                 ).warning("rebalance_check_failed", "Error checking rebalance_days", error=e)
 
-        # Generate new orders (with safe handling for None prices)
-        return self._safe_generate_trade_decision(execute_result)
+        return _safe_generate_trade_decision(
+            self,
+            super().generate_trade_decision,
+            execute_result,
+            logger_name="redis-topk-strategy",
+        )
+
+    def post_exe_step(self, execute_result=None):
+        self.log_progress()
+        self.log_executed_trades(execute_result)
+
+
+class RedisRiskGuardTopkStrategy(DynamicRiskMixin, FundamentalFilterMixin, TopkDropoutStrategy, RedisLoggerMixin):
+    """
+    风控增强 TopK 策略。
+
+    风控分两层：
+    1. 硬过滤：基于 fundamental_aligned 剔除 ST、新股、涨跌停、异常换手、高 Beta 和跳跃异常股票。
+    2. 大盘周期风控：结合市场状态自动降仓，下行区间优先压低持仓比例。
+
+    适合“收盘后算特征，次日开盘前推理”的盘后选股流程。
+    """
+
+    def __init__(self, *args, **kwargs):
+        self.rebalance_days = int(kwargs.pop("rebalance_days", 3))
+        self.max_industry_count = int(kwargs.pop("max_industry_count", 0))
+        self.industry_cap_ratio = float(kwargs.pop("industry_cap_ratio", 0.30))
+        self.market_state_window = int(kwargs.pop("market_state_window", 20))
+        self._internal_market_state_cache: dict[str, str] = {}
+
+        # 默认硬风控阈值：如需放宽，可在模板或自定义策略里显式覆盖。
+        kwargs.setdefault("exclude_st", True)
+        kwargs.setdefault("f_is_st_not", 1)
+        kwargs.setdefault("f_listed_days_min", 120)
+        kwargs.setdefault("f_limit_up_today_not", 1)
+        kwargs.setdefault("f_limit_down_today_not", 1)
+        kwargs.setdefault("f_consecutive_limit_up_days_max", 0)
+        kwargs.setdefault("f_turnover_rate_min", 0.5)
+        kwargs.setdefault("f_turnover_rate_max", 15.0)
+        kwargs.setdefault("f_beta_20_max", 1.8)
+        kwargs.setdefault("f_float_mv_min", 500_000_000.0)
+        kwargs.setdefault("f_micro_jump_flag_not", 1)
+        kwargs.setdefault("market_state_symbol", "SH000300")
+
+        self.init_redis(kwargs)
+        self.init_dynamic_risk(kwargs)
+        self.init_fundamental_filter(kwargs)
+
+        # 信号兼容性处理：必须在 _OUR_KWARGS 过滤循环之前调用。
+        kwargs = _resolve_signal_kwarg(kwargs)
+        self._wrap_signal_with_fundamental_filter(kwargs)
+
+        # 全局规则：选股时剔除涨跌停/停牌，避免无效名额占用
+        kwargs.setdefault("only_tradable", True)
+
+        # 剔除所有不被 BaseStrategy 接受的自定义参数
+        for k in list(kwargs.keys()):
+            if k in _OUR_KWARGS:
+                kwargs.pop(k, None)
+
+        self._current_step = 0
+        super().__init__(*args, **kwargs)
+
+        StructuredTaskLogger(
+            logger,
+            "redis-risk-guard-topk",
+            {"backtest_id": getattr(self, "backtest_id", None)},
+        ).info(
+            "strategy_initialized",
+            "风控 TopK 策略初始化完成",
+            rebalance_days=self.rebalance_days,
+            max_industry_count=self.max_industry_count,
+            industry_cap_ratio=self.industry_cap_ratio,
+            market_state_window=self.market_state_window,
+            hard_filters=list(self.fundamental_constraints.keys()),
+        )
+
+    def reset(self, *args, **kwargs):
+        self._current_step = 0
+        self._internal_market_state_cache.clear()
+        self.reset_dynamic_risk()
+        try:
+            return super().reset(*args, **kwargs)
+        except TypeError as exc:
+            if "unexpected keyword argument" not in str(exc):
+                raise
+            filtered = dict(kwargs)
+            filtered.pop("level_infra", None)
+            filtered.pop("common_infra", None)
+            filtered.pop("trade_exchange", None)
+            try:
+                return super().reset(*args, **filtered)
+            except TypeError:
+                return super().reset()
+
+    def _get_industry_cap(self) -> int:
+        if self.max_industry_count > 0:
+            return self.max_industry_count
+        if self.industry_cap_ratio <= 0:
+            return 0
+        return max(1, int(round(float(self.topk) * float(self.industry_cap_ratio))))
+
+    def _get_trade_snapshot(self, trade_date: pd.Timestamp) -> pd.DataFrame:
+        snapshot = fundamental_aligner.get_snapshot(trade_date)
+        if snapshot.empty:
+            return snapshot
+        if "symbol" in snapshot.columns and snapshot.index.name != "symbol":
+            try:
+                snapshot = snapshot.set_index("symbol", drop=False)
+            except Exception:
+                pass
+        return snapshot
+
+    def _infer_market_state(self, trade_date: pd.Timestamp) -> str:
+        """当外部未注入 market_state_series 时，按市场基准和窗口现场推导风险状态。"""
+        if not self.market_state_symbol:
+            return "neutral"
+
+        date_key = trade_date.strftime("%Y-%m-%d")
+        cached = self._internal_market_state_cache.get(date_key)
+        if cached:
+            return cached
+
+        try:
+            start_date = (trade_date - pd.Timedelta(days=max(self.market_state_window * 3, 45))).strftime("%Y-%m-%d")
+            end_date = trade_date.strftime("%Y-%m-%d")
+            service = MarketStateService()
+            series = service.build_market_state_series(
+                symbol=str(self.market_state_symbol),
+                start_date=start_date,
+                end_date=end_date,
+                window=self.market_state_window,
+                thresholds=DEFAULT_THRESHOLDS,
+            )
+            if series:
+                state = series.get(date_key)
+                if not state:
+                    latest_key = sorted(series.keys())[-1]
+                    state = series.get(latest_key, "neutral")
+            else:
+                state = "neutral"
+        except Exception as exc:
+            StructuredTaskLogger(
+                logger,
+                "redis-risk-guard-topk",
+                {"backtest_id": getattr(self, "backtest_id", None)},
+            ).warning("market_state_fallback_failed", "大盘状态推导失败，回退中性仓位", error=str(exc))
+            state = "neutral"
+
+        state = str(state or "neutral")
+        self._internal_market_state_cache[date_key] = state
+        return state
+
+    def get_risk_degree(self, *args, **kwargs):
+        """
+        大盘风险度优先级：
+        1. 外部注入 market_state_series / risk_degree 系列；
+        2. 显式 risk_degree；
+        3. 自行根据 market_state_symbol 和窗口推导 bull / neutral / bear；
+        4. 回退到父类默认仓位。
+        """
+        trade_date = self._get_trade_date()
+        if trade_date is not None and not self.market_state_series and self.default_risk_degree is None:
+            state = self._infer_market_state(trade_date)
+            position_map = self.position_by_state if isinstance(self.position_by_state, dict) else DEFAULT_POSITION_BY_STATE
+            mapped = position_map.get(state, position_map.get("neutral", 0.7))
+            base = float(self.strategy_total_position) if self.strategy_total_position is not None else 1.0
+            return self._clamp(min(float(mapped) * base, self.max_leverage))
+        return super().get_risk_degree(*args, **kwargs)
+
+    def _apply_industry_cap(
+        self,
+        candidate_list: list[str],
+        current_industry_counts: dict[str, int],
+        industry_map: dict[str, str],
+        target_count: int,
+    ) -> list[str]:
+        if target_count <= 0:
+            return []
+
+        cap = self._get_industry_cap()
+        if cap <= 0 or not industry_map:
+            return candidate_list[:target_count]
+
+        counts = defaultdict(int, current_industry_counts)
+        accepted: list[str] = []
+        deferred: list[str] = []
+
+        for code in candidate_list:
+            if len(accepted) >= target_count:
+                break
+            industry = industry_map.get(str(code), "")
+            if not industry or counts[industry] < cap:
+                accepted.append(code)
+                if industry:
+                    counts[industry] += 1
+            else:
+                deferred.append(code)
+
+        if len(accepted) < target_count:
+            for code in deferred:
+                if len(accepted) >= target_count:
+                    break
+                accepted.append(code)
+
+        return accepted[:target_count]
+
+    def generate_trade_decision(self, execute_result=None):
+        if hasattr(self, "check_account_stop_loss") and self.check_account_stop_loss():
+            StructuredTaskLogger(
+                logger,
+                "redis-risk-guard-topk",
+                {"backtest_id": getattr(self, "backtest_id", None)},
+            ).info("account_stop_loss", "Account stop-loss triggered. Liquidating.")
+            return self._liquidate_all()
+
+        if self.rebalance_days > 1:
+            try:
+                from backend.services.engine.qlib_app.utils.recording_strategy import RedisRecordingStrategy
+
+                trade_step = RedisRecordingStrategy._get_trade_step_safe(self) or 0
+                if trade_step % self.rebalance_days != 0:
+                    return TradeDecisionWO([], self)
+            except Exception as e:
+                StructuredTaskLogger(
+                    logger,
+                    "redis-risk-guard-topk",
+                    {"backtest_id": getattr(self, "backtest_id", None), "rebalance_days": self.rebalance_days},
+                ).warning("rebalance_check_failed", "Error checking rebalance_days", error=e)
+
+        trade_step = self.trade_calendar.get_trade_step()
+        trade_start_time, trade_end_time = self.trade_calendar.get_step_time(trade_step)
+        pred_start_time, pred_end_time = self.trade_calendar.get_step_time(trade_step, shift=1)
+        pred_score = self.signal.get_signal(start_time=pred_start_time, end_time=pred_end_time)
+        if isinstance(pred_score, pd.DataFrame):
+            pred_score = pred_score.iloc[:, 0]
+        if pred_score is None:
+            return TradeDecisionWO([], self)
+
+        if self.use_fundamental_filter:
+            pred_score = self.apply_fundamental_filter(pred_score, trade_start_time)
+            if pred_score is None or getattr(pred_score, "empty", False):
+                return TradeDecisionWO([], self)
+
+        if self.only_tradable:
+            def get_first_n(li, n, reverse=False):
+                cur_n = 0
+                res = []
+                for si in reversed(li) if reverse else li:
+                    if self.trade_exchange.is_stock_tradable(
+                        stock_id=si, start_time=trade_start_time, end_time=trade_end_time
+                    ):
+                        res.append(si)
+                        cur_n += 1
+                        if cur_n >= n:
+                            break
+                return res[::-1] if reverse else res
+
+            def get_last_n(li, n):
+                return get_first_n(li, n, reverse=True)
+
+            def filter_stock(li):
+                return [
+                    si
+                    for si in li
+                    if self.trade_exchange.is_stock_tradable(
+                        stock_id=si, start_time=trade_start_time, end_time=trade_end_time
+                    )
+                ]
+        else:
+            def get_first_n(li, n):
+                return list(li)[:n]
+
+            def get_last_n(li, n):
+                return list(li)[-n:]
+
+            def filter_stock(li):
+                return li
+
+        current_temp = copy.deepcopy(self.trade_position)
+        sell_order_list = []
+        buy_order_list = []
+        cash = current_temp.get_cash()
+        current_stock_list = current_temp.get_stock_list()
+
+        last = pred_score.reindex(current_stock_list).sort_values(ascending=False).index
+
+        snapshot = self._get_trade_snapshot(pd.Timestamp(trade_start_time))
+        industry_map = {}
+        if not snapshot.empty and "industry" in snapshot.columns:
+            try:
+                industry_map = snapshot["industry"].fillna("").astype(str).to_dict()
+            except Exception:
+                industry_map = {}
+
+        current_industry_counts = defaultdict(int)
+        if industry_map:
+            for code in current_stock_list:
+                industry = industry_map.get(str(code), "")
+                if industry:
+                    current_industry_counts[industry] += 1
+
+        desired_buy_count = max(0, self.n_drop + self.topk - len(last))
+
+        if self.method_buy == "top":
+            base_candidates = pred_score[~pred_score.index.isin(last)].sort_values(ascending=False).index.tolist()
+            today = self._apply_industry_cap(
+                base_candidates,
+                current_industry_counts,
+                industry_map,
+                desired_buy_count,
+            )
+        elif self.method_buy == "random":
+            topk_candi = get_first_n(pred_score.sort_values(ascending=False).index, self.topk)
+            candi = list(filter(lambda x: x not in last, topk_candi))
+            try:
+                sampled = list(np.random.choice(candi, min(len(candi), max(desired_buy_count, len(candi))), replace=False))
+            except ValueError:
+                sampled = candi
+            today = self._apply_industry_cap(
+                sampled,
+                current_industry_counts,
+                industry_map,
+                desired_buy_count,
+            )
+        else:
+            raise NotImplementedError(f"This type of input is not supported")
+
+        comb = pred_score.reindex(last.union(pd.Index(today))).sort_values(ascending=False).index
+
+        if self.method_sell == "bottom":
+            sell = last[last.isin(get_last_n(comb, self.n_drop))]
+        elif self.method_sell == "random":
+            candi = filter_stock(last)
+            try:
+                sell = pd.Index(np.random.choice(candi, self.n_drop, replace=False) if len(last) else [])
+            except ValueError:
+                sell = candi
+        else:
+            raise NotImplementedError(f"This type of input is not supported")
+
+        buy = today[: max(0, len(sell) + self.topk - len(last))]
+        for code in current_stock_list:
+            if not self.trade_exchange.is_stock_tradable(
+                stock_id=code,
+                start_time=trade_start_time,
+                end_time=trade_end_time,
+                direction=None if self.forbid_all_trade_at_limit else OrderDir.SELL,
+            ):
+                continue
+            if code in sell:
+                time_per_step = self.trade_calendar.get_freq()
+                if current_temp.get_stock_count(code, bar=time_per_step) < self.hold_thresh:
+                    continue
+                sell_amount = current_temp.get_stock_amount(code=code)
+                sell_order = Order(
+                    stock_id=code,
+                    amount=sell_amount,
+                    start_time=trade_start_time,
+                    end_time=trade_end_time,
+                    direction=Order.SELL,
+                )
+                if self.trade_exchange.check_order(sell_order):
+                    sell_order_list.append(sell_order)
+                    trade_val, trade_cost, trade_price = self.trade_exchange.deal_order(
+                        sell_order, position=current_temp
+                    )
+                    cash += trade_val - trade_cost
+
+        value = cash * self.risk_degree / len(buy) if len(buy) > 0 else 0
+        for code in buy:
+            if not self.trade_exchange.is_stock_tradable(
+                stock_id=code,
+                start_time=trade_start_time,
+                end_time=trade_end_time,
+                direction=None if self.forbid_all_trade_at_limit else OrderDir.BUY,
+            ):
+                continue
+            buy_price = self.trade_exchange.get_deal_price(
+                stock_id=code, start_time=trade_start_time, end_time=trade_end_time, direction=OrderDir.BUY
+            )
+            buy_amount = value / buy_price
+            factor = self.trade_exchange.get_factor(stock_id=code, start_time=trade_start_time, end_time=trade_end_time)
+            buy_amount = self.trade_exchange.round_amount_by_trade_unit(buy_amount, factor)
+            buy_order = Order(
+                stock_id=code,
+                amount=buy_amount,
+                start_time=trade_start_time,
+                end_time=trade_end_time,
+                direction=Order.BUY,
+            )
+            buy_order_list.append(buy_order)
+        return TradeDecisionWO(sell_order_list + buy_order_list, self)
 
     def post_exe_step(self, execute_result=None):
         self.log_progress()

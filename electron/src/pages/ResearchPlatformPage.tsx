@@ -521,6 +521,7 @@ export const ResearchPlatformPage: React.FC = () => {
             latestChange: safeNum(item?.latestChange, 0),
             nextDayReturn: item?.nextDayReturn !== null && item?.nextDayReturn !== undefined ? safeNum(item?.nextDayReturn, 0) : null,
             day3Return: item?.day3Return !== null && item?.day3Return !== undefined ? safeNum(item?.day3Return, 0) : null,
+            return20d: item?.return20d !== null && item?.return20d !== undefined ? safeNum(item?.return20d, 0) : null,
             consecutiveLimitUpDays: safeNum(item?.consecutiveLimitUpDays, 0),
             turnoverRate: safeNum(item?.turnoverRate, 0),
             amount: safeNum(item?.amount, 0),
@@ -2345,6 +2346,7 @@ export const ResearchPlatformPage: React.FC = () => {
                                   totalReturn: null,
                                   nextDayReturn: null,
                                   day3Return: null,
+                                  return20d: null,
                                   consecutiveLimitUpDays: 0,
                                   volumeTrend3d: 0,
                                   volumeTrend5d: false,
@@ -2412,6 +2414,7 @@ export const ResearchPlatformPage: React.FC = () => {
                                   totalReturn: null,
                                   nextDayReturn: null,
                                   day3Return: null,
+                                  return20d: null,
                                   consecutiveLimitUpDays: 0,
                                   volumeTrend3d: 0,
                                   volumeTrend5d: false,
@@ -2614,17 +2617,17 @@ export const ResearchPlatformPage: React.FC = () => {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {[
                   { label: '模型分数', val: safeNum(selectedStock.score, 0).toFixed(3) },
-                  { label: '连板天数', val: `${safeNum(selectedStock.consecutiveLimitUpDays, 0)} 天` },
-                  { label: '成交额', val: `${safeNum(selectedStock.amount, 0).toFixed(2)} 亿` },
-                  { label: '换手率', val: fmtPercent2(selectedStock.turnoverRate) },
                   { label: '涨跌幅', val: fmtSignedPercent2(selectedStock.latestChange) },
                   { label: '次日收益', val: fmtNullableSignedPercent2(selectedStock.nextDayReturn) },
-                  { label: '3日收益', val: fmtNullableSignedPercent2(selectedStock.day3Return) },
-                  { label: '行业', val: selectedStock.sector || '-' },
-                  { label: '概念', val: (selectedStock.conceptTags || []).slice(0, 3).join(' / ') || selectedStock.concept || '-' },
-                  { label: '指数', val: (selectedStock.indexTags || []).slice(0, 3).join(' / ') || '-' },
+                  { label: '20日收益', val: fmtNullableSignedPercent2(selectedStock.return20d) },
                   { label: '总市值', val: `${safeNum(selectedStock.totalMv, 0).toFixed(2)} 亿` },
                   { label: '流通市值', val: `${safeNum(selectedStock.floatMv, 0).toFixed(2)} 亿` },
+                  { label: '成交额', val: `${safeNum(selectedStock.amount, 0).toFixed(2)} 亿` },
+                  { label: '换手率', val: fmtPercent2(selectedStock.turnoverRate) },
+                  { label: '连板天数', val: `${safeNum(selectedStock.consecutiveLimitUpDays, 0)} 天` },
+                  { label: '概念', val: (selectedStock.conceptTags || []).slice(0, 3).join(' / ') || selectedStock.concept || '-' },
+                  { label: '指数', val: (selectedStock.indexTags || []).slice(0, 3).join(' / ') || '-' },
+                  { label: '行业', val: selectedStock.sector || '-' },
                 ].map((item, idx) => (
                   <div key={idx} className="min-h-[72px] rounded-2xl border border-slate-100 bg-slate-50/70 p-3 text-center">
                     <div className="text-[9px] font-black uppercase tracking-wide text-slate-400">{item.label}</div>

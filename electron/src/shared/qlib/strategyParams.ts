@@ -56,7 +56,7 @@ export function shouldShowNDrop(code: string | undefined, strategyType: string):
   }
 
   // 已知不需要 n_drop 的策略类型
-  const noNDropTypes = ['alpha_cross_section', 'full_alpha_cross_section', 'score_weighted', 'VolatilityWeighted'];
+  const noNDropTypes = ['alpha_cross_section', 'full_alpha_cross_section', 'score_weighted'];
   if (noNDropTypes.includes(strategyType)) {
     return false;
   }
@@ -93,7 +93,21 @@ const HARDCODED_FALLBACK_PARAMS: Record<string, QlibStrategyParams> = {
   long_short_topk: { topk: 50, short_topk: 50, signal: '<PRED>', rebalance_days: 3, min_score: 0.0, max_weight: 0.05, long_exposure: 1.0, short_exposure: 1.0, enable_short_selling: true },
   momentum: { topk: 30, n_drop: 6, signal: '<PRED>', rebalance_days: 3, momentum_period: 20, enable_short_selling: false },
   StopLoss: { topk: 30, n_drop: 6, signal: '<PRED>', rebalance_days: 3, stop_loss: -0.08, take_profit: 0.15, enable_short_selling: false },
-  VolatilityWeighted: { topk: 50, vol_lookback: 20, max_weight: 0.10, min_score: 0.0, signal: '<PRED>', rebalance_days: 3, enable_short_selling: false },
+  risk_guard_topk: {
+    topk: 50,
+    n_drop: 10,
+    signal: '<PRED>',
+    rebalance_days: 3,
+    market_state_symbol: 'SH000300',
+    market_state_window: 20,
+    industry_cap_ratio: 0.3,
+    listed_days_min: 120,
+    turnover_rate_min: 0.5,
+    turnover_rate_max: 15.0,
+    beta_20_max: 1.8,
+    float_mv_min: 500000000,
+    enable_short_selling: false,
+  },
   adaptive_drift: { topk: 50, n_drop: 10, signal: '<PRED>', rebalance_days: 3, dynamic_position: true, enable_short_selling: false },
   score_weighted: { topk: 50, signal: '<PRED>', min_score: 0.0, max_weight: 0.05, rebalance_days: 3, enable_short_selling: false },
   deep_time_series: { topk: 30, n_drop: 6, signal: '<PRED>', rebalance_days: 3, enable_short_selling: false },
@@ -147,6 +161,8 @@ export function getDefaultStrategyParams(
         (defaults as Record<string, unknown>)[param.name] = true;
       } else if (typeof v === 'string' && v.toLowerCase() === 'false') {
         (defaults as Record<string, unknown>)[param.name] = false;
+      } else if (typeof v === 'string') {
+        (defaults as Record<string, unknown>)[param.name] = v;
       }
     }
 

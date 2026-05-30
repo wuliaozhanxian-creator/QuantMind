@@ -14,7 +14,7 @@ from backend.services.engine.ai_strategy.provider_registry import get_provider
 from backend.services.engine.inference import InferenceRouterService, InferenceService
 from backend.services.engine.qlib_app.schemas.backtest import (
     QlibBacktestRequest,
-    QlibStrategyParams,
+    TopkDropoutParams,
 )
 from backend.services.engine.qlib_app.services.backtest_service import (
     QlibBacktestService,
@@ -652,7 +652,7 @@ class PipelineService:
 
         backtest_request = QlibBacktestRequest(
             strategy_type="TopkDropout",
-            strategy_params=QlibStrategyParams(
+            strategy_params=TopkDropoutParams(
                 topk=request.topk,
                 n_drop=request.n_drop,
                 signal=signal_value,

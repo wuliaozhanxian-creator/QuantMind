@@ -305,9 +305,7 @@ class ModelRegistryService:
                     {"tenant_id": tenant, "user_id": user, "model_id": self.primary_model_id},
                 )
             ).first()
-            if exists:
-                return
-
+            # 始终读取最新的 metadata，无论记录是否存在
             current_default = (
                 await session.execute(
                     text(
@@ -371,6 +369,12 @@ class ModelRegistryService:
                         CAST(:metadata_json AS JSONB), CAST(:metrics_json AS JSONB), :is_default,
                         :created_at, :updated_at, :activated_at
                     )
+                    ON CONFLICT (tenant_id, user_id, model_id) DO UPDATE SET
+                        metadata_json = EXCLUDED.metadata_json,
+                        metrics_json = EXCLUDED.metrics_json,
+                        storage_path = EXCLUDED.storage_path,
+                        model_file = EXCLUDED.model_file,
+                        updated_at = EXCLUDED.updated_at
                     """
                 ),
                 {
@@ -438,7 +442,12 @@ class ModelRegistryService:
                         CAST(:metadata_json AS JSONB), CAST(:metrics_json AS JSONB), FALSE,
                         :created_at, :updated_at, NULL
                     )
-                    ON CONFLICT (tenant_id, user_id, model_id) DO NOTHING
+                    ON CONFLICT (tenant_id, user_id, model_id) DO UPDATE SET
+                        metadata_json = EXCLUDED.metadata_json,
+                        metrics_json = EXCLUDED.metrics_json,
+                        storage_path = EXCLUDED.storage_path,
+                        model_file = EXCLUDED.model_file,
+                        updated_at = EXCLUDED.updated_at
                     """
                 ),
                 {

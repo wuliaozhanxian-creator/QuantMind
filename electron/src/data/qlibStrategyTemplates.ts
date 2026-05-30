@@ -81,6 +81,48 @@ STRATEGY_CONFIG = {
     ]
   },
   {
+    id: 'risk_guard_topk',
+    name: '大盘风控 Top-K 选股策略',
+    description: '在基础 Top-K 选股之上叠加基本面硬过滤、行业集中度约束与大盘下行降仓。',
+    category: 'risk_control',
+    difficulty: 'intermediate',
+    code: `"""
+大盘风控 Top-K 选股策略 (Risk-Guarded Top-K)
+[Native] 核心逻辑：Top-K 选股 + 基本面硬过滤 + 大盘周期降仓。
+"""
+STRATEGY_CONFIG = {
+    "class": "RedisRiskGuardTopkStrategy",
+    "kwargs": {
+        "signal": "<PRED>",
+        "topk": 50,
+        "n_drop": 10,
+        "rebalance_days": 3,
+        "market_state_symbol": "SH000300",
+        "market_state_window": 20,
+        "industry_cap_ratio": 0.30,
+        "listed_days_min": 120,
+        "turnover_rate_min": 0.5,
+        "turnover_rate_max": 15.0,
+        "beta_20_max": 1.8,
+        "float_mv_min": 500000000,
+    }
+}
+`,
+    params: [
+      { name: 'topk', description: '持仓股票总数', default: 50, min: 5, max: 200 },
+      { name: 'n_drop', description: '每期替换数量', default: 10, min: 0, max: 200 },
+      { name: 'rebalance_days', description: '调仓周期 (天)', default: 3, min: 1, max: 60 },
+      { name: 'market_state_symbol', description: '市场状态参考指数', default: 'SH000300' },
+      { name: 'market_state_window', description: '大盘状态判定窗口 (交易日)', default: 20, min: 5, max: 120 },
+      { name: 'industry_cap_ratio', description: '单行业持仓上限占比', default: 0.3, min: 0.1, max: 0.6 },
+      { name: 'listed_days_min', description: '上市天数下限', default: 120, min: 20, max: 500 },
+      { name: 'turnover_rate_min', description: '换手率下限 (%)', default: 0.5, min: 0, max: 10 },
+      { name: 'turnover_rate_max', description: '换手率上限 (%)', default: 15.0, min: 1, max: 80 },
+      { name: 'beta_20_max', description: '20日 Beta 上限', default: 1.8, min: 0.5, max: 3 },
+      { name: 'float_mv_min', description: '流通市值下限 (元)', default: 500000000, min: 100000000, max: 10000000000 },
+    ]
+  },
+  {
     id: 'alpha_cross_section',
     name: '截面 Alpha 预测策略',
     description: '根据预测分自动分配资金权重，分高者重仓。',

@@ -21,6 +21,7 @@ _BUILTIN_CLASS_MODULE_MAP: dict[str, str] = {
     "RedisLongShortTopkStrategy": "backend.services.engine.qlib_app.utils.extended_strategies",
     "RedisStopLossStrategy": "backend.services.engine.qlib_app.utils.extended_strategies",
     "RedisVolatilityWeightedStrategy": "backend.services.engine.qlib_app.utils.extended_strategies",
+    "RedisRiskGuardTopkStrategy": "backend.services.engine.qlib_app.utils.extended_strategies",
     "RedisFullAlphaStrategy": "backend.services.engine.qlib_app.utils.extended_strategies",
     "SimpleWeightStrategy": "backend.services.engine.qlib_app.utils.recording_strategy",
 }
@@ -49,15 +50,33 @@ class StrategyBuilder(ABC):
 
     def _get_fundamental_filter_kwargs(self, request: QlibBacktestRequest) -> dict[str, Any]:
         """仅在请求显式要求时注入 ST 基本面过滤参数。"""
-        strategy_params = getattr(request, "strategy_params", None)
-        exclude_st = getattr(strategy_params, "exclude_st", None)
+        exclude_st = getattr(request.strategy_params, 'exclude_st', False)
+        f_is_st_not = getattr(request.strategy_params, 'f_is_st_not', None)
 
         kwargs: dict[str, Any] = {}
         if exclude_st:
             kwargs["exclude_st"] = True
-        f_is_st_not = getattr(strategy_params, "f_is_st_not", None)
         if f_is_st_not is not None:
             kwargs["f_is_st_not"] = int(f_is_st_not)
+        return kwargs
+
+    def _get_strategy_kwargs(self, request: QlibBacktestRequest, market_state_kwargs: dict[str, Any], backtest_id: str) -> dict[str, Any]:
+        kwargs = request.strategy_params.model_dump(exclude_none=True) if hasattr(request.strategy_params, 'model_dump') else {}
+        
+        # Override signal if necessary (signal_data is handled separately or we pass "<PRED>")
+        # The base dict already contains 'signal': '<PRED>' from the default
+        
+        # Merge fundamental filter explicitly if the strategy needs it handled (usually it is dumped directly now)
+        # We can just keep the ones dumped from model_dump, so _get_fundamental_filter_kwargs is redundant for built-in, 
+        # but let's just make sure.
+        
+        # Remove any n_drop=0 special logic if needed, or handle it here
+        if kwargs.get('n_drop') == 0:
+            kwargs['n_drop'] = kwargs.get('topk', 50)
+
+        kwargs.update(self._get_fundamental_filter_kwargs(request))
+        kwargs.update(market_state_kwargs)
+        kwargs.update(self._get_redis_config(backtest_id))
         return kwargs
 
     def _sanitize_module_path_config(self, value: Any) -> Any:
@@ -96,28 +115,12 @@ class TopkDropoutBuilder(StrategyBuilder):
         logger.info(
             "build_topk_dropout",
             "Building TopkDropout strategy",
-            topk=request.strategy_params.topk,
-            n_drop=request.strategy_params.n_drop,
-            rebalance_days=request.strategy_params.rebalance_days,
+            topk=getattr(request.strategy_params, 'topk', None),
         )
         strategy = {
             "class": "RedisRecordingStrategy",
             "module_path": "backend.services.engine.qlib_app.utils.recording_strategy",
-            "kwargs": {
-                "signal": "<PRED>",
-                "topk": request.strategy_params.topk,
-                "n_drop": (
-                    request.strategy_params.n_drop
-                    if request.strategy_params.n_drop > 0
-                    else request.strategy_params.topk
-                ),
-                "rebalance_days": request.strategy_params.rebalance_days,
-                "account_stop_loss": request.strategy_params.account_stop_loss,
-                "max_leverage": request.strategy_params.max_leverage,
-                **self._get_fundamental_filter_kwargs(request),
-                **market_state_kwargs,
-                **self._get_redis_config(backtest_id),
-            },
+            "kwargs": self._get_strategy_kwargs(request, market_state_kwargs, backtest_id),
         }
         return self._sanitize_module_path_config(strategy)
 
@@ -134,18 +137,7 @@ class WeightStrategyBuilder(StrategyBuilder):
         strategy = {
             "class": "RedisWeightStrategy",
             "module_path": "backend.services.engine.qlib_app.utils.recording_strategy",
-            "kwargs": {
-                "signal": "<PRED>",
-                "topk": request.strategy_params.topk,
-                "min_score": request.strategy_params.min_score,
-                "max_weight": request.strategy_params.max_weight,
-                "rebalance_days": request.strategy_params.rebalance_days,
-                "account_stop_loss": request.strategy_params.account_stop_loss,
-                "max_leverage": request.strategy_params.max_leverage,
-                **self._get_fundamental_filter_kwargs(request),
-                **market_state_kwargs,
-                **self._get_redis_config(backtest_id),
-            },
+            "kwargs": self._get_strategy_kwargs(request, market_state_kwargs, backtest_id),
         }
         return self._sanitize_module_path_config(strategy)
 
@@ -158,31 +150,11 @@ class SimpleTopkBuilder(StrategyBuilder):
         signal_data: Any,
         backtest_id: str,
     ) -> dict[str, Any]:
-        logger.info(
-            "build_simple_topk",
-            "Building SimpleTopk strategy",
-            topk=request.strategy_params.topk,
-            n_drop=request.strategy_params.n_drop,
-            rebalance_days=request.strategy_params.rebalance_days,
-        )
+        logger.info("build_simple_topk", "Building SimpleTopk strategy")
         strategy = {
             "class": "RedisTopkStrategy",
             "module_path": "backend.services.engine.qlib_app.utils.extended_strategies",
-            "kwargs": {
-                "signal": "<PRED>",
-                "topk": request.strategy_params.topk,
-                "n_drop": (
-                    request.strategy_params.n_drop
-                    if request.strategy_params.n_drop > 0
-                    else request.strategy_params.topk
-                ),
-                "rebalance_days": request.strategy_params.rebalance_days,
-                "account_stop_loss": request.strategy_params.account_stop_loss,
-                "max_leverage": request.strategy_params.max_leverage,
-                **self._get_fundamental_filter_kwargs(request),
-                **market_state_kwargs,
-                **self._get_redis_config(backtest_id),
-            },
+            "kwargs": self._get_strategy_kwargs(request, market_state_kwargs, backtest_id),
         }
         return self._sanitize_module_path_config(strategy)
 
@@ -196,29 +168,10 @@ class DeepTimeSeriesBuilder(StrategyBuilder):
         backtest_id: str,
     ) -> dict[str, Any]:
         logger.info("build_deep_time_series", "Building DeepTimeSeries strategy")
-
-        # 修复：不再在此嵌入内联 signal dict（会绕过 Runtime 的实例化保障）。
-        # 使用 "<PRED>" 占位符，由 Runtime 层统一通过 signal_data 替换，
-        # 保持与 TopkDropoutBuilder 等一致的信号处理链路。
-        # signal_data 已由 _build_signal_data() 构建（含 pred.pkl 加载逻辑），
-        # 并经 Runtime 实例化保障块转换为合法 Signal 对象。
         strategy = {
             "class": "RedisRecordingStrategy",
             "module_path": "backend.services.engine.qlib_app.utils.recording_strategy",
-            "kwargs": {
-                "signal": "<PRED>",
-                "topk": request.strategy_params.topk,
-                "n_drop": (
-                    request.strategy_params.n_drop
-                    if request.strategy_params.n_drop > 0
-                    else request.strategy_params.topk
-                ),
-                "rebalance_days": request.strategy_params.rebalance_days,
-                "account_stop_loss": request.strategy_params.account_stop_loss,
-                "max_leverage": request.strategy_params.max_leverage,
-                **market_state_kwargs,
-                **self._get_redis_config(backtest_id),
-            },
+            "kwargs": self._get_strategy_kwargs(request, market_state_kwargs, backtest_id),
         }
         return self._sanitize_module_path_config(strategy)
 
@@ -234,29 +187,15 @@ class AdaptiveDriftBuilder(StrategyBuilder):
         backtest_id: str,
     ) -> dict[str, Any]:
         logger.info("build_adaptive_drift", "Building AdaptiveDrift strategy")
-        # Ensure dynamic_position is True for this builder
         if not market_state_kwargs:
-            # Fallback if not injected by backtest_service automatically
             market_state_kwargs = {"dynamic_position": True}
-
+            
+        kwargs = self._get_strategy_kwargs(request, market_state_kwargs, backtest_id)
+        
         strategy = {
             "class": "RedisRecordingStrategy",
             "module_path": "backend.services.engine.qlib_app.utils.recording_strategy",
-            "kwargs": {
-                "signal": "<PRED>",
-                "topk": request.strategy_params.topk,
-                "n_drop": (
-                    request.strategy_params.n_drop
-                    if request.strategy_params.n_drop > 0
-                    else request.strategy_params.topk
-                ),
-                "drop_thresh": 30,
-                "rebalance_days": request.strategy_params.rebalance_days,
-                "account_stop_loss": request.strategy_params.account_stop_loss,
-                "max_leverage": request.strategy_params.max_leverage,
-                **market_state_kwargs,
-                **self._get_redis_config(backtest_id),
-            },
+            "kwargs": kwargs,
         }
         return self._sanitize_module_path_config(strategy)
 
@@ -363,7 +302,13 @@ class CustomStrategyBuilder(StrategyBuilder):
                     # 调仓周期属于平台关键业务参数：即使用户代码中未显式声明，也应透传给支持 **kwargs 的策略。
                     force_passthrough_ui_params = {"rebalance_days"}
                     for key in ui_params:
-                        val = getattr(request.strategy_params, key, None)
+                        if hasattr(request.strategy_params, key):
+                            val = getattr(request.strategy_params, key)
+                        elif isinstance(request.strategy_params, dict):
+                            val = request.strategy_params.get(key)
+                        else:
+                            val = None
+                        
                         if val is not None:
                             if (
                                 key in explicit_params
@@ -372,7 +317,12 @@ class CustomStrategyBuilder(StrategyBuilder):
                             ):
                                 # 特殊处理：n_drop=0 表示不限调仓即全速调仓
                                 if key == "n_drop" and val == 0:
-                                    val = getattr(request.strategy_params, "topk", 50)
+                                    if hasattr(request.strategy_params, "topk"):
+                                        val = getattr(request.strategy_params, "topk")
+                                    elif isinstance(request.strategy_params, dict):
+                                        val = request.strategy_params.get("topk", 50)
+                                    else:
+                                        val = 50
                                 logger.info(
                                     "merge_ui_param",
                                     "CustomStrategyBuilder merging UI param",
@@ -431,7 +381,12 @@ class CustomStrategyBuilder(StrategyBuilder):
                     "f_is_st_not",
                 ]
                 for key in ui_params:
-                    val = getattr(request.strategy_params, key, None)
+                    if hasattr(request.strategy_params, key):
+                        val = getattr(request.strategy_params, key)
+                    elif isinstance(request.strategy_params, dict):
+                        val = request.strategy_params.get(key)
+                    else:
+                        val = None
                     if val is None:
                         continue
                     if key == "rebalance_days" or key in kwargs or key in original_kwargs:
@@ -715,35 +670,16 @@ class StopLossBuilder(StrategyBuilder):
         signal_data: Any,
         backtest_id: str,
     ) -> dict[str, Any]:
-        logger.info(
-            "build_stop_loss",
-            "Building StopLoss strategy",
-            topk=request.strategy_params.topk,
-            stop_loss=request.strategy_params.stop_loss,
-            take_profit=request.strategy_params.take_profit,
-        )
+        logger.info("build_stop_loss", "Building StopLoss strategy")
         strategy = {
             "class": "RedisStopLossStrategy",
             "module_path": "backend.services.engine.qlib_app.utils.extended_strategies",
-            "kwargs": {
-                "signal": "<PRED>",
-                "topk": request.strategy_params.topk,
-                "n_drop": request.strategy_params.n_drop,
-                "stop_loss": request.strategy_params.stop_loss,
-                "take_profit": request.strategy_params.take_profit,
-                "account_stop_loss": request.strategy_params.account_stop_loss,
-                "max_leverage": request.strategy_params.max_leverage,
-                **self._get_fundamental_filter_kwargs(request),
-                **market_state_kwargs,
-                **self._get_redis_config(backtest_id),
-            },
+            "kwargs": self._get_strategy_kwargs(request, market_state_kwargs, backtest_id),
         }
         return self._sanitize_module_path_config(strategy)
 
 
 class VolatilityWeightedBuilder(StrategyBuilder):
-    """波动率加权 TopK 策略 Builder"""
-
     def build(
         self,
         request: QlibBacktestRequest,
@@ -751,29 +687,35 @@ class VolatilityWeightedBuilder(StrategyBuilder):
         signal_data: Any,
         backtest_id: str,
     ) -> dict[str, Any]:
-        logger.info(
-            "build_volatility_weighted",
-            "Building VolatilityWeighted strategy",
-            topk=request.strategy_params.topk,
-            vol_lookback=request.strategy_params.vol_lookback,
-            max_weight=request.strategy_params.max_weight,
-        )
+        logger.info("build_volatility_weighted", "Building VolatilityWeighted strategy")
         strategy = {
             "class": "RedisVolatilityWeightedStrategy",
             "module_path": "backend.services.engine.qlib_app.utils.extended_strategies",
-            "kwargs": {
-                "signal": "<PRED>",
-                "topk": request.strategy_params.topk,
-                "rebalance_days": request.strategy_params.rebalance_days,
-                "vol_lookback": request.strategy_params.vol_lookback,
-                "min_score": request.strategy_params.min_score,
-                "max_weight": request.strategy_params.max_weight,
-                "account_stop_loss": request.strategy_params.account_stop_loss,
-                "max_leverage": request.strategy_params.max_leverage,
-                **self._get_fundamental_filter_kwargs(request),
-                **market_state_kwargs,
-                **self._get_redis_config(backtest_id),
-            },
+            "kwargs": self._get_strategy_kwargs(request, market_state_kwargs, backtest_id),
+        }
+        return self._sanitize_module_path_config(strategy)
+
+
+class RiskGuardTopkBuilder(StrategyBuilder):
+    def build(
+        self,
+        request: QlibBacktestRequest,
+        market_state_kwargs: dict[str, Any],
+        signal_data: Any,
+        backtest_id: str,
+    ) -> dict[str, Any]:
+        logger.info("build_risk_guard_topk", "Building RiskGuardTopk strategy")
+        kwargs = self._get_strategy_kwargs(request, market_state_kwargs, backtest_id)
+        # Pull these from request root as they were placed there before
+        if request.market_state_symbol:
+            kwargs["market_state_symbol"] = request.market_state_symbol
+        if request.market_state_window:
+            kwargs["market_state_window"] = request.market_state_window
+            
+        strategy = {
+            "class": "RedisRiskGuardTopkStrategy",
+            "module_path": "backend.services.engine.qlib_app.utils.extended_strategies",
+            "kwargs": kwargs,
         }
         return self._sanitize_module_path_config(strategy)
 
@@ -866,6 +808,7 @@ class StrategyFactory:
         "deep_time_series": DeepTimeSeriesBuilder(),
         "adaptive_drift": AdaptiveDriftBuilder(),
         "score_weighted": WeightStrategyBuilder(),
+        "risk_guard_topk": RiskGuardTopkBuilder(),
         # Extended strategies
         "simple_topk": SimpleTopkBuilder(),
         "momentum": TopkDropoutBuilder(),
@@ -875,6 +818,7 @@ class StrategyFactory:
         # Upper case fallbacks for compatibility
         "Momentum": TopkDropoutBuilder(),
         "StopLoss": StopLossBuilder(),
+        "RiskGuardTopk": RiskGuardTopkBuilder(),
         "VolatilityWeighted": VolatilityWeightedBuilder(),
     }
 
@@ -892,6 +836,7 @@ class StrategyFactory:
         "long_short_topk": "long_short_topk",
         "deep_time_series": "deep_time_series",
         "stoploss": "StopLoss",
+        "riskguardtopk": "risk_guard_topk",
         "volatilityweighted": "VolatilityWeighted",
         "momentum": "momentum",
     }

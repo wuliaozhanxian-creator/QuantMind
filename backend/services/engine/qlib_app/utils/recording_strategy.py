@@ -34,8 +34,6 @@ _OUR_KWARGS = {
     # 前端费率配置（CnExchange 处理，不属于策略层）
     "buy_cost",
     "sell_cost",
-    # 历史遗留字段（前端 QlibStrategyParams 曾存在的额外字段）
-    "drop_thresh",
     # 股票池文件路径（由平台在上层消费，不传给 qlib BaseStrategy）
     "pool_file",
     "pool_file_local",

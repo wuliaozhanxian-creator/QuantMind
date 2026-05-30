@@ -17,7 +17,8 @@ export type QlibStrategyType =
   | 'EnhancedIndex'
   | 'RiskParity'
   | 'StopLoss'
-  | 'VolatilityWeighted';
+  | 'VolatilityWeighted'
+  | 'risk_guard_topk';
 
 /** Qlib策略参数 */
 export interface QlibStrategyParams {
@@ -46,6 +47,14 @@ export interface QlibStrategyParams {
   // 风险模型/指数增强参数
   riskmodel_root?: string;
   market?: string;
+  market_state_window?: number;
+  market_state_symbol?: string;
+  industry_cap_ratio?: number;
+  listed_days_min?: number;
+  turnover_rate_min?: number;
+  turnover_rate_max?: number;
+  beta_20_max?: number;
+  float_mv_min?: number;
 
   // 行业轮动参数
   topk_sectors?: number;

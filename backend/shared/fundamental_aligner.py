@@ -113,6 +113,16 @@ class FundamentalAligner:
                 continue
 
             col_data = snapshot[col]
+
+            # 鲁棒性检查：如果字段数据全部为空，或全部为 0 (代表未对齐/未初始化数据)，跳过过滤
+            if col_data.dropna().empty:
+                logger.warning(f"FundamentalAligner: 字段 {col} 全为空/NaN，跳过过滤。")
+                continue
+
+            import pandas.api.types as ptypes
+            if ptypes.is_numeric_dtype(col_data) and (col_data == 0).all():
+                logger.warning(f"FundamentalAligner: 字段 {col} 全为 0 (未对齐/未初始化)，跳过过滤。")
+                continue
             if op == "le":
                 mask &= col_data <= float(target_val)
             elif op == "ge":
@@ -130,6 +140,27 @@ class FundamentalAligner:
         valid_symbols = set(snapshot[mask].index)
         return [symbol for symbol in instruments if symbol in valid_symbols]
 
+    def get_snapshot(self, current_date: Any) -> pd.DataFrame:
+        """
+        返回指定交易日的基本面对齐截面。
+
+        主要用于策略侧做行业集中度、流动性阈值和大盘状态等日内/盘后风控判断。
+        """
+        data = self._load_data()
+        if data.empty:
+            return pd.DataFrame()
+
+        dt = pd.to_datetime(current_date).normalize()
+        try:
+            snapshot = data.loc[dt]
+        except KeyError:
+            return pd.DataFrame()
+
+        if isinstance(snapshot, pd.Series):
+            snapshot = snapshot.to_frame().T
+        return snapshot.copy()
+
 
 fundamental_aligner = FundamentalAligner()
+
 

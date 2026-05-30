@@ -17,27 +17,18 @@ def count_param_values(param_min: float, param_max: float, param_step: float) ->
     return int(round((param_max - param_min) / param_step)) + 1
 
 
-class QlibStrategyParams(BaseModel):
-    """Qlib 策略参数"""
+class BaseStrategyParams(BaseModel):
+    """Base Qlib 策略参数"""
+    model_config = ConfigDict(extra="ignore")
 
     topk: int = Field(50, description="选股数量", ge=5, le=200)
     short_topk: int = Field(50, description="做空选股数量", ge=0, le=200)
     n_drop: int = Field(10, description="每期调仓数量", ge=0, le=200)
     signal: str = Field("<PRED>", description="信号列名或文件路径")
-    min_score: float = Field(0.0, description="权重策略最小分数阈值", ge=0.0)
-    max_weight: float = Field(1.0, description="权重策略单标的最大权重", ge=0.0, le=1.0)
+    exclude_st: bool = Field(False, description="是否在策略侧显式剔除 ST 股票（默认关闭）")
+    f_is_st_not: int | None = Field(None, description="基本面对齐字段：1 表示剔除 ST，0 表示不启用")
     long_exposure: float = Field(1.0, description="多头敞口", ge=0.0, le=3.0)
     short_exposure: float = Field(1.0, description="空头敞口", ge=0.0, le=3.0)
-
-    # 扩展参数
-    momentum_period: int = Field(20, description="动量计算周期", ge=5, le=60)
-    riskmodel_root: str | None = Field(None, description="风险模型根目录")
-    market: str = Field("all", description="基准权重市场代码")
-    topk_sectors: int = Field(5, description="行业轮动选择行业数量", ge=2, le=15)
-    lookback_days: int = Field(20, description="回看周期", ge=5, le=252)
-    vol_lookback: int = Field(20, description="波动率估计回看天数", ge=5, le=120)
-    stop_loss: float = Field(-0.08, description="止损线", le=-0.01, ge=-0.5)
-    take_profit: float = Field(0.15, description="止盈线", ge=0.01, le=1.0)
     rebalance_days: int = Field(3, description="调仓周期(天)", ge=1, le=60)
     enable_short_selling: bool = Field(False, description="是否启用双向交易/做空")
     margin_stock_pool: str | None = Field(None, description="固定融资融券股票池标识")
@@ -45,12 +36,49 @@ class QlibStrategyParams(BaseModel):
     borrow_rate: float = Field(0.08, description="融券年化费率", ge=0.0, le=1.0)
     max_short_exposure: float = Field(1.0, description="最大空头敞口", ge=0.0, le=3.0)
     max_leverage: float = Field(1.0, description="最大总杠杆", ge=0.0, le=5.0)
-    account_stop_loss: float = Field(
-        0.2,
-        description="账户爆仓止损线(净值低于初始资金该比例时强制平仓并停止交易)",
-        ge=0.0,
-        le=0.8,
-    )
+    account_stop_loss: float = Field(0.2, description="账户爆仓止损线", ge=0.0, le=0.8)
+
+class TopkDropoutParams(BaseStrategyParams):
+    pass
+
+class SimpleTopkParams(BaseStrategyParams):
+    pass
+
+class WeightStrategyParams(BaseStrategyParams):
+    min_score: float = Field(0.0, description="权重策略最小分数阈值", ge=0.0)
+    max_weight: float = Field(1.0, description="权重策略单标的最大权重", ge=0.0, le=1.0)
+
+class VolatilityWeightedParams(BaseStrategyParams):
+    vol_lookback: int = Field(20, description="波动率估计回看天数", ge=5, le=120)
+    min_score: float = Field(0.0, description="权重策略最小分数阈值", ge=0.0)
+    max_weight: float = Field(1.0, description="权重策略单标的最大权重", ge=0.0, le=1.0)
+
+class StopLossParams(BaseStrategyParams):
+    stop_loss: float = Field(-0.08, description="止损线", le=-0.01, ge=-0.5)
+    take_profit: float = Field(0.15, description="止盈线", ge=0.01, le=1.0)
+
+class RiskGuardTopkParams(BaseStrategyParams):
+    industry_cap_ratio: float = Field(0.3, description="单行业持仓上限占比", ge=0.1, le=0.6)
+    listed_days_min: int = Field(120, description="上市天数下限", ge=20, le=500)
+    turnover_rate_min: float = Field(0.5, description="换手率下限（%）", ge=0.0, le=10.0)
+    turnover_rate_max: float = Field(15.0, description="换手率上限（%）", ge=1.0, le=80.0)
+    beta_20_max: float = Field(1.8, description="20日 Beta 上限", ge=0.5, le=3.0)
+    float_mv_min: float = Field(500_000_000, description="流通市值下限（元）", ge=100_000_000, le=10_000_000_000)
+
+class DeepTimeSeriesParams(BaseStrategyParams):
+    pass
+
+class AdaptiveDriftParams(BaseStrategyParams):
+    pass
+
+class CustomStrategyParams(BaseStrategyParams):
+    model_config = ConfigDict(extra="allow")
+    momentum_period: int = Field(20, description="动量计算周期", ge=5, le=60)
+    riskmodel_root: str | None = Field(None, description="风险模型根目录")
+    market: str = Field("all", description="基准权重市场代码")
+    topk_sectors: int = Field(5, description="行业轮动选择行业数量", ge=2, le=15)
+    lookback_days: int = Field(20, description="回看周期", ge=5, le=252)
+
 
 
 class QlibBacktestRequest(BaseModel):
@@ -64,9 +92,7 @@ class QlibBacktestRequest(BaseModel):
         description="策略类型 (如 TopkDropout, standard_topk, deep_time_series 等)",
     )
 
-    strategy_params: QlibStrategyParams = Field(
-        default_factory=QlibStrategyParams, description="策略参数"
-    )
+    strategy_params: Any = Field(default_factory=CustomStrategyParams, description="策略参数")
     strategy_content: str | None = Field(
         None,
         description="策略代码（仅用于 CustomStrategy 模式）",
