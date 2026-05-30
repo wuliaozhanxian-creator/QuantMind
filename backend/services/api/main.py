@@ -76,6 +76,11 @@ async def lifespan(app: FastAPI):
         # from backend.services.api.routers.research import ensure_research_tables
         # await ensure_research_tables()
 
+        # 预加载股票名称映射到内存
+        from backend.shared.stock_name_mapper import get_stock_name_mapper
+        stock_mapper = get_stock_name_mapper()
+        logger.info(f"✅ Stock name mapper preloaded ({len(stock_mapper._mapping)} stocks)")
+
         logger.info("✅ QuantMind API initialized")
     except Exception as e:
         app.state.startup_healthy = False

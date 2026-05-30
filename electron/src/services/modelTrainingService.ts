@@ -481,6 +481,7 @@ class ModelTrainingService {
       total: number;
       items: Array<{
         symbol: string;
+        name?: string;
         fusion_score: number | null;
         light_score: number | null;
         tft_score: number | null;
@@ -503,7 +504,7 @@ class ModelTrainingService {
       rankings: data.items.map((item, index) => ({
         rank: item.score_rank ?? index + 1,
         code: item.symbol,
-        name: item.symbol,
+        name: item.name || item.symbol,
         score: Number(item.fusion_score ?? 0),
         signal: item.signal_side === 'buy' ? 'buy' : item.signal_side === 'sell' ? 'sell' : 'hold',
       })),

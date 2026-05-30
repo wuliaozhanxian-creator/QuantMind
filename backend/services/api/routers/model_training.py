@@ -1059,10 +1059,17 @@ async def get_model_inference_run_detail(
                         {"run_id": run_id, "tenant_id": tenant_id, "user_id": user_id},
                     )
                 ).mappings().all()
+
+            # 获取股票名称映射器
+            from backend.shared.stock_name_mapper import get_stock_name_mapper
+            stock_mapper = get_stock_name_mapper()
+
             for row in rows:
                 item = dict(row or {})
                 if item.get("created_at") is not None:
                     item["created_at"] = item["created_at"].isoformat()
+                # 添加股票名称
+                item["name"] = stock_mapper.get_name(item.get("symbol", ""))
                 signals.append(item)
         except Exception as exc:  # pragma: no cover - DB fallback
             logger.warning("failed to load inference signal rows for %s: %s", run_id, exc)
