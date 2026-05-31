@@ -947,7 +947,7 @@ class RiskAnalyzer:
             "tenant_id": request.tenant_id,
             "history_source": request.history_source,
             "qlib_strategy_type": request.strategy_type,
-            "qlib_strategy_params": request.strategy_params.model_dump(),
+            "qlib_strategy_params": request.strategy_params.model_dump() if hasattr(request.strategy_params, "model_dump") else dict(request.strategy_params),
             "benchmark_symbol": request.benchmark,
             "deal_price": request.deal_price,
             "seed": request.seed,

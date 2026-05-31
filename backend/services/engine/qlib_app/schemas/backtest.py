@@ -84,7 +84,32 @@ class CustomStrategyParams(BaseStrategyParams):
 class QlibBacktestRequest(BaseModel):
     """Qlib 回测请求"""
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, protected_namespaces=())
+
+    @model_validator(mode="before")
+    @classmethod
+    def parse_strategy_params(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            strat_type = data.get("strategy_type", "TopkDropout")
+            params = data.get("strategy_params", {})
+            if isinstance(params, dict):
+                if strat_type in ("TopkDropout", "standard_topk"):
+                    data["strategy_params"] = TopkDropoutParams(**params)
+                elif strat_type == "WeightStrategy":
+                    data["strategy_params"] = WeightStrategyParams(**params)
+                elif strat_type == "VolatilityWeighted":
+                    data["strategy_params"] = VolatilityWeightedParams(**params)
+                elif strat_type == "StopLoss":
+                    data["strategy_params"] = StopLossParams(**params)
+                elif strat_type == "RiskGuardTopk":
+                    data["strategy_params"] = RiskGuardTopkParams(**params)
+                elif strat_type in ("DeepTimeSeries", "deep_time_series"):
+                    data["strategy_params"] = DeepTimeSeriesParams(**params)
+                elif strat_type == "AdaptiveDrift":
+                    data["strategy_params"] = AdaptiveDriftParams(**params)
+                else:
+                    data["strategy_params"] = CustomStrategyParams(**params)
+        return data
 
     # 策略配置 (支持原生 ID 和前端模板 ID)
     strategy_type: str = Field(

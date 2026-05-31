@@ -53,6 +53,46 @@ _OUR_KWARGS = {
     "account_stop_loss",
     # 调仓周期（各策略自行 pop 使用，不传给 BaseStrategy）
     "rebalance_days",
+    # 做空选股（平台扩展参数，不传给 qlib BaseStrategy）
+    "short_topk",
+    # 基本面过滤对齐相关字段
+    "exclude_st",
+    "f_is_st_not",
+    "pe_max",
+    "mc_min",
+    "mc_max",
+    # 融券股票池
+    "margin_stock_pool",
+    # 调仓周期（各策略自行 pop 使用，不传给 BaseStrategy）
+    "rebalance_days",
+    # 做空开关
+    "enable_short_selling",
+    # 敞口配置
+    "long_exposure",
+    "short_exposure",
+    # CustomStrategyParams 扩展字段（由策略上层消费，不传给 qlib BaseStrategy）
+    "momentum_period",
+    "riskmodel_root",
+    "market",
+    "topk_sectors",
+    "lookback_days",
+    # WeightStrategyParams 扩展
+    "min_score",
+    "max_weight",
+    # StopLossParams 扩展
+    "stop_loss",
+    "take_profit",
+    # VolatilityWeightedParams 扩展
+    "vol_lookback",
+    # RiskGuardTopkParams 扩展
+    "industry_cap_ratio",
+    "listed_days_min",
+    "turnover_rate_min",
+    "turnover_rate_max",
+    "beta_20_max",
+    "float_mv_min",
+    # 注意："signal" 是 Qlib 原生参数，不在此处过滤
+    # 各策略应在 super().__init__() 前通过 _resolve_signal_kwarg() 处理 signal
 }
 
 

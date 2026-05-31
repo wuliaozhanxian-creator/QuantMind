@@ -223,11 +223,11 @@ def _latest_signal_run_key(tenant_id: str, user_id: str) -> str:
 
 
 def _get_latest_signal_run_id(
-    redis_client: redis.Redis, tenant_id: str, user_id: str
+    signal_redis_client: redis.Redis, tenant_id: str, user_id: str
 ) -> str | None:
     try:
         latest = str(
-            redis_client.get(_latest_signal_run_key(tenant_id, user_id)) or ""
+            signal_redis_client.get(_latest_signal_run_key(tenant_id, user_id)) or ""
         ).strip()
         return latest or None
     except Exception as e:
@@ -270,9 +270,9 @@ def _ensure_signal_stream_group(
             logger.warning("[SignalStream] xgroup_create 失败: %s", e)
 
 
-def fetch_market_snapshot(redis_client: redis.Redis) -> dict[str, Any]:
+def fetch_market_snapshot(market_redis_client: redis.Redis) -> dict[str, Any]:
     try:
-        data = redis_client.get("market:snapshot")
+        data = market_redis_client.get("market:snapshot")
         return _safe_json_loads(data, {})
     except Exception as e:
         logger.error("获取行情快照失败: %s", e)
@@ -380,7 +380,7 @@ def _consume_signal_events(
     user_id: str,
     tenant_id: str,
     strategy: str,
-    redis_client: redis.Redis,
+    signal_redis_client: redis.Redis,
     exec_config: dict[str, Any],
     latest_run_id: str | None = None,
     last_id: str = ">",
@@ -393,7 +393,7 @@ def _consume_signal_events(
         int(exec_config.get("signal_stream_block_ms", 1000)) if last_id == ">" else None
     )
 
-    records = redis_client.xreadgroup(
+    records = signal_redis_client.xreadgroup(
         group, consumer, {stream: last_id}, count=batch_size, block=block_ms
     )
     if not records:
@@ -499,7 +499,7 @@ def create_hosted_execution_task(
 
 
 def _ack_signal_events(
-    redis_client: redis.Redis,
+    signal_redis_client: redis.Redis,
     tenant_id: str,
     user_id: str,
     strategy: str,
@@ -511,7 +511,7 @@ def _ack_signal_events(
     stream = _signal_stream_name(tenant_id)
     group = _signal_stream_group_name(tenant_id, user_id, strategy, exec_config)
     try:
-        redis_client.xack(stream, group, *ack_ids)
+        signal_redis_client.xack(stream, group, *ack_ids)
     except Exception as e:
         logger.warning("[SignalStream] ACK 失败: %s", e)
 
@@ -554,6 +554,8 @@ def process_cycle(
     tenant_id: str,
     strategy: str,
     redis_client: redis.Redis,
+    signal_redis_client: redis.Redis,
+    market_redis_client: redis.Redis,
     exec_config: dict[str, Any],
     live_trade_config: dict[str, Any],
 ):
@@ -641,10 +643,11 @@ def process_cycle(
 
 
 def _build_redis_client() -> redis.Redis:
+    """交易主连接 DB 2 — trade:account, trade:agent:heartbeat, runner 锁等"""
     host = os.getenv("REDIS_HOST", "quantmind-redis")
     port = int(os.getenv("REDIS_PORT", "6379"))
     password = os.getenv("REDIS_PASSWORD", "")
-    db = int(os.getenv("REDIS_DB", "0"))
+    db = int(os.getenv("REDIS_DB_TRADE", "2"))
     return redis.Redis(
         host=host,
         port=port,
@@ -653,6 +656,28 @@ def _build_redis_client() -> redis.Redis:
         decode_responses=True,
         socket_timeout=2,
     )
+
+
+def _build_signal_redis_client() -> redis.Redis:
+    """信号流连接 DB 0 — qm:signal:stream, qm:signal:latest (engine 写 trade 读)"""
+    host = os.getenv("SIGNAL_STREAM_REDIS_HOST", os.getenv("REDIS_HOST", "quantmind-redis"))
+    port = int(os.getenv("SIGNAL_STREAM_REDIS_PORT", os.getenv("REDIS_PORT", "6379")))
+    password = os.getenv("SIGNAL_STREAM_REDIS_PASSWORD", os.getenv("REDIS_PASSWORD", ""))
+    db = int(os.getenv("SIGNAL_STREAM_REDIS_DB", "0"))
+    return redis.Redis(
+        host=host,
+        port=port,
+        password=password,
+        db=db,
+        decode_responses=True,
+        socket_timeout=2,
+    )
+
+
+def _build_market_redis_client() -> redis.Redis:
+    """行情连接 — 远程行情服务器 DB 1"""
+    from backend.shared.remote_redis_client import get_remote_redis_client
+    return get_remote_redis_client(db=1)
 
 
 def _resolve_runner_identity(args: argparse.Namespace) -> tuple[str, str, str] | None:
@@ -689,6 +714,8 @@ def _run_scheduler_once(
     tenant_id: str,
     strategy: str,
     redis_client: redis.Redis,
+    signal_redis_client: redis.Redis,
+    market_redis_client: redis.Redis,
     exec_config: dict[str, Any],
     live_trade_config: dict[str, Any],
 ) -> bool:
@@ -697,6 +724,8 @@ def _run_scheduler_once(
         tenant_id=tenant_id,
         strategy=strategy,
         redis_client=redis_client,
+        signal_redis_client=signal_redis_client,
+        market_redis_client=market_redis_client,
         exec_config=exec_config,
         live_trade_config=live_trade_config,
     )
@@ -708,6 +737,8 @@ def _run_scheduler_loop(
     tenant_id: str,
     strategy: str,
     redis_client: redis.Redis,
+    signal_redis_client: redis.Redis,
+    market_redis_client: redis.Redis,
     exec_config: dict[str, Any],
     live_trade_config: dict[str, Any],
     poll_interval_seconds: int,
@@ -728,6 +759,8 @@ def _run_scheduler_loop(
                 tenant_id=tenant_id,
                 strategy=strategy,
                 redis_client=redis_client,
+                signal_redis_client=signal_redis_client,
+                market_redis_client=market_redis_client,
                 exec_config=exec_config,
                 live_trade_config=live_trade_config,
             )
@@ -762,11 +795,15 @@ def _bootstrap_from_cli() -> int:
         or 30
     )
     redis_client = _build_redis_client()
+    signal_redis_client = _build_signal_redis_client()
+    market_redis_client = _build_market_redis_client()
     _run_scheduler_loop(
         user_id=user_id,
         tenant_id=tenant_id,
         strategy=strategy,
         redis_client=redis_client,
+        signal_redis_client=signal_redis_client,
+        market_redis_client=market_redis_client,
         exec_config=exec_config,
         live_trade_config=live_trade_config,
         poll_interval_seconds=poll_interval,

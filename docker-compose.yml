@@ -91,6 +91,18 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=
+      # Redis DB 分配（遵循 CLAUDE.md 规范：0=general,1=auth,2=trade,3=market,4=backtest,5=cache）
+      - REDIS_DB=0
+      - REDIS_DB_TRADE=2
+      - REDIS_DB_MARKET=3
+      - REDIS_DB_BROKER=1
+      - REDIS_DB_BACKEND=2
+      - REDIS_DB_ENGINE=5
+      - REDIS_CACHE_DB=5
+      - SIGNAL_STREAM_REDIS_DB=0
+      - EXEC_STREAM_REDIS_DB=0
+      - NOTIFICATION_REDIS_DB=0
+      - TRADE_EVENTS_REDIS_DB=2
 
       # 存储配置 (本地存储)
       - STORAGE_MODE=local
@@ -207,6 +219,18 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=
+      # Redis DB 分配（遵循 CLAUDE.md 规范：0=general,1=auth,2=trade,3=market,4=backtest,5=cache）
+      - REDIS_DB=0
+      - REDIS_DB_TRADE=2
+      - REDIS_DB_MARKET=3
+      - REDIS_DB_BROKER=1
+      - REDIS_DB_BACKEND=2
+      - REDIS_DB_ENGINE=5
+      - REDIS_CACHE_DB=5
+      - SIGNAL_STREAM_REDIS_DB=0
+      - EXEC_STREAM_REDIS_DB=0
+      - NOTIFICATION_REDIS_DB=0
+      - TRADE_EVENTS_REDIS_DB=2
 
       # 存储配置
       - STORAGE_MODE=local
