@@ -25,6 +25,18 @@ export default defineConfig(({ mode }) => {
   return {
     base: mode === 'production' ? './' : '/',
     plugins: [react()],
+    optimizeDeps: {
+      include: [
+        'dayjs/plugin/weekday',
+        'dayjs/plugin/localeData',
+        'dayjs/plugin/weekOfYear',
+        'dayjs/plugin/weekYear',
+        'dayjs/plugin/advancedFormat',
+        'dayjs/plugin/customParseFormat',
+        'dayjs/plugin/utc',
+        'dayjs/plugin/timezone',
+      ],
+    },
     test: {
       globals: true,
       environment: 'jsdom',

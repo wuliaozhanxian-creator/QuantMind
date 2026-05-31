@@ -59,7 +59,7 @@ class QlibBacktestAdapter:
             if not self.auto_init:
                 raise QlibNotAvailable("Qlib 未初始化，且 auto_init=False")
             self.logger.info("初始化 Qlib provider_uri=%s region=%s", self.provider_uri, self.region)
-            qlib.init(provider_uri=self.provider_uri, region=self.region)
+            qlib.init(provider_uri={"day": self.provider_uri}, region=self.region)
 
     def run_backtest(
         self,

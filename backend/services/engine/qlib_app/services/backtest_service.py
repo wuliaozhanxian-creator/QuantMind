@@ -86,6 +86,7 @@ class QlibBacktestService(QlibBacktestServiceRuntimeMixin):
                 pass
 
         self.provider_uri = provider_uri
+        self.provider_uri_dict = {"day": provider_uri}
         self.region = region
         self._initialized = False
         self._runs: dict[str, dict[str, Any]] = {}
@@ -213,7 +214,7 @@ class QlibBacktestService(QlibBacktestServiceRuntimeMixin):
         if not self._initialized:
             try:
                 qlib.init(
-                    provider_uri=self.provider_uri,
+                    provider_uri=self.provider_uri_dict,
                     region=self.region,
                     joblib_backend=self._joblib_backend,
                 )

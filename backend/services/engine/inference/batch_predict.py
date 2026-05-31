@@ -39,7 +39,7 @@ def run_batch_inference(model_id="model_qlib", target_date=None):
     """
     # 1. 初始化 Qlib
     provider_uri = str(PROJECT_ROOT / "db" / "qlib_data")
-    qlib.init(provider_uri=provider_uri, region="cn")
+    qlib.init(provider_uri={"day": provider_uri}, region="cn")
 
     # 2. 确定日期
     if target_date is None:

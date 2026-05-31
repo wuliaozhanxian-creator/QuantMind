@@ -631,7 +631,7 @@ def _init_qlib():
         return False
 
     print(f"[SYSTEM] 初始化 Qlib: provider_uri={provider_uri}")
-    qlib.init(provider_uri=provider_uri, region="cn")
+    qlib.init(provider_uri={"day": provider_uri}, region="cn")
     print("[SYSTEM] Qlib 初始化成功")
     return True
 

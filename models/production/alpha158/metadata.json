@@ -7,9 +7,9 @@
   "is_neutralized": false,
   "model_info": {
     "name": "Alpha158_Base",
-    "version": "v19",
-    "description": "T+3 基线模型 (V2)，Qlib内置Alpha158因子集，基于OHCLV训练",
-    "algorithm": "LightGBM_Vectorized",
+    "version": "v20",
+    "description": "T+3 基线模型 (V2)，完整Alpha158因子集(158/158)全量实现，向量化线性回归，基于OHCLV训练",
+    "algorithm": "LightGBM_Vectorized_FullFeatures",
     "author": "quantmind-ai",
     "created_at": "2026-04-17"
   },
@@ -24,16 +24,16 @@
   },
   "performance_metrics": {
     "train": {
-      "mean_ic": 0.1062,
-      "icir": 0.7926
+      "mean_ic": 0.1719,
+      "icir": 1.361
     },
     "valid": {
-      "mean_ic": 0.0652,
-      "icir": 0.3832
+      "mean_ic": 0.093,
+      "icir": 0.6863
     },
     "test": {
-      "mean_ic": 0.0545,
-      "icir": 0.3359
+      "mean_ic": 0.0609,
+      "icir": 0.443
     }
   },
   "train_start": "2019-01-02",
@@ -59,17 +59,17 @@
     "pred_file": "pred.pkl"
   },
   "notes": "模板文件：config.yaml, prepare_data.py, train.py。训练产物应保存 model_checkpoint.bin。",
-  "trained_at": "2026-05-29 06:48:45",
+  "trained_at": "2026-05-31 18:25:58",
   "model_path": "/root/qlib-main/model/19_T3_Alpha158_Base/model_checkpoint_v19.bin",
   "prediction_path": "/app/models/production/alpha158/pred.pkl",
   "pred_coverage_start": "2021-01-04",
-  "pred_coverage_end": "2026-04-24",
-  "pred_rows": 6651039,
-  "regenerated_at": "2026-04-26T10:44:29.599132",
+  "pred_coverage_end": "2026-05-20",
+  "pred_rows": 7208500,
+  "regenerated_at": "2026-05-31T18:43:00",
   "regeneration_config": {
     "cpu_cores": 72,
     "start_date": "2021-01-01",
-    "end_date": "2026-04-27"
+    "end_date": "2026-05-20"
   },
   "feature_columns": [
     "KMID",
@@ -230,5 +230,6 @@
     "VSUMD20",
     "VSUMD30",
     "VSUMD60"
-  ]
+  ],
+  "best_iteration": 560
 }
