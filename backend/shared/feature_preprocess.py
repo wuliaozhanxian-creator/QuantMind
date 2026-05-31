@@ -14,7 +14,7 @@ def cs_zscore_with_mad_series(series: pd.Series, mad_multiplier: float = 5.0) ->
         
     upper = median + mad_multiplier * mad
     lower = median - mad_multiplier * mad
-    clipped = series.clip(lower=lower, upper=upper)
+    clipped = series.clip(lower=lower, upper=upper).infer_objects(copy=False)
     
     # 优势 2：释放小尺度核心因子的真实波动。移除 1e-9 惩罚项。
     std = clipped.std()

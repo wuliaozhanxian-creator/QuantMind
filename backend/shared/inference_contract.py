@@ -8,6 +8,13 @@ import numpy as np
 import pandas as pd
 
 
+def _safe_int(val: Any, default: int = 0) -> int:
+    try:
+        return int(float(val))
+    except (ValueError, TypeError):
+        return default
+
+
 def canonical_json_hash(payload: Any) -> str:
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
@@ -110,21 +117,21 @@ def compare_frozen_config(
             }
         )
 
-    if int(frozen_best_iteration or 0) != int(actual_best_iteration or 0):
+    if _safe_int(frozen_best_iteration) != _safe_int(actual_best_iteration):
         mismatches.append(
             {
                 "field": "best_iteration",
-                "expected": int(frozen_best_iteration or 0),
-                "actual": int(actual_best_iteration or 0),
+                "expected": _safe_int(frozen_best_iteration),
+                "actual": _safe_int(actual_best_iteration),
             }
         )
 
-    if int(frozen_target_horizon_days or 0) != int(actual_target_horizon_days or 0):
+    if _safe_int(frozen_target_horizon_days) != _safe_int(actual_target_horizon_days):
         mismatches.append(
             {
                 "field": "target_horizon_days",
-                "expected": int(frozen_target_horizon_days or 0),
-                "actual": int(actual_target_horizon_days or 0),
+                "expected": _safe_int(frozen_target_horizon_days),
+                "actual": _safe_int(actual_target_horizon_days),
             }
         )
 
