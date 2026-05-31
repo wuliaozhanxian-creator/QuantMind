@@ -140,7 +140,7 @@ export const AdminMarketMonitor: React.FC = () => {
                         className="h-full rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow"
                         styles={{ body: { padding: '24px' } }}
                     >
-                        <div className="flex items-start justify-between mb-6">
+                        <div className="flex items-start justify-between mb-4">
                             <div className="flex items-center space-x-3">
                                 <div className="w-12 h-12 rounded-xl bg-blue-50 flex items-center justify-center">
                                     <CloudServerOutlined className="text-blue-600 text-2xl" />
@@ -148,6 +148,7 @@ export const AdminMarketMonitor: React.FC = () => {
                                 <div>
                                     <Title level={4} className="!mb-0 !text-slate-800">在线行情源</Title>
                                     <Text className="text-xs text-slate-400 font-mono">{online?.server_ip || '106.53.100.144'}</Text>
+                                    <Text className="text-xs text-slate-400 block mt-0.5">投研平台数据查询</Text>
                                 </div>
                             </div>
                             <div className="px-3 py-1 bg-slate-50 rounded-lg border border-slate-100">
@@ -155,29 +156,33 @@ export const AdminMarketMonitor: React.FC = () => {
                             </div>
                         </div>
 
+                        {/* 核心指标 — 日期信息置顶 */}
+                        <div className="bg-indigo-50 p-4 rounded-xl mb-4">
+                            <div className="flex items-baseline space-x-2">
+                                <Text className="text-sm text-indigo-600">最新行情日期:</Text>
+                                <Text className="text-xl font-bold text-indigo-700 font-mono">
+                                    {online?.latest_date || '--'}
+                                </Text>
+                            </div>
+                            <div className="flex items-baseline space-x-2 mt-1">
+                                <Text className="text-sm text-indigo-600">数据量:</Text>
+                                <Text className="text-lg font-bold text-indigo-700 font-mono">
+                                    {online?.row_count?.toLocaleString() || 0}
+                                </Text>
+                                <Text className="text-xs text-indigo-400">条</Text>
+                                {online?.row_count && online.row_count < 4000 ? (
+                                    <Text className="text-xs text-orange-500">(偏少)</Text>
+                                ) : null}
+                            </div>
+                        </div>
+
                         <Divider className="my-4" />
 
                         <div className="space-y-4">
                             <div className="bg-slate-50 p-4 rounded-xl">
-                                <div className="flex items-center justify-between mb-2">
+                                <div className="flex items-center justify-between">
                                     <Text className="text-xs font-bold text-slate-500 uppercase tracking-wider">PostgreSQL</Text>
                                     {renderServiceTag(online?.postgresql?.status || 'unknown')}
-                                </div>
-                                <div className="flex items-baseline space-x-2 mt-2">
-                                    <Text className="text-sm text-slate-500">最新行情日期:</Text>
-                                    <Text className="text-lg font-bold text-slate-700 font-mono">
-                                        {online?.latest_date || '--'}
-                                    </Text>
-                                </div>
-                                <div className="flex items-baseline space-x-2 mt-1">
-                                    <Text className="text-sm text-slate-500">数据量:</Text>
-                                    <Text className="text-lg font-bold text-slate-700 font-mono">
-                                        {online?.row_count?.toLocaleString() || 0}
-                                    </Text>
-                                    <Text className="text-xs text-slate-400">条</Text>
-                                    {online?.row_count && online.row_count < 4000 ? (
-                                        <Text className="text-xs text-orange-500">(偏少)</Text>
-                                    ) : null}
                                 </div>
                                 {online?.postgresql?.error && (
                                     <Text className="text-xs text-red-500 mt-1 block">{online.postgresql.error}</Text>
@@ -186,7 +191,7 @@ export const AdminMarketMonitor: React.FC = () => {
 
                             <div className="bg-slate-50 p-4 rounded-xl">
                                 <div className="flex items-center justify-between">
-                                    <Text className="text-xs font-bold text-slate-500 uppercase tracking-wider">Redis</Text>
+                                    <Text className="text-xs font-bold text-slate-500 uppercase tracking-wider">Redis (DB 3)</Text>
                                     {renderServiceTag(online?.redis?.status || 'unknown')}
                                 </div>
                                 {online?.redis?.error && (
@@ -214,7 +219,7 @@ export const AdminMarketMonitor: React.FC = () => {
                         className="h-full rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow"
                         styles={{ body: { padding: '24px' } }}
                     >
-                        <div className="flex items-start justify-between mb-6">
+                        <div className="flex items-start justify-between mb-4">
                             <div className="flex items-center space-x-3">
                                 <div className="w-12 h-12 rounded-xl bg-purple-50 flex items-center justify-center">
                                     <DatabaseOutlined className="text-purple-600 text-2xl" />
@@ -222,6 +227,7 @@ export const AdminMarketMonitor: React.FC = () => {
                                 <div>
                                     <Title level={4} className="!mb-0 !text-slate-800">离线数据源</Title>
                                     <Text className="text-xs text-slate-400 font-mono">{offline?.server_ip || '139.199.75.121'}</Text>
+                                    <Text className="text-xs text-slate-400 block mt-0.5">Parquet 数据更新</Text>
                                 </div>
                             </div>
                             <div className="px-3 py-1 bg-slate-50 rounded-lg border border-slate-100">
@@ -229,33 +235,37 @@ export const AdminMarketMonitor: React.FC = () => {
                             </div>
                         </div>
 
+                        {/* 核心指标 — 日期信息置顶 */}
+                        <div className="bg-purple-50 p-4 rounded-xl mb-4">
+                            <div className="flex items-baseline space-x-2">
+                                <Text className="text-sm text-purple-600">最新快照日期:</Text>
+                                <Text className="text-xl font-bold text-purple-700 font-mono">
+                                    {offline?.feature_snapshots?.latest_date || '--'}
+                                </Text>
+                            </div>
+                            <div className="flex items-baseline space-x-2 mt-1">
+                                <Text className="text-sm text-purple-600">数据量:</Text>
+                                <Text className="text-lg font-bold text-purple-700 font-mono">
+                                    {offline?.feature_snapshots?.row_count?.toLocaleString() || 0}
+                                </Text>
+                                <Text className="text-xs text-purple-400">条</Text>
+                            </div>
+                        </div>
+
                         <Divider className="my-4" />
 
                         <div className="space-y-4">
                             <div className="bg-slate-50 p-4 rounded-xl">
-                                <div className="flex items-center justify-between mb-2">
+                                <div className="flex items-center justify-between">
                                     <Text className="text-xs font-bold text-slate-500 uppercase tracking-wider">PostgreSQL</Text>
                                     {renderServiceTag(offline?.postgresql?.status || 'unknown')}
                                 </div>
                             </div>
 
                             <div className="bg-slate-50 p-4 rounded-xl">
-                                <div className="flex items-center justify-between mb-2">
+                                <div className="flex items-center justify-between">
                                     <Text className="text-xs font-bold text-slate-500 uppercase tracking-wider">Feature Snapshots</Text>
                                     {renderServiceTag(offline?.feature_snapshots?.status || 'unknown')}
-                                </div>
-                                <div className="flex items-baseline space-x-2 mt-2">
-                                    <Text className="text-sm text-slate-500">最新快照日期:</Text>
-                                    <Text className="text-lg font-bold text-slate-700 font-mono">
-                                        {offline?.feature_snapshots?.latest_date || '--'}
-                                    </Text>
-                                </div>
-                                <div className="flex items-baseline space-x-2 mt-1">
-                                    <Text className="text-sm text-slate-500">数据量:</Text>
-                                    <Text className="text-lg font-bold text-slate-700 font-mono">
-                                        {offline?.feature_snapshots?.row_count?.toLocaleString() || 0}
-                                    </Text>
-                                    <Text className="text-xs text-slate-400">条</Text>
                                 </div>
                             </div>
                         </div>

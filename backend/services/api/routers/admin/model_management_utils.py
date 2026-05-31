@@ -388,11 +388,11 @@ def _scan_feature_snapshots_status(
             continue
 
         m_year = data.get("year")
-        s_date = data.get("output_start_date")
-        e_date = data.get("output_end_date")
-        r_count = data.get("row_count") or 0
-        f_count = data.get("implemented_feature_count") or 0
-        sym_count = data.get("symbol_count") or 0
+        s_date = data.get("output_start_date") or data.get("min_date", "")[:10]
+        e_date = data.get("output_end_date") or data.get("max_date", "")[:10]
+        r_count = data.get("row_count") or data.get("rows") or 0
+        f_count = data.get("implemented_feature_count") or data.get("feature_count") or 0
+        sym_count = data.get("symbol_count") or data.get("symbols") or 0
 
         total_rows += r_count
 
