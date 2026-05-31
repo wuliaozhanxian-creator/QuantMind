@@ -44,22 +44,12 @@ def _get_quote_redis():
     global _quote_redis
     if _quote_redis is None:
         try:
-            host = os.getenv("REDIS_HOST", "quantmind-redis")
-            port = int(os.getenv("REDIS_PORT", "6379"))
-            password = os.getenv("REDIS_PASSWORD", "")
-            db = int(os.getenv("REDIS_DB_MARKET", "3"))
-            _quote_redis = redis_lib.Redis(
-                host=host,
-                port=port,
-                password=password,
-                db=db,
-                decode_responses=True,
-                socket_timeout=2,
-            )
+            from backend.services.trade.utils.quote_redis import get_quote_redis
+            _quote_redis = get_quote_redis()
             _quote_redis.ping()
-            logger.info(f"[ManualExecution] 已连接行情 Redis: {host}:{port} db={db}")
+            logger.info("[ManualExecution] 已连接远程行情 Redis DB 0")
         except Exception as e:
-            logger.warning(f"[ManualExecution] 无法连接行情 Redis: {e}")
+            logger.warning(f"[ManualExecution] 无法连接远程行情 Redis: {e}")
             _quote_redis = None
     return _quote_redis
 

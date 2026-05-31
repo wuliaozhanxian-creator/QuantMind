@@ -675,9 +675,9 @@ def _build_signal_redis_client() -> redis.Redis:
 
 
 def _build_market_redis_client() -> redis.Redis:
-    """行情连接 — 远程行情服务器 DB 1"""
-    from backend.shared.remote_redis_client import get_remote_redis_client
-    return get_remote_redis_client(db=1)
+    """行情连接 — 远程行情服务器 DB 0（交易服务行情数据）"""
+    from backend.services.trade.utils.quote_redis import get_quote_redis
+    return get_quote_redis()
 
 
 def _resolve_runner_identity(args: argparse.Namespace) -> tuple[str, str, str] | None:

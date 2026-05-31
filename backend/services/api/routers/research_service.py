@@ -64,7 +64,7 @@ def _resolve_stock_index_json_path() -> Path | None:
 
 def _redis_get_json(key: str) -> dict[str, Any] | None:
     try:
-        redis = get_remote_redis_client()
+        redis = get_remote_redis_client(db=3)
         raw = redis.get(key)
         if not raw:
             return None
@@ -78,7 +78,7 @@ def _redis_get_json(key: str) -> dict[str, Any] | None:
 
 def _redis_set_json(key: str, value: dict[str, Any], ttl_seconds: int) -> None:
     try:
-        redis = get_remote_redis_client()
+        redis = get_remote_redis_client(db=3)
         payload = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         redis.setex(key, ttl_seconds, payload)
     except Exception:
@@ -92,7 +92,7 @@ def _sdl_redis_key(trade_date: date) -> str:
 def _load_sdl_from_remote_redis(trade_date: date) -> dict[str, dict[str, Any]]:
     """从远程 Redis 加载 sdl:日期:股票代码 格式的缓存（使用 pipeline 批量读取）"""
     try:
-        redis = get_remote_redis_client()
+        redis = get_remote_redis_client(db=3)
         date_str = trade_date.isoformat()
         pattern = f"sdl:{date_str}:*"
         keys = redis.keys(pattern)
@@ -1220,80 +1220,46 @@ async def get_symbols_features(tid: str, uid: str, symbols: list[str], lite: boo
 
 
 async def get_stock_kline(symbol: str, days: int) -> dict[str, Any]:
-    """从远程 Redis 批量读取多日 SDL 数据构建 K 线"""
+    """构建 K 线：直接从远程 PostgreSQL stock_daily_latest 查询"""
     normalized_symbol = StockCodeUtil.to_prefix(symbol)
     cache_key = f"sdl-kline:{normalized_symbol}:{days}"
     cached = _get_local_cache(_SDL_CACHE, cache_key, _SDL_CACHE_TTL_SECONDS)
     if cached is not None:
         return cached
 
+    items: list[dict[str, Any]] = []
     try:
-        redis = get_remote_redis_client()
-        # Redis key 格式: sdl:日期:股票代码 (如 sdl:2026-04-30:SH600036)
-        # 扫描该股票所有日期的数据
-        pattern = f"sdl:*:{normalized_symbol}"
-        all_keys = redis.keys(pattern)
-        if not all_keys:
-            # 尝试后缀格式兼容 (sdl:2026-04-30:600036.SH)
-            suffix_symbol = f"{normalized_symbol[2:]}.{normalized_symbol[:2]}"
-            pattern = f"sdl:*:{suffix_symbol}"
-            all_keys = redis.keys(pattern)
-
-        if not all_keys:
-            payload = {"code": 200, "data": {"symbol": normalized_symbol, "items": []}}
-            _set_local_cache(_SDL_CACHE, cache_key, payload, _SDL_CACHE_MAX_ENTRIES)
-            return payload
-
-        # 按日期排序，取最近 days 条
-        dated_keys = []
-        for key in all_keys:
-            parts = key.split(":")
-            if len(parts) >= 3:
-                try:
-                    date_str = parts[1]
-                    dated_keys.append((date_str, key))
-                except:
-                    continue
-
-        dated_keys.sort(reverse=True)  # 按日期降序
-        recent_keys = [k for _, k in dated_keys[:days]]
-
-        # 使用 pipeline 批量读取
-        pipe = redis.pipeline()
-        for key in recent_keys:
-            pipe.hgetall(key)
-        results = pipe.execute()
-
-        items = []
-        for data in results:
-            if not data:
-                continue
-            try:
-                date_str = data.get("trade_date", "")
-                close = float(data.get("close", 0) or 0)
-                open_price = float(data.get("open", 0) or 0)
-                high = float(data.get("high", 0) or 0)
-                low = float(data.get("low", 0) or 0)
-                volume = float(data.get("volume", 0) or 0)
-                adj_factor = 1.0  # SDL 缓存已调整
-
-                if close > 0 and volume > 0:
+        suffix_symbol = f"{normalized_symbol[2:]}.{normalized_symbol[:2]}"
+        sql = f"""
+            SELECT trade_date, open, high, low, close, volume
+            FROM {_SDL_TABLE}
+            WHERE (symbol = :symbol OR symbol = :suffix_symbol)
+              AND volume > 0
+            ORDER BY trade_date DESC
+            LIMIT :days
+        """
+        async with get_market_session() as m_session:
+            res = await m_session.execute(
+                text(sql),
+                {"symbol": normalized_symbol, "suffix_symbol": suffix_symbol, "days": days},
+            )
+            rows = res.mappings().all()
+            for row in rows:
+                close = float(row.get("close", 0) or 0)
+                if close > 0:
                     items.append({
-                        "date": date_str,
-                        "open": round(open_price / adj_factor, 2),
-                        "high": round(high / adj_factor, 2),
-                        "low": round(low / adj_factor, 2),
-                        "close": round(close / adj_factor, 2),
-                        "volume": volume,
+                        "date": str(row.get("trade_date", "")),
+                        "open": round(float(row.get("open", 0) or 0), 2),
+                        "high": round(float(row.get("high", 0) or 0), 2),
+                        "low": round(float(row.get("low", 0) or 0), 2),
+                        "close": round(close, 2),
+                        "volume": float(row.get("volume", 0) or 0),
                     })
-            except Exception:
-                continue
-
-        items.reverse()  # 按时间升序返回
-        payload = {"code": 200, "data": {"symbol": normalized_symbol, "items": items}}
-        _set_local_cache(_SDL_CACHE, cache_key, payload, _SDL_CACHE_MAX_ENTRIES)
-        return payload
+            items.reverse()
     except Exception as e:
         import logging
-        logging.getLogger(__name__).warning(f"K-line Redis read failed for {symbol}: {e}")
-        return {"code": 200, "data": {"symbol": normalized_symbol, "items": []}}
+        logging.getLogger(__name__).warning(f"K-line PG read failed for {symbol}: {e}")
+
+    payload = {"code": 200, "data": {"symbol": normalized_symbol, "items": items}}
+    _set_local_cache(_SDL_CACHE, cache_key, payload, _SDL_CACHE_MAX_ENTRIES)
+    return payload

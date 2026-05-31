@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import redis as redis_lib
+
 from backend.services.trade.services.k8s_manager import k8s_manager
 from backend.services.trade.services.signal_readiness_service import (
     signal_readiness_service,
@@ -66,20 +66,10 @@ def _get_env_with_root_fallback(key: str, default: str = "") -> str:
 
 
 def _get_stream_series_redis_client():
-    host = _get_env_with_root_fallback("REDIS_HOST", "localhost")
-    port = int(_get_env_with_root_fallback("REDIS_PORT", "6379") or "6379")
-    password = _get_env_with_root_fallback("REDIS_PASSWORD", "") or None
-    db = int(_get_env_with_root_fallback("REDIS_DB_MARKET", "3"))
-    client = redis_lib.Redis(
-        host=host,
-        port=port,
-        password=password,
-        db=db,
-        decode_responses=True,
-        socket_timeout=3.0,
-        socket_connect_timeout=3.0,
-    )
-    return client, host, port
+    """行情时序 Redis 客户端 — 远程行情服务器 DB 0"""
+    from backend.services.trade.utils.quote_redis import get_quote_redis
+    client = get_quote_redis()
+    return client, "106.53.100.144", 6379
 
 
 def _resolve_probe_symbols() -> list[str]:

@@ -26,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from starlette.concurrency import run_in_threadpool
 
-import redis as redis_lib
+
 from backend.services.trade.deps import AuthContext, get_auth_context, get_db
 from backend.services.trade.models.order import Order
 from backend.services.trade.models.preflight_snapshot import PreflightSnapshot
@@ -986,22 +986,11 @@ def _resolve_runner_image_for_mode() -> tuple[str, str]:
 def _get_stream_series_redis_client():
     """
     Stream 行情时序 Redis（quote->series）客户端。
-    OSS 版本使用统一 Redis 实例 (REDIS_DB_MARKET)。
+    使用远程行情服务器 DB 0（交易服务行情数据）。
     """
-    host = _get_env_with_root_fallback("REDIS_HOST", "localhost")
-    port = int(_get_env_with_root_fallback("REDIS_PORT", "6379") or "6379")
-    password = _get_env_with_root_fallback("REDIS_PASSWORD", "") or None
-    db = int(_get_env_with_root_fallback("REDIS_DB_MARKET", "3"))
-    client = redis_lib.Redis(
-        host=host,
-        port=port,
-        password=password,
-        db=db,
-        decode_responses=True,
-        socket_timeout=3.0,
-        socket_connect_timeout=3.0,
-    )
-    return client, host, port
+    from backend.services.trade.utils.quote_redis import get_quote_redis
+    client = get_quote_redis()
+    return client, "106.53.100.144", 6379
 
 
 def check_stream_series_freshness(redis_client=None) -> dict[str, Any]:
