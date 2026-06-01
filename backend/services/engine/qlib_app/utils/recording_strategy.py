@@ -727,6 +727,14 @@ class SimpleWeightStrategy(WeightStrategyBase):
             else:
                 return {}
 
+        # Qlib 的 signal 常见索引是 MultiIndex(date, instrument)。
+        # WeightStrategyBase 下游按 stock_id(str) 调用交易所接口，若传 tuple 会导致全部无法成交。
+        if isinstance(sc.index, pd.MultiIndex):
+            if "instrument" in sc.index.names:
+                sc = sc.groupby(level="instrument").last()
+            else:
+                sc = sc.groupby(level=sc.index.nlevels - 1).last()
+
         # 只保留大于阈值的正分
         threshold = self.min_score if self.min_score is not None else 0.0
         sc = sc[sc > threshold]

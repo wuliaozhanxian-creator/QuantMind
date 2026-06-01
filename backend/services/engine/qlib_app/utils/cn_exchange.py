@@ -147,7 +147,12 @@ class CnExchange(Exchange):
         end_time: pd.Timestamp,
         method: str = "ts_data_last",
     ) -> float | None:
-        return self._get_recent_valid_quote(stock_id, start_time, end_time, field="$close", method=method)
+        price = self._get_recent_valid_quote(stock_id, start_time, end_time, field="$close", method=method)
+        if price is not None and not getattr(self, "trade_w_adj_price", False):
+            factor = self.get_factor(stock_id, start_time, end_time)
+            if factor:
+                price = price * float(factor)
+        return price
 
     def get_factor(
         self,
@@ -185,6 +190,11 @@ class CnExchange(Exchange):
                 end_time=str(pd.Timestamp(end_time)),
             )
             deal_price = self.get_close(stock_id, start_time, end_time, method)
+
+        if deal_price is not None and not getattr(self, "trade_w_adj_price", False):
+            factor = self.get_factor(stock_id, start_time, end_time)
+            if factor:
+                deal_price = deal_price * float(factor)
         return deal_price
 
     def deal_order(

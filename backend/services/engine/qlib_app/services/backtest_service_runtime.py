@@ -716,14 +716,65 @@ class QlibBacktestServiceRuntimeMixin(QlibBacktestServiceQueryMixin):
             "on",
         }
 
+    @staticmethod
+    def _strict_model_id_enabled() -> bool:
+        raw = str(os.getenv("QLIB_STRICT_MODEL_ID", "true") or "true").strip().lower()
+        return raw in {"1", "true", "yes", "on"}
+
+    def _validate_explicit_model_id_resolution(
+        self,
+        explicit_model_id: str | None,
+        registry_meta: dict[str, Any],
+    ) -> str | None:
+        """
+        严格模式：
+        - 只要显式传了 model_id，就必须解析到同一模型；
+        - 禁止静默回退到 user_default / system_fallback。
+        """
+        explicit = str(explicit_model_id or "").strip()
+        if not explicit or not self._strict_model_id_enabled():
+            return None
+
+        model_resolution = str(registry_meta.get("model_resolution") or "").strip()
+        model_source = str(registry_meta.get("model_source") or "").strip()
+        fallback_used = bool(registry_meta.get("fallback_used"))
+        effective_model_id = str(registry_meta.get("effective_model_id") or "").strip()
+        fallback_reason = str(registry_meta.get("fallback_reason") or "").strip()
+
+        if model_resolution != "resolved":
+            return (
+                f"strict_model_id_resolution_failed: requested={explicit}, "
+                f"model_resolution={model_resolution or '<empty>'}, reason={fallback_reason or '<none>'}"
+            )
+
+        if model_source not in {"explicit_model_id", "explicit_system_model"} or fallback_used:
+            return (
+                f"strict_model_id_mismatch: requested={explicit}, effective={effective_model_id or '<empty>'}, "
+                f"model_source={model_source or '<empty>'}, fallback_used={fallback_used}, "
+                f"reason={fallback_reason or '<none>'}"
+            )
+        return None
+
     def _enforce_signal_quality(
         self,
         signal_meta: dict[str, Any],
         request: QlibBacktestRequest | None = None,
     ) -> None:
         source = signal_meta.get("source")
+        fallback_reason = str(signal_meta.get("fallback_reason", "unknown") or "unknown")
+        if source == "close_fallback" and fallback_reason.startswith("strict_model_id_"):
+            pred_path_hint = (
+                signal_meta.get("resolved_pred_path")
+                or signal_meta.get("model_storage_path")
+                or signal_meta.get("pred_path")
+                or signal_meta.get("legacy_pred_path")
+                or "<未解析>"
+            )
+            raise ValueError(
+                f"信号质量预检失败：显式 model_id 严格模式未通过（原因：{fallback_reason}）。"
+                f"尝试查找的 pred 路径：{pred_path_hint}。"
+            )
         if source == "close_fallback" and not self._feature_fallback_allowed(request):
-            fallback_reason = signal_meta.get("fallback_reason", "unknown")
             pred_path_hint = (
                 signal_meta.get("resolved_pred_path")
                 or signal_meta.get("model_storage_path")
@@ -1002,15 +1053,59 @@ class QlibBacktestServiceRuntimeMixin(QlibBacktestServiceQueryMixin):
         feature = signal.strip()
 
         if feature == "<PRED>":
+            explicit_model_id = str(getattr(request, "model_id", "") or "").strip() or None
             (
                 registry_pred_path,
                 registry_meta,
             ) = await self._resolve_pred_path_from_model_registry(request)
+            strict_model_error = self._validate_explicit_model_id_resolution(
+                explicit_model_id, registry_meta
+            )
+            if strict_model_error:
+                task_logger.error(
+                    "strict_model_id_rejected",
+                    "显式 model_id 严格模式校验失败",
+                    requested_model_id=explicit_model_id,
+                    effective_model_id=registry_meta.get("effective_model_id"),
+                    model_source=registry_meta.get("model_source"),
+                    fallback_used=registry_meta.get("fallback_used"),
+                    fallback_reason=registry_meta.get("fallback_reason"),
+                )
+                return {
+                    "class": "SimpleSignal",
+                    "module_path": "backend.services.engine.qlib_app.utils.simple_signal",
+                    "kwargs": {
+                        "metric": "$close",
+                        "universe": request.universe,
+                        "signal_lag_days": int(getattr(request, "signal_lag_days", 1) or 0),
+                    },
+                }, {
+                    **registry_meta,
+                    "source": "close_fallback",
+                    "fallback_reason": strict_model_error,
+                    "signal_lag_days": int(getattr(request, "signal_lag_days", 1) or 0),
+                }
             if registry_pred_path and os.path.exists(registry_pred_path):
                 signal_data, signal_meta = self._load_pred_pkl(
                     registry_pred_path, request
                 )
                 return signal_data, {**registry_meta, **signal_meta}
+
+            if explicit_model_id and self._strict_model_id_enabled():
+                return {
+                    "class": "SimpleSignal",
+                    "module_path": "backend.services.engine.qlib_app.utils.simple_signal",
+                    "kwargs": {
+                        "metric": "$close",
+                        "universe": request.universe,
+                        "signal_lag_days": int(getattr(request, "signal_lag_days", 1) or 0),
+                    },
+                }, {
+                    **registry_meta,
+                    "source": "close_fallback",
+                    "fallback_reason": "strict_model_id_pred_not_found",
+                    "signal_lag_days": int(getattr(request, "signal_lag_days", 1) or 0),
+                }
 
             pred_path = os.getenv(
                 "QLIB_PRED_PATH",

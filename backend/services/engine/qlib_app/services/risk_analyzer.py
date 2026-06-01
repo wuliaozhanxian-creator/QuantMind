@@ -270,9 +270,8 @@ class RiskAnalyzer:
                 display_price = adj_price / factor_val
                 display_quantity = adj_quantity * factor_val
 
-            total_amount = cls._to_finite_float(row.get("totalAmount", row.get("total_amount")))
-            if total_amount is None:
-                total_amount = display_price * display_quantity
+            # 强制统一成交金额口径，避免旧错误 totalAmount 污染收益统计
+            total_amount = display_price * display_quantity
 
             row["price"] = float(display_price)
             row["quantity"] = cls._normalize_display_quantity(symbol, display_quantity)
