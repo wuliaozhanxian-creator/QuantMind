@@ -451,6 +451,37 @@ async def test_get_default_model_hosted_status_accepts_explicit_system_model(mon
     assert status["latest_run_id"] == "run_explicit_system"
 
 
+@pytest.mark.asyncio
+async def test_get_default_model_hosted_status_distinguishes_system_default_only(monkeypatch):
+    service = ManualExecutionService()
+
+    monkeypatch.setattr(
+        service,
+        "_load_user_default_model_record",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        "backend.shared.model_registry.model_registry_service.get_default_model",
+        AsyncMock(
+            return_value={
+                "model_id": "model_qlib",
+                "metadata_json": {"system_default": True, "readonly": True},
+                "status": "active",
+            }
+        ),
+    )
+
+    status = await service.get_default_model_hosted_status(
+        tenant_id="default",
+        user_id="79311845",
+    )
+
+    assert status["available"] is False
+    assert status["source"] == "system_default"
+    assert status["reason_code"] == "system_default_only"
+    assert "系统兜底模型" in status["message"]
+
+
 def test_parse_iso_datetime_supports_z_suffix_and_naive_value():
     parsed_z = _parse_iso_datetime("2026-05-13T10:00:00Z")
     parsed_naive = _parse_iso_datetime("2026-05-13T10:00:00")

@@ -1242,6 +1242,47 @@ class ManualExecutionService:
             db=db,
         )
         if not default_model:
+            current_default_model = None
+            try:
+                from backend.shared.model_registry import model_registry_service
+
+                current_default_model = await model_registry_service.get_default_model(
+                    tenant_id=tenant,
+                    user_id=uid,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to inspect current default model for hosted status: %s",
+                    exc,
+                )
+
+            if current_default_model:
+                default_model_meta_raw = current_default_model.get("metadata_json")
+                if isinstance(default_model_meta_raw, str):
+                    try:
+                        default_model_meta = json.loads(default_model_meta_raw)
+                    except Exception:
+                        default_model_meta = {}
+                elif isinstance(default_model_meta_raw, dict):
+                    default_model_meta = default_model_meta_raw
+                else:
+                    default_model_meta = {}
+
+                if bool(default_model_meta.get("system_default")):
+                    return {
+                        "available": False,
+                        "source": "system_default",
+                        "reason_code": "system_default_only",
+                        "message": (
+                            "当前默认模型是系统兜底模型，"
+                            "不参与自动托管，请先在模型管理中设置用户默认模型"
+                        ),
+                        "latest_default_model_id": str(
+                            current_default_model.get("model_id") or ""
+                        ).strip()
+                        or None,
+                    }
+
             return {
                 "available": False,
                 "source": "missing",
