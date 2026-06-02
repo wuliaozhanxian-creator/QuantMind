@@ -452,7 +452,7 @@ async def test_get_default_model_hosted_status_accepts_explicit_system_model(mon
 
 
 @pytest.mark.asyncio
-async def test_get_default_model_hosted_status_distinguishes_system_default_only(monkeypatch):
+async def test_get_default_model_hosted_status_accepts_system_default_when_latest_run_ready(monkeypatch):
     service = ManualExecutionService()
 
     monkeypatch.setattr(
@@ -470,16 +470,40 @@ async def test_get_default_model_hosted_status_distinguishes_system_default_only
             }
         ),
     )
+    monkeypatch.setattr(
+        service,
+        "_load_latest_default_model_inference_run",
+        AsyncMock(
+            return_value={
+                "run_id": "run_system_default_ready",
+                "data_trade_date": date(2026, 6, 1),
+                "prediction_trade_date": date(2026, 6, 2),
+                "fallback_used": False,
+                "model_source": "explicit_system_model",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        service,
+        "_resolve_hosted_execution_window",
+        lambda **kwargs: (date(2026, 6, 2), date(2026, 6, 8)),
+    )
+    monkeypatch.setattr(
+        "backend.services.trade.services.manual_execution_service.datetime",
+        SimpleNamespace(
+            now=lambda _tz=None: SimpleNamespace(date=lambda: date(2026, 6, 2))
+        ),
+    )
 
     status = await service.get_default_model_hosted_status(
         tenant_id="default",
         user_id="79311845",
     )
 
-    assert status["available"] is False
-    assert status["source"] == "system_default"
-    assert status["reason_code"] == "system_default_only"
-    assert "系统兜底模型" in status["message"]
+    assert status["available"] is True
+    assert status["source"] == "explicit_system_model"
+    assert status["reason_code"] == "ready"
+    assert status["latest_run_id"] == "run_system_default_ready"
 
 
 def test_parse_iso_datetime_supports_z_suffix_and_naive_value():
