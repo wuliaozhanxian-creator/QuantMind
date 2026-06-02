@@ -27,6 +27,75 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+_SIM_TRADES_HAS_TRADE_ACTION: bool | None = None
+_SIM_TRADES_TIME_COLUMN: str | None = None
+
+
+async def _sim_trades_has_trade_action_column() -> bool:
+    """检测 sim_trades 是否存在 trade_action 列。
+
+    兼容老库结构：早期模拟盘表只有 side，没有 trade_action。
+    这里做一次轻量探测并缓存，避免每次持仓聚合都触发异常重试。
+    """
+    global _SIM_TRADES_HAS_TRADE_ACTION
+    if _SIM_TRADES_HAS_TRADE_ACTION is not None:
+        return _SIM_TRADES_HAS_TRADE_ACTION
+
+    try:
+        db_manager = get_db_manager()
+        query = text(
+            """
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'sim_trades'
+              AND column_name = 'trade_action'
+            LIMIT 1
+            """
+        )
+        async with db_manager.get_master_session() as session:
+            row = (await session.execute(query)).first()
+        _SIM_TRADES_HAS_TRADE_ACTION = bool(row)
+    except Exception as exc:
+        logger.warning("Failed to inspect sim_trades.trade_action column: %s", exc)
+        _SIM_TRADES_HAS_TRADE_ACTION = False
+
+    return _SIM_TRADES_HAS_TRADE_ACTION
+
+
+async def _sim_trades_time_column() -> str | None:
+    """返回 sim_trades 可用于时间过滤的列名。
+
+    优先使用 executed_at；老库若没有该列，则回退到 created_at。
+    两者都没有时返回 None，调用方需要跳过时间过滤。
+    """
+    global _SIM_TRADES_TIME_COLUMN
+    if _SIM_TRADES_TIME_COLUMN is not None:
+        return _SIM_TRADES_TIME_COLUMN
+
+    try:
+        db_manager = get_db_manager()
+        query = text(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'sim_trades'
+              AND column_name IN ('executed_at', 'created_at')
+            ORDER BY CASE column_name WHEN 'executed_at' THEN 0 ELSE 1 END
+            LIMIT 1
+            """
+        )
+        async with db_manager.get_master_session() as session:
+            row = (await session.execute(query)).first()
+        _SIM_TRADES_TIME_COLUMN = str(row[0]) if row and row[0] else None
+    except Exception as exc:
+        logger.warning("Failed to inspect sim_trades time column: %s", exc)
+        _SIM_TRADES_TIME_COLUMN = None
+
+    return _SIM_TRADES_TIME_COLUMN
+
+
 async def _get_latest_price(symbol: str) -> float:
     """
     获取股票最新价格逻辑：
@@ -135,59 +204,89 @@ async def _build_realtime_positions_from_db(
 
     base_filter = "WHERE tenant_id = :tenant_id AND user_id = :user_id"
     extra_filter = ""
-    params: dict = {"tenant_id": tenant_id, "user_id": user_id}
+    # sim_trades.user_id 在当前库结构里按字符串存储，显式转成 str 避免 asyncpg 类型不匹配。
+    params: dict = {"tenant_id": tenant_id, "user_id": str(user_id)}
     if since_naive is not None:
-        extra_filter = " AND executed_at >= :since_at"
-        params["since_at"] = since_naive
+        time_column = await _sim_trades_time_column()
+        if time_column:
+            extra_filter = f" AND {time_column} >= :since_at"
+            params["since_at"] = since_naive
 
-    # 多头净量：buy_to_open 增仓 / sell_to_close 平仓
-    # trade_action 为空时（旧数据）保持原先 buy=+/sell=- 逻辑
-    long_sql = f"""
-        SELECT symbol,
-               SUM(CASE
-                       WHEN trade_action IN ('buy_to_open', 'buy') OR (trade_action IS NULL AND side = 'buy')
-                           THEN quantity
-                       WHEN trade_action IN ('sell_to_close') OR (trade_action IS NULL AND side = 'sell')
-                           THEN -quantity
-                       ELSE 0
-                   END) AS volume
-        FROM sim_trades
-        {base_filter}{extra_filter}
-        GROUP BY symbol
-        HAVING SUM(CASE
-                       WHEN trade_action IN ('buy_to_open', 'buy') OR (trade_action IS NULL AND side = 'buy')
-                           THEN quantity
-                       WHEN trade_action IN ('sell_to_close') OR (trade_action IS NULL AND side = 'sell')
-                           THEN -quantity
-                       ELSE 0
-                   END) > 0.000001
-        ORDER BY symbol
-    """
+    has_trade_action = await _sim_trades_has_trade_action_column()
+    if has_trade_action:
+        # 多头净量：buy_to_open 增仓 / sell_to_close 平仓
+        # trade_action 为空时（旧数据）保持原先 buy=+/sell=- 逻辑
+        long_sql = f"""
+            SELECT symbol,
+                   SUM(CASE
+                           WHEN trade_action IN ('buy_to_open', 'buy') OR (trade_action IS NULL AND side = 'buy')
+                               THEN quantity
+                           WHEN trade_action IN ('sell_to_close') OR (trade_action IS NULL AND side = 'sell')
+                               THEN -quantity
+                           ELSE 0
+                       END) AS volume
+            FROM sim_trades
+            {base_filter}{extra_filter}
+            GROUP BY symbol
+            HAVING SUM(CASE
+                           WHEN trade_action IN ('buy_to_open', 'buy') OR (trade_action IS NULL AND side = 'buy')
+                               THEN quantity
+                           WHEN trade_action IN ('sell_to_close') OR (trade_action IS NULL AND side = 'sell')
+                               THEN -quantity
+                           ELSE 0
+                       END) > 0.000001
+            ORDER BY symbol
+        """
 
-    # 空头净量：sell_to_open 开空 / buy_to_close 平空
-    short_sql = f"""
-        SELECT symbol,
-               SUM(CASE
-                       WHEN trade_action = 'sell_to_open' THEN quantity
-                       WHEN trade_action = 'buy_to_close' THEN -quantity
-                       ELSE 0
-                   END) AS volume
-        FROM sim_trades
-        {base_filter}{extra_filter}
-          AND trade_action IN ('sell_to_open', 'buy_to_close')
-        GROUP BY symbol
-        HAVING SUM(CASE
-                       WHEN trade_action = 'sell_to_open' THEN quantity
-                       WHEN trade_action = 'buy_to_close' THEN -quantity
-                       ELSE 0
-                   END) > 0.000001
-        ORDER BY symbol
-    """
+        # 空头净量：sell_to_open 开空 / buy_to_close 平空
+        short_sql = f"""
+            SELECT symbol,
+                   SUM(CASE
+                           WHEN trade_action = 'sell_to_open' THEN quantity
+                           WHEN trade_action = 'buy_to_close' THEN -quantity
+                           ELSE 0
+                       END) AS volume
+            FROM sim_trades
+            {base_filter}{extra_filter}
+              AND trade_action IN ('sell_to_open', 'buy_to_close')
+            GROUP BY symbol
+            HAVING SUM(CASE
+                           WHEN trade_action = 'sell_to_open' THEN quantity
+                           WHEN trade_action = 'buy_to_close' THEN -quantity
+                           ELSE 0
+                       END) > 0.000001
+            ORDER BY symbol
+        """
+    else:
+        # 兼容老库：sim_trades 尚未包含 trade_action 列时，只按 side 聚合多头净量。
+        # 由于无法区分“开空/平空”，这里不构造空头仓位，避免错误报表和异常重试。
+        long_sql = f"""
+            SELECT symbol,
+                   SUM(CASE
+                           WHEN side = 'buy' THEN quantity
+                           WHEN side = 'sell' THEN -quantity
+                           ELSE 0
+                       END) AS volume
+            FROM sim_trades
+            {base_filter}{extra_filter}
+            GROUP BY symbol
+            HAVING SUM(CASE
+                           WHEN side = 'buy' THEN quantity
+                           WHEN side = 'sell' THEN -quantity
+                           ELSE 0
+                       END) > 0.000001
+            ORDER BY symbol
+        """
+        short_sql = None
 
     try:
         async with get_session(read_only=True) as session:
             long_rows = (await session.execute(text(long_sql), params)).mappings().all()
-            short_rows = (await session.execute(text(short_sql), params)).mappings().all()
+            short_rows = (
+                (await session.execute(text(short_sql), params)).mappings().all()
+                if short_sql
+                else []
+            )
     except Exception as e:
         logger.warning(f"Database query failed in _build_realtime_positions_from_db: {e}")
         long_rows = []
