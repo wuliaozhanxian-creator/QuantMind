@@ -83,7 +83,11 @@ async def get_account_daily_ledger(
         user_id=resolved_user_id,
     )
     resolved_account_id = str(current_snapshot.get("account_id") or "").strip() if current_snapshot else ""
-    target_account_id = str(account_id or resolved_account_id or "").strip()
+    # Handle both direct calls (str value) and FastAPI routing (Query object)
+    account_id_value = None
+    if isinstance(account_id, str):
+        account_id_value = account_id
+    target_account_id = str(account_id_value or resolved_account_id or "").strip()
 
     rows = await list_real_account_daily_ledgers(
         db,

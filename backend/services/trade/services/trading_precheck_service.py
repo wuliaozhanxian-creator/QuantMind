@@ -214,7 +214,12 @@ def _check_inference_model_exists() -> tuple[bool, str]:
     )
 
 
-    pass
+def _check_stream_series_freshness(redis_client) -> tuple[bool, str]:
+    """检查行情时序数据新鲜度，供测试 mock 使用。"""
+    from backend.services.trade.routers.real_trading_utils import check_stream_series_freshness
+
+    res = check_stream_series_freshness(redis_client=redis_client)
+    return res.get("ok", False), res.get("message", "")
 
 
 def _parse_snapshot_at(snapshot: dict[str, Any]) -> float | None:

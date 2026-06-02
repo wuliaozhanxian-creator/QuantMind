@@ -148,6 +148,33 @@ class Settings(BaseSettings):
     SIMULATION_COMMISSION_RATE: float = float(
         os.getenv("SIMULATION_COMMISSION_RATE", "0.0003")
     )
+    SIMULATION_STAMP_DUTY_RATE: float = float(
+        os.getenv("SIMULATION_STAMP_DUTY_RATE", "0.001")
+    )  # 印花税（卖出）
+    SIMULATION_TRANSFER_FEE_RATE: float = float(
+        os.getenv("SIMULATION_TRANSFER_FEE_RATE", "0.00001")
+    )  # 过户费（双向）
+
+    # Simulation Hosted Scheduler
+    SIM_HOSTED_SCHEDULER_ENABLED: bool = (
+        os.getenv("SIM_HOSTED_SCHEDULER_ENABLED", "true").lower() == "true"
+    )
+    SIM_HOSTED_SCHEDULER_INTERVAL_SECONDS: int = int(
+        os.getenv("SIM_HOSTED_SCHEDULER_INTERVAL_SECONDS", "30")
+    )
+
+    # Simulation Runtime Restorer
+    SIM_RUNTIME_RESTORE_ENABLED: bool = (
+        os.getenv("SIM_RUNTIME_RESTORE_ENABLED", "true").lower() == "true"
+    )
+
+    # Simulation Fund Snapshot
+    SIM_FUND_SNAPSHOT_ENABLED: bool = (
+        os.getenv("SIM_FUND_SNAPSHOT_ENABLED", "true").lower() == "true"
+    )
+    SIM_FUND_SNAPSHOT_INTERVAL_SECONDS: int = int(
+        os.getenv("SIM_FUND_SNAPSHOT_INTERVAL_SECONDS", "30")
+    )
 
     # Commission rates for risk purchasing-power check
     # A 股买入佣金约 0.03%（券商最低 5 元）；卖出另含印花税 0.1%+过户费 0.001%

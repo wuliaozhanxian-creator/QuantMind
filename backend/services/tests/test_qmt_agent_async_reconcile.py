@@ -177,13 +177,13 @@ def test_reconcile_recent_activity_applies_window_and_limits():
     now = int(time.time())
 
     trader._orders = [
-        SimpleNamespace(order_remark="cid-old-order", order_id="1001", stock_code="600001.SH", order_type=23, traded_volume=0, price=9.8, order_status=48, order_time=now - 5000),
-        SimpleNamespace(order_remark="cid-newer-order", order_id="1002", stock_code="600002.SH", order_type=23, traded_volume=10, price=10.2, order_status=49, order_time=now - 20),
-        SimpleNamespace(order_remark="cid-newest-order", order_id="1003", stock_code="600003.SH", order_type=24, traded_volume=100, price=10.3, order_status=50, order_time=now - 10),
+        SimpleNamespace(order_remark="a1b2c3d4-e5f6-7890-abcd-ef1234567890", order_id="1001", stock_code="600001.SH", order_type=23, traded_volume=0, price=9.8, order_status=48, order_time=now - 5000),
+        SimpleNamespace(order_remark="b2c3d4e5-f6a7-8901-bcde-f23456789012", order_id="1002", stock_code="600002.SH", order_type=23, traded_volume=10, price=10.2, order_status=49, order_time=now - 20),
+        SimpleNamespace(order_remark="c3d4e5f6-a7b8-9012-cdef-345678901234", order_id="1003", stock_code="600003.SH", order_type=24, traded_volume=100, price=10.3, order_status=50, order_time=now - 10),
     ]
     trader._trades = [
-        SimpleNamespace(order_remark="cid-old-trade", order_id="2001", traded_id="t-old", stock_code="600010.SH", order_type=23, traded_volume=100, traded_price=9.6, traded_time=now - 3000),
-        SimpleNamespace(order_remark="cid-newest-trade", order_id="2002", traded_id="t-new", stock_code="600011.SH", order_type=24, traded_volume=200, traded_price=11.2, traded_time=now - 8),
+        SimpleNamespace(order_remark="d4e5f6a7-b8c9-0123-def0-456789012345", order_id="2001", traded_id="t-old", stock_code="600010.SH", order_type=23, traded_volume=100, traded_price=9.6, traded_time=now - 3000),
+        SimpleNamespace(order_remark="e5f6a7b8-c9d0-1234-ef01-567890123456", order_id="2002", traded_id="t-new", stock_code="600011.SH", order_type=24, traded_volume=200, traded_price=11.2, traded_time=now - 8),
     ]
 
     events = client.reconcile_recent_activity()
@@ -193,8 +193,8 @@ def test_reconcile_recent_activity_applies_window_and_limits():
     trade_events = [e for e in events if e["exchange_trade_id"] is not None]
     assert len(order_events) == 1
     assert len(trade_events) == 1
-    assert order_events[0]["client_order_id"] == "cid-newest-order"
-    assert trade_events[0]["client_order_id"] == "cid-newest-trade"
+    assert order_events[0]["client_order_id"] == "c3d4e5f6-a7b8-9012-cdef-345678901234"
+    assert trade_events[0]["client_order_id"] == "e5f6a7b8-c9d0-1234-ef01-567890123456"
 
 
 def test_async_cancel_callback_resolves_client_order_by_seq():
@@ -226,7 +226,7 @@ def test_reconcile_recent_activity_dedups_same_trade_key():
     trader._orders = []
     trader._trades = [
         SimpleNamespace(
-            order_remark="cid-dedup-1",
+            order_remark="f6a7b8c9-d0e1-2345-f012-678901234567",
             order_id="3001",
             traded_id="dup-trade-id",
             stock_code="600111.SH",
@@ -236,7 +236,7 @@ def test_reconcile_recent_activity_dedups_same_trade_key():
             traded_time=now - 5,
         ),
         SimpleNamespace(
-            order_remark="cid-dedup-1",
+            order_remark="f6a7b8c9-d0e1-2345-f012-678901234567",
             order_id="3001",
             traded_id="dup-trade-id",
             stock_code="600111.SH",

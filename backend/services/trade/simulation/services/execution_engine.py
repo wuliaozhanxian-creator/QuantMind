@@ -3,7 +3,6 @@ Synthetic execution engine for simulation orders.
 """
 
 import logging
-import random
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -35,6 +34,8 @@ class ExecutionResult:
         price: float = 0.0,
         quantity: float = 0.0,
         commission: float = 0.0,
+        stamp_duty: float = 0.0,
+        transfer_fee: float = 0.0,
         price_source: str | None = None,
         message: str = "",
     ):
@@ -42,6 +43,8 @@ class ExecutionResult:
         self.price = price
         self.quantity = quantity
         self.commission = commission
+        self.stamp_duty = stamp_duty
+        self.transfer_fee = transfer_fee
         self.price_source = price_source
         self.message = message
 
@@ -172,14 +175,12 @@ class SimulationExecutionEngine:
         try:
             from sqlalchemy import text
 
-            query_with_limits = text(
-                """
+            query_with_limits = text("""
                 SELECT close, adj_factor, limit_up_today, limit_down_today, volume
                 FROM stock_daily_latest
                 WHERE symbol = :symbol
                 ORDER BY trade_date DESC LIMIT 1
-                """
-            )
+            """)
             try:
                 result = await self.db.execute(query_with_limits, {"symbol": prefix_symbol})
                 row = result.fetchone()
@@ -199,14 +200,12 @@ class SimulationExecutionEngine:
                         suspended=(self._as_float(row[4]) or 0.0) <= 0.0,
                     )
             except Exception:
-                query_legacy = text(
-                    """
+                query_legacy = text("""
                     SELECT close, adj_factor
                     FROM stock_daily_latest
                     WHERE symbol = :symbol
                     ORDER BY trade_date DESC LIMIT 1
-                    """
-                )
+                """)
                 legacy_result = await self.db.execute(query_legacy, {"symbol": prefix_symbol})
                 legacy_row = legacy_result.fetchone()
                 if not legacy_row and suffix_symbol != prefix_symbol:
@@ -221,10 +220,11 @@ class SimulationExecutionEngine:
         except Exception as e:
             logger.error("Database fallback failed for %s: %s", raw_symbol, e)
 
-        # Level 3: 最终保底
+        # Level 3: 拒单而非随机价格，避免污染账户数据
         return MarketSnapshot(
-            price=100.0 + random.uniform(-1, 1),
-            price_source="random_fallback",
+            price=0.0,
+            price_source="unavailable",
+            suspended=True,
         )
 
     async def execute_order(self, order: SimOrder) -> ExecutionResult:
@@ -238,8 +238,22 @@ class SimulationExecutionEngine:
         slippage = settings.SIMULATION_SLIPPAGE_BPS / 10000
 
         side = str(order.side.value).lower()
+
+        # 风控检查
         if snapshot.suspended:
             return ExecutionResult(success=False, message="Security is suspended, cannot trade")
+        if base_price <= 0:
+            return ExecutionResult(success=False, message="No valid market price, cannot trade")
+        if order.quantity <= 0:
+            return ExecutionResult(success=False, message="Quantity must be positive")
+
+        # 整手校验：A股必须以100股为单位
+        if not float(order.quantity).is_integer() or int(order.quantity) % 100 != 0:
+            return ExecutionResult(
+                success=False,
+                message="A-share simulation quantity must be an integral board lot of 100",
+            )
+
         if side == "buy" and snapshot.limit_up:
             return ExecutionResult(success=False, message="Limit-up locked, buy order cannot be filled")
         if side == "sell" and snapshot.limit_down:
@@ -252,19 +266,42 @@ class SimulationExecutionEngine:
         elif order.order_type == OrderType.LIMIT:
             if order.price is None or order.price <= 0:
                 return ExecutionResult(success=False, message="Limit price required")
-            exec_price = round(float(order.price), 4)
+            limit_price = float(order.price)
+            direction = 1 if side == "buy" else -1
+            simulated_price = round(base_price * (1 + direction * slippage), 4)
+            if side == "buy":
+                if limit_price < base_price:
+                    return ExecutionResult(success=False, message="Buy limit price is below market price")
+                exec_price = min(simulated_price, round(limit_price, 4))
+            else:
+                if limit_price > base_price:
+                    return ExecutionResult(success=False, message="Sell limit price is above market price")
+                exec_price = max(simulated_price, round(limit_price, 4))
             price_source = "limit_price"
         else:
             return ExecutionResult(success=False, message=f"Unsupported order type: {order.order_type}")
 
+        # 完整费用模型：佣金 + 印花税（卖出）+ 过户费
         commission = round(order.quantity * exec_price * settings.SIMULATION_COMMISSION_RATE, 2)
+        stamp_duty = (
+            round(order.quantity * exec_price * settings.SIMULATION_STAMP_DUTY_RATE, 2)
+            if side == "sell"
+            else 0.0
+        )
+        transfer_fee = round(order.quantity * exec_price * settings.SIMULATION_TRANSFER_FEE_RATE, 2)
+        total_fee = commission + stamp_duty + transfer_fee
+
         gross = order.quantity * exec_price
         if order.side.value == "buy":
-            delta_cash = -(gross + commission)
+            delta_cash = -(gross + total_fee)
             delta_volume = order.quantity
         else:
-            delta_cash = gross - commission
+            delta_cash = gross - total_fee
             delta_volume = -order.quantity
+
+        trade_action = str(getattr(order, "trade_action", None) or "").strip() or None
+        position_side = str(getattr(order, "position_side", None) or "long").strip() or "long"
+        is_margin_trade = bool(getattr(order, "is_margin_trade", False))
 
         update = await self.manager.update_balance(
             user_id=order.user_id,
@@ -273,6 +310,9 @@ class SimulationExecutionEngine:
             delta_volume=delta_volume,
             price=exec_price,
             tenant_id=order.tenant_id,
+            trade_action=trade_action,
+            position_side=position_side,
+            is_margin_trade=is_margin_trade,
         )
         if not update.get("success"):
             reason = update.get("reason", "BALANCE_UPDATE_FAILED")
@@ -287,6 +327,8 @@ class SimulationExecutionEngine:
             price=exec_price,
             quantity=order.quantity,
             commission=commission,
+            stamp_duty=stamp_duty,
+            transfer_fee=transfer_fee,
             price_source=price_source,
         )
 
@@ -303,8 +345,14 @@ class SimulationExecutionEngine:
             price=result.price,
             trade_value=trade_value,
             commission=result.commission,
+            stamp_duty=result.stamp_duty,
+            transfer_fee=result.transfer_fee,
+            total_fee=result.commission + result.stamp_duty + result.transfer_fee,
             executed_at=datetime.now(),
             price_source=result.price_source,
+            trade_action=getattr(order, "trade_action", None),
+            position_side=getattr(order, "position_side", None) or "long",
+            is_margin_trade=int(bool(getattr(order, "is_margin_trade", False))),
         )
         self.db.add(trade)
 
@@ -315,6 +363,7 @@ class SimulationExecutionEngine:
         order.average_price = result.price
         order.filled_value = trade_value
         order.commission = result.commission
+        order.total_fee = result.commission + result.stamp_duty + result.transfer_fee
         order.order_value = order.quantity * (order.price or 0)
         order.execution_model = "synthetic_price"
         order.price_source = result.price_source

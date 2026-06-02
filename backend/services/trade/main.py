@@ -53,6 +53,8 @@ async def lifespan(app: FastAPI):
     manual_execution_task = None
     sandbox_signal_task = None
     sim_fund_snapshot_worker = None
+    simulation_hosted_scheduler = None
+    simulation_runtime_restorer = None
 
     try:
         await init_unified_config(service_name="quantmind-trade")
@@ -163,8 +165,7 @@ async def lifespan(app: FastAPI):
         app.state.startup_healthy = False
         logger.error("trade simulation fund snapshot worker start failed: %s", e, exc_info=True)
 
-    # 启动模拟盘定时调度器
-    simulation_scheduler_task = None
+    # 启动模拟盘定时调度器（旧版，已弃用）
     try:
         enabled = os.getenv("ENABLE_SIMULATION_SCHEDULER", "false").lower() in {"1", "true", "yes", "on"}
         if enabled:
@@ -172,9 +173,43 @@ async def lifespan(app: FastAPI):
 
             await simulation_scheduler.start()
             app.state.simulation_scheduler = simulation_scheduler
-            logger.info("Simulation scheduler started")
+            logger.info("Simulation scheduler started (legacy)")
     except Exception as e:
         logger.error("trade simulation scheduler start failed: %s", e, exc_info=True)
+
+    # 模拟盘托管调度器（新版，替代旧调度器）
+    try:
+        from backend.services.trade.trade_config import settings
+
+        if settings.SIM_HOSTED_SCHEDULER_ENABLED:
+            from backend.services.trade.services.simulation_hosted_scheduler import (
+                SimulationHostedScheduler,
+            )
+
+            simulation_hosted_scheduler = SimulationHostedScheduler(
+                redis_client, interval_seconds=settings.SIM_HOSTED_SCHEDULER_INTERVAL_SECONDS
+            )
+            await simulation_hosted_scheduler.start()
+            app.state.simulation_hosted_scheduler = simulation_hosted_scheduler
+            logger.info("Simulation hosted scheduler started")
+    except Exception as e:
+        logger.error("trade simulation hosted scheduler start failed: %s", e, exc_info=True)
+
+    # 容器重启后从 Redis 恢复模拟盘沙箱进程
+    try:
+        from backend.services.trade.trade_config import settings
+
+        if settings.SIM_RUNTIME_RESTORE_ENABLED:
+            from backend.services.trade.services.simulation_runtime_restorer import (
+                SimulationRuntimeRestorer,
+            )
+
+            simulation_runtime_restorer = SimulationRuntimeRestorer(redis_client)
+            restored = await simulation_runtime_restorer.restore_all()
+            app.state.simulation_runtime_restorer = simulation_runtime_restorer
+            logger.info("Simulation runtime restored %d strategies", restored)
+    except Exception as e:
+        logger.error("trade simulation runtime restore failed: %s", e, exc_info=True)
 
     healthy = bool(app.state.startup_healthy and app.state.db_connected and app.state.redis_connected)
     set_service_health("quantmind-trade", healthy)
@@ -213,13 +248,21 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning("trade sandbox signal consumer stop failed: %s", e)
 
-    # 停止模拟盘调度器
+    # 停止模拟盘调度器（旧版）
     simulation_scheduler = getattr(app.state, "simulation_scheduler", None)
     if simulation_scheduler is not None:
         try:
             await simulation_scheduler.stop()
         except Exception as e:
             logger.warning("trade simulation scheduler stop failed: %s", e)
+
+    # 停止模拟盘托管调度器（新版）
+    hosted_scheduler = getattr(app.state, "simulation_hosted_scheduler", None)
+    if hosted_scheduler is not None:
+        try:
+            await hosted_scheduler.stop()
+        except Exception as e:
+            logger.warning("trade simulation hosted scheduler stop failed: %s", e)
 
     # 停止沙箱进程池
     try:
