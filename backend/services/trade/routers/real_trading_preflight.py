@@ -441,14 +441,15 @@ async def preflight_check(
                 f"行情检测异常: {e}",
             )
 
-        # 2. Stream行情落库 (始终阻断)
+        # 2. Stream行情落库 (REAL/SHADOW 必需，SIMULATION 非阻断)
+        persist_required = mode in {"REAL", "SHADOW"}
         try:
             res = check_stream_quote_persist_rate(redis_client=redis.client)
             add_check(
                 "stream_quote_persist_rate",
                 "Stream行情落库",
                 res["ok"],
-                True,
+                persist_required,
                 res["message"],
                 res["details"],
             )
@@ -457,7 +458,7 @@ async def preflight_check(
                 "stream_quote_persist_rate",
                 "Stream行情落库",
                 False,
-                True,
+                persist_required,
                 f"行情落库检测失败: {e}",
             )
             await db.rollback()
@@ -672,13 +673,21 @@ async def preflight_check(
             matched_symbol = None
             latest_age_sec = None
             for symbol in stream_symbols:
-                key = f"market:series:{symbol}"
-                latest = stream_redis.zrevrange(key, 0, 0, withscores=True)
+                normalized = StockCodeUtil.to_prefix(symbol)
+                # 兼容两种 key 格式:
+                # 1. market:series:SH600000 (前缀格式，规范)
+                # 2. market:series:600000.SH (后缀格式，旧数据)
+                prefix_key = f"market:series:{normalized}"
+                suffix_key = f"market:series:{normalized[2:]}.{normalized[:2]}"
+
+                latest = stream_redis.zrevrange(prefix_key, 0, 0, withscores=True)
+                if not latest:
+                    latest = stream_redis.zrevrange(suffix_key, 0, 0, withscores=True)
                 if latest:
                     _, score = latest[0]
                     age = max(0, int(time.time() - float(score)))
                     if latest_age_sec is None or age < latest_age_sec:
-                        matched_symbol = symbol
+                        matched_symbol = normalized
                         latest_age_sec = age
             stream_ok = latest_age_sec is not None and latest_age_sec < 300
             threshold_sec = 300
