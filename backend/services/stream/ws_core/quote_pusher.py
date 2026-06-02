@@ -55,7 +55,7 @@ class QuotePusher:
         self.push_interval = 2.0  # 全局拉取间隔（秒）
         self.cache: dict[str, dict[str, Any]] = {}  # 行情缓存
         self.persist_to_db = True
-        self.write_series = True
+        self.write_series = False  # 远程 Redis 只读，不写入时序数据
         self.warmup_symbols: set[str] = {
             s.strip() for s in (settings.STREAM_WARMUP_SYMBOLS or "").split(",") if s.strip()
         }

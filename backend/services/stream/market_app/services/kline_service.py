@@ -1,107 +1,117 @@
-"""KLine service"""
+“””KLine service”””
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from redis.asyncio import Redis
-from sqlalchemy import and_, desc, select
+from sqlalchemy import and_, desc, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..market_config import settings
 from ..models import KLine
 from ..schemas import KLineCreate, KLineResponse
-from .data_source import SinaDataSource, TencentDataSource
-from .remote_redis_source import RemoteRedisDataSource
+from backend.shared.market_db_manager import get_market_session
+from backend.shared.stock_utils import StockCodeUtil
 
 logger = logging.getLogger(__name__)
 
 
 class KLineService:
-    """K线数据服务"""
+    “””K线数据服务”””
 
     def __init__(self, db: AsyncSession, redis: Redis | None = None):
         self.db = db
         self.redis = redis
-        self.primary_source = TencentDataSource()
-        self.fallback_source = SinaDataSource()
-        self.remote_snapshot_source = RemoteRedisDataSource()
 
     async def get_klines(
         self,
         symbol: str,
-        interval: str = "1d",
+        interval: str = “1d”,
         start_time: datetime | None = None,
         end_time: datetime | None = None,
         limit: int = 100,
         use_cache: bool = True,
     ) -> list[KLineResponse]:
-        """获取K线数据"""
+        “””获取K线数据 - 优先从远程 stock_daily_latest 读取”””
 
         # 1. 尝试从缓存获取
         if use_cache and self.redis:
             cached = await self._get_cached_klines(symbol, interval, limit)
             if cached:
-                logger.debug(f"KLine cache hit for {symbol} {interval}")
+                logger.debug(f”KLine cache hit for {symbol} {interval}”)
                 return cached
 
-        # 2. 从数据库查询
+        # 2. 优先从远程 stock_daily_latest 读取 (仅支持日线)
+        if interval == “1d”:
+            klines = await self._fetch_from_stock_daily_latest(symbol, limit)
+            if klines:
+                if self.redis:
+                    await self._cache_klines(symbol, interval, klines)
+                return klines
+
+        # 3. 从本地数据库查询
         klines = await self.list_klines(symbol, interval, start_time, end_time, limit)
+        if klines:
+            return klines
 
-        # 3. 如果数据库没有，从数据源获取
-        if not klines:
-            logger.info(f"Fetching klines from data source for {symbol} {interval}")
-            kline_data = await self.primary_source.fetch_kline(symbol, interval, start_time, end_time, limit)
-            if not kline_data:
-                kline_data = await self.fallback_source.fetch_kline(symbol, interval, start_time, end_time, limit)
+        return []
 
-            if kline_data:
-                # 批量保存
-                for data in kline_data:
-                    await self.create_kline(KLineCreate(**data))
+    async def _fetch_from_stock_daily_latest(self, symbol: str, limit: int = 60) -> list[KLineResponse]:
+        “””从远程 stock_daily_latest 表读取日线数据”””
+        # 统一转换为小写前缀格式 (sh600000)
+        normalized = StockCodeUtil.to_prefix(symbol).lower()
 
-                klines = await self.list_klines(symbol, interval, start_time, end_time, limit)
-            else:
-                # 上游 K 线为空时，使用远程快照兜底生成一根“当前K线”
-                snap = await self.remote_snapshot_source.fetch_quote(symbol)
-                if snap and snap.get("current_price") is not None:
-                    ts = snap.get("timestamp") if isinstance(snap.get("timestamp"), datetime) else datetime.now()
-                    price = float(snap.get("current_price") or 0.0)
-                    open_p = float(snap.get("open_price") or price)
-                    high_p = float(snap.get("high_price") or max(open_p, price))
-                    low_p = float(snap.get("low_price") or min(open_p, price))
-                    close_p = float(snap.get("close_price") or price)
-                    volume = int(snap.get("volume") or 0)
-                    amount = snap.get("amount")
+        try:
+            async with get_market_session() as session:
+                stmt = text(“””
+                    SELECT
+                        symbol,
+                        trade_date,
+                        open,
+                        high,
+                        low,
+                        close,
+                        volume,
+                        amount,
+                        pct_change,
+                        turnover_rate
+                    FROM stock_daily_latest
+                    WHERE symbol = :symbol
+                    ORDER BY trade_date DESC
+                    LIMIT :limit
+                “””)
+                result = await session.execute(stmt, {“symbol”: normalized, “limit”: limit})
+                rows = result.mappings().all()
 
-                    synthetic = KLineCreate(
+                if not rows:
+                    logger.debug(f”No data in stock_daily_latest for {normalized}”)
+                    return []
+
+                klines = []
+                for row in rows:
+                    klines.append(KLineResponse(
                         symbol=symbol,
-                        interval=interval,
-                        timestamp=ts,
-                        open_price=open_p,
-                        high_price=high_p,
-                        low_price=low_p,
-                        close_price=close_p,
-                        volume=volume,
-                        amount=float(amount) if amount is not None else None,
-                        change=(price - close_p) if close_p else None,
-                        change_percent=((price - close_p) / close_p * 100.0) if close_p else None,
-                        turnover_rate=None,
-                        data_source="remote_redis",
-                    )
-                    try:
-                        await self.create_kline(synthetic)
-                    except Exception as e:
-                        logger.warning(f"Create synthetic kline failed for {symbol}: {e}")
-                        await self.db.rollback()
-                    klines = await self.list_klines(symbol, interval, start_time, end_time, limit)
+                        interval=”1d”,
+                        timestamp=datetime.combine(row[“trade_date”], datetime.min.time()),
+                        open_price=float(row[“open”] or 0),
+                        high_price=float(row[“high”] or 0),
+                        low_price=float(row[“low”] or 0),
+                        close_price=float(row[“close”] or 0),
+                        volume=int(row[“volume”] or 0),
+                        amount=float(row[“amount”] or 0),
+                        change=None,
+                        change_percent=float(row[“pct_change”]) if row[“pct_change”] else None,
+                        turnover_rate=float(row[“turnover_rate”]) if row[“turnover_rate”] else None,
+                    ))
 
-        # 4. 缓存
-        if self.redis and klines:
-            await self._cache_klines(symbol, interval, klines)
+                logger.info(f”Fetched {len(klines)} klines from stock_daily_latest for {normalized}”)
+                return klines
 
-        return klines
+        except Exception as e:
+            logger.error(f”Failed to fetch from stock_daily_latest: {e}”)
+            return []
 
     async def create_kline(self, kline: KLineCreate) -> KLineResponse:
         """创建K线记录"""

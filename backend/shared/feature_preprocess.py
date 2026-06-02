@@ -4,17 +4,21 @@ import pandas as pd
 
 
 def cs_zscore_with_mad_series(series: pd.Series, mad_multiplier: float = 5.0) -> pd.Series:
+    if series.isna().all():
+        return pd.Series(0.0, index=series.index)
+
     median = series.median()
     abs_dev = (series - median).abs()
     mad = abs_dev.median()
-    
+
     # 优势 1：天然屏蔽稀疏低效噪音。当 MAD 为 0 时直接返回全 0.0。
     if mad == 0:
         return pd.Series(0.0, index=series.index)
-        
+
     upper = median + mad_multiplier * mad
     lower = median - mad_multiplier * mad
-    clipped = series.clip(lower=lower, upper=upper).infer_objects(copy=False)
+    with pd.option_context("future.no_silent_downcasting", True):
+        clipped = series.clip(lower=lower, upper=upper).infer_objects(copy=False)
     
     # 优势 2：释放小尺度核心因子的真实波动。移除 1e-9 惩罚项。
     std = clipped.std()

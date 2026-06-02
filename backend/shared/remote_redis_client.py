@@ -23,7 +23,7 @@ REMOTE_REDIS_HOST = os.getenv("REMOTE_QUOTE_REDIS_HOST", "106.53.100.144")
 REMOTE_REDIS_PORT = int(os.getenv("REMOTE_QUOTE_REDIS_PORT", "6379"))
 REMOTE_REDIS_USER = os.getenv("REMOTE_QUOTE_REDIS_USER", "readonly_monitor")
 REMOTE_REDIS_PASSWORD = os.getenv("REMOTE_QUOTE_REDIS_PASSWORD") or _decrypt_redis_password()
-REMOTE_REDIS_DB = 3
+REMOTE_REDIS_DB = 0
 
 
 def get_remote_redis_client(db: int = None) -> Redis:

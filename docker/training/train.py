@@ -55,14 +55,6 @@ DEFAULT_LGB_PARAMS: dict[str, Any] = {
     "verbosity":         -1,
 }
 
-TRAINING_BASE_FEATURES: list[str] = [
-    "mom_ret_1d",
-    "mom_ret_5d",
-    "mom_ret_20d",
-    "liq_volume",
-    "liq_amount",
-    "liq_turnover_os",
-]
 _ALLOWED_SHAP_SPLIT = {"valid", "test", "train"}
 _DEFAULT_EXPLAIN_CFG: dict[str, Any] = {
     "enable_shap": True,
@@ -675,10 +667,9 @@ def main() -> int:
 
         logger.info("=== QuantMind Training Start ===")
         logger.info(f"run_id={run_id}  job={job_name}  config={cfg_path}")
-        # 数据加载（特征列自动补齐基础6列）
+        # 数据加载
         submitted_features = list(dict.fromkeys([str(item).strip() for item in (cfg["data"].get("features", []) or []) if str(item).strip()]))
-        auto_appended_features = [feature for feature in TRAINING_BASE_FEATURES if feature not in submitted_features]
-        features = list(dict.fromkeys(TRAINING_BASE_FEATURES + submitted_features))
+        features = submitted_features
         source_mode = str((cfg.get("data", {}) or {}).get("source_mode") or "LOCAL").strip().upper()
         local_data_dir = str((cfg.get("data", {}) or {}).get("local_dir") or "").strip() or None
         explain_cfg = _normalize_explain_cfg(cfg.get("explain") or {})
@@ -754,8 +745,6 @@ def main() -> int:
             "feature_count": len(valid_features),
             "requested_feature_count": len(submitted_features),
             "requested_features": submitted_features,
-            "auto_appended_feature_count": len(auto_appended_features),
-            "auto_appended_features": auto_appended_features,
             "features": valid_features,
             "feature_columns": valid_features,
             "fill_values": fill_values,

@@ -1221,7 +1221,7 @@ async def get_symbols_features(tid: str, uid: str, symbols: list[str], lite: boo
 
 async def get_stock_kline(symbol: str, days: int) -> dict[str, Any]:
     """构建 K 线：直接从远程 PostgreSQL stock_daily_latest 查询"""
-    normalized_symbol = StockCodeUtil.to_prefix(symbol)
+    normalized_symbol = StockCodeUtil.to_prefix(symbol).lower()  # 转为小写匹配数据库格式
     cache_key = f"sdl-kline:{normalized_symbol}:{days}"
     cached = _get_local_cache(_SDL_CACHE, cache_key, _SDL_CACHE_TTL_SECONDS)
     if cached is not None:
@@ -1229,11 +1229,10 @@ async def get_stock_kline(symbol: str, days: int) -> dict[str, Any]:
 
     items: list[dict[str, Any]] = []
     try:
-        suffix_symbol = f"{normalized_symbol[2:]}.{normalized_symbol[:2]}"
         sql = f"""
             SELECT trade_date, open, high, low, close, volume
             FROM {_SDL_TABLE}
-            WHERE (symbol = :symbol OR symbol = :suffix_symbol)
+            WHERE symbol = :symbol
               AND volume > 0
             ORDER BY trade_date DESC
             LIMIT :days
@@ -1241,7 +1240,7 @@ async def get_stock_kline(symbol: str, days: int) -> dict[str, Any]:
         async with get_market_session() as m_session:
             res = await m_session.execute(
                 text(sql),
-                {"symbol": normalized_symbol, "suffix_symbol": suffix_symbol, "days": days},
+                {"symbol": normalized_symbol, "days": days},
             )
             rows = res.mappings().all()
             for row in rows:

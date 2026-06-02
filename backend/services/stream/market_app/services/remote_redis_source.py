@@ -204,14 +204,22 @@ class RemoteRedisDataSource(DataSourceAdapter):
         """
         client = self._get_client()
         normalized = self._normalize_symbol(symbol)
-        series_key = f"market:series:{normalized}"
+
+        # 兼容两种 key 格式:
+        # 1. market:series:SH600000 (前缀格式，规范)
+        # 2. market:series:600000.SH (后缀格式，旧数据)
+        prefix_key = f"market:series:{normalized}"
+        suffix_key = f"market:series:{normalized[2:]}.{normalized[:2]}"
 
         now_ts = int(time.time())
         start_ts = now_ts - seconds
 
         try:
-            # 获取时间窗口内的所有快照点
-            raw_data = await client.zrange(series_key, start_ts, now_ts, byscore=True)
+            # 尝试前缀格式
+            raw_data = await client.zrange(prefix_key, start_ts, now_ts, byscore=True)
+            # 如果没有数据，尝试后缀格式
+            if not raw_data:
+                raw_data = await client.zrange(suffix_key, start_ts, now_ts, byscore=True)
 
             results = []
             for item in raw_data:

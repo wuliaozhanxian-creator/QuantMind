@@ -29,7 +29,7 @@ MARKET_REDIS_HOST = "106.53.100.144"
 MARKET_REDIS_PORT = 6379
 MARKET_REDIS_USER = "readonly_monitor"
 MARKET_REDIS_PASSWORD = _decrypt_market_redis_password()
-MARKET_REDIS_DB = 3
+MARKET_REDIS_DB = 0
 
 
 class Settings(BaseSettings):

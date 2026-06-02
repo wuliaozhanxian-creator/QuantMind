@@ -1008,8 +1008,15 @@ def check_stream_series_freshness(redis_client=None) -> dict[str, Any]:
         stream_redis.ping()
         for symbol in stream_symbols:
             normalized = StockCodeUtil.to_prefix(symbol)
-            key = f"market:series:{normalized}"
-            latest = stream_redis.zrevrange(key, 0, 0, withscores=True)
+            # 兼容两种 key 格式:
+            # 1. market:series:SH600000 (前缀格式，规范)
+            # 2. market:series:600000.SH (后缀格式，旧数据)
+            prefix_key = f"market:series:{normalized}"
+            suffix_key = f"market:series:{normalized[2:]}.{normalized[:2]}"
+
+            latest = stream_redis.zrevrange(prefix_key, 0, 0, withscores=True)
+            if not latest:
+                latest = stream_redis.zrevrange(suffix_key, 0, 0, withscores=True)
             if latest:
                 _, score = latest[0]
                 age = max(0, int(time.time() - float(score)))
@@ -1022,8 +1029,11 @@ def check_stream_series_freshness(redis_client=None) -> dict[str, Any]:
             try:
                 for symbol in stream_symbols:
                     normalized = StockCodeUtil.to_prefix(symbol)
-                    key = f"market:series:{normalized}"
-                    latest = redis_client.zrevrange(key, 0, 0, withscores=True)
+                    prefix_key = f"market:series:{normalized}"
+                    suffix_key = f"market:series:{normalized[2:]}.{normalized[:2]}"
+                    latest = redis_client.zrevrange(prefix_key, 0, 0, withscores=True)
+                    if not latest:
+                        latest = redis_client.zrevrange(suffix_key, 0, 0, withscores=True)
                     if latest:
                         _, score = latest[0]
                         age = max(0, int(time.time() - float(score)))
