@@ -465,52 +465,6 @@ async def preflight_check(
             )
             await db.rollback()
 
-        # 10) Stream K线拉取可用性（只做可用性探针，默认非阻断）
-        kline_required = False
-        kline_symbol = _resolve_preflight_symbols()[0]
-        stream_base_url = str(settings.MARKET_DATA_SERVICE_URL or "http://quantmind-stream:8003").rstrip("/")
-        kline_url = f"{stream_base_url}/api/v1/klines/{kline_symbol}"
-        try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(5.0, connect=2.0)) as client:
-                resp = await client.get(
-                    kline_url,
-                    params={"interval": "1d", "limit": 3, "use_cache": False},
-                )
-            if resp.status_code != 200:
-                add_check(
-                    "stream_kline_fetch",
-                    "Stream K线抓取",
-                    False,
-                    kline_required,
-                    f"K线接口返回异常: HTTP {resp.status_code}",
-                    {"endpoint": kline_url, "status_code": resp.status_code},
-                )
-            else:
-                payload = resp.json() if resp.content else {}
-                kline_total = int(payload.get("total", 0) or 0)
-                kline_ok = kline_total > 0
-                add_check(
-                    "stream_kline_fetch",
-                    "Stream K线抓取",
-                    kline_ok,
-                    kline_required,
-                    "K线接口可用" if kline_ok else "K线接口可达，但未返回有效数据",
-                    {
-                        "endpoint": kline_url,
-                        "symbol": kline_symbol,
-                        "kline_total": kline_total,
-                    },
-                )
-        except Exception as e:
-            add_check(
-                "stream_kline_fetch",
-                "Stream K线抓取",
-                False,
-                kline_required,
-                f"K线探针失败: {e}",
-                {"endpoint": kline_url, "symbol": kline_symbol},
-            )
-
     # 11) 模拟盘专用：沙箱进程池与关键表可用性
     simulation_required = mode == "SIMULATION"
     if simulation_required:

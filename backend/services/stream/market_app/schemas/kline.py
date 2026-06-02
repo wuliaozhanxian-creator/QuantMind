@@ -33,8 +33,8 @@ class KLineResponse(KLineBase):
 
     model_config = ConfigDict(from_attributes=True)
 
-    id: int
-    created_at: datetime
+    id: int | None = Field(None, description="主键")
+    created_at: datetime | None = Field(None, description="创建时间")
 
 
 class KLineListResponse(BaseModel):
