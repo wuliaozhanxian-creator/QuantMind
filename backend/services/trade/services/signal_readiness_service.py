@@ -35,6 +35,7 @@ class SignalReadinessService:
         hosted_status = await manual_execution_service.get_default_model_hosted_status(
             tenant_id=tenant,
             user_id=uid,
+            db=db,
         )
         result = {
             "available": bool(hosted_status.get("available")),

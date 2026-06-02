@@ -960,8 +960,37 @@ class ManualExecutionService:
             )
 
     async def _load_user_default_model_record(
-        self, *, tenant_id: str, user_id: str
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        db: Any | None = None,
     ) -> dict[str, Any] | None:
+        if db is not None:
+            row = (
+                (
+                    await db.execute(
+                        text(
+                            """
+                        SELECT model_id, metadata_json, status, activated_at, updated_at
+                        FROM qm_user_models
+                        WHERE tenant_id = :tenant_id
+                          AND user_id = :user_id
+                          AND is_default = TRUE
+                          AND status IN ('ready', 'active')
+                          AND COALESCE((metadata_json->>'system_default')::boolean, FALSE) = FALSE
+                        ORDER BY activated_at DESC NULLS LAST, updated_at DESC
+                        LIMIT 1
+                        """
+                        ),
+                        {"tenant_id": tenant_id, "user_id": user_id},
+                    )
+                )
+                .mappings()
+                .first()
+            )
+            return dict(row) if row else None
+
         async with get_session(read_only=True) as session:
             row = (
                 (
@@ -988,8 +1017,41 @@ class ManualExecutionService:
         return dict(row) if row else None
 
     async def _load_latest_default_model_inference_run(
-        self, *, tenant_id: str, user_id: str, model_id: str
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        model_id: str,
+        db: Any | None = None,
     ) -> dict[str, Any] | None:
+        if db is not None:
+            row = (
+                (
+                    await db.execute(
+                        text(
+                            """
+                        SELECT *
+                        FROM qm_model_inference_runs
+                        WHERE tenant_id = :tenant_id
+                          AND user_id = :user_id
+                          AND model_id = :model_id
+                          AND status = 'completed'
+                        ORDER BY prediction_trade_date DESC, created_at DESC
+                        LIMIT 1
+                        """
+                        ),
+                        {
+                            "tenant_id": tenant_id,
+                            "user_id": user_id,
+                            "model_id": model_id,
+                        },
+                    )
+                )
+                .mappings()
+                .first()
+            )
+            return dict(row) if row else None
+
         async with get_session(read_only=True) as session:
             row = (
                 (
@@ -1166,12 +1228,18 @@ class ManualExecutionService:
         return dict(row) if row else None
 
     async def get_default_model_hosted_status(
-        self, *, tenant_id: str, user_id: str
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        db: Any | None = None,
     ) -> dict[str, Any]:
         tenant = (tenant_id or "").strip() or "default"
         uid = str(user_id or "").strip()
         default_model = await self._load_user_default_model_record(
-            tenant_id=tenant, user_id=uid
+            tenant_id=tenant,
+            user_id=uid,
+            db=db,
         )
         if not default_model:
             return {
@@ -1202,7 +1270,10 @@ class ManualExecutionService:
             target_horizon_days = 5
 
         latest_run = await self._load_latest_default_model_inference_run(
-            tenant_id=tenant, user_id=uid, model_id=default_model_id
+            tenant_id=tenant,
+            user_id=uid,
+            model_id=default_model_id,
+            db=db,
         )
         if not latest_run:
             return {

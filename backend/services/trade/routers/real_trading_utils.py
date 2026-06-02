@@ -23,7 +23,6 @@ from pydantic import BaseModel
 from sqlalchemy import bindparam, desc, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 from starlette.concurrency import run_in_threadpool
 
 
@@ -271,7 +270,6 @@ async def _fetch_active_portfolio_snapshot(
 
     stmt = (
         select(Portfolio)
-        .options(selectinload(Portfolio.positions))
         .where(*base_where)
         .order_by(
             desc(Portfolio.run_status == "running"),

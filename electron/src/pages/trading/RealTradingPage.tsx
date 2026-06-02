@@ -71,13 +71,26 @@ const getErrorHttpStatus = (err: unknown): number | undefined => {
     return response?.status;
 };
 
+const REAL_TRADING_STATUS_TIMEOUT_MS = 29000;
+const REAL_TRADING_ACCOUNT_TIMEOUT_MS = 29000;
+
 const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> => {
-    return await Promise.race([
-        promise,
-        new Promise<T>((_, reject) => {
-            window.setTimeout(() => reject(new Error(`${label} timeout after ${timeoutMs}ms`)), timeoutMs);
-        }),
-    ]);
+    let timeoutId: number | undefined;
+    try {
+        return await Promise.race([
+            promise,
+            new Promise<T>((_, reject) => {
+                timeoutId = window.setTimeout(
+                    () => reject(new Error(`${label} timeout after ${timeoutMs}ms`)),
+                    timeoutMs,
+                );
+            }),
+        ]);
+    } finally {
+        if (timeoutId !== undefined) {
+            window.clearTimeout(timeoutId);
+        }
+    }
 };
 
 const RealTradingPage: React.FC = () => {
@@ -143,13 +156,13 @@ const RealTradingPage: React.FC = () => {
             const { realTradingService } = await import('../../services/realTradingService');
             const statusData = await withTimeout(
                 realTradingService.getStatus(userId, tradingMode, tenantId),
-                8000,
+                REAL_TRADING_STATUS_TIMEOUT_MS,
                 'getStatus',
             );
             const runtimeMode = resolveTradingAccountMode(statusData?.mode, tradingMode);
             const accountData = await withTimeout(
                 realTradingService.getRuntimeAccount(userId, tenantId, runtimeMode).catch(() => null),
-                8000,
+                REAL_TRADING_ACCOUNT_TIMEOUT_MS,
                 'getRuntimeAccount',
             );
 

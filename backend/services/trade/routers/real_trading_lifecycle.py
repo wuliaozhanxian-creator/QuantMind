@@ -22,12 +22,13 @@ logger = logging.getLogger(__name__)
 
 
 async def _build_signal_source_status(
-    _redis_client, tenant_id: str, user_id: str
+    _redis_client, tenant_id: str, user_id: str, db: AsyncSession | None = None
 ) -> tuple[str | None, dict]:
     try:
         hosted_status = await manual_execution_service.get_default_model_hosted_status(
             tenant_id=tenant_id,
             user_id=user_id,
+            db=db,
         )
     except Exception as exc:
         return None, {
@@ -571,6 +572,7 @@ async def get_status(
         redis.client,
         resolved_tenant_id,
         resolved_user_id,
+        db,
     )
     latest_hosted_task = await manual_execution_service.get_latest_hosted_task(
         tenant_id=resolved_tenant_id,

@@ -217,6 +217,7 @@ const StrategyManagement: React.FC<StrategyManagementProps> = ({
     const hostedLogsRef = useRef<string[]>([]);
     const latestInferenceRunIdRef = useRef<string | null>(null);
     const latestInferenceNewTimerRef = useRef<number | null>(null);
+    const monitorFetchInFlightRef = useRef(false);
 
     const strategyOptions = useMemo(
         () => strategies.map((strategy) => ({
@@ -335,7 +336,6 @@ const StrategyManagement: React.FC<StrategyManagementProps> = ({
     useEffect(() => {
         const currentMode = tradingMode === 'simulation' ? 'SIMULATION' : 'REAL';
         let cancelled = false;
-        const SHARED_REAL_CHECK_KEYS = new Set(['stream_series_freshness']);
 
         const normalizeTradingPrecheckItems = (items: Array<{ key: string; label: string; passed: boolean; detail: string }>): PreflightCheckItem[] => {
             return items.map((item) => ({
@@ -363,43 +363,16 @@ const StrategyManagement: React.FC<StrategyManagementProps> = ({
             return Array.from(merged.values());
         };
 
-        const overlayChecksByKey = (
-            base: PreflightCheckItem[],
-            fromReal: PreflightCheckItem[],
-            keys: Set<string>,
-        ): PreflightCheckItem[] => {
-            if (!keys.size) return base;
-            const byKey = new Map<string, PreflightCheckItem>();
-            for (const item of base) {
-                if (!item?.key) continue;
-                byKey.set(item.key, item);
-            }
-            for (const item of fromReal) {
-                if (!item?.key) continue;
-                if (keys.has(item.key)) {
-                    byKey.set(item.key, item);
-                }
-            }
-            return Array.from(byKey.values());
-        };
-
         const loadMonitor = async () => {
+            if (monitorFetchInFlightRef.current) {
+                return;
+            }
+            monitorFetchInFlightRef.current = true;
             try {
                 const realTradingService = await loadRealTradingService();
-                const [
-                    preflightResult,
-                    tradingPrecheckResult,
-                    realPreflightResult,
-                    realTradingPrecheckResult,
-                ] = await Promise.allSettled([
+                const [preflightResult, tradingPrecheckResult] = await Promise.allSettled([
                     realTradingService.preflight(currentMode, userId, tenantId),
                     realTradingService.getTradingPrecheck(currentMode),
-                    currentMode === 'SIMULATION'
-                        ? realTradingService.preflight('REAL', userId, tenantId)
-                        : Promise.resolve(null),
-                    currentMode === 'SIMULATION'
-                        ? realTradingService.getTradingPrecheck('REAL')
-                        : Promise.resolve(null),
                 ]);
                 if (cancelled) return;
 
@@ -412,23 +385,10 @@ const StrategyManagement: React.FC<StrategyManagementProps> = ({
                 ) ? normalizeTradingPrecheckItems(tradingPrecheckResult.value.items) : [];
 
                 const mergedChecks = mergeChecks(preflightChecks, tradingPrecheckChecks);
-                const realPreflightChecks = (
-                    realPreflightResult.status === 'fulfilled' && Array.isArray(realPreflightResult.value?.checks)
-                ) ? realPreflightResult.value.checks : [];
-                const realTradingPrecheckChecks = (
-                    realTradingPrecheckResult.status === 'fulfilled' && Array.isArray(realTradingPrecheckResult.value?.items)
-                ) ? normalizeTradingPrecheckItems(realTradingPrecheckResult.value.items) : [];
-                const mergedRealChecks = mergeChecks(realPreflightChecks, realTradingPrecheckChecks);
-
-                const finalChecks = currentMode === 'SIMULATION'
-                    ? overlayChecksByKey(mergedChecks, mergedRealChecks, SHARED_REAL_CHECK_KEYS)
-                    : mergedChecks;
-                setMonitorChecks(finalChecks);
+                setMonitorChecks(mergedChecks);
                 setMonitorCheckedAt(
                     (preflightResult.status === 'fulfilled' ? preflightResult.value?.checked_at : null)
                     || (tradingPrecheckResult.status === 'fulfilled' ? tradingPrecheckResult.value?.checked_at : null)
-                    || (realPreflightResult.status === 'fulfilled' ? realPreflightResult.value?.checked_at : null)
-                    || (realTradingPrecheckResult.status === 'fulfilled' ? realTradingPrecheckResult.value?.checked_at : null)
                     || null,
                 );
             } catch (e) {
@@ -436,11 +396,13 @@ const StrategyManagement: React.FC<StrategyManagementProps> = ({
                 console.warn('Failed to load strategy monitor snapshot', e);
                 setMonitorChecks([]);
                 setMonitorCheckedAt(null);
+            } finally {
+                monitorFetchInFlightRef.current = false;
             }
         };
 
         loadMonitor();
-        const timer = setInterval(loadMonitor, 15000);
+        const timer = setInterval(loadMonitor, 30000);
         return () => {
             cancelled = true;
             clearInterval(timer);

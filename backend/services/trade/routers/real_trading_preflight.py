@@ -19,6 +19,7 @@ from .real_trading_utils import (
 from backend.services.trade.services.signal_readiness_service import (
     signal_readiness_service,
 )
+from backend.services.trade.utils.redis_cache import redis_cache
 from backend.shared.trade_redis_keys import build_trade_agent_heartbeat_key
 
 router = APIRouter()
@@ -58,6 +59,7 @@ def _is_cn_trading_hours() -> bool:
 
 
 @router.get("/preflight")
+@redis_cache(ttl=10)
 async def preflight_check(
     trading_mode: str = "REAL",
     user_id: Optional[str] = None,
@@ -762,6 +764,7 @@ async def preflight_check(
 
 
 @router.get("/trading-precheck", response_model=TradingPrecheckResponse)
+@redis_cache(ttl=10)
 async def trading_precheck(
     trading_mode: str = "REAL",
     auth: AuthContext = Depends(get_auth_context),

@@ -140,7 +140,7 @@ const getWebSocketUrl = () => {
   // Web 部署使用相对路径，通过 Nginx 代理
   if (typeof window !== 'undefined') {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${protocol}//${window.location.host}/ws/api/v1/ws/market`;
+    return `${protocol}//${window.location.host}/api/v1/ws/market`;
   }
   // 最后才回退到环境变量，避免开发环境配置压过用户保存的服务器地址
   if (ENV.VITE_WS_BASE_URL || ENV.VITE_WEBSOCKET_MARKET_URL) {
