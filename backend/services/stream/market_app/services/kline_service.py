@@ -1,4 +1,4 @@
-“””KLine service”””
+"""KLine service"""
 
 import json
 import logging
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class KLineService:
-    “””K线数据服务”””
+    """K线数据服务"""
 
     def __init__(self, db: AsyncSession, redis: Redis | None = None):
         self.db = db
@@ -28,44 +28,43 @@ class KLineService:
     async def get_klines(
         self,
         symbol: str,
-        interval: str = “1d”,
+        interval: str = "1d",
         start_time: datetime | None = None,
         end_time: datetime | None = None,
         limit: int = 100,
         use_cache: bool = True,
     ) -> list[KLineResponse]:
-        “””获取K线数据 - 优先从远程 stock_daily_latest 读取”””
+        """获取K线数据 - 优先从远程 stock_daily_latest 读取"""
 
-        # 1. 尝试从缓存获取
         if use_cache and self.redis:
             cached = await self._get_cached_klines(symbol, interval, limit)
             if cached:
-                logger.debug(f”KLine cache hit for {symbol} {interval}”)
+                logger.debug(f"KLine cache hit for {symbol} {interval}")
                 return cached
 
-        # 2. 优先从远程 stock_daily_latest 读取 (仅支持日线)
-        if interval == “1d”:
+        if interval == "1d":
             klines = await self._fetch_from_stock_daily_latest(symbol, limit)
             if klines:
                 if self.redis:
                     await self._cache_klines(symbol, interval, klines)
                 return klines
 
-        # 3. 从本地数据库查询
         klines = await self.list_klines(symbol, interval, start_time, end_time, limit)
         if klines:
             return klines
 
         return []
 
-    async def _fetch_from_stock_daily_latest(self, symbol: str, limit: int = 60) -> list[KLineResponse]:
-        “””从远程 stock_daily_latest 表读取日线数据”””
-        # 统一转换为小写前缀格式 (sh600000)
+    async def _fetch_from_stock_daily_latest(
+        self, symbol: str, limit: int = 60
+    ) -> list[KLineResponse]:
+        """从远程 stock_daily_latest 表读取日线数据"""
         normalized = StockCodeUtil.to_prefix(symbol).lower()
 
         try:
             async with get_market_session() as session:
-                stmt = text(“””
+                stmt = text(
+                    """
                     SELECT
                         symbol,
                         trade_date,
@@ -81,36 +80,47 @@ class KLineService:
                     WHERE symbol = :symbol
                     ORDER BY trade_date DESC
                     LIMIT :limit
-                “””)
-                result = await session.execute(stmt, {“symbol”: normalized, “limit”: limit})
+                    """
+                )
+                result = await session.execute(stmt, {"symbol": normalized, "limit": limit})
                 rows = result.mappings().all()
 
                 if not rows:
-                    logger.debug(f”No data in stock_daily_latest for {normalized}”)
+                    logger.debug(f"No data in stock_daily_latest for {normalized}")
                     return []
 
                 klines = []
                 for row in rows:
-                    klines.append(KLineResponse(
-                        symbol=symbol,
-                        interval=”1d”,
-                        timestamp=datetime.combine(row[“trade_date”], datetime.min.time()),
-                        open_price=float(row[“open”] or 0),
-                        high_price=float(row[“high”] or 0),
-                        low_price=float(row[“low”] or 0),
-                        close_price=float(row[“close”] or 0),
-                        volume=int(row[“volume”] or 0),
-                        amount=float(row[“amount”] or 0),
-                        change=None,
-                        change_percent=float(row[“pct_change”]) if row[“pct_change”] else None,
-                        turnover_rate=float(row[“turnover_rate”]) if row[“turnover_rate”] else None,
-                    ))
+                    klines.append(
+                        KLineResponse(
+                            symbol=symbol,
+                            interval="1d",
+                            timestamp=datetime.combine(
+                                row["trade_date"], datetime.min.time()
+                            ),
+                            open_price=float(row["open"] or 0),
+                            high_price=float(row["high"] or 0),
+                            low_price=float(row["low"] or 0),
+                            close_price=float(row["close"] or 0),
+                            volume=int(row["volume"] or 0),
+                            amount=float(row["amount"] or 0),
+                            change=None,
+                            change_percent=float(row["pct_change"])
+                            if row["pct_change"]
+                            else None,
+                            turnover_rate=float(row["turnover_rate"])
+                            if row["turnover_rate"]
+                            else None,
+                        )
+                    )
 
-                logger.info(f”Fetched {len(klines)} klines from stock_daily_latest for {normalized}”)
+                logger.info(
+                    f"Fetched {len(klines)} klines from stock_daily_latest for {normalized}"
+                )
                 return klines
 
         except Exception as e:
-            logger.error(f”Failed to fetch from stock_daily_latest: {e}”)
+            logger.error(f"Failed to fetch from stock_daily_latest: {e}")
             return []
 
     async def create_kline(self, kline: KLineCreate) -> KLineResponse:
@@ -159,7 +169,9 @@ class KLineService:
 
         return KLineResponse.model_validate(kline) if kline else None
 
-    async def _get_cached_klines(self, symbol: str, interval: str, limit: int) -> list[KLineResponse] | None:
+    async def _get_cached_klines(
+        self, symbol: str, interval: str, limit: int
+    ) -> list[KLineResponse] | None:
         """从缓存获取K线"""
         if not self.redis:
             return None
@@ -176,7 +188,9 @@ class KLineService:
 
         return None
 
-    async def _cache_klines(self, symbol: str, interval: str, klines: list[KLineResponse]) -> None:
+    async def _cache_klines(
+        self, symbol: str, interval: str, klines: list[KLineResponse]
+    ) -> None:
         """缓存K线数据"""
         if not self.redis:
             return
