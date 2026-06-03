@@ -1447,6 +1447,99 @@ class ManualExecutionService:
             )
         return snapshot
 
+    async def _ensure_real_portfolio_for_task(
+        self,
+        db,
+        *,
+        tenant_id: str,
+        user_id: str,
+        strategy_id: str,
+        strategy_name: str,
+    ) -> Portfolio | None:
+        try:
+            user_id_int = int(user_id)
+        except (TypeError, ValueError):
+            return None
+
+        conditions = [
+            Portfolio.tenant_id == tenant_id,
+            Portfolio.user_id == user_id_int,
+            Portfolio.status == "active",
+            Portfolio.is_deleted == False,
+            Portfolio.trading_mode == "REAL",
+        ]
+        strategy_id_text = str(strategy_id or "").strip()
+        if strategy_id_text.isdigit():
+            conditions.append(Portfolio.strategy_id == int(strategy_id_text))
+
+        stmt = (
+            select(Portfolio)
+            .where(and_(*conditions))
+            .order_by(
+                (Portfolio.run_status == "running").desc(),
+                Portfolio.updated_at.desc(),
+            )
+            .limit(1)
+        )
+        portfolio = (await db.execute(stmt)).scalar_one_or_none()
+        if portfolio:
+            return portfolio
+
+        latest_snapshot = await self._load_latest_account_snapshot(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            trading_mode="REAL",
+        )
+        if not latest_snapshot:
+            return None
+
+        total_asset = _to_float(latest_snapshot.get("total_asset"), 0.0)
+        available_cash = _to_float(
+            latest_snapshot.get("available_cash") or latest_snapshot.get("cash"),
+            0.0,
+        )
+        market_value = _to_float(latest_snapshot.get("market_value"), 0.0)
+        if total_asset <= 0:
+            total_asset = max(available_cash + market_value, available_cash, 0.0)
+        if total_asset <= 0:
+            return None
+
+        portfolio = Portfolio(
+            tenant_id=tenant_id,
+            user_id=user_id_int,
+            name=f"{strategy_name or strategy_id_text or '默认策略'} 实盘组合",
+            description="首次实盘手动执行自动初始化",
+            initial_capital=total_asset,
+            current_capital=total_asset,
+            available_cash=max(available_cash, 0.0),
+            frozen_cash=0,
+            total_value=total_asset,
+            total_pnl=0,
+            total_return=0,
+            daily_pnl=0,
+            daily_return=0,
+            yesterday_total_value=total_asset,
+            status="active",
+            trading_mode="REAL",
+            strategy_id=int(strategy_id_text) if strategy_id_text.isdigit() else None,
+            run_status="running",
+            broker_type="QMT",
+            broker_account_id=str(latest_snapshot.get("account_id") or "") or None,
+            broker_params={"source": "manual_execution_auto_init"},
+        )
+        db.add(portfolio)
+        await db.flush()
+        await db.refresh(portfolio)
+        logger.info(
+            "Auto-initialized real portfolio for manual execution: tenant=%s user=%s strategy=%s portfolio=%s total_asset=%.2f",
+            tenant_id,
+            user_id,
+            strategy_id,
+            portfolio.id,
+            total_asset,
+        )
+        return portfolio
+
     async def prepare_manual_execution(
         self,
         *,
@@ -2268,20 +2361,13 @@ class ManualExecutionService:
                     line="[链路诊断] 正在检查活跃实盘组合...",
                 )
 
-                stmt = (
-                    select(Portfolio)
-                    .where(
-                        and_(
-                            Portfolio.tenant_id == tenant_id,
-                            Portfolio.user_id == user_id,
-                            Portfolio.status == "active",
-                            Portfolio.is_deleted.is_(False),
-                        )
-                    )
-                    .order_by(Portfolio.updated_at.desc())
-                    .limit(1)
+                portfolio = await self._ensure_real_portfolio_for_task(
+                    db,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    strategy_id=strategy_id,
+                    strategy_name=prepared.strategy_name,
                 )
-                portfolio = (await db.execute(stmt)).scalar_one_or_none()
                 if not portfolio:
                     error_msg = "当前未发现可用的实盘组合，请先启动实盘策略或完成组合初始化"
                     manual_execution_log_stream.append_log(
@@ -2307,7 +2393,7 @@ class ManualExecutionService:
                     user_id=user_id,
                     level="info",
                     stage="validating",
-                    line=f"[链路诊断] 发现活跃组合: {portfolio.name} (ID: {portfolio.id})",
+                    line=f"[链路诊断] 实盘组合就绪: {portfolio.name} (ID: {portfolio.id})",
                 )
 
             execution_plan = (

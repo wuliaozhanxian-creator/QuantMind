@@ -620,3 +620,11 @@ pytest -q backend/services/tests
   - `manual_execution_service` 在 `SIMULATION` 模式下跳过实盘组合检查；
   - `_load_latest_account_snapshot` 增加按 `trading_mode` 分流，`SIMULATION` 从 Redis `simulation:account:{tenant}:{user}` 读取账户快照；
   - 托管任务构建执行预案与账户等待逻辑统一透传 `trading_mode`，避免模拟盘回退到实盘快照链路。
+
+## 修复记录（2026-06-03，首次实盘手动执行自动初始化组合）
+
+- 现象：首次确认实盘调仓预案后，任务进入 `validating` 阶段时报错
+  `当前未发现可用的实盘组合，请先启动实盘策略或完成组合初始化`。
+- 根因：预览/提交阶段只依赖 QMT 最新账户快照，但后台执行 worker 仍强制要求当前租户、用户、策略已有 `active` 实盘组合；首次实盘执行尚未创建组合时链路被阻断。
+- 修复：`manual_execution_service` 在 `REAL` 手动任务校验阶段优先复用已存在的实盘组合；若不存在，则基于最新 QMT 账户快照自动初始化 `REAL + active + running` 组合后继续执行。
+- 约束：没有最新 QMT 账户快照或快照总资产无效时仍会阻断，避免在资金状态未知时创建空组合。
