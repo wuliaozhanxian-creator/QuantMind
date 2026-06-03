@@ -73,6 +73,8 @@ class AdaptiveDriftParams(BaseStrategyParams):
 
 class CustomStrategyParams(BaseStrategyParams):
     model_config = ConfigDict(extra="allow")
+    min_score: float = Field(0.0, description="权重策略最小分数阈值", ge=0.0)
+    max_weight: float = Field(1.0, description="权重策略单标的最大权重", ge=0.0, le=1.0)
     momentum_period: int = Field(20, description="动量计算周期", ge=5, le=60)
     riskmodel_root: str | None = Field(None, description="风险模型根目录")
     market: str = Field("all", description="基准权重市场代码")
@@ -99,6 +101,8 @@ class QlibBacktestRequest(BaseModel):
                     data["strategy_params"] = WeightStrategyParams(**params)
                 elif strat_type == "VolatilityWeighted":
                     data["strategy_params"] = VolatilityWeightedParams(**params)
+                elif strat_type in ("long_short_topk", "value_growth", "alpha_cross_section", "score_weighted"):
+                    data["strategy_params"] = WeightStrategyParams(**params)
                 elif strat_type == "StopLoss":
                     data["strategy_params"] = StopLossParams(**params)
                 elif strat_type == "RiskGuardTopk":

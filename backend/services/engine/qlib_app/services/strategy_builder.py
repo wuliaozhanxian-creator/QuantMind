@@ -48,10 +48,20 @@ class StrategyBuilder(ABC):
             "redis_password": os.getenv("REDIS_PASSWORD"),
         }
 
+    def _strategy_params_to_dict(self, request: QlibBacktestRequest) -> dict[str, Any]:
+        params = request.strategy_params
+        if hasattr(params, "model_dump"):
+            dumped = params.model_dump(exclude_none=True)
+            return dumped if isinstance(dumped, dict) else {}
+        if isinstance(params, dict):
+            return {k: v for k, v in params.items() if v is not None}
+        return {}
+
     def _get_fundamental_filter_kwargs(self, request: QlibBacktestRequest) -> dict[str, Any]:
         """仅在请求显式要求时注入 ST 基本面过滤参数。"""
-        exclude_st = getattr(request.strategy_params, 'exclude_st', False)
-        f_is_st_not = getattr(request.strategy_params, 'f_is_st_not', None)
+        params = self._strategy_params_to_dict(request)
+        exclude_st = params.get("exclude_st", False)
+        f_is_st_not = params.get("f_is_st_not")
 
         kwargs: dict[str, Any] = {}
         if exclude_st:
@@ -61,7 +71,20 @@ class StrategyBuilder(ABC):
         return kwargs
 
     def _get_strategy_kwargs(self, request: QlibBacktestRequest, market_state_kwargs: dict[str, Any], backtest_id: str) -> dict[str, Any]:
-        kwargs = request.strategy_params.model_dump(exclude_none=True) if hasattr(request.strategy_params, 'model_dump') else {}
+        kwargs = self._strategy_params_to_dict(request)
+
+        # 兼容风控模板原始参数名，统一映射到 FundamentalFilterMixin 识别的 f_* 字段。
+        risk_param_aliases = {
+            "listed_days_min": "f_listed_days_min",
+            "turnover_rate_min": "f_turnover_rate_min",
+            "turnover_rate_max": "f_turnover_rate_max",
+            "beta_20_max": "f_beta_20_max",
+            "float_mv_min": "f_float_mv_min",
+        }
+        for raw_key, normalized_key in risk_param_aliases.items():
+            raw_val = kwargs.pop(raw_key, None)
+            if raw_val is not None and normalized_key not in kwargs:
+                kwargs[normalized_key] = raw_val
         
         # Override signal if necessary (signal_data is handled separately or we pass "<PRED>")
         # The base dict already contains 'signal': '<PRED>' from the default
@@ -730,31 +753,38 @@ class LongShortTopkBuilder(StrategyBuilder):
         signal_data: Any,
         backtest_id: str,
     ) -> dict[str, Any]:
+        params = self._strategy_params_to_dict(request)
         logger.info(
             "build_long_short_topk",
             "Building LongShortTopK strategy",
-            topk=request.strategy_params.topk,
-            short_topk=request.strategy_params.short_topk,
-            rebalance_days=request.strategy_params.rebalance_days,
+            topk=params.get("topk"),
+            short_topk=params.get("short_topk"),
+            rebalance_days=params.get("rebalance_days"),
         )
+        strategy_kwargs = {
+            "signal": "<PRED>",
+            **self._get_fundamental_filter_kwargs(request),
+            **market_state_kwargs,
+            **self._get_redis_config(backtest_id),
+        }
+        for key in (
+            "topk",
+            "short_topk",
+            "min_score",
+            "max_weight",
+            "long_exposure",
+            "short_exposure",
+            "rebalance_days",
+            "account_stop_loss",
+            "max_leverage",
+        ):
+            if key in params and params[key] is not None:
+                strategy_kwargs[key] = params[key]
+
         strategy = {
             "class": "RedisLongShortTopkStrategy",
             "module_path": "backend.services.engine.qlib_app.utils.extended_strategies",
-            "kwargs": {
-                "signal": "<PRED>",
-                "topk": request.strategy_params.topk,
-                "short_topk": request.strategy_params.short_topk,
-                "min_score": request.strategy_params.min_score,
-                "max_weight": request.strategy_params.max_weight,
-                "long_exposure": request.strategy_params.long_exposure,
-                "short_exposure": request.strategy_params.short_exposure,
-                "rebalance_days": request.strategy_params.rebalance_days,
-                "account_stop_loss": request.strategy_params.account_stop_loss,
-                "max_leverage": request.strategy_params.max_leverage,
-                **self._get_fundamental_filter_kwargs(request),
-                **market_state_kwargs,
-                **self._get_redis_config(backtest_id),
-            },
+            "kwargs": strategy_kwargs,
         }
         return self._sanitize_module_path_config(strategy)
 
@@ -769,27 +799,28 @@ class FullAlphaCrossSectionBuilder(StrategyBuilder):
         signal_data: Any,
         backtest_id: str,
     ) -> dict[str, Any]:
+        params = self._strategy_params_to_dict(request)
         logger.info(
             "build_full_alpha_cross_section",
             "Building FullAlphaCrossSection strategy",
-            topk=request.strategy_params.topk,
-            rebalance_days=request.strategy_params.rebalance_days,
-            max_weight=request.strategy_params.max_weight,
+            topk=params.get("topk"),
+            rebalance_days=params.get("rebalance_days"),
+            max_weight=params.get("max_weight"),
         )
+        strategy_kwargs = {
+            "signal": "<PRED>",
+            **self._get_fundamental_filter_kwargs(request),
+            **market_state_kwargs,
+            **self._get_redis_config(backtest_id),
+        }
+        for key in ("topk", "max_weight", "rebalance_days", "account_stop_loss", "max_leverage"):
+            if key in params and params[key] is not None:
+                strategy_kwargs[key] = params[key]
+
         strategy = {
             "class": "RedisFullAlphaStrategy",
             "module_path": "backend.services.engine.qlib_app.utils.extended_strategies",
-            "kwargs": {
-                "signal": "<PRED>",
-                "topk": request.strategy_params.topk,
-                "max_weight": request.strategy_params.max_weight,
-                "rebalance_days": request.strategy_params.rebalance_days,
-                "account_stop_loss": request.strategy_params.account_stop_loss,
-                "max_leverage": request.strategy_params.max_leverage,
-                **self._get_fundamental_filter_kwargs(request),
-                **market_state_kwargs,
-                **self._get_redis_config(backtest_id),
-            },
+            "kwargs": strategy_kwargs,
         }
         return self._sanitize_module_path_config(strategy)
 

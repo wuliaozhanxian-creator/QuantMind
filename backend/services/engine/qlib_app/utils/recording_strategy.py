@@ -91,6 +91,11 @@ _OUR_KWARGS = {
     "turnover_rate_max",
     "beta_20_max",
     "float_mv_min",
+    "f_listed_days_min",
+    "f_turnover_rate_min",
+    "f_turnover_rate_max",
+    "f_beta_20_max",
+    "f_float_mv_min",
     # 注意："signal" 是 Qlib 原生参数，不在此处过滤
     # 各策略应在 super().__init__() 前通过 _resolve_signal_kwarg() 处理 signal
 }
