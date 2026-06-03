@@ -72,8 +72,8 @@ class LiveTradeConfigSchema(BaseModel):
             raise ValueError("rebalance_days is required when schedule_type=interval")
         if self.schedule_type == ScheduleType.WEEKLY and not self.trade_weekdays:
             raise ValueError("trade_weekdays is required when schedule_type=weekly")
-        if self.sell_time >= self.buy_time:
-            raise ValueError("buy_time must be later than sell_time")
+        if self.sell_time > self.buy_time:
+            raise ValueError("buy_time must not be earlier than sell_time")
         if self.order_type == LiveOrderType.LIMIT and self.max_price_deviation is None:
             raise ValueError("max_price_deviation is required for LIMIT order")
         return self

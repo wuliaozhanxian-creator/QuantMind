@@ -32,6 +32,7 @@ fetch(`${apiGatewayBase}/api/v1/api-keys/init`, { method: 'POST' });
 - `PersonalCenter.tsx` 的模拟盘初始金额修改/重置提示已收敛为“已保存并重置，资金快照已更新”，与后端即时采集行为保持一致。
 - `PersonalCenter.tsx` 的按钮提交态文案已同步为“保存并重置中... / 重置并采集中...”，避免用户误解当前操作仅是单纯改配置。
 - `PersonalCenter.tsx` 在保存/重置成功后会短暂显示“今日快照已更新”，用于明确告诉用户历史资金口径已写入当日快照。
+- `PersonalCenter.tsx` 在模拟盘重置成功后会触发全局模块刷新，并通知账户、交易记录、策略状态重新拉取，确保实时交易记录和智能图表立即展示清理后的数据。
 - `StrategyStatus.tsx` 与 `PositionMonitor.tsx` 的持仓分布/持仓明细已收敛到共享组件 `../components/PositionOverview.tsx`，避免两套页面分别维护图表和表格逻辑。
 - `StrategyStatus.tsx` 的持仓分布已切换为真实账户快照驱动，不再使用固定 `10W+` / mock 饼图数据。
 - `StrategyStatus.tsx`、`PersonalCenter.tsx` 与 `RealTradingPage.tsx` 现在统一通过运行态选择账户来源，不再在页面内分别判断“实盘优先 / 模拟兜底”；统一选择逻辑抽到了 `trading/utils/accountAdapter.ts` 与 `realTradingService.getRuntimeAccount()`。

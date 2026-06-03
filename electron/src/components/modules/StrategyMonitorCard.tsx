@@ -4,6 +4,7 @@ import { TrendingUp, TrendingDown, Activity, AlertTriangle, CheckCircle, Clock, 
 import { motion } from 'framer-motion';
 import { setCurrentTab } from '../../store/slices/aiStrategySlice';
 import { useStrategies } from '../../hooks/useStrategies';
+import { useAppSelector } from '../../store';
 import { StrategyMonitorSkeleton } from '../common/CardSkeletons';
 import { formatBackendTime } from '../../utils/format';
 
@@ -34,6 +35,7 @@ export const StrategyMonitorCard: React.FC<StrategyMonitorCardProps> = ({
 }) => {
   const [isHovered, setIsHovered] = useState(false);
   const dispatch = useDispatch();
+  const tradingMode = useAppSelector((state) => state.ui.tradingMode);
 
   const {
     strategies,
@@ -45,7 +47,7 @@ export const StrategyMonitorCard: React.FC<StrategyMonitorCardProps> = ({
     lastUpdatedAt,
     realtimeStatus,
     refresh,
-  } = useStrategies({ autoRefresh: true, refreshInterval: 10000, enableRealtime: true });
+  } = useStrategies({ autoRefresh: true, refreshInterval: 10000, enableRealtime: true, tradingMode });
 
   const formatAmount = (value: number) => {
     const formatter = new Intl.NumberFormat('zh-CN', {

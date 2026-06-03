@@ -187,8 +187,12 @@ class StrategyService {
     /**
      * 获取策略列表
      */
-    async getStrategies(): Promise<ApiResponse<Strategy[]>> {
-        const response = await apiClient.get<unknown>(API_ENDPOINTS.STRATEGIES);
+    async getStrategies(tradingMode?: 'real' | 'simulation' | 'REAL' | 'SIMULATION' | 'SHADOW'): Promise<ApiResponse<Strategy[]>> {
+        const normalizedMode = String(tradingMode || '').trim().toUpperCase();
+        const params = ['REAL', 'SIMULATION', 'SHADOW'].includes(normalizedMode)
+            ? { trading_mode: normalizedMode }
+            : undefined;
+        const response = await apiClient.get<unknown>(API_ENDPOINTS.STRATEGIES, params);
         const normalizedResponse = this.isObject(response) ? response : {};
         const rawData = this.isObject(normalizedResponse) && 'data' in normalizedResponse
             ? normalizedResponse['data']

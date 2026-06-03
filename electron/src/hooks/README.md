@@ -63,6 +63,7 @@
 
 ## useStrategies（2026-02 补充）
 - 响应判定兼容 `code` 与 `success` 两种成功语义，降低前后端响应风格差异带来的解析失败风险。
+- 支持传入 `tradingMode`（`real|simulation`），策略列表、运行态兜底与收益统计会按当前交易模式请求，避免实盘/模拟盘监控混用。
 - 运行态兜底联动（2026-03-20）：
   - 当策略列表无 `running/starting`，但 `/api/v1/real-trading/status` 明确返回运行中时，Hook 会按 `strategy.id / strategy.name / parameters.strategy_type(sys_模板ID)` 回填运行态；
   - 修复“实盘控制台显示运行中，但仪表盘策略卡全部已停止”的短期口径不一致问题。
@@ -108,6 +109,9 @@
 - 收益率字段兼容增强（2026-04-13）：
   - 当账本字段 `daily_return_pct` 缺失或为空时，Hook 会自动回退 `daily_return_ratio * 100`，再回退 `daily_return`；
   - 兼容旧环境字段口径差异，避免“智能图表-每日收益率”出现空白。
+- 模拟盘收益率口径增强（2026-06-03）：
+  - 模拟盘日快照优先读取 `daily_return_pct/daily_return_ratio`；
+  - 字段缺失时按前一交易日 `total_asset` 环比计算，再回退 `today_pnl / initial_capital`，避免把累计收益误当每日收益。
 - 交易日历对齐（2026-04-11）：
   - 智能图表已复用模型推理同源的交易日历接口（`/api/v1/market-calendar/*`）补齐最近 30 个交易日与最近 7 个交易日窗口；
   - 每日收益与交易次数横轴均按交易日历序列渲染，不再按自然周/自然日补点。

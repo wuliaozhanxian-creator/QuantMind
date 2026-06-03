@@ -282,6 +282,11 @@ psql "$DATABASE_URL" -f backend/migrations/add_margin_trading_fields.sql
 - `/api/v1/simulation/account` 在账户不存在时会优先读取 `simulation/settings.initial_cash` 自动初始化，避免账户回退到默认 100 万导致设置与账户口径不一致。
 - `/api/v1/simulation/reset` 与首次自动初始化都会立即触发一次当日资金快照采集，确保“保存/重置后”的历史资金口径及时落库。
 - `/api/v1/simulation/reset` 在显式传入 `initial_cash` 时会同步更新 `simulation/settings.initial_cash`，确保 `simulation/account.initial_equity` 与账户现金口径一致。
+- `/api/v1/simulation/reset` 会按当前 `tenant_id + user_id` 清理 `sim_trades/sim_orders/simulation_fund_snapshots` 后再重建模拟账户，避免重置后实时交易记录和智能图表继续显示旧数据。
+- `/api/v1/simulation/batch/step` 增加鉴权上下文校验，禁止通过 payload 覆盖其他用户或租户，并将 `tenant_id` 显式传给结算器。
+- `/api/v1/real-trading/status` 在检测到模拟盘 active strategy 但沙箱进程不存活时，会先尝试从 Redis 持久状态恢复沙箱，再返回 `starting/running` 状态。
+- 模拟盘启动原生 `STRATEGY_CONFIG` 且未定义 `on_tick` 的策略时，会立即创建一次 hosted bootstrap 任务，避免“显示运行中但无信号产出”。
+- `live_trade_config.sell_time == buy_time` 现在可通过后端校验，并由模拟盘托管调度识别为 `ALL` 阶段，支持截图中 `09:30/09:30` 这类同一时刻卖买配置。
 - 模拟撮合新增涨跌停/停牌约束：`涨停不可买`、`跌停不可卖`、`停牌不可交易`；行情无显式布尔标记时会结合盘口与涨跌停价近似判断，避免“应拒单却成交”。
 - 新增接口：
   - `GET /api/v1/simulation/snapshots/daily?days=30`：查询当前用户日快照历史。

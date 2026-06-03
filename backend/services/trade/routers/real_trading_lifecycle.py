@@ -1,4 +1,5 @@
 from fastapi import APIRouter
+import ast
 import logging
 from .real_trading_utils import *
 from .real_trading_utils import (
@@ -19,6 +20,27 @@ from backend.services.trade.services.manual_execution_service import (
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _is_native_strategy_config_without_on_tick(code_str: str) -> bool:
+    code = str(code_str or "")
+    if not code.strip():
+        return False
+    if "STRATEGY_CONFIG" not in code:
+        return False
+    try:
+        tree = ast.parse(code)
+    except Exception:
+        # 语法异常由后续沙箱编译阶段给出更明确报错，这里不提前拦截
+        return False
+
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == "on_tick"
+        ):
+            return False
+    return True
 
 
 async def _build_signal_source_status(
@@ -267,8 +289,10 @@ async def start_trading(
             # 纯模拟盘模式：无需 K8s，使用轻量级进程池沙箱执行策略
             from backend.services.trade.sandbox.manager import sandbox_manager
 
+            is_native_cfg = _is_native_strategy_config_without_on_tick(code_str)
+
             try:
-                sandbox_run_id = sandbox_manager.submit_strategy(
+                sandbox_manager.submit_strategy(
                     tenant_id=resolved_tenant_id,
                     user_id=resolved_user_id,
                     strategy_id=strategy_id or strategy_name,
@@ -280,7 +304,40 @@ async def start_trading(
                     f"[Sim] 用户 {resolved_user_id} 启动了沙箱模拟盘 {strategy_name} -> PID Task"
                 )
             except Exception as e:
-                raise HTTPException(status_code=500, detail=f"沙箱启动失败: {str(e)}")
+                raise HTTPException(status_code=500, detail=f"沙箱启动失败: {str(e)}") from e
+
+            # 兼容原生 STRATEGY_CONFIG 策略（通常不定义 on_tick）：
+            # 启动后立即触发一次自动托管任务，避免“运行中但无信号产出”的假活跃状态。
+            if is_native_cfg and strategy_id:
+                hosted_bootstrap = await manual_execution_service.create_hosted_task(
+                    tenant_id=resolved_tenant_id,
+                    user_id=resolved_user_id,
+                    strategy_id=str(strategy_id or ""),
+                    trading_mode="SIMULATION",
+                    execution_config=exec_config,
+                    live_trade_config=live_config,
+                    trigger_context={
+                        "source": "simulation_native_bootstrap",
+                        "reason": "native_strategy_config_without_on_tick",
+                    },
+                    parent_runtime_id=run_id,
+                    note="auto bootstrap from simulation start",
+                )
+                result = {
+                    **result,
+                    "hosted_bootstrap": {
+                        "task_id": hosted_bootstrap.get("task_id"),
+                        "status": hosted_bootstrap.get("status"),
+                        "noop": bool(hosted_bootstrap.get("noop")),
+                    },
+                }
+                logger.info(
+                    "[Sim] 已触发原生策略自动托管引导任务: user=%s strategy=%s task_id=%s status=%s",
+                    resolved_user_id,
+                    strategy_id,
+                    hosted_bootstrap.get("task_id"),
+                    hosted_bootstrap.get("status"),
+                )
 
         # 4. 状态持久化
         redis.client.set(
@@ -293,6 +350,7 @@ async def start_trading(
                     "strategy_name": strategy_name,
                     "execution_config": exec_config,
                     "live_trade_config": live_config,
+                    "started_at": datetime.now(timezone.utc).isoformat(),
                     "trading_permission": trading_permission,
                     "signal_readiness": signal_readiness,
                     "launch_result": result,
@@ -618,10 +676,36 @@ async def get_status(
                 simulation_runtime_msg = "模拟盘运行状态校验失败，请稍后重试"
 
         if not simulation_runtime_alive:
+            try:
+                from backend.services.trade.services.simulation_runtime_restorer import (
+                    SimulationRuntimeRestorer,
+                )
+
+                restorer = SimulationRuntimeRestorer(redis)
+                simulation_runtime_alive = await restorer.restore_active_payload(
+                    tenant_id=resolved_tenant_id,
+                    user_id=resolved_user_id,
+                    active_data=active_data if isinstance(active_data, dict) else {},
+                )
+                if simulation_runtime_alive:
+                    simulation_runtime_msg = "模拟盘沙箱已从持久状态恢复"
+            except Exception as exc:
+                logger.warning(
+                    "Simulation runtime restore on status failed: tenant=%s user=%s strategy=%s error=%s",
+                    resolved_tenant_id,
+                    resolved_user_id,
+                    strategy_id_for_runtime,
+                    exc,
+                )
+                simulation_runtime_msg = (
+                    simulation_runtime_msg or "模拟盘运行状态恢复失败"
+                )
+
+        if not simulation_runtime_alive:
             return {
-                "status": "not_running",
+                "status": "starting",
                 "message": simulation_runtime_msg
-                or "检测到模拟策略标记，但沙箱运行进程未存活，请重新启动模拟盘",
+                or "模拟盘正在从持久状态恢复，请稍后刷新",
                 "user_id": resolved_user_id,
                 "mode": "SIMULATION",
                 "orchestration_mode": k8s_manager.mode,
@@ -768,7 +852,7 @@ async def get_orders(
         resolved_user_id, resolved_tenant_id = _normalize_identity(
             auth, user_id=user_id, tenant_id=tenant_id
         )
-        uid = _parse_user_id(resolved_user_id)
+        uid_int = _parse_user_id(resolved_user_id)
         stmt = select(Order).where(
             Order.user_id == uid_int, Order.tenant_id == resolved_tenant_id
         )
@@ -804,7 +888,7 @@ async def get_trade_history(
         resolved_user_id, resolved_tenant_id = _normalize_identity(
             auth, user_id=user_id, tenant_id=tenant_id
         )
-        uid = _parse_user_id(resolved_user_id)
+        uid_int = _parse_user_id(resolved_user_id)
         stmt = select(Trade).where(
             Trade.user_id == uid_int, Trade.tenant_id == resolved_tenant_id
         )

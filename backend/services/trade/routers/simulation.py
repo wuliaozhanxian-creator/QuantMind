@@ -439,6 +439,58 @@ async def _capture_simulation_snapshot(redis: RedisClient) -> None:
         )
 
 
+async def _purge_simulation_history(*, tenant_id: str, user_id: int) -> dict[str, int]:
+    """清理当前用户模拟盘历史记录，避免重置后旧数据继续进入仪表盘。"""
+    user_id_text = str(user_id)
+    statements = [
+        (
+            "sim_trades",
+            text(
+                """
+                DELETE FROM sim_trades
+                WHERE tenant_id = :tenant_id AND user_id = :user_id
+                """
+            ),
+            {"tenant_id": tenant_id, "user_id": user_id_text},
+        ),
+        (
+            "sim_orders",
+            text(
+                """
+                DELETE FROM sim_orders
+                WHERE tenant_id = :tenant_id AND user_id = :user_id
+                """
+            ),
+            {"tenant_id": tenant_id, "user_id": user_id_text},
+        ),
+        (
+            "simulation_fund_snapshots",
+            text(
+                """
+                DELETE FROM simulation_fund_snapshots
+                WHERE tenant_id = :tenant_id AND user_id = :user_id
+                """
+            ),
+            {"tenant_id": tenant_id, "user_id": user_id_text},
+        ),
+    ]
+
+    purged: dict[str, int] = {}
+    async with get_session(read_only=False) as session:
+        for table_name, statement, params in statements:
+            result = await session.execute(statement, params)
+            purged[table_name] = max(int(result.rowcount or 0), 0)
+        await session.commit()
+
+    logger.info(
+        "Purged simulation history for tenant=%s user=%s: %s",
+        tenant_id,
+        user_id,
+        purged,
+    )
+    return purged
+
+
 # update_simulation_settings (PUT /settings) removed as it is deprecated.
 
 
@@ -456,9 +508,18 @@ async def reset_simulation_account(
 
     # 模拟盘重置口径固定回到 100 万，不再接受外部初始资金参数。
     await manager.set_initial_cash(auth.user_id, initial_cash, tenant_id=auth.tenant_id)
+    purge_stats = await _purge_simulation_history(
+        tenant_id=auth.tenant_id,
+        user_id=int(auth.user_id),
+    )
     account = await manager.init_account(auth.user_id, initial_cash, tenant_id=auth.tenant_id)
     await _capture_simulation_snapshot(redis)
-    return {"success": True, "message": "Simulation account reset", "data": account}
+    return {
+        "success": True,
+        "message": "Simulation account reset",
+        "data": account,
+        "purged": purge_stats,
+    }
 
 
 @router.get("/account")

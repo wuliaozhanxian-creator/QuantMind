@@ -18,6 +18,11 @@
 
 ## 新增服务说明
 
+- 模拟盘接口分流（2026-06-03）：
+  - `config.ts` 新增 `/api/v1/simulation/trades|orders|trades/stats/summary` 端点；
+  - `tradingService` 会按 `tradingMode=simulation` 自动切换到模拟盘交易/委托/统计接口，避免实盘与模拟盘记录混用；
+  - `strategyService.getStrategies(tradingMode)` 支持透传 `REAL/SIMULATION/SHADOW` 查询参数，供策略监控按当前模式展示。
+
 - `advancedAnalysisService` histogram 边界保留修复（2026-04-27）：
   - `sanitizeHistogram` 现在会保留标准 histogram 的完整 bin edges（`bins.length === counts.length + 1`）；
   - 避免基础风险与交易统计图表丢失最后一个边界，便于前端正确生成区间标签和中点参考线。

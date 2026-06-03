@@ -192,16 +192,17 @@ class TradingService {
             return [];
         }
 
+        const normalizedTradingMode = this.normalizeTradingMode(params.trading_mode);
         const queryParams: Record<string, unknown> = {};
         if (params.user_id) queryParams['user_id'] = params.user_id;
         if (params.portfolio_id) queryParams['portfolio_id'] = params.portfolio_id;
         if (params.status) queryParams['status'] = params.status;
-        if (params.trading_mode) queryParams['trading_mode'] = params.trading_mode;
+        if (normalizedTradingMode && normalizedTradingMode !== 'simulation') queryParams['trading_mode'] = normalizedTradingMode;
         queryParams['limit'] = params.limit ?? 50;
         queryParams['offset'] = params.offset ?? 0;
 
         try {
-            return await this.client.get<ListOrdersResult>(API_ENDPOINTS.ORDERS, queryParams);
+            return await this.client.get<ListOrdersResult>(this.getOrdersEndpoint(normalizedTradingMode), queryParams);
         } catch (error: any) {
             if (this.isNotFoundError(error)) {
                 // 网关未接入 orders 路由时，短时熔断避免控制台反复 404
@@ -219,15 +220,16 @@ class TradingService {
         if (Date.now() < this.tradesEndpointUnavailableUntil) {
             throw new Error('trades endpoint unavailable');
         }
+        const normalizedTradingMode = this.normalizeTradingMode(params.trading_mode);
         const queryParams: Record<string, unknown> = {};
         if (params.user_id) queryParams['user_id'] = params.user_id;
         if (params.portfolio_id) queryParams['portfolio_id'] = params.portfolio_id;
-        if (params.trading_mode) queryParams['trading_mode'] = this.normalizeTradingMode(params.trading_mode);
+        if (normalizedTradingMode && normalizedTradingMode !== 'simulation') queryParams['trading_mode'] = normalizedTradingMode;
         queryParams['limit'] = params.limit ?? 50;
         queryParams['offset'] = params.offset ?? 0;
 
         try {
-            return await this.client.get<Trade[]>(API_ENDPOINTS.TRADES, queryParams);
+            return await this.client.get<Trade[]>(this.getTradesEndpoint(normalizedTradingMode), queryParams);
         } catch (error: any) {
             if (this.isNotFoundError(error)) {
                 // 网关未接入 trades 路由时，短时熔断避免控制台反复 404
@@ -248,8 +250,9 @@ class TradingService {
      * 创建订单
      */
     async createOrder(data: CreateOrderParams): Promise<Order> {
+        const normalizedTradingMode = this.normalizeTradingMode(data.trading_mode);
         return this.client.post<Order>(
-            API_ENDPOINTS.ORDERS,
+            this.getOrdersEndpoint(normalizedTradingMode),
             data as unknown as Record<string, unknown>,
         );
     }
@@ -257,9 +260,10 @@ class TradingService {
     /**
      * 取消订单
      */
-    async cancelOrder(orderId: string): Promise<Order> {
+    async cancelOrder(orderId: string, tradingMode?: TradingMode): Promise<Order> {
+        const normalizedTradingMode = this.normalizeTradingMode(tradingMode);
         return this.client.post<Order>(
-            API_ENDPOINTS.ORDER_CANCEL(orderId),
+            this.getOrderCancelEndpoint(orderId, normalizedTradingMode),
             { order_id: orderId } as unknown as Record<string, unknown>,
         );
     }
@@ -277,9 +281,15 @@ class TradingService {
                 range
             };
             if (tradingMode) {
-                params['trading_mode'] = String(tradingMode).toUpperCase();
+                const normalizedTradingMode = this.normalizeTradingMode(tradingMode);
+                if (normalizedTradingMode && normalizedTradingMode !== 'simulation') {
+                    params['trading_mode'] = String(normalizedTradingMode).toUpperCase();
+                }
             }
-            const response = await this.client.get<TradeStatsSummaryResponse | ChartDataPoint[]>(API_ENDPOINTS.TRADING_STATS, params);
+            const response = await this.client.get<TradeStatsSummaryResponse | ChartDataPoint[]>(
+                this.getTradeStatsEndpoint(this.normalizeTradingMode(tradingMode)),
+                params,
+            );
             if (Array.isArray(response)) {
                 return response;
             }
@@ -422,6 +432,26 @@ class TradingService {
         if (normalized === 'real') return 'real';
         if (normalized === 'simulation') return 'simulation';
         return undefined;
+    }
+
+    private getTradesEndpoint(mode?: TradingMode): string {
+        return mode === 'simulation' ? API_ENDPOINTS.SIMULATION_TRADES : API_ENDPOINTS.TRADES;
+    }
+
+    private getOrdersEndpoint(mode?: TradingMode): string {
+        return mode === 'simulation' ? API_ENDPOINTS.SIMULATION_ORDERS : API_ENDPOINTS.ORDERS;
+    }
+
+    private getOrderCancelEndpoint(orderId: string, mode?: TradingMode): string {
+        return mode === 'simulation'
+            ? API_ENDPOINTS.SIMULATION_ORDER_CANCEL(orderId)
+            : API_ENDPOINTS.ORDER_CANCEL(orderId);
+    }
+
+    private getTradeStatsEndpoint(mode?: TradingMode): string {
+        return mode === 'simulation'
+            ? API_ENDPOINTS.SIMULATION_TRADING_STATS
+            : API_ENDPOINTS.TRADING_STATS;
     }
 
     private extractOrders(result: ListOrdersResult): Order[] {

@@ -147,7 +147,12 @@ const PersonalCenter: React.FC<PersonalCenterProps> = ({ tenantId, userId, statu
             );
             setSelectedAccount(account);
             showSnapshotNotice('今日快照已更新');
-            message.success('模拟盘已重置，资金快照已更新');
+            const { refreshOrchestrator } = await import('../../../services/refreshOrchestrator');
+            await refreshOrchestrator.requestAll('module-action', false);
+            window.dispatchEvent(new CustomEvent('refresh-account-data'));
+            window.dispatchEvent(new CustomEvent('refresh-trade-records'));
+            window.dispatchEvent(new CustomEvent('refresh-strategy-status'));
+            message.success('模拟盘已重置，交易记录和图表已清理');
         } catch (err) {
             console.error('Failed to reset simulation account', err);
             message.error('重置失败，请稍后重试');

@@ -41,6 +41,7 @@
 ## 策略监控模块对齐修复（2026-03-19）
 
 - `StrategyMonitorCard` 已恢复自动刷新，监控卡不再停留在手动刷新模式。
+- `StrategyMonitorCard` 会读取全局 `tradingMode` 并传入 `useStrategies`，仪表盘在实盘/模拟盘切换时策略监控同步切换数据口径。
 - 后端列表返回的最近一次回测摘要会回填到策略卡，用于展示 `total_return`、`today_return`、`today_pnl`、`risk_level` 和异常信息；其中 `today_return` / `today_pnl` 在实盘运行时会优先使用 trade 服务的实时组合快照。
 - 策略详情列表右侧新增“今日盈亏”徽章，方便快速识别绝对盈亏，不再只看百分比。
 - 运行态展示口径收敛为 `running / starting / stopped / error`，界面中的“暂停”统计项已改为“已停止”，避免与后端生命周期状态混淆。

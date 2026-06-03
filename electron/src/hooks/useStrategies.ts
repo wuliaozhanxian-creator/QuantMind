@@ -33,6 +33,7 @@ export interface UseStrategiesOptions {
     autoRefresh?: boolean;
     refreshInterval?: number;
     enableRealtime?: boolean;
+    tradingMode?: 'real' | 'simulation';
 }
 
 export interface UseStrategiesReturn {
@@ -59,6 +60,7 @@ export const useStrategies = (options: UseStrategiesOptions = {}): UseStrategies
         autoRefresh = true,
         refreshInterval = DEFAULT_POLLING_INTERVAL,
         enableRealtime = true,
+        tradingMode = 'real',
     } = options;
 
     const [strategies, setStrategies] = useState<Strategy[]>([]);
@@ -105,7 +107,7 @@ export const useStrategies = (options: UseStrategiesOptions = {}): UseStrategies
             let rtStatus: RealTradingStatus | null = null;
             try {
                 const { realTradingService } = await import('../services/realTradingService');
-                rtStatus = await realTradingService.getStatus('');
+                rtStatus = await realTradingService.getStatus('', tradingMode);
             } catch {
                 return list;
             }
@@ -145,7 +147,7 @@ export const useStrategies = (options: UseStrategiesOptions = {}): UseStrategies
 
             return matched ? next : list;
         },
-        [],
+        [tradingMode],
     );
 
     const isSuccessResponse = <T,>(response: ApiResponse<T> | undefined): boolean => {
@@ -178,11 +180,41 @@ export const useStrategies = (options: UseStrategiesOptions = {}): UseStrategies
         };
     };
 
+    const enrichStatsFromAccount = useCallback(async (baseStats: StrategyStats): Promise<StrategyStats> => {
+        const userId = getCurrentUserId();
+        if (!userId) return baseStats;
+        try {
+            const { portfolioService } = await import('../services/portfolioService');
+            const overview = await portfolioService.getFundOverview(userId, tradingMode);
+            const fund = overview?.data;
+            if (!fund) return baseStats;
+
+            const accountTotalReturn = Number(fund.totalReturn);
+            const accountTodayReturn = Number(fund.dailyReturn);
+            const accountTodayPnL = Number(fund.todayPnL);
+            return {
+                ...baseStats,
+                totalReturn: Number.isFinite(accountTotalReturn)
+                    ? Number(accountTotalReturn.toFixed(2))
+                    : baseStats.totalReturn,
+                todayReturn: Number.isFinite(accountTodayReturn)
+                    ? Number(accountTodayReturn.toFixed(2))
+                    : baseStats.todayReturn,
+                todayPnL: Number.isFinite(accountTodayPnL)
+                    ? Number(accountTodayPnL.toFixed(2))
+                    : baseStats.todayPnL,
+            };
+        } catch {
+            return baseStats;
+        }
+    }, [getCurrentUserId, tradingMode]);
+
     const applyStrategiesSnapshot = useCallback((
         nextStrategies: Strategy[],
         nextIsSimulated: boolean,
+        statsOverride?: StrategyStats,
     ) => {
-        const nextStats = calculateStats(nextStrategies);
+        const nextStats = statsOverride || calculateStats(nextStrategies);
         const snapshot = {
             strategies: nextStrategies,
             stats: nextStats,
@@ -208,12 +240,13 @@ export const useStrategies = (options: UseStrategiesOptions = {}): UseStrategies
                 setLoading(true);
             }
 
-            const response = await strategyService.getStrategies();
+            const response = await strategyService.getStrategies(tradingMode);
 
             if (isSuccessResponse(response) && Array.isArray(response.data)) {
                 const reconciledStrategies = await reconcileRuntimeStatus(response.data);
                 const nextIsSimulated = reconciledStrategies.some(s => s.name.includes('(模拟)'));
-                applyStrategiesSnapshot(reconciledStrategies, nextIsSimulated);
+                const enrichedStats = await enrichStatsFromAccount(calculateStats(reconciledStrategies));
+                applyStrategiesSnapshot(reconciledStrategies, nextIsSimulated, enrichedStats);
                 setIsStale(false);
                 setLastUpdatedAt(new Date().toISOString());
                 setError(null);
@@ -229,7 +262,7 @@ export const useStrategies = (options: UseStrategiesOptions = {}): UseStrategies
             initializedRef.current = true;
             setLoading(false);
         }
-    }, [strategies.length, reconcileRuntimeStatus, applyStrategiesSnapshot]);
+    }, [strategies.length, reconcileRuntimeStatus, applyStrategiesSnapshot, enrichStatsFromAccount, tradingMode]);
 
     const refresh = useCallback(async () => {
         await fetchData({ silent: true });

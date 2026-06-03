@@ -420,8 +420,16 @@ export const useIntelligenceCharts = (userId: string = 'current', options?: { au
                 normalizedPositionRatio = normalizePositionDistribution(positionRatio);
             }
 
-            const ledgerPoints = Array.isArray(ledgerDaily)
-                ? ledgerDaily
+            const ledgerRows = Array.isArray(ledgerDaily)
+                ? [...ledgerDaily].sort((a: any, b: any) => {
+                    const da = String(a?.snapshot_date || a?.timestamp || '');
+                    const db = String(b?.snapshot_date || b?.timestamp || '');
+                    return da.localeCompare(db);
+                })
+                : [];
+            let previousSimulationTotalAsset: number | null = null;
+            const ledgerPoints = ledgerRows.length > 0
+                ? ledgerRows
                     .map((row: any) => {
                         if (!row || (!row.snapshot_date && !row.timestamp)) return null;
                         const date = row.snapshot_date || row.timestamp;
@@ -440,10 +448,30 @@ export const useIntelligenceCharts = (userId: string = 'current', options?: { au
                                         ? legacyPctValue
                                         : Number.NaN;
                         } else {
-                            // 模拟盘逻辑：计算 盈亏 / 初始权益
-                            const pnl = Number(row.today_pnl || row.daily_pnl || 0);
+                            const pctValue = Number(row.daily_return_pct);
+                            const ratioValue = Number(row.daily_return_ratio);
+                            const totalAsset = Number(row.total_asset);
+                            const todayPnl = Number(row.today_pnl || row.daily_pnl);
                             const initial = Number(row.initial_capital || 1000000);
-                            returnValue = initial > 0 ? (pnl / initial) * 100 : 0;
+                            if (Number.isFinite(pctValue)) {
+                                returnValue = pctValue;
+                            } else if (Number.isFinite(ratioValue)) {
+                                returnValue = ratioValue * 100;
+                            } else if (
+                                Number.isFinite(totalAsset) &&
+                                totalAsset > 0 &&
+                                previousSimulationTotalAsset &&
+                                previousSimulationTotalAsset > 0
+                            ) {
+                                returnValue = (totalAsset / previousSimulationTotalAsset - 1) * 100;
+                            } else if (Number.isFinite(todayPnl) && initial > 0) {
+                                returnValue = (todayPnl / initial) * 100;
+                            } else if (Number.isFinite(totalAsset) && initial > 0) {
+                                returnValue = (totalAsset / initial - 1) * 100;
+                            }
+                            if (Number.isFinite(totalAsset) && totalAsset > 0) {
+                                previousSimulationTotalAsset = totalAsset;
+                            }
                         }
 
                         if (!Number.isFinite(returnValue)) return null;

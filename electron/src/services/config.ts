@@ -57,6 +57,11 @@ export const API_ENDPOINTS = {
   SIMULATION_ACCOUNT: `${API_PATHS.V1}/simulation/account`,
   SIMULATION_SETTINGS: `${API_PATHS.V1}/simulation/settings`,
   SIMULATION_RESET: `${API_PATHS.V1}/simulation/reset`,
+  SIMULATION_TRADES: `${API_PATHS.V1}/simulation/trades`,
+  SIMULATION_ORDERS: `${API_PATHS.V1}/simulation/orders`,
+  SIMULATION_ORDER_DETAIL: (id: string) => `${API_PATHS.V1}/simulation/orders/${id}`,
+  SIMULATION_ORDER_CANCEL: (id: string) => `${API_PATHS.V1}/simulation/orders/${id}/cancel`,
+  SIMULATION_TRADING_STATS: `${API_PATHS.V1}/simulation/trades/stats/summary`,
 
   // 交易/订单
   TRADES: `${API_PATHS.V1}/trades`,
