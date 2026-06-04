@@ -92,6 +92,13 @@ class _QMTCallbackAdapter:
             "filled_price": float(_obj_get(data, "traded_price", 0) or _obj_get(data, "price", 0) or 0),
             "message": message,
         }
+        execution_meta = self.client.resolve_execution_meta(
+            client_order_id=client_order_id,
+            exchange_order_id=exchange_order_id,
+            seq=seq,
+        )
+        if execution_meta:
+            payload["execution_meta"] = execution_meta
         return payload
 
     def on_stock_order(self, order: Any) -> None:

@@ -9,6 +9,7 @@ import re
 import sys
 import threading
 import time
+from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -75,6 +76,8 @@ class QMTClient:
         self._account: Optional[Any] = None
         self._client_order_to_exchange: dict[str, str] = {}
         self._exchange_order_to_client: dict[str, str] = {}
+        self._client_order_execution_meta: dict[str, dict[str, Any]] = {}
+        self._exchange_order_execution_meta: dict[str, dict[str, Any]] = {}
         self._async_seq_to_client_order: collections.OrderedDict[int, str] = collections.OrderedDict()
         self._short_quota_cache: dict[str, dict[str, Any]] = {}
         self._last_short_check_at: float | None = None
@@ -248,10 +251,26 @@ class QMTClient:
         side: str,
         order_type: str,
         price: float,
-    ) -> tuple[str, float]:
+    ) -> tuple[str, float, dict[str, Any]]:
         agent_price_mode = str(payload.get("agent_price_mode") or "").strip().lower()
+        requested_order_type = str(order_type or "").strip().upper() or "LIMIT"
+        requested_price = float(price or 0.0)
+        execution_meta: dict[str, Any] = {
+            "requested_order_type": requested_order_type,
+            "requested_price": requested_price,
+            "agent_price_mode": agent_price_mode or None,
+            "execution_mode": (
+                "native_market"
+                if requested_order_type == "MARKET" and requested_price <= 0
+                else "plain_limit"
+            ),
+            "effective_order_type": requested_order_type,
+            "effective_price": requested_price,
+            "symbol": symbol,
+            "side": side,
+        }
         if agent_price_mode != "protect_limit":
-            return order_type, price
+            return order_type, price, execution_meta
 
         level1_price = self.get_level1_price(symbol, side)
         if level1_price <= 0:
@@ -273,7 +292,62 @@ class QMTClient:
             ratio,
             protected_price,
         )
-        return "LIMIT", protected_price
+        aligned_price = self._align_price_to_tick(
+            symbol=symbol,
+            side=side,
+            price=protected_price,
+        )
+        logger.info(
+            "QMT protect-limit aligned client_order_id=%s symbol=%s side=%s raw=%.6f aligned=%.6f tick=%.6f",
+            str(payload.get("client_order_id") or "").strip(),
+            symbol,
+            side,
+            protected_price,
+            aligned_price,
+            self._infer_price_tick(symbol),
+        )
+        execution_meta.update(
+            {
+                "execution_mode": "protect_limit",
+                "effective_order_type": "LIMIT",
+                "effective_price": aligned_price,
+                "level1_price": level1_price,
+                "protect_price_ratio": ratio,
+                "raw_protected_price": protected_price,
+                "aligned_price": aligned_price,
+                "tick_size": self._infer_price_tick(symbol),
+            }
+        )
+        return "LIMIT", aligned_price, execution_meta
+
+    @staticmethod
+    def _infer_price_tick(symbol: str) -> float:
+        normalized = str(symbol or "").strip().upper()
+        if not normalized:
+            return 0.01
+        code = normalized
+        if "." in normalized:
+            code = normalized.split(".", 1)[0]
+        elif normalized[:2] in {"SH", "SZ", "BJ"}:
+            code = normalized[2:]
+
+        if code.startswith(("11", "12", "13", "15", "16", "18", "50", "51", "52", "56", "58")):
+            return 0.001
+        return 0.01
+
+    @classmethod
+    def _align_price_to_tick(cls, *, symbol: str, side: str, price: float) -> float:
+        tick = cls._infer_price_tick(symbol)
+        if price <= 0 or tick <= 0:
+            return price
+        quant = Decimal(str(tick))
+        value = Decimal(str(price))
+        rounding = ROUND_CEILING if str(side or "").strip().upper() == "BUY" else ROUND_FLOOR
+        aligned = value.quantize(quant, rounding=rounding)
+        aligned_float = float(aligned)
+        if aligned_float <= 0:
+            return price
+        return aligned_float
 
     def _resolve_side(self, order_type: Any) -> str:
         side = ""
@@ -710,6 +784,20 @@ class QMTClient:
         with self._lock:
             self._client_order_to_exchange[client_order_id] = exchange_order_id
             self._exchange_order_to_client[exchange_order_id] = client_order_id
+            meta = self._client_order_execution_meta.get(client_order_id)
+            if meta:
+                self._exchange_order_execution_meta[exchange_order_id] = dict(meta)
+
+    def remember_execution_meta(self, client_order_id: str, meta: dict[str, Any] | None) -> None:
+        cid = str(client_order_id or "").strip()
+        if not self.is_valid_client_order_id(cid) or not isinstance(meta, dict) or not meta:
+            return
+        sanitized = dict(meta)
+        with self._lock:
+            self._client_order_execution_meta[cid] = sanitized
+            exchange_order_id = str(self._client_order_to_exchange.get(cid) or "").strip()
+            if self.is_valid_exchange_order_id(exchange_order_id):
+                self._exchange_order_execution_meta[exchange_order_id] = dict(sanitized)
 
     def resolve_client_order_id(
         self,
@@ -735,6 +823,30 @@ class QMTClient:
 
     def bind_exchange_order_id(self, client_order_id: Any, exchange_order_id: Any) -> None:
         self._remember_order_mapping(str(client_order_id or ""), str(exchange_order_id or ""))
+
+    def resolve_execution_meta(
+        self,
+        *,
+        client_order_id: Any = "",
+        exchange_order_id: Any = "",
+        seq: Any = None,
+    ) -> dict[str, Any] | None:
+        cid = self.resolve_client_order_id(
+            client_order_id=client_order_id,
+            exchange_order_id=exchange_order_id,
+            seq=seq,
+        )
+        with self._lock:
+            if self.is_valid_client_order_id(cid):
+                meta = self._client_order_execution_meta.get(cid)
+                if meta:
+                    return dict(meta)
+            ex_oid = str(exchange_order_id or "").strip()
+            if self.is_valid_exchange_order_id(ex_oid):
+                meta = self._exchange_order_execution_meta.get(ex_oid)
+                if meta:
+                    return dict(meta)
+        return None
 
     def connect(self) -> bool:
         if not self.enabled:
@@ -999,13 +1111,14 @@ class QMTClient:
         if not symbol or side not in {"BUY", "SELL"} or quantity <= 0:
             raise ValueError("invalid order payload")
 
-        order_type, price = self._resolve_effective_order_price(
+        order_type, price, execution_meta = self._resolve_effective_order_price(
             payload=payload,
             symbol=symbol,
             side=side,
             order_type=order_type,
             price=price,
         )
+        self.remember_execution_meta(client_order_id, execution_meta)
 
         logger.info(
             "QMT submit_order request client_order_id=%s symbol=%s side=%s quantity=%s order_type=%s trade_action=%s",
@@ -1028,6 +1141,7 @@ class QMTClient:
                 "filled_quantity": 0.0,
                 "filled_price": None,
                 "message": "accepted by mock qmt agent",
+                "execution_meta": execution_meta,
             }
             logger.info(
                 "QMT submit_order mock result client_order_id=%s exchange_order_id=%s",
@@ -1082,6 +1196,7 @@ class QMTClient:
         if exchange_order_id in (-1, None, ""):
             raise RuntimeError("QMT rejected order")
         self._remember_order_mapping(client_order_id, str(exchange_order_id))
+        execution_meta["qmt_price_type"] = int(price_type)
 
         result = {
             "client_order_id": client_order_id,
@@ -1094,6 +1209,7 @@ class QMTClient:
             "filled_quantity": 0.0,
             "filled_price": None,
             "message": "accepted by qmt",
+            "execution_meta": execution_meta,
         }
         logger.info(
             "QMT submit_order result client_order_id=%s exchange_order_id=%s status=%s",
@@ -1117,13 +1233,14 @@ class QMTClient:
         if not symbol or side not in {"BUY", "SELL"} or quantity <= 0:
             raise ValueError("invalid order payload")
 
-        order_type, price = self._resolve_effective_order_price(
+        order_type, price, execution_meta = self._resolve_effective_order_price(
             payload=payload,
             symbol=symbol,
             side=side,
             order_type=order_type,
             price=price,
         )
+        self.remember_execution_meta(client_order_id, execution_meta)
 
         logger.info(
             "QMT submit_order_async request client_order_id=%s symbol=%s side=%s quantity=%s order_type=%s trade_action=%s",
@@ -1147,6 +1264,7 @@ class QMTClient:
                 "filled_quantity": 0.0,
                 "filled_price": None,
                 "message": "accepted by mock qmt agent (async)",
+                "execution_meta": execution_meta,
             }
             logger.info("QMT submit_order_async mock result client_order_id=%s", client_order_id)
             return result
@@ -1197,6 +1315,7 @@ class QMTClient:
         if int(seq or 0) <= 0:
             raise RuntimeError(f"QMT async order rejected, seq={seq}")
         self._remember_async_seq(seq, client_order_id)
+        execution_meta["qmt_price_type"] = int(price_type)
 
         result = {
             "client_order_id": client_order_id,
@@ -1209,6 +1328,7 @@ class QMTClient:
             "filled_quantity": 0.0,
             "filled_price": None,
             "message": f"async order accepted by qmt, seq={seq}",
+            "execution_meta": execution_meta,
         }
         logger.info(
             "QMT submit_order_async result client_order_id=%s seq=%s status=%s",

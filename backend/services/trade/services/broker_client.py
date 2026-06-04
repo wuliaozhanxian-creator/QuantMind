@@ -580,6 +580,25 @@ class QMTBridgeBroker(BaseBroker):
         }
         if payload["payload"]["quantity"] <= 0:
             return BrokerResult(success=False, message="quantity must be > 0")
+        client_oid_lower = client_oid.lower()
+        is_manual_market_order = (
+            client_oid_lower.startswith("manual-")
+            and str(order_type or "").strip().lower() == "market"
+        )
+        if (
+            not is_manual_market_order
+            and (
+                str(order_type or "").strip().lower() == "market"
+                or not price
+                or float(price or 0) <= 0
+            )
+        ):
+            payload["payload"]["agent_price_mode"] = "protect_limit"
+            try:
+                protect_ratio = float(os.getenv("QMT_BRIDGE_PROTECT_PRICE_RATIO", "0.002"))
+            except ValueError:
+                protect_ratio = 0.002
+            payload["payload"]["protect_price_ratio"] = max(0.0, min(0.05, protect_ratio))
 
         try:
             client = await self._get_session()

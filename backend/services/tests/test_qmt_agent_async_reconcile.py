@@ -145,9 +145,36 @@ def test_submit_order_async_protect_limit_uses_level1_price():
     )
 
     assert result["status"] == "SUBMITTED"
+    assert result["execution_meta"]["execution_mode"] == "protect_limit"
+    assert result["execution_meta"]["requested_order_type"] == "MARKET"
+    assert result["execution_meta"]["effective_order_type"] == "LIMIT"
+    assert result["execution_meta"]["level1_price"] == 10.0
     assert trader.last_async_order_args is not None
     assert trader.last_async_order_args["price_type"] == 0
     assert trader.last_async_order_args["price"] == 10.02
+
+
+def test_submit_order_async_protect_limit_aligns_sell_price_to_tick():
+    client, trader = _make_client()
+    client.get_level1_price = lambda symbol, side: 9.41
+
+    result = client.submit_order_async(
+        {
+            "client_order_id": "cid-protect-limit-sell-1",
+            "symbol": "603330.SH",
+            "side": "SELL",
+            "quantity": 100,
+            "order_type": "MARKET",
+            "price": 0,
+            "agent_price_mode": "protect_limit",
+            "protect_price_ratio": 0.002,
+        }
+    )
+
+    assert result["status"] == "SUBMITTED"
+    assert trader.last_async_order_args is not None
+    assert trader.last_async_order_args["price_type"] == 0
+    assert trader.last_async_order_args["price"] == 9.39
 
 
 def test_async_order_callback_resolves_client_order_by_seq():
@@ -170,6 +197,35 @@ def test_async_order_callback_resolves_client_order_by_seq():
     assert event["client_order_id"] == "cid-callback-1"
     assert event["exchange_order_id"] == "56789"
     assert event["status"] == "SUBMITTED"
+
+
+def test_async_order_callback_carries_execution_meta():
+    captured: list[dict] = []
+    client, _ = _make_client()
+    client._execution_callback = lambda e: captured.append(e)
+    client._remember_async_seq(123, "cid-callback-meta")
+    client.remember_execution_meta(
+        "cid-callback-meta",
+        {
+            "execution_mode": "protect_limit",
+            "requested_order_type": "MARKET",
+            "effective_order_type": "LIMIT",
+            "effective_price": 10.02,
+        },
+    )
+
+    callback = client._build_callback()
+    callback.on_order_stock_async_response(
+        SimpleNamespace(
+            seq=123,
+            order_id=56789,
+            stock_code="600000.SH",
+        )
+    )
+
+    assert len(captured) == 1
+    assert captured[0]["execution_meta"]["execution_mode"] == "protect_limit"
+    assert captured[0]["execution_meta"]["effective_price"] == 10.02
 
 
 def test_reconcile_recent_activity_applies_window_and_limits():

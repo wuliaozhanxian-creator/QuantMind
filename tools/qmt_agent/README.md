@@ -398,3 +398,24 @@ python tools/qmt_agent/upload_release_to_cos.py \
   - 上报 Redis 是否为交易 Redis 且 DB=2
   - `qmt_path/qmt_bin_path` 是否正确且 QMT 已进入极简模式
 3. Agent 会优先使用 `bridge/session` 响应里的 `ws_url` 作为实时通道地址（覆盖本地 `server_url`），避免环境迁移后仍连旧地址导致 `bridge_agent_offline`。
+
+## 修复记录（2026-06-04，保护限价按最小价位单位对齐）
+
+- 现象：保护限价模式会生成诸如 `9.39118`、`61.1774` 的价格，未对齐交易所最小价位单位时，QMT 柜台会返回 `120161 校验最小价差失败`，表现为“Agent 已收到订单但 QMT 无任何有效委托”。
+- 修复：Agent 在提交 `protect_limit` 订单前，现会按证券代码推断最小价位单位并对价格做方向敏感对齐：
+  - 买单向上对齐；
+  - 卖单向下对齐。
+- 说明：手动任务 `client_order_id=manual-*` 在上游桥接层已改为保留原生 `MARKET` 语义；本对齐逻辑主要兜底自动托管等仍使用保护限价的链路。
+
+## 修复记录（2026-06-04，执行语义与诊断元信息收敛）
+
+- 现象：历史上“原生市价 / 保护限价 / 智能执行”的决策分散在云端桥接和 Agent 两侧，排障时只能从日志猜测最终到底以什么语义送到了柜台。
+- 修复：
+  - Agent 现在在本地下单前统一生成 `execution_meta`，明确记录：
+    - `requested_order_type`
+    - `requested_price`
+    - `execution_mode`
+    - `effective_order_type`
+    - `effective_price`
+    - `level1_price / protect_price_ratio / tick_size`（如适用）
+  - 这些元信息会随首次提交结果、异步受理回报和后续订单状态回报一起上报，便于云端和桌面端统一诊断。

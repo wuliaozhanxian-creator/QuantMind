@@ -55,6 +55,18 @@
   - QMT Agent 在临下单前按买一/卖一取 Level1 价格，并按 `MANUAL_TASK_AGENT_PROTECT_PRICE_RATIO`（默认 `0.002`）加减保护后，仍以 QMT `FIX_PRICE` 限价单提交
   - trade 风控估值不再依赖 preview 阶段的 Redis 参考价，而是通过 `QMTBridgeBroker.query_quote()` 实时调用 stream `GET /api/v1/quotes/{symbol}` 获取最新价做市值估算
 
+## 修复记录（2026-06-04，手动任务原生市价与重复提交保护）
+
+- 现象：
+  - 手动任务虽然在云端按 `MARKET` 生成，但执行阶段仍会显式附带 `agent_price_mode=protect_limit`，导致委托被 Agent 改写成保护限价；
+  - 同一账户连续确认相同调仓预案时，会创建多笔 `queued` 任务，旧 worker 还可能在重复任务保护查询时因 `created_at` 被序列化成字符串而崩在 `validating` 前。
+- 修复：
+  - 手动任务 `client_order_id=manual-*` 现在保留原生 `MARKET` 语义，桥接层不再强制改写为 `protect_limit`；
+  - 同一账户存在活跃手动任务时，相同 `run_id + strategy_id` 直接返回已有任务，不再创建重复任务；不同批次/策略提交时返回 `409`；
+  - worker 领取历史积压任务时，若检测到更早同批次手动任务已完成，会自动取消积压任务；
+  - `has_completed_predecessor()` 现兼容 ISO-8601 字符串时间，避免 `asyncpg` 因 `timestamptz` 参数类型不匹配而中断；
+  - 清理历史任务挂起订单时，`orders.user_id` 改为按整数参数写入，避免事务回滚。
+
 ## 自动托管任务化收口（2026-04-13）
 
 - 自动托管已不再由 `runner/main.py` 逐笔调用 `/api/v1/internal/strategy/order`，而是统一改为：

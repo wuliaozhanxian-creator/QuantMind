@@ -75,6 +75,71 @@ async def test_qmt_bridge_broker_passes_margin_fields():
 
 
 @pytest.mark.asyncio
+async def test_qmt_bridge_broker_market_order_uses_protect_limit(monkeypatch):
+    monkeypatch.setenv("QMT_BRIDGE_PROTECT_PRICE_RATIO", "0.003")
+    broker = QMTBridgeBroker(
+        stream_base_url="http://stream:8003",
+        internal_secret="secret",
+        redis_client=None,
+    )
+    dummy_client = _DummyHttpClient()
+
+    async def _fake_get_session():
+        return dummy_client
+
+    broker._get_session = _fake_get_session
+
+    result = await broker.place_order(
+        user_id=1001,
+        symbol="600000.SH",
+        side="BUY",
+        quantity=200,
+        order_type="MARKET",
+        price=None,
+        tenant_id="default",
+        client_order_id="cid-market-001",
+    )
+
+    assert result.success is True
+    payload = dummy_client.last_post["json"]["payload"]
+    assert payload["agent_price_mode"] == "protect_limit"
+    assert payload["protect_price_ratio"] == 0.003
+
+
+@pytest.mark.asyncio
+async def test_qmt_bridge_broker_manual_market_order_keeps_native_market(monkeypatch):
+    monkeypatch.setenv("QMT_BRIDGE_PROTECT_PRICE_RATIO", "0.003")
+    broker = QMTBridgeBroker(
+        stream_base_url="http://stream:8003",
+        internal_secret="secret",
+        redis_client=None,
+    )
+    dummy_client = _DummyHttpClient()
+
+    async def _fake_get_session():
+        return dummy_client
+
+    broker._get_session = _fake_get_session
+
+    result = await broker.place_order(
+        user_id=1001,
+        symbol="600000.SH",
+        side="BUY",
+        quantity=200,
+        order_type="MARKET",
+        price=None,
+        tenant_id="default",
+        client_order_id="manual-abcd1234-0001",
+    )
+
+    assert result.success is True
+    payload = dummy_client.last_post["json"]["payload"]
+    assert payload["order_type"] == "MARKET"
+    assert "agent_price_mode" not in payload
+    assert "protect_price_ratio" not in payload
+
+
+@pytest.mark.asyncio
 async def test_risk_service_rejects_sell_to_open_when_long_short_not_enabled(monkeypatch):
     redis = _FakeRedis()
     svc = RiskService(db=None, redis=redis)

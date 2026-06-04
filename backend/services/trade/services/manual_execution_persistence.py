@@ -87,6 +87,23 @@ class ManualExecutionPersistence:
                 await session.execute(text(stmt))
 
     @staticmethod
+    def _coerce_datetime(value: Any) -> datetime | None:
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str):
+            text_value = value.strip()
+            if not text_value:
+                return None
+            normalized = text_value.replace("Z", "+00:00")
+            try:
+                return datetime.fromisoformat(normalized)
+            except ValueError:
+                return None
+        return None
+
+    @staticmethod
     def _parse_json_field(value: Any) -> Any:
         if isinstance(value, (dict, list)):
             return value
@@ -237,6 +254,77 @@ class ManualExecutionPersistence:
                 )
             ).mappings().first()
         return self._row_to_task(dict(row)) if row else None
+
+    async def get_active_manual_task(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        trading_mode: str,
+    ) -> dict[str, Any] | None:
+        async with get_session(read_only=True) as session:
+            row = (
+                await session.execute(
+                    text(
+                        """
+                        SELECT *
+                        FROM trade_manual_execution_tasks
+                        WHERE tenant_id = :tenant_id
+                          AND user_id = :user_id
+                          AND trading_mode = :trading_mode
+                          AND task_type = 'manual'
+                          AND status IN ('queued', 'validating', 'dispatching', 'running')
+                        ORDER BY created_at ASC
+                        LIMIT 1
+                        """
+                    ),
+                    {
+                        "tenant_id": tenant_id,
+                        "user_id": user_id,
+                        "trading_mode": trading_mode,
+                    },
+                )
+            ).mappings().first()
+        return self._row_to_task(dict(row)) if row else None
+
+    async def has_completed_predecessor(self, task: dict[str, Any]) -> bool:
+        if str(task.get("task_type") or "").strip().lower() != "manual":
+            return False
+        created_at = self._coerce_datetime(task.get("created_at"))
+        if created_at is None:
+            return False
+        async with get_session(read_only=True) as session:
+            found = (
+                await session.execute(
+                    text(
+                        """
+                        SELECT 1
+                        FROM trade_manual_execution_tasks
+                        WHERE tenant_id = :tenant_id
+                          AND user_id = :user_id
+                          AND trading_mode = :trading_mode
+                          AND task_type = 'manual'
+                          AND run_id = :run_id
+                          AND strategy_id = :strategy_id
+                          AND task_id <> :task_id
+                          AND created_at < CAST(:created_at AS timestamptz)
+                          AND status = 'completed'
+                          AND updated_at >= CAST(:created_at AS timestamptz)
+                        LIMIT 1
+                        """
+                    ),
+                    {
+                        "tenant_id": task.get("tenant_id"),
+                        "user_id": task.get("user_id"),
+                        "trading_mode": task.get("trading_mode"),
+                        "run_id": task.get("run_id"),
+                        "strategy_id": task.get("strategy_id"),
+                        "task_id": task.get("task_id"),
+                        "created_at": created_at,
+                    },
+                )
+            ).first()
+        return found is not None
 
     async def update_task(
         self,

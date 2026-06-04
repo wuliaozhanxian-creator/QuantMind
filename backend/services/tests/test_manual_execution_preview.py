@@ -135,6 +135,156 @@ async def test_submit_execution_plan_rejects_mismatched_preview_hash():
     assert "预览结果已失效" in str(exc_info.value.detail)
 
 
+@pytest.mark.asyncio
+async def test_submit_execution_plan_returns_same_active_task(monkeypatch):
+    service = ManualExecutionService()
+    preview = {
+        "preview_hash": "expected-hash",
+        "summary": {"buy_order_count": 1},
+        "sell_orders": [],
+        "buy_orders": [{"symbol": "600000.SH", "quantity": 100}],
+        "skipped_items": [],
+    }
+    prepared = PreparedManualExecution(
+        task_id="",
+        tenant_id="default",
+        user_id="79311845",
+        strategy_id="101",
+        strategy_name="默认策略",
+        run_id="run-1",
+        model_id="model_qlib",
+        prediction_trade_date=date(2026, 6, 4),
+        trading_mode="REAL",
+        request_payload={},
+        run={},
+        strategy={},
+    )
+    service.build_execution_preview = AsyncMock(return_value=preview)  # type: ignore[method-assign]
+    service.prepare_manual_execution = AsyncMock(return_value=prepared)  # type: ignore[method-assign]
+    monkeypatch.setattr(
+        "backend.services.trade.services.manual_execution_service.manual_execution_persistence.get_active_manual_task",
+        AsyncMock(
+            return_value={
+                "task_id": "manual-active",
+                "run_id": "run-1",
+                "strategy_id": "101",
+                "status": "running",
+                "stage": "dispatching",
+            }
+        ),
+    )
+
+    result = await service.submit_execution_plan(
+        tenant_id="default",
+        user_id="79311845",
+        model_id="model_qlib",
+        run_id="run-1",
+        strategy_id="101",
+        trading_mode="REAL",
+        preview_hash="expected-hash",
+    )
+
+    assert result["task_id"] == "manual-active"
+    assert result["duplicate"] is True
+    assert result["noop"] is True
+
+
+@pytest.mark.asyncio
+async def test_submit_execution_plan_rejects_when_other_manual_task_active(monkeypatch):
+    service = ManualExecutionService()
+    preview = {
+        "preview_hash": "expected-hash",
+        "summary": {},
+        "sell_orders": [],
+        "buy_orders": [],
+        "skipped_items": [],
+    }
+    prepared = PreparedManualExecution(
+        task_id="",
+        tenant_id="default",
+        user_id="79311845",
+        strategy_id="102",
+        strategy_name="新策略",
+        run_id="run-2",
+        model_id="model_qlib",
+        prediction_trade_date=date(2026, 6, 4),
+        trading_mode="REAL",
+        request_payload={},
+        run={},
+        strategy={},
+    )
+    service.build_execution_preview = AsyncMock(return_value=preview)  # type: ignore[method-assign]
+    service.prepare_manual_execution = AsyncMock(return_value=prepared)  # type: ignore[method-assign]
+    monkeypatch.setattr(
+        "backend.services.trade.services.manual_execution_service.manual_execution_persistence.get_active_manual_task",
+        AsyncMock(
+            return_value={
+                "task_id": "manual-active",
+                "run_id": "run-1",
+                "strategy_id": "101",
+                "status": "running",
+                "stage": "dispatching",
+            }
+        ),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await service.submit_execution_plan(
+            tenant_id="default",
+            user_id="79311845",
+            model_id="model_qlib",
+            run_id="run-2",
+            strategy_id="102",
+            trading_mode="REAL",
+            preview_hash="expected-hash",
+        )
+
+    assert exc_info.value.status_code == 409
+    assert "已有手动执行任务正在处理" in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_has_completed_predecessor_accepts_iso_created_at_strings(monkeypatch):
+    captured_params: dict[str, object] = {}
+
+    class _FakeResult:
+        def first(self):
+            return (1,)
+
+    class _FakeSession:
+        async def execute(self, statement, params=None):
+            captured_params.update(params or {})
+            return _FakeResult()
+
+    class _FakeSessionCtx:
+        async def __aenter__(self):
+            return _FakeSession()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(
+        "backend.services.trade.services.manual_execution_persistence.get_session",
+        lambda *args, **kwargs: _FakeSessionCtx(),
+    )
+
+    found = await manual_execution_persistence.has_completed_predecessor(
+        {
+            "task_type": "manual",
+            "tenant_id": "default",
+            "user_id": "79311845",
+            "trading_mode": "REAL",
+            "run_id": "run-1",
+            "strategy_id": "101",
+            "task_id": "manual_1",
+            "created_at": "2026-06-04T06:45:57.157171+00:00",
+        }
+    )
+
+    assert found is True
+    assert isinstance(captured_params["created_at"], datetime)
+
+
 def test_preview_hash_is_stable_for_same_payload():
     payload = {
         "account_snapshot": {"total_asset": 1},

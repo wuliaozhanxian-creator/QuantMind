@@ -154,16 +154,6 @@ def _normalize_to_broker_symbol(sym: str) -> str:
     return s
 
 
-def _manual_task_agent_protect_price_ratio() -> float:
-    ratio = _to_float(
-        os.getenv("MANUAL_TASK_AGENT_PROTECT_PRICE_RATIO", "0.002"),
-        0.002,
-    )
-    if ratio <= 0:
-        return 0.002
-    return min(ratio, 0.1)
-
-
 def _manual_task_wait_next_account_timeout_seconds() -> int:
     timeout = _to_int(
         os.getenv("MANUAL_TASK_WAIT_NEXT_ACCOUNT_TIMEOUT_SECONDS", "120"),
@@ -1705,6 +1695,42 @@ class ManualExecutionService:
         preview["preview_hash"] = _build_preview_hash(preview)
         return preview
 
+    async def _guard_active_manual_task(
+        self,
+        *,
+        prepared: PreparedManualExecution,
+        preview_summary: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        active_task = await manual_execution_persistence.get_active_manual_task(
+            tenant_id=prepared.tenant_id,
+            user_id=prepared.user_id,
+            trading_mode=prepared.trading_mode,
+        )
+        if not active_task:
+            return None
+        active_task_id = str(active_task.get("task_id") or "").strip()
+        same_execution = (
+            str(active_task.get("run_id") or "").strip() == prepared.run_id
+            and str(active_task.get("strategy_id") or "").strip() == prepared.strategy_id
+        )
+        if same_execution:
+            return {
+                "task_id": active_task_id,
+                "status": str(active_task.get("status") or "queued"),
+                "task": active_task,
+                "preview_summary": preview_summary or {},
+                "duplicate": True,
+                "noop": True,
+            }
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "当前账户已有手动执行任务正在处理，"
+                f"请等待完成后再提交；task_id={active_task_id} "
+                f"status={active_task.get('status')} stage={active_task.get('stage')}"
+            ),
+        )
+
     async def create_manual_task(
         self,
         *,
@@ -1738,6 +1764,9 @@ class ManualExecutionService:
             trading_mode=trading_mode,
             note=note,
         )
+        active_result = await self._guard_active_manual_task(prepared=prepared)
+        if active_result:
+            return active_result
         task_id = f"manual_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}_{uuid4().hex[:8]}"
         created_at = datetime.now(timezone.utc)
         task = await self._persist_task(
@@ -1843,7 +1872,7 @@ class ManualExecutionService:
                           AND status = 'pending'
                           AND ({prefix_conditions})
                     """),
-                    {"user_id": user_id, "tenant_id": tenant_id, **prefix_params},
+                    {"user_id": int(user_id), "tenant_id": tenant_id, **prefix_params},
                 )
 
                 await db.commit()
@@ -1898,6 +1927,12 @@ class ManualExecutionService:
             trading_mode=trading_mode,
             note=note,
         )
+        active_result = await self._guard_active_manual_task(
+            prepared=prepared,
+            preview_summary=preview.get("summary") or {},
+        )
+        if active_result:
+            return active_result
         task_id = f"manual_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}_{uuid4().hex[:8]}"
         created_at = datetime.now(timezone.utc)
         preview_summary = preview.get("summary") or {}
@@ -2632,8 +2667,6 @@ class ManualExecutionService:
                     .strip()
                     .upper()
                 )
-                # 手动任务统一改为 Agent 端临门查价，再转成保护限价单送入 QMT。
-                protect_price_ratio = _manual_task_agent_protect_price_ratio()
                 order_type = "MARKET"
                 quantity = _to_int(row.get("quantity"), 0)
 
@@ -2645,12 +2678,10 @@ class ManualExecutionService:
                     "client_order_id": f"manual-{task_id[-8:]}-{index:04d}",
                     "order_type": order_type,
                     "trading_mode": trading_mode,
-                    "agent_price_mode": "protect_limit",
-                    "protect_price_ratio": protect_price_ratio,
                     "remarks": (
                         f"manual_task={task_id} run_id={run_id} "
                         f"fusion_score={fusion_score:.6f} "
-                        f"agent_price_mode=protect_limit protect_ratio={protect_price_ratio:.6f} "
+                        f"order_type=MARKET "
                         f"preview_price={preview_price:.4f} "
                         f"reason={str(row.get('reason') or '').strip()}"
                     ),
@@ -2671,7 +2702,7 @@ class ManualExecutionService:
                     line=(
                         f"[{index}/{total}] 正在提交委托: {side} {symbol} "
                         f"qty={quantity} preview={preview_price:.2f} "
-                        f"agent_price_mode=protect_limit protect_ratio={protect_price_ratio:.4f}"
+                        f"order_type=MARKET"
                     ),
                 )
 

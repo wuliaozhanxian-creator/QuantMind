@@ -401,9 +401,22 @@ class QMTAgent:
                     "filled_quantity": 0.0,
                     "filled_price": None,
                     "message": str(exc),
+                    "execution_meta": self.qmt.resolve_execution_meta(
+                        client_order_id=payload.get("client_order_id"),
+                    ),
                 }
             )
             return
+        execution_meta = result.get("execution_meta")
+        if isinstance(execution_meta, dict):
+            logger.info(
+                "order execution meta client_order_id=%s mode=%s requested=%s effective=%s effective_price=%s",
+                result.get("client_order_id"),
+                execution_meta.get("execution_mode"),
+                execution_meta.get("requested_order_type"),
+                execution_meta.get("effective_order_type"),
+                execution_meta.get("effective_price"),
+            )
         try:
             logger.debug("about to report_execution with payload: %s", json.dumps(result, ensure_ascii=False))
             self.reporter.report_execution(result)
@@ -422,6 +435,7 @@ class QMTAgent:
                         "side": str(result.get("side") or "").strip(),
                         "submitted_at": time.time(),
                         "last_status": str(result.get("status") or "").strip().upper(),
+                        "execution_meta": execution_meta if isinstance(execution_meta, dict) else None,
                     }
 
     def _process_cancel_message(self, payload: dict[str, Any]) -> None:
