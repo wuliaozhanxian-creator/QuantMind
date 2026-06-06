@@ -709,6 +709,7 @@ class BacktestService {
 
     const strategyParams = config.strategy_params || {};
     const tenantId = authService.getTenantId() || 'default'; // 从 authService 获取租户 ID
+    const strategyId = typeof config.strategy_id === 'string' ? config.strategy_id.trim() : '';
 
     const buyCost = Number(
       config.buy_cost ?? strategyParams.buy_cost ?? strategyParams.open_cost
@@ -786,6 +787,11 @@ class BacktestService {
 
     if (config.strategy_code?.trim()) {
       payload.strategy_content = config.strategy_code;
+    }
+
+    // 关联用户策略 ID，供后端在回测成功后回写 is_verified=true
+    if (strategyId) {
+      payload.strategy_id = strategyId;
     }
 
     // 使用异步模式提交：立即返回 task_id，由前端轮询/WebSocket 获取结果。

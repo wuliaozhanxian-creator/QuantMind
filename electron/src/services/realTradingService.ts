@@ -950,12 +950,12 @@ export const realTradingService = {
     // Update Real Account Settings
     updateRealAccountSettings: async (initialEquity: number): Promise<boolean> => {
         try {
-            const response = await requestRealTradingWithFallback<{ success?: boolean }>({
+            const response = await requestRealTradingWithFallback<{ success?: boolean; status?: string }>({
                 method: 'put',
                 url: '/account/settings',
                 data: { initial_equity: initialEquity },
             });
-            return response?.success === true;
+            return response?.success === true || response?.status === 'success';
         } catch (err) {
             console.error('Failed to update real account settings', err);
             return false;
