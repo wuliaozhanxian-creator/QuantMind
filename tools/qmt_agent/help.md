@@ -30,7 +30,7 @@ python tools/qmt_agent/build_windows_agent.py
 | `account_id` | 是 | 无 | 资金账号，必须和 QMT 登录账号一致。 |
 | `tenant_id` | 否 | `default` | 多租户场景按平台分配值填写，单租户保留默认。 |
 | `user_id` | 否 | 空 | 建议填平台用户 ID，便于排障定位。 |
-| `client_version` | 否 | `1.0.0` | 建议保留安装包生成值；桌面包通常为 `x.y.z-desktop`。 |
+| `client_version` | 否 | `1.3.0` | 建议保留安装包生成值；桌面包通常为 `x.y.z-desktop`。 |
 | `client_fingerprint` | 否 | 主机名 | 建议保持唯一机器标识，不同机器不要重复。 |
 | `hostname` | 否 | 主机名 | 一般不改，空值会自动取本机主机名。 |
 
@@ -40,7 +40,7 @@ python tools/qmt_agent/build_windows_agent.py
 |---|---|---|---|
 | `qmt_path` | 建议填 | 空 | 必须指向 MiniQMT 的 `userdata_mini` 目录。 |
 | `qmt_bin_path` | 建议填 | 空 | 必须指向 MiniQMT 的 `bin.x64` 目录。 |
-| `session_id` | 否 | `0` | `0` 表示自动生成；手工填写时应为非负整数。 |
+| `session_id` | 否 | `0` | `0` 表示自动生成稳定会话号（基于账号/主机名/路径，重连不漂移）；手工填写时应为非负整数。 |
 | `account_type` | 否 | `STOCK` | 普通股票账户用 `STOCK`；信用账户用 `CREDIT`。 |
 | `enable_short_trading` | 否 | `false` | 仅信用账户且确需融券时设为 `true`。 |
 | `short_check_cache_ttl_sec` | 否 | `30` | 融券额度缓存秒数；建议 `30-60`。最小 `5`。 |
@@ -104,7 +104,7 @@ python tools/qmt_agent/build_windows_agent.py
   "account_type": "STOCK",
   "tenant_id": "default",
   "user_id": "10001",
-  "client_version": "1.0.0-desktop",
+  "client_version": "1.3.0-desktop",
   "client_fingerprint": "HOST-001",
   "hostname": "HOST-001",
   "qmt_path": "E:/MiniQMT/userdata_mini",

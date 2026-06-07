@@ -48,12 +48,12 @@ def get_current_version() -> str:
     """Get the current application version."""
     version_file = Path(__file__).resolve().parent / "version.json"
     if not version_file.exists():
-        return "1.0.0"
+        return "1.3.0"
     try:
         data = json.loads(version_file.read_text(encoding="utf-8"))
-        return str(data.get("version") or "1.0.0")
+        return str(data.get("version") or "1.3.0")
     except Exception:
-        return "1.0.0"
+        return "1.3.0"
 
 
 def get_update_base_url() -> str:

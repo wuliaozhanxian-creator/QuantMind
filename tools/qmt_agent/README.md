@@ -202,7 +202,7 @@ python tools/qmt_agent/build_windows_agent.py
 - `account_type`: 账户类型，默认 `STOCK`；多空（融券）实盘要求 `CREDIT`
 - `enable_short_trading`: 是否启用融券做空通道，默认 `false`
 - `short_check_cache_ttl_sec`: 可融券额度查询缓存 TTL（秒），默认 `30`
-- `session_id`: MiniQMT 会话号，不填时默认取当前时间戳
+- `session_id`: MiniQMT 会话号；填 `0` 或留空时会自动生成稳定会话号（基于账号/主机名/路径）
 - `heartbeat_interval_seconds`: 心跳上报周期，默认 `15`
 - `account_report_interval_seconds`: 账户快照上报周期，默认 `30`
 - `reconnect_interval_seconds`: WebSocket / QMT 失败后的重试间隔，默认 `5`
@@ -258,7 +258,7 @@ python tools/qmt_agent/build_windows_agent.py
   "qmt_path": "E:/迅投极速交易终端 睿智融科版/userdata_mini",
   "qmt_bin_path": "E:/迅投极速交易终端 睿智融科版/bin.x64",
   "client_fingerprint": "HOSTNAME",
-  "client_version": "1.0.0-desktop"
+  "client_version": "1.3.0-desktop"
 }
 ```
 

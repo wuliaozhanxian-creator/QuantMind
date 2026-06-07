@@ -17,7 +17,7 @@ class AgentConfig:
     account_type: str = "STOCK"
     tenant_id: str = "default"
     user_id: str = ""
-    client_version: str = "1.0.0"
+    client_version: str = "1.3.0"
     client_fingerprint: str = ""
     hostname: str = ""
     qmt_path: str = ""

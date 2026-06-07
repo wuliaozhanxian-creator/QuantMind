@@ -9,6 +9,7 @@ import re
 import sys
 import threading
 import time
+import zlib
 from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -194,6 +195,27 @@ class QMTClient:
             return xtconstant
         except Exception:
             return None
+
+    def _resolve_session_id(self) -> int:
+        try:
+            configured = int(self.cfg.session_id or 0)
+        except Exception:
+            configured = 0
+        if configured > 0:
+            return configured
+
+        # Keep session id stable when config uses 0 to reduce temp-file growth in userdata_mini.
+        seed = "|".join(
+            [
+                str(self.cfg.account_id or "").strip(),
+                str(self.cfg.hostname or "").strip(),
+                str(self.cfg.qmt_path or "").strip(),
+            ]
+        )
+        if not seed:
+            return 10001
+        derived = zlib.crc32(seed.encode("utf-8")) & 0x7FFFFFFF
+        return max(10001, derived)
 
     @staticmethod
     def _to_qmt_symbol(symbol: str) -> str:
@@ -855,7 +877,13 @@ class QMTClient:
             logger.error("qmt_path is required when xtquant is enabled")
             return False
 
-        session_id = int(self.cfg.session_id or int(time.time()))
+        session_id = self._resolve_session_id()
+        try:
+            configured = int(self.cfg.session_id or 0)
+        except Exception:
+            configured = 0
+        if configured <= 0:
+            logger.info("QMT session_id not configured, using stable auto session_id=%s", session_id)
         for attempt in range(3):
             trader = None
             try:

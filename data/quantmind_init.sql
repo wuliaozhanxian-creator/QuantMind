@@ -12276,4 +12276,241 @@ GRANT USAGE ON SCHEMA public TO quantmind;
 -- PostgreSQL database dump complete
 --
 
+--
+-- Additional tables added after initial dump (market calendar and index data)
+--
+
+SET default_tablespace = '';
+
+SET default_table_access_method = heap;
+
+--
+-- Name: index_ohlcv_daily; Type: TABLE; Schema: public; Owner: quantmind
+--
+
+CREATE TABLE public.index_ohlcv_daily (
+    id bigint NOT NULL,
+    trade_date date NOT NULL,
+    symbol character varying(16) NOT NULL,
+    index_name character varying(64),
+    open double precision,
+    high double precision,
+    low double precision,
+    close double precision,
+    volume double precision,
+    amount double precision,
+    pct_change double precision,
+    source character varying(64),
+    created_at timestamp without time zone DEFAULT now(),
+    updated_at timestamp without time zone DEFAULT now()
+);
+
+
+ALTER TABLE public.index_ohlcv_daily OWNER TO quantmind;
+
+--
+-- Name: index_ohlcv_daily_id_seq; Type: SEQUENCE; Schema: public; Owner: quantmind
+--
+
+CREATE SEQUENCE public.index_ohlcv_daily_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.index_ohlcv_daily_id_seq OWNER TO quantmind;
+
+--
+-- Name: index_ohlcv_daily_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: quantmind
+--
+
+ALTER SEQUENCE public.index_ohlcv_daily_id_seq OWNED BY public.index_ohlcv_daily.id;
+
+
+--
+-- Name: qm_market_calendar_exception; Type: TABLE; Schema: public; Owner: quantmind
+--
+
+CREATE TABLE public.qm_market_calendar_exception (
+    id bigint NOT NULL,
+    market character varying(32) NOT NULL,
+    trade_date date NOT NULL,
+    action character varying(16) NOT NULL,
+    reason text,
+    tenant_id character varying(64) DEFAULT 'default'::character varying NOT NULL,
+    user_id character varying(64) DEFAULT '*'::character varying NOT NULL,
+    approved_by character varying(128),
+    metadata_json jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+ALTER TABLE public.qm_market_calendar_exception OWNER TO quantmind;
+
+--
+-- Name: qm_market_calendar_exception_id_seq; Type: SEQUENCE; Schema: public; Owner: quantmind
+--
+
+CREATE SEQUENCE public.qm_market_calendar_exception_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.qm_market_calendar_exception_id_seq OWNER TO quantmind;
+
+--
+-- Name: qm_market_calendar_exception_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: quantmind
+--
+
+ALTER SEQUENCE public.qm_market_calendar_exception_id_seq OWNED BY public.qm_market_calendar_exception.id;
+
+
+--
+-- Name: qm_market_calendar_version; Type: TABLE; Schema: public; Owner: quantmind
+--
+
+CREATE TABLE public.qm_market_calendar_version (
+    market character varying(32) NOT NULL,
+    year integer NOT NULL,
+    checksum character varying(128) NOT NULL,
+    status character varying(32) DEFAULT 'draft'::character varying NOT NULL,
+    source character varying(64),
+    published_at timestamp with time zone,
+    metadata_json jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+ALTER TABLE public.qm_market_calendar_version OWNER TO quantmind;
+
+--
+-- Name: qm_market_trading_session; Type: TABLE; Schema: public; Owner: quantmind
+--
+
+CREATE TABLE public.qm_market_trading_session (
+    market character varying(32) NOT NULL,
+    session_name character varying(64) NOT NULL,
+    start_time time without time zone NOT NULL,
+    end_time time without time zone NOT NULL,
+    cross_day boolean DEFAULT false NOT NULL,
+    trade_date_rule character varying(64) DEFAULT 'TRADE_DATE'::character varying NOT NULL,
+    timezone character varying(64) DEFAULT 'Asia/Shanghai'::character varying NOT NULL,
+    tenant_id character varying(64) DEFAULT 'default'::character varying NOT NULL,
+    user_id character varying(64) DEFAULT '*'::character varying NOT NULL,
+    metadata_json jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+ALTER TABLE public.qm_market_trading_session OWNER TO quantmind;
+
+--
+-- Name: index_ohlcv_daily id; Type: DEFAULT; Schema: public; Owner: quantmind
+--
+
+ALTER TABLE ONLY public.index_ohlcv_daily ALTER COLUMN id SET DEFAULT nextval('public.index_ohlcv_daily_id_seq'::regclass);
+
+
+--
+-- Name: qm_market_calendar_exception id; Type: DEFAULT; Schema: public; Owner: quantmind
+--
+
+ALTER TABLE ONLY public.qm_market_calendar_exception ALTER COLUMN id SET DEFAULT nextval('public.qm_market_calendar_exception_id_seq'::regclass);
+
+
+--
+-- Name: index_ohlcv_daily index_ohlcv_daily_pkey; Type: CONSTRAINT; Schema: public; Owner: quantmind
+--
+
+ALTER TABLE ONLY public.index_ohlcv_daily
+    ADD CONSTRAINT index_ohlcv_daily_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: index_ohlcv_daily index_ohlcv_daily_trade_date_symbol_key; Type: CONSTRAINT; Schema: public; Owner: quantmind
+--
+
+ALTER TABLE ONLY public.index_ohlcv_daily
+    ADD CONSTRAINT index_ohlcv_daily_trade_date_symbol_key UNIQUE (trade_date, symbol);
+
+
+--
+-- Name: qm_market_calendar_exception qm_market_calendar_exception_pkey; Type: CONSTRAINT; Schema: public; Owner: quantmind
+--
+
+ALTER TABLE ONLY public.qm_market_calendar_exception
+    ADD CONSTRAINT qm_market_calendar_exception_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: qm_market_calendar_version qm_market_calendar_version_pkey; Type: CONSTRAINT; Schema: public; Owner: quantmind
+--
+
+ALTER TABLE ONLY public.qm_market_calendar_version
+    ADD CONSTRAINT qm_market_calendar_version_pkey PRIMARY KEY (market, year);
+
+
+--
+-- Name: qm_market_trading_session qm_market_trading_session_pkey; Type: CONSTRAINT; Schema: public; Owner: quantmind
+--
+
+ALTER TABLE ONLY public.qm_market_trading_session
+    ADD CONSTRAINT qm_market_trading_session_pkey PRIMARY KEY (market, session_name, tenant_id, user_id);
+
+
+--
+-- Name: idx_index_ohlcv_daily_symbol_date; Type: INDEX; Schema: public; Owner: quantmind
+--
+
+CREATE INDEX idx_index_ohlcv_daily_symbol_date ON public.index_ohlcv_daily USING btree (symbol, trade_date);
+
+
+--
+-- Name: idx_index_ohlcv_daily_trade_date; Type: INDEX; Schema: public; Owner: quantmind
+--
+
+CREATE INDEX idx_index_ohlcv_daily_trade_date ON public.index_ohlcv_daily USING btree (trade_date);
+
+
+--
+-- Name: idx_qm_calendar_exception_query; Type: INDEX; Schema: public; Owner: quantmind
+--
+
+CREATE INDEX idx_qm_calendar_exception_query ON public.qm_market_calendar_exception USING btree (market, tenant_id, user_id, trade_date);
+
+
+--
+-- Name: TABLE index_ohlcv_daily; Type: COMMENT; Schema: public; Owner: quantmind
+--
+
+COMMENT ON TABLE public.index_ohlcv_daily IS '指数日线行情数据表：存储主要指数（沪深300、中证500、中证1000等）的日线OHLCV数据';
+
+
+--
+-- Name: TABLE qm_market_calendar_exception; Type: COMMENT; Schema: public; Owner: quantmind
+--
+
+COMMENT ON TABLE public.qm_market_calendar_exception IS '市场日历例外表：记录特殊交易日安排（如临时休市、补交易日等）';
+
+
+--
+-- Name: TABLE qm_market_calendar_version; Type: COMMENT; Schema: public; Owner: quantmind
+--
+
+COMMENT ON TABLE public.qm_market_calendar_version IS '市场日历版本表：管理每年市场日历的版本控制和发布状态';
+
+
+--
+-- Name: TABLE qm_market_trading_session; Type: COMMENT; Schema: public; Owner: quantmind
+--
+
+COMMENT ON TABLE public.qm_market_trading_session IS '市场交易时段表：定义各市场的交易时段配置';
+
 \unrestrict A6yow9GXpjaPdE4nqy3fX6gPKaCKxmHsAfrMoxT5lcuFT3BvFYav1gflstrULrw
