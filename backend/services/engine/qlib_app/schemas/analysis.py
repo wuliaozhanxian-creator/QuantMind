@@ -156,9 +156,23 @@ class TradeStatsMetrics(BaseModel):
     win_rate: float = Field(..., description="胜率")
     profit_loss_ratio: float = Field(..., description="盈亏比")
     profit_loss_days_ratio: float = Field(..., description="盈亏天数比（盈利交易日/亏损交易日）")
+    real_win_rate: float = Field(..., description="真实胜率（已平仓闭环单笔）")
+    avg_win_return: float = Field(..., description="盈利交易平均收益率")
+    avg_loss_return: float = Field(..., description="亏损交易平均亏损率绝对值")
+    avg_trade_return: float = Field(..., description="平均单笔收益率")
+    median_trade_return: float = Field(..., description="单笔收益率中位数")
+    max_win_return: float = Field(..., description="最大单笔收益率")
+    max_loss_return: float = Field(..., description="最大单笔亏损率")
     avg_holding_days: float = Field(..., description="平均持仓天数")
     trade_frequency: float = Field(..., description="交易频率（每月）")
     total_trades: int = Field(..., description="总交易次数")
+    closed_trades: int = Field(..., description="已平仓交易数")
+    open_buy_trades: int = Field(..., description="未平仓买入笔数")
+    winning_trades: int = Field(..., description="盈利交易数")
+    losing_trades: int = Field(..., description="亏损交易数")
+    flat_trades: int = Field(..., description="持平交易数")
+    profit_factor: float = Field(..., description="利润因子")
+    metric_basis: str = Field(..., description="指标计算口径")
 
 
 class TradeStatsResponse(BaseModel):

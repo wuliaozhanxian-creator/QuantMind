@@ -23,7 +23,7 @@ from backend.shared.model_registry import model_registry_service
 router = APIRouter()
 logger = logging.getLogger(__name__)
 _FEATURE_CATALOG_FALLBACK = Path(os.getcwd()) / "config" / "features" / "model_training_feature_catalog_v1.json"
-_ALLOWED_TARGET_MODE = {"return", "classification"}
+_ALLOWED_TARGET_MODE = {"return"}
 _ALLOWED_DEAL_PRICE = {"open", "close"}
 _TRAINING_BASE_FEATURES = []
 _training_log_stream = TrainingRunLogStream()
@@ -240,7 +240,7 @@ def _normalize_payload(payload: dict[str, Any], allowed_features: list[str]) -> 
 
     target_mode = str(payload.get("target_mode", "return")).strip().lower()
     if target_mode not in _ALLOWED_TARGET_MODE:
-        raise HTTPException(status_code=422, detail="target_mode must be one of: return, classification")
+        raise HTTPException(status_code=422, detail="target_mode currently supports only: return")
 
     label_formula = str(payload.get("label_formula") or "").strip()
     effective_trade_date = str(payload.get("effective_trade_date") or "").strip()

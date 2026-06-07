@@ -59,7 +59,7 @@ def _is_cn_trading_hours() -> bool:
 
 
 @router.get("/preflight")
-@redis_cache(ttl=10)
+@redis_cache(ttl=30)
 async def preflight_check(
     trading_mode: str = "REAL",
     user_id: Optional[str] = None,
@@ -718,7 +718,7 @@ async def preflight_check(
 
 
 @router.get("/trading-precheck", response_model=TradingPrecheckResponse)
-@redis_cache(ttl=10)
+@redis_cache(ttl=30)
 async def trading_precheck(
     trading_mode: str = "REAL",
     auth: AuthContext = Depends(get_auth_context),

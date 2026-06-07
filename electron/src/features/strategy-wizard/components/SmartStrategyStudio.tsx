@@ -15,7 +15,7 @@ import { PoolPreview, type PoolPreviewHandle } from './PoolPreview';
 import { ContextAwareAssistant } from './ContextAwareAssistant';
 import QlibParamsConfig from './QlibParamsConfig';
 import QlibValidatorAndSave from './QlibValidatorAndSave';
-import { useWizardStore } from '../store/wizardStore';
+import { useWizardV2Store } from '../store/wizardV2Store';
 import { PAGE_LAYOUT } from '../../../config/pageLayout';
 // 使用按需导入 wizardService 的方法，避免静态和动态导入混用
 import { getWizardUserId } from '../utils/userId';
@@ -33,17 +33,19 @@ const SmartStrategyStudio: React.FC = () => {
   // Use store to persist state across steps
   const {
     generated,
-    pool,
+    workingPool,
     validationResult,
-    poolFile,
+    activePoolVersionId,
     selectedSymbols,
     conditions,
     qlibParams,
+    currentPoolName,
     setGenerated,
-    setPool,
-    setPoolFile,
-    setSelectedSymbols,
-  } = useWizardStore();
+    setWorkingPool,
+    saveCurrentPoolAsVersion,
+    activateVersion,
+    fetchSavedPools,
+  } = useWizardV2Store();
 
   // 组件挂载时从数据库获取活跃的股票池文件
   useEffect(() => {
@@ -51,22 +53,13 @@ const SmartStrategyStudio: React.FC = () => {
       try {
         const userId = getWizardUserId();
 
-        const { getActivePoolFile } = await import('../services/wizardService');
+        const { getActivePoolFile, previewPoolFile } = await import('../services/wizardService');
         const res = await getActivePoolFile({ user_id: userId });
 
         if (res?.success && res?.pool_file) {
           console.log('[SmartStrategyStudio] 从数据库加载活跃股票池:', res.pool_file);
-          setPoolFile({
-            fileUrl: res.pool_file.file_url,
-            fileKey: res.pool_file.file_key,
-            format: res.pool_file.format as 'json' | 'txt' | 'csv',
-            relativePath: res.pool_file.relative_path,
-            fileSize: res.pool_file.file_size,
-            codeHash: res.pool_file.code_hash,
-          });
 
           if (res.pool_file.file_key) {
-            const { previewPoolFile } = await import('../services/wizardService');
             const preview = await previewPoolFile({
               user_id: userId,
               file_key: res.pool_file.file_key,
@@ -74,12 +67,17 @@ const SmartStrategyStudio: React.FC = () => {
 
             if (preview?.success) {
               const items = Array.isArray(preview.items) ? preview.items : [];
-              setPool({
-                items,
-                summary: preview.summary || {},
-                charts: preview.charts || {},
-              });
-              setSelectedSymbols(items.map((item: any) => item.symbol));
+              const mappedItems = items.map((x: any) => ({
+                symbol: String(x?.symbol || '').trim(),
+                name: String(x?.name || '').trim(),
+                marketCap: Number(x?.metrics?.market_cap ?? 0) || 0,
+                pe: Number(x?.metrics?.pe ?? 0) || 0,
+                roe: Number(x?.metrics?.roe ?? 0) || 0,
+                price: Number(x?.metrics?.close ?? 0) || 0,
+              }));
+              setWorkingPool(mappedItems, true);
+              await activateVersion(res.pool_file.file_key);
+              await fetchSavedPools();
             }
           }
 
@@ -92,9 +90,8 @@ const SmartStrategyStudio: React.FC = () => {
       }
     };
 
-
-    // 只在poolFile为空时加载
-    if (!poolFile?.fileKey) {
+    // 只在没有活跃版本时加载
+    if (!activePoolVersionId && workingPool.length === 0) {
       loadActivePoolFile();
     }
   }, []); // 只在组件挂载时执行一次
@@ -103,14 +100,13 @@ const SmartStrategyStudio: React.FC = () => {
   const next = async () => {
     if (currentStep === 2) {
       // 第三步:检查是否有股票池文件
-      console.log('[SmartStrategyStudio] 检查股票池文件:', {
-        hasPoolFile: !!poolFile,
-        hasFileKey: !!poolFile?.fileKey,
-        poolFile: poolFile
+      console.log('[SmartStrategyStudio] 检查股票池:', {
+        hasActiveVersion: !!activePoolVersionId,
+        workingPoolLength: workingPool.length
       });
 
-      if (!poolFile?.fileKey) {
-        message.error('未找到股票池文件Key,请返回第二步重新生成股票池');
+      if (!activePoolVersionId) {
+        message.error('未找到股票池，请返回第二步重新生成股票池');
         return;
       }
 
@@ -130,9 +126,10 @@ const SmartStrategyStudio: React.FC = () => {
         const res = await generateQlib({
           user_id: userId,
           conditions: conditions || {},
-          pool_file_key: poolFile.fileKey,
-          pool_file_url: poolFile.fileUrl,
+          pool_file_key: activePoolVersionId,
+          pool_file_url: '',
           qlib_params: normalizedQlibParams,
+          strategy_name: currentPoolName || `智能策略_${new Date().toLocaleDateString()}`,
         });
 
         if (!res?.success || !res?.code) {
@@ -184,10 +181,10 @@ const SmartStrategyStudio: React.FC = () => {
 
   const canProceed = (stepIndex: number) => {
     if (stepIndex === 0) {
-      return !!(pool?.items && pool.items.length > 0);
+      return !!(workingPool && workingPool.length > 0);
     }
     if (stepIndex === 1) {
-      return !!(pool?.items && pool.items.length > 0);
+      return !!(workingPool && workingPool.length > 0);
     }
     return true;
   };
@@ -371,18 +368,8 @@ const SmartStrategyStudio: React.FC = () => {
                     type="primary"
                     onClick={() => {
                       if (currentStep === 1) {
-                        // 添加2秒延时弹窗，确保历史股票池数据加载完成
-                        Modal.info({
-                          title: '正在准备股票池',
-                          content: '正在确认股票池数据，请稍候...',
-                          okButtonProps: { style: { display: 'none' } },
-                          maskClosable: false,
-                        });
-
-                        setTimeout(() => {
-                          Modal.destroyAll();
-                          poolPreviewRef.current?.triggerSaveAndNext();
-                        }, 2000);
+                        // 直接调用保存逻辑，不使用延时弹窗
+                        poolPreviewRef.current?.triggerSaveAndNext();
                         return;
                       }
                       next();
@@ -448,7 +435,7 @@ const SmartStrategyStudio: React.FC = () => {
                   <Text type="secondary" className="text-xs">状态: {generated?.code ? '已生成' : '草稿'}</Text>
                 </div>
                 <Text type="secondary" className="text-xs">
-                  股票池: <span className="font-medium text-gray-700">{pool?.items ? `${pool.items.length} 只` : '未计算'}</span>
+                  股票池: <span className="font-medium text-gray-700">{workingPool?.length ? `${workingPool.length} 只` : '未计算'}</span>
                 </Text>
                 <Text type="secondary" className="text-xs">
                   最后更新: <span className="font-mono">{new Date().toLocaleTimeString()}</span>

@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import time
@@ -321,29 +322,63 @@ async def run_trading_readiness_precheck(
         raise ValueError(f"unsupported trading mode: {mode}")
 
     checks: list[dict[str, Any]] = []
-
     expected_trade_date = _previous_trading_day(date.today())
 
-    try:
-        redis_ok = bool(redis_client.ping())
-        checks.append(
-            _build_check(
+    # 串行执行数据库相关检查，并行执行非数据库检查
+    # 1. Redis 检查（非数据库，可并行）
+    # 2. PostgreSQL 检查（数据库，必须串行）
+    # 3. 信号就绪状态（数据库，必须串行）
+
+    # 并行执行非数据库操作
+    async def _check_redis():
+        try:
+            redis_ok = bool(redis_client.ping())
+            return _build_check(
                 "redis",
                 "Redis",
                 redis_ok,
                 "Redis 已连接" if redis_ok else "Redis 不可达",
             )
-        )
-    except Exception as exc:
-        checks.append(_build_check("redis", "Redis", False, f"Redis 自检失败: {exc}"))
+        except Exception as exc:
+            return _build_check("redis", "Redis", False, f"Redis 自检失败: {exc}")
 
+    def _check_orchestration_sync():
+        resolved_image, image_source = _resolve_runner_image()
+        orchestration_ready = bool(k8s_manager.api and k8s_manager.core_api)
+        orchestration_label = (
+            "容器编排服务 (Docker) 与执行镜像已就绪"
+            if k8s_manager.mode == "docker"
+            else "Kubernetes 服务与执行镜像已就绪"
+        )
+        return _build_check(
+            "k8s_and_runner_ready",
+            orchestration_label,
+            orchestration_ready and bool(resolved_image),
+            (
+                f"orchestration_mode={k8s_manager.mode}, "
+                f"orchestration_ready={orchestration_ready}, "
+                f"runner_image={resolved_image}, image_source={image_source}"
+            ),
+        ), resolved_image
+
+    def _check_stream_freshness_sync():
+        from backend.services.trade.routers.real_trading_utils import check_stream_series_freshness
+        res = check_stream_series_freshness(redis_client=redis_client)
+        return _build_check(
+            "stream_series_freshness",
+            "实时行情服务已就绪",
+            res["ok"],
+            res["message"],
+        )
+
+    # 串行执行数据库检查
     try:
         await db.execute(text("SELECT 1"))
         checks.append(_build_check("db", "PostgreSQL", True, "数据库连接正常"))
     except Exception as exc:
         checks.append(_build_check("db", "PostgreSQL", False, f"数据库自检失败: {exc}"))
 
-    # 信号就绪状态检查（合并了信号链路启用检查）
+    # 信号就绪状态检查（数据库操作）
     try:
         signal_readiness = await signal_readiness_service.evaluate(
             db,
@@ -353,6 +388,7 @@ async def run_trading_readiness_precheck(
             mode=normalized_mode,
         )
     except Exception as exc:
+        await db.rollback()
         signal_readiness = {
             "available": False,
             "status": "check_error",
@@ -362,7 +398,15 @@ async def run_trading_readiness_precheck(
             else "observe_only",
             "blocking": normalized_mode == "REAL",
         }
-        await db.rollback()
+
+    # 并行执行非数据库检查
+    redis_check, (orchestration_check, resolved_image), stream_check = await asyncio.gather(
+        _check_redis(),
+        asyncio.to_thread(_check_orchestration_sync),
+        asyncio.to_thread(_check_stream_freshness_sync),
+    )
+    checks.append(redis_check)
+
     signal_passed = not bool(signal_readiness.get("blocking"))
     checks.append(
         _build_check(
@@ -382,10 +426,11 @@ async def run_trading_readiness_precheck(
     )
 
     if normalized_mode == "SIMULATION":
-        # 默认模型检测（检查用户是否配置了默认模型）
+        # SIMULATION 模式：串行执行数据库检查，并行执行非数据库检查
+
+        # 数据库操作：默认模型检测（必须串行）
         try:
             from backend.shared.model_registry import model_registry_service
-
             default_model = await model_registry_service.get_default_model(
                 tenant_id=tenant_id,
                 user_id=user_id,
@@ -413,36 +458,32 @@ async def run_trading_readiness_precheck(
                 )
             )
 
-        try:
-            model_ok, model_detail = _check_inference_model_exists()
-            # SIMULATION 模式推理模型仅警告，允许用户先配置系统
-            checks.append(
-                _build_check(
+        # 非数据库操作：并行执行
+        def _check_inference_model_sync():
+            try:
+                model_ok, model_detail = _check_inference_model_exists()
+                return _build_check(
                     "inference_database_ready",
                     "推理模型已就绪",
                     True,  # 仅警告，不阻断
                     model_detail if model_ok else f"[WARNING] {model_detail}",
                 )
-            )
-        except Exception as exc:
-            checks.append(
-                _build_check(
+            except Exception as exc:
+                return _build_check(
                     "inference_database_ready",
                     "推理模型已就绪",
-                    True,  # 仅警告，不阻断
+                    True,
                     f"[WARNING] model_check_error={exc}",
                 )
-            )
 
-        try:
-            from backend.services.trade.sandbox.manager import sandbox_manager
-
-            workers = list(getattr(sandbox_manager, "_workers", {}).values())
-            worker_total = len(workers)
-            alive_total = sum(1 for proc in workers if bool(proc and proc.is_alive()))
-            pool_ok = alive_total > 0
-            checks.append(
-                _build_check(
+        def _check_sandbox_pool_sync():
+            try:
+                from backend.services.trade.sandbox.manager import sandbox_manager
+                workers = list(getattr(sandbox_manager, "_workers", {}).values())
+                worker_total = len(workers)
+                alive_total = sum(1 for proc in workers if bool(proc and proc.is_alive()))
+                pool_ok = alive_total > 0
+                return _build_check(
                     "simulation_sandbox_pool",
                     "模拟盘进程池",
                     pool_ok,
@@ -452,42 +493,44 @@ async def run_trading_readiness_precheck(
                         else "进程池不可用（无存活 worker）"
                     ),
                 )
-            )
-        except Exception as exc:
-            checks.append(
-                _build_check(
+            except Exception as exc:
+                return _build_check(
                     "simulation_sandbox_pool",
                     "模拟盘进程池",
                     False,
                     f"process_pool_error={exc}",
                 )
-            )
 
-        try:
-            from backend.services.trade.routers.real_trading_utils import check_stream_series_freshness
-            res = check_stream_series_freshness(redis_client=redis_client)
-            checks.append(
-                _build_check(
+        def _check_stream_freshness_sim_sync():
+            try:
+                from backend.services.trade.routers.real_trading_utils import check_stream_series_freshness
+                res = check_stream_series_freshness(redis_client=redis_client)
+                return _build_check(
                     "stream_series_freshness",
                     "实时行情服务已就绪",
                     res["ok"],
                     res["message"],
                 )
-            )
-        except Exception as exc:
-            now = datetime.now(timezone.utc).replace(tzinfo=None)
-            is_trading_hours = (
-                now.weekday() < 5
-                and ((now.hour == 9 and now.minute >= 15) or (now.hour >= 10 and now.hour < 15))
-            )
-            checks.append(
-                _build_check(
+            except Exception as exc:
+                now = datetime.now(timezone.utc).replace(tzinfo=None)
+                is_trading_hours = (
+                    now.weekday() < 5
+                    and ((now.hour == 9 and now.minute >= 15) or (now.hour >= 10 and now.hour < 15))
+                )
+                return _build_check(
                     "stream_series_freshness",
                     "实时行情服务已就绪",
                     not is_trading_hours,
                     f"[阻断] stream_probe_error={exc}" if is_trading_hours else f"[WARNING] stream_probe_error={exc}",
                 )
-            )
+
+        # 并行执行非数据库检查
+        inference_check, sandbox_check, sim_stream_check = await asyncio.gather(
+            asyncio.to_thread(_check_inference_model_sync),
+            asyncio.to_thread(_check_sandbox_pool_sync),
+            asyncio.to_thread(_check_stream_freshness_sim_sync),
+        )
+        checks.extend([inference_check, sandbox_check, sim_stream_check])
         return {
             "passed": all(bool(item.get("passed")) for item in checks),
             "checked_at": datetime.now().isoformat(),
@@ -496,7 +539,10 @@ async def run_trading_readiness_precheck(
             "trading_permission": signal_readiness.get("trading_permission"),
         }
 
-    # REAL/SHADOW 模式：推理模型检查
+    # REAL/SHADOW 模式：添加已并行获取的检查结果
+    checks.extend([orchestration_check, stream_check])
+
+    # 推理模型检查（非数据库操作，已在前面并行执行）
     try:
         model_ok, model_detail = _check_inference_model_exists()
         checks.append(
@@ -516,39 +562,6 @@ async def run_trading_readiness_precheck(
                 f"model_check_error={exc}",
             )
         )
-
-    resolved_image, image_source = _resolve_runner_image()
-    # 容器编排就绪度检测 (支持 Docker 或 K8s)
-    orchestration_ready = bool(k8s_manager.api and k8s_manager.core_api)
-    orchestration_label = (
-        "容器编排服务 (Docker) 与执行镜像已就绪"
-        if k8s_manager.mode == "docker"
-        else "Kubernetes 服务与执行镜像已就绪"
-    )
-
-    checks.append(
-        _build_check(
-            "k8s_and_runner_ready",
-            orchestration_label,
-            orchestration_ready and bool(resolved_image),
-            (
-                f"orchestration_mode={k8s_manager.mode}, "
-                f"orchestration_ready={orchestration_ready}, "
-                f"runner_image={resolved_image}, image_source={image_source}"
-            ),
-        )
-    )
-
-    from backend.services.trade.routers.real_trading_utils import check_stream_series_freshness
-    res = check_stream_series_freshness(redis_client=redis_client)
-    checks.append(
-        _build_check(
-            "stream_series_freshness",
-            "实时行情服务已就绪",
-            res["ok"],
-            res["message"],
-        )
-    )
 
     if normalized_mode == "REAL":
         qmt_ok, qmt_detail = await _check_qmt_agent_online(

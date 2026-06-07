@@ -250,6 +250,7 @@
 - `advancedAnalysisService.analyzeBasicRisk` 增加响应清洗：对 `NaN/Inf/undefined` 统一降级为 `0`，避免高级分析卡片显示 `NaN%`。
 - 基础风险指标前端类型同步移除 `information_ratio`，与后端最新可计算口径保持一致。
 - 交易统计类型新增 `profit_loss_days_ratio`（盈亏天数比），用于替代前端“盈亏比”主展示，减少无真实单笔 `pnl` 时的语义偏差。
+- 高级分析页 `TradeStatsPanel` 已在 `2026-06-07` 将盈亏分布图优先切换为交易日口径：组合调用 `analyzeTradeStats + analyzeBasicRisk`，优先展示基础风险返回的 `returns_distribution`，仅在基础风险分布缺失时回退到旧的 `pnl_distribution`。
 
 ## 测试
 

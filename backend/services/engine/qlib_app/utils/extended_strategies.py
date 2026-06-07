@@ -291,6 +291,9 @@ class RedisRiskGuardTopkStrategy(DynamicRiskMixin, FundamentalFilterMixin, TopkD
         # 信号兼容性处理：必须在 _OUR_KWARGS 过滤循环之前调用。
         kwargs = _resolve_signal_kwarg(kwargs)
 
+        # 包装信号以支持基本面过滤
+        self._wrap_signal_with_fundamental_filter(kwargs)
+
         # 全局规则：选股时剔除涨跌停/停牌，避免无效名额占用
         kwargs.setdefault("only_tradable", True)
 

@@ -374,11 +374,12 @@ export const parseSuggestedTimePeriods = (
   return { train, val, test };
 };
 
+export const normalizeTargetMode = (mode?: string | null): TargetMode => {
+  return mode === 'classification' ? 'return' : 'return';
+};
+
 export const buildLabelFormula = (target: TrainingTarget) => {
-  if (target.mode === 'classification') {
-    return `label = 1[ future_return(T, T+${target.horizonDays}) > 0 ]`;
-  }
-  return `label = CSZScore(future_return(T, T+${target.horizonDays})) = CSZScore(open(T+${target.horizonDays}) / open(T) - 1)`;
+  return `label = CSZScore(adj_close(T+${target.horizonDays}) / adj_open(T+1) - 1)`;
 };
 
 export const buildEffectiveTradeDate = (target: TrainingTarget, referenceDate: Dayjs) => {
@@ -437,14 +438,18 @@ export const buildTrainingRequest = (
   displayName: string
 ): TrainingRequestPayload => {
   const finalFeatures = Array.from(new Set(selectedFeatures));
-  const labelFormula = buildLabelFormula(target);
+  const normalizedTarget: TrainingTarget = {
+    ...target,
+    mode: normalizeTargetMode(target.mode),
+  };
+  const labelFormula = buildLabelFormula(normalizedTarget);
   const effectiveTradeDate = buildEffectiveTradeDate(target, timePeriods.test[0]);
   const trainingWindow = `${formatRange(timePeriods.train)} | ${formatRange(timePeriods.val)} | ${formatRange(timePeriods.test)}`;
   return {
-    displayName: displayName.trim() || buildAutoDisplayName(dayjs(), target, finalFeatures.length),
+    displayName: displayName.trim() || buildAutoDisplayName(dayjs(), normalizedTarget, finalFeatures.length),
     selectedFeatures: finalFeatures,
     featureCategories: summarizeFeatureCategories(finalFeatures, categories),
-    target,
+    target: normalizedTarget,
     timePeriods: {
       train: toISOStringRange(timePeriods.train),
       val: toISOStringRange(timePeriods.val),
@@ -463,6 +468,7 @@ export const buildBackendTrainingPayload = (
   request: TrainingRequestPayload,
   timePeriods: TimePeriodMap,
 ): any => {
+  const normalizedTargetMode = normalizeTargetMode(request.target.mode);
   const features = Array.from(new Set(request.selectedFeatures));
   const trainStart = dayjs(request.timePeriods.train[0]).format('YYYY-MM-DD');
   const trainEnd = dayjs(request.timePeriods.train[1]).format('YYYY-MM-DD');
@@ -490,7 +496,7 @@ export const buildBackendTrainingPayload = (
     features,
     feature_categories: request.featureCategories,
     target_horizon_days: request.target.horizonDays,
-    target_mode: request.target.mode,
+    target_mode: normalizedTargetMode,
     label_formula: request.labelFormula,
     effective_trade_date: request.effectiveTradeDate,
     training_window: request.trainingWindow,
@@ -568,7 +574,7 @@ export const parseTrainingResult = (
   const defaultMetadata = {
     display_name: request.displayName,
     target_horizon_days: request.target.horizonDays,
-    target_mode: request.target.mode,
+    target_mode: normalizeTargetMode(request.target.mode),
     label_formula: request.labelFormula,
     training_window: request.trainingWindow,
     feature_count: request.selectedFeatures.length,
@@ -628,7 +634,7 @@ export const parseTrainingResult = (
 };
 
 export const getTargetModeDescription = (mode: TargetMode): string => {
-  if (mode === 'classification') return '分类（预测涨跌方向）';
+  if (mode === 'classification') return '分类（历史元数据兼容，当前训练入口不再开放）';
   return '回归（预测未来收益率）';
 };
 

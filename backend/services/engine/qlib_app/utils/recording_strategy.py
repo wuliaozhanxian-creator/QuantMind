@@ -1,8 +1,10 @@
 import json
 import logging
+from typing import Any
 
 import pandas as pd
 from qlib.backtest.decision import Order, OrderDir
+from qlib.backtest.signal import Signal
 from qlib.contrib.strategy.signal_strategy import (
     TopkDropoutStrategy,
     WeightStrategyBase,
@@ -14,6 +16,83 @@ from backend.shared.fundamental_aligner import fundamental_aligner
 from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
 
 logger = logging.getLogger(__name__)
+
+
+class FundamentalFilteredSignal(Signal):
+    """对 signal.get_signal() 的返回值补充基本面过滤。"""
+
+    def __init__(self, signal: Any, constraints: dict[str, Any]) -> None:
+        self._signal = signal
+        self._constraints = dict(constraints or {})
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._signal, name)
+
+    @staticmethod
+    def _resolve_trade_date(args: tuple[Any, ...], kwargs: dict[str, Any]) -> pd.Timestamp | None:
+        candidates = (
+            kwargs.get("end_time"),
+            kwargs.get("start_time"),
+            args[1] if len(args) > 1 else None,
+            args[0] if len(args) > 0 else None,
+        )
+        for candidate in candidates:
+            if candidate is None:
+                continue
+            try:
+                return pd.Timestamp(candidate)
+            except Exception:
+                continue
+        return None
+
+    @staticmethod
+    def _filter_score_index(score: pd.Series | pd.DataFrame, instruments: list[str]) -> pd.Series | pd.DataFrame:
+        if not instruments:
+            return score.iloc[0:0]
+
+        instrument_set = {str(item) for item in instruments}
+        if isinstance(score.index, pd.MultiIndex) and "instrument" in score.index.names:
+            mask = score.index.get_level_values("instrument").astype(str).isin(instrument_set)
+            return score.loc[mask]
+
+        kept_index = [idx for idx in score.index if str(idx) in instrument_set]
+        if not kept_index:
+            return score.iloc[0:0]
+        return score.loc[kept_index]
+
+    def get_signal(self, *args: Any, **kwargs: Any) -> Any:
+        score = self._signal.get_signal(*args, **kwargs)
+        if score is None or not self._constraints:
+            return score
+        if not isinstance(score, (pd.Series, pd.DataFrame)) or score.empty:
+            return score
+
+        trade_date = self._resolve_trade_date(args, kwargs)
+        if trade_date is None:
+            return score
+
+        try:
+            if isinstance(score.index, pd.MultiIndex) and "instrument" in score.index.names:
+                instruments = score.index.get_level_values("instrument").astype(str).tolist()
+            else:
+                instruments = [str(idx) for idx in score.index.tolist()]
+
+            filtered = fundamental_aligner.filter_instruments(
+                trade_date,
+                instruments,
+                constraints=self._constraints,
+            )
+            if not filtered:
+                return score.iloc[0:0]
+            return self._filter_score_index(score, list(filtered))
+        except Exception as exc:
+            StructuredTaskLogger(
+                logger,
+                "fundamental-filter-signal",
+                {"trade_date": trade_date.strftime("%Y-%m-%d") if hasattr(trade_date, "strftime") else trade_date},
+            ).warning("fundamental_signal_filter_failed", "基本面信号过滤失败，回退原始信号", error=str(exc))
+            return score
+
 
 # 所有「本项目自定义 / 前端传入」的 kwargs，Qlib 的 BaseStrategy 不认识它们，
 # 必须在调用 super().__init__() 之前统一 pop。
@@ -570,6 +649,32 @@ class FundamentalFilterMixin:
                     self.fundamental_constraints[old_key] = kwargs.pop(old_key)
 
         self.use_fundamental_filter = len(self.fundamental_constraints) > 0
+
+    def _wrap_signal_with_fundamental_filter(self, kwargs):
+        """将原始信号包装为带基本面过滤的信号。"""
+        if not getattr(self, "use_fundamental_filter", False):
+            return
+        signal = kwargs.get("signal")
+        if signal is None:
+            StructuredTaskLogger(
+                logger,
+                "fundamental-filter-mixin",
+                {"backtest_id": getattr(self, "backtest_id", None)},
+            ).warning("signal_none", "signal 为 None，跳过包装")
+            return
+        if not hasattr(signal, "get_signal"):
+            StructuredTaskLogger(
+                logger,
+                "fundamental-filter-mixin",
+                {"backtest_id": getattr(self, "backtest_id", None)},
+            ).warning("signal_no_get_signal", "signal 没有 get_signal 方法，跳过包装", signal_type=type(signal).__name__)
+            return
+        kwargs["signal"] = FundamentalFilteredSignal(signal, self.fundamental_constraints)
+        StructuredTaskLogger(
+            logger,
+            "fundamental-filter-mixin",
+            {"backtest_id": getattr(self, "backtest_id", None)},
+        ).info("signal_wrapped", "信号已包装为 FundamentalFilteredSignal", constraints=list(self.fundamental_constraints.keys()))
 
     def apply_fundamental_filter(self, score, trade_date):
         if not self.use_fundamental_filter or score is None or score.empty:

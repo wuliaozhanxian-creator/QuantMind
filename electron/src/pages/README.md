@@ -16,6 +16,7 @@
 - `ResearchPlatformPage.tsx` 的量化研究条件默认值已统一为“全量候选”宽松口径，避免初始进入页面时被成交额、换手率、ROE、PB、市值、乖离等隐藏条件预先过滤；候选池市值与主力流入也改为尊重后端已标准化单位，避免重复除以 `1e8`。
 - `ResearchPlatformPage.tsx` 的股票详情弹窗已将“量化研究结论”改为“量化研究指标”，只展示模型分数、连板天数、成交额、换手率、涨跌幅、收益、行业、概念、指数、市值等客观字段，不再渲染结论性文本。
 - `ModelTrainingPage.tsx` 在训练任务返回 `failed` 时也会进入第五步“结果入库”页并展示后端错误原因，避免训练后处理或模型注册失败时页面停留在第四步造成无跳转误判。
+- `ModelTrainingPage.tsx` / `trainingUtils.tsx` / `TrainingTargetConfig.tsx` 已在 `2026-06-07` 收敛训练目标口径：训练页不再开放 `classification` 选择；标签预览统一展示真实训练公式 `CSZScore(adj_close(T+N) / adj_open(T+1) - 1)`，对应后复权、`T+1` 开盘买入、`T+N` 收盘卖出的可交易收益率。
 - `BacktestCenterPage.tsx` 的旧版本地“收益分布直方图”已修复最后一个分箱右边界漏计问题，并在无收益样本时直接跳过渲染，避免 legacy 页面把最大单日收益漏掉 1 个样本。
 - `AIIDEPage.tsx` 的接口请求为“网关优先 + 直连回退”：生产默认先走 `SERVICE_ENDPOINTS.API_GATEWAY`（可由 `VITE_AI_IDE_API_BASE_URL` 覆盖），当 AI-IDE 核心接口出现 404/5xx 或网络失败时自动回退到 `VITE_AI_IDE_DIRECT_BASE_URL`（默认 `http://127.0.0.1:8010/api/v1`）。
 - `RealTradingPage.tsx` / `StrategyManagement.tsx` 依赖的 `realTradingService` 也已支持“网关优先 + 直连回退”：当主网关不可达或返回 5xx 时，会自动尝试 `VITE_REAL_TRADING_DIRECT_URL`（默认 `http://127.0.0.1:8000/api/v1/real-trading`），便于本地调试或网关短暂抖动时继续启动。
@@ -60,7 +61,7 @@
 - `ModelRegistryPage.tsx` 已继续拆分：页面主文件仅保留状态与路由编排，模型注册纯函数迁入 `modelRegistryUtils.ts`，详情/训练溯源/推理中心/通用卡片迁入 `modelRegistryPanels.tsx`。
 - 训练与回测默认价格口径已统一切换为开盘价（2026-04-28）：
   - `ModelTrainingPage.tsx` 依赖的 `trainingUtils.DEFAULT_CONTEXT.dealPrice` 已从 `close` 调整为 `open`；
-  - 训练标签公式默认值已从 `close(T+N)/close(T)-1` 调整为 `open(T+N)/open(T)-1`；
+  - 训练页标签预览当前已进一步对齐真实训练实现：由旧的 `open(T+N)/open(T)-1` 文案收敛为 `adj_close(T+N)/adj_open(T+1)-1`；
   - `AIIDEPage.tsx` 自动构建的默认 Qlib 回测参数 `deal_price` 已改为 `open`。
 - `modelRegistryUtils.ts` 已修复模型名称显示回退顺序：优先使用 `MODEL_ID_NAME_MAP` 命中，其次使用 `metadata_json.display_name`，最后才回退 `model_id`，避免新训练模型在资产库页只显示 ID。
 - `ModelRegistryPage.tsx` 新增“归因分析”页签（位于“训练溯源”与“推理中心”之间），用于展示训练后 SHAP 因子贡献榜；页面会调用用户态接口读取 `shap_summary.csv` 并按 `mean_abs_shap` 列表排序展示，并支持按因子名搜索与“按当前筛选结果导出 CSV”。

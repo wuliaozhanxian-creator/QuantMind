@@ -27,6 +27,8 @@ class LocalStorageService:
         self.local_storage_root = storage_root
         if not os.path.exists(self.local_storage_root):
             os.makedirs(self.local_storage_root, exist_ok=True)
+        # 添加 client 属性以兼容 strategy_storage 的检查
+        self.client = self
         logger.info(
             f"LocalStorageService initialized - Root: {self.local_storage_root}"
         )

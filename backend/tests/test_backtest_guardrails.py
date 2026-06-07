@@ -326,10 +326,16 @@ def test_advanced_trade_stats_handles_missing_pnl_columns():
         {"date": "2025-01-03", "symbol": "SH600001", "action": "sell", "price": 11.0, "quantity": 100},
     ]
 
-    stats = RiskAnalyzer._calculate_advanced_trade_stats(trades)
+    daily_returns = pd.Series([0.01, -0.01], index=pd.to_datetime(["2025-01-02", "2025-01-03"]))
+    stats = RiskAnalyzer._calculate_advanced_trade_stats(trades, daily_returns=daily_returns)
 
     assert stats["pnl_distribution"]["counts"]
-    assert stats["trade_frequency_series"]["values"] == [2.0]
+    assert stats["trade_frequency_series"]["values"] == []
+    assert stats["profit_loss_days_ratio"] == pytest.approx(1.0)
+    assert stats["avg_holding_days"] == pytest.approx(1.0)
+    assert stats["trade_frequency"] == pytest.approx(2.0)
+    assert stats["real_win_rate"] == pytest.approx(0.0)
+    assert stats["metric_basis"] == "summary_fallback"
 
 
 def test_risk_metrics_uses_geometric_benchmark_annualization(monkeypatch):

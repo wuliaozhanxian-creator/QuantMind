@@ -177,8 +177,14 @@ def _resolve_trade_service_url() -> str:
     if direct:
         parsed = urlparse(direct)
         hostname = (parsed.hostname or "").strip().lower()
-        # 容器内若读到本地开发地址（127.0.0.1/localhost），会错误指向当前 engine 容器。
-        if os.path.exists("/.dockerenv") and hostname in {"127.0.0.1", "localhost"}:
+        # 多容器模式下，若读到本地地址（127.0.0.1/localhost），替换为正确的服务名
+        # 单容器模式（SERVICE_MODE=all）下，所有服务在同一容器，保持 127.0.0.1
+        service_mode = str(os.getenv("SERVICE_MODE", "")).strip().lower()
+        if (
+            os.path.exists("/.dockerenv")
+            and hostname in {"127.0.0.1", "localhost"}
+            and service_mode != "all"
+        ):
             return "http://quantmind-trade:8002/api/v1/real-trading/status"
         return f"{direct.rstrip('/')}/api/v1/real-trading/status"
     return "http://quantmind-trade:8002/api/v1/real-trading/status"

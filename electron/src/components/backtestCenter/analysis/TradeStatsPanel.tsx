@@ -3,7 +3,7 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { AlertTriangle, BarChart3, Info, RefreshCw, TrendingUp } from 'lucide-react';
+import { AlertTriangle, BarChart3, Info, RefreshCw, Target, TrendingDown, TrendingUp } from 'lucide-react';
 import ReactECharts from 'echarts-for-react';
 import {
   advancedAnalysisService,
@@ -21,7 +21,7 @@ export const TradeStatsPanel: React.FC<TradeStatsPanelProps> = ({ backtestId }) 
 
   useEffect(() => {
     if (backtestId) {
-      loadData();
+      void loadData();
     }
   }, [backtestId]);
 
@@ -29,8 +29,8 @@ export const TradeStatsPanel: React.FC<TradeStatsPanelProps> = ({ backtestId }) 
     setLoading(true);
     setError('');
     try {
-      const result = await advancedAnalysisService.analyzeTradeStats(backtestId);
-      setData(result);
+      const tradeStatsResult = await advancedAnalysisService.analyzeTradeStats(backtestId);
+      setData(tradeStatsResult);
     } catch (err: unknown) {
       setError(extractErrorMessage(err));
       console.error('加载交易统计失败:', err);
@@ -59,7 +59,7 @@ export const TradeStatsPanel: React.FC<TradeStatsPanelProps> = ({ backtestId }) 
             <div className="font-medium text-red-800">分析失败</div>
             <div className="text-sm text-red-700 mt-1">{error}</div>
             <button
-              onClick={loadData}
+              onClick={() => void loadData()}
               className="mt-2 text-sm text-red-600 hover:text-red-700 underline"
             >
               重试
@@ -79,68 +79,182 @@ export const TradeStatsPanel: React.FC<TradeStatsPanelProps> = ({ backtestId }) 
     );
   }
 
-  const metrics = [
+  const isFallback = data.metrics.metric_basis !== 'closed_trade_fifo';
+
+  const topMetrics = [
     {
-      label: '交易日盈亏占比',
-      value: data.metrics.win_rate,
+      label: '交易胜率',
+      value: data.metrics.real_win_rate,
+      displayValue: isFallback ? '--' : undefined,
+      format: 'percent' as const,
+      icon: Target,
+      color: 'red' as const,
+    },
+    {
+      label: '平均盈亏',
+      value: data.metrics.avg_trade_return,
+      displayValue: isFallback ? '--' : undefined,
+      format: 'percent' as const,
+      icon: TrendingUp,
+      color: data.metrics.avg_trade_return >= 0 ? 'red' as const : 'green' as const,
+    },
+    {
+      label: '盈亏比',
+      value: data.metrics.profit_loss_ratio,
+      displayValue: isFallback ? '--' : undefined,
+      format: 'number' as const,
+      icon: BarChart3,
+      color: 'purple' as const,
+      decimals: 2,
+    },
+    {
+      label: '利润因子',
+      value: data.metrics.profit_factor,
+      displayValue: isFallback ? '--' : undefined,
+      format: 'number' as const,
+      icon: TrendingUp,
+      color: 'purple' as const,
+      decimals: 2,
+    },
+    {
+      label: '已完成交易笔数',
+      value: data.metrics.closed_trades,
+      displayValue: isFallback ? '--' : undefined,
+      format: 'number' as const,
+      icon: BarChart3,
+      color: 'gray' as const,
+      decimals: 0,
+      suffix: '笔',
+    },
+  ];
+
+  const detailMetrics = [
+    {
+      label: '月均交易次数',
+      value: data.metrics.trade_frequency,
+      displayValue: isFallback ? '--' : undefined,
+      format: 'number' as const,
+      icon: TrendingUp,
+      color: 'gray' as const,
+      decimals: 0,
+      suffix: '笔',
+    },
+    {
+      label: '未闭环买入批次',
+      value: data.metrics.open_buy_trades,
+      displayValue: isFallback ? '--' : undefined,
+      format: 'number' as const,
+      icon: TrendingDown,
+      color: 'orange' as const,
+      decimals: 0,
+      suffix: '笔',
+    },
+    {
+      label: '盈利交易',
+      value: data.metrics.winning_trades,
+      displayValue: isFallback ? '--' : undefined,
+      format: 'number' as const,
+      icon: TrendingUp,
+      color: 'red' as const,
+      decimals: 0,
+      suffix: '笔',
+    },
+    {
+      label: '亏损交易',
+      value: data.metrics.losing_trades,
+      displayValue: isFallback ? '--' : undefined,
+      format: 'number' as const,
+      icon: TrendingDown,
+      color: 'green' as const,
+      decimals: 0,
+      suffix: '笔',
+    },
+    {
+      label: '最大盈利',
+      value: data.metrics.max_win_return,
+      displayValue: isFallback ? '--' : undefined,
       format: 'percent' as const,
       icon: TrendingUp,
       color: 'red' as const,
     },
     {
-      label: '盈亏天数比',
-      value: data.metrics.profit_loss_days_ratio,
-      format: 'number' as const,
-      icon: BarChart3,
+      label: '最大亏损',
+      value: data.metrics.max_loss_return,
+      displayValue: isFallback ? '--' : undefined,
+      format: 'percent' as const,
+      icon: TrendingDown,
+      color: 'green' as const,
+    },
+    {
+      label: '盈利交易平均盈利',
+      value: data.metrics.avg_win_return,
+      displayValue: isFallback ? '--' : undefined,
+      format: 'percent' as const,
+      icon: TrendingUp,
       color: 'red' as const,
+    },
+    {
+      label: '亏损交易平均亏损',
+      value: -Math.abs(data.metrics.avg_loss_return),
+      displayValue: isFallback ? '--' : undefined,
+      format: 'percent' as const,
+      icon: TrendingDown,
+      color: 'green' as const,
     },
     {
       label: '平均持仓天数',
       value: data.metrics.avg_holding_days,
+      displayValue: isFallback ? '--' : undefined,
       format: 'number' as const,
       icon: BarChart3,
-      color: 'orange' as const,
+      color: 'gray' as const,
       decimals: 2,
       suffix: '天',
     },
     {
-      label: '交易频率',
-      value: data.metrics.trade_frequency,
-      format: 'number' as const,
-      icon: TrendingUp,
-      color: 'purple' as const,
-      decimals: 2,
-      suffix: '/月',
-    },
-    {
-      label: '交易次数',
+      label: '总成交次数',
       value: data.metrics.total_trades,
+      displayValue: isFallback ? '--' : undefined,
       format: 'number' as const,
       icon: BarChart3,
       color: 'gray' as const,
       decimals: 0,
-      suffix: '次',
+      suffix: '笔',
     },
   ];
 
-  const useHoldingFallback = !hasHistogramData(data.holding_days_distribution);
-
   return (
     <div className="space-y-6">
-      <div className="bg-green-50 border border-green-200 rounded-2xl p-4">
+      <div className={`${isFallback ? 'bg-amber-50 border-amber-200' : 'bg-green-50 border-green-200'} border rounded-2xl p-4`}>
         <div className="flex items-start gap-2">
-          <Info className="w-4 h-4 text-green-600 mt-0.5 flex-shrink-0" />
-          <div className="text-xs text-green-700">
-            <div className="font-medium mb-1">交易统计</div>
-            <div>按交易日胜率口径，刻画交易风格与执行节奏。</div>
+          <Info className={`w-4 h-4 mt-0.5 flex-shrink-0 ${isFallback ? 'text-amber-600' : 'text-green-600'}`} />
+          <div className={`text-xs ${isFallback ? 'text-amber-700' : 'text-green-700'}`}>
+            <div className="font-semibold mb-1 text-[11px]">真实交易能力</div>
+            <div>
+              {isFallback
+                ? '该回测缺少完整成交闭环，当前部分指标为兼容口径；建议优先查看已完成且成交明细完整的回测结果。'
+                : '当前指标按已平仓单笔交易 FIFO 配对计算，手续费已计入，未平仓仓位不纳入真实胜率。'}
+            </div>
           </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-        {metrics.map((metric) => (
-          <MetricCard key={metric.label} {...metric} />
-        ))}
+      <div>
+        <div className="text-xs font-semibold text-gray-700 mb-3">单笔交易核心指标</div>
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+          {topMetrics.map((metric) => (
+            <MetricCard key={metric.label} {...metric} size="lg" />
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <div className="text-xs font-semibold text-gray-700 mb-3">交易明细</div>
+        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
+          {detailMetrics.map((metric) => (
+            <MetricCard key={metric.label} {...metric} />
+          ))}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -156,16 +270,10 @@ export const TradeStatsPanel: React.FC<TradeStatsPanelProps> = ({ backtestId }) 
           )}
         </ChartCard>
 
-        <ChartCard title={useHoldingFallback ? '月度交易次数分布（替代）' : '持仓天数分布'}>
-          {!useHoldingFallback && hasHistogramData(data.holding_days_distribution) ? (
+        <ChartCard title="持仓天数分布">
+          {hasHistogramData(data.holding_days_distribution) ? (
             <ReactECharts
               option={getHoldingDaysOption(data.holding_days_distribution)}
-              style={{ height: '320px' }}
-              opts={{ renderer: 'canvas' }}
-            />
-          ) : hasSeriesData(data.trade_frequency_series) ? (
-            <ReactECharts
-              option={getTradeFrequencyBarOption(data.trade_frequency_series)}
               style={{ height: '320px' }}
               opts={{ renderer: 'canvas' }}
             />
@@ -175,19 +283,17 @@ export const TradeStatsPanel: React.FC<TradeStatsPanelProps> = ({ backtestId }) 
         </ChartCard>
       </div>
 
-      <div className="grid grid-cols-1 gap-6">
-        <ChartCard title="交易频率趋势">
-          {hasSeriesData(data.trade_frequency_series) ? (
-            <ReactECharts
-              option={getTradeFrequencyOption(data.trade_frequency_series)}
-              style={{ height: '320px' }}
-              opts={{ renderer: 'canvas' }}
-            />
-          ) : (
-            <EmptyChart />
-          )}
-        </ChartCard>
-      </div>
+      <ChartCard title="月度交易次数">
+        {hasSeriesData(data.trade_frequency_series) ? (
+          <ReactECharts
+            option={getTradeFrequencyOption(data.trade_frequency_series)}
+            style={{ height: '320px' }}
+            opts={{ renderer: 'canvas' }}
+          />
+        ) : (
+          <EmptyChart />
+        )}
+      </ChartCard>
     </div>
   );
 };
@@ -219,7 +325,7 @@ function getPnlDistributionOption(data: { bins: number[]; counts: number[] }) {
     yAxis: { type: 'value', name: '频次' },
     series: [
       {
-        name: '盈亏分布',
+        name: '单笔收益率分布',
         type: 'bar',
         data: data.counts,
         itemStyle: { color: '#10b981' },
@@ -232,22 +338,13 @@ function getPnlDistributionOption(data: { bins: number[]; counts: number[] }) {
 function getHoldingDaysOption(data: { bins: number[]; counts: number[] }) {
   const normalized = normalizeHoldingDistribution(data);
   const labels = buildHoldingPeriodLabels();
-  const total = normalized.reduce((sum, value) => sum + value, 0);
   return {
     tooltip: {
       trigger: 'axis',
-      formatter: (params: Array<{ axisValue: string; value: number }>) => {
-        const count = Number(params[0].value) || 0;
-        const pct = total > 0 ? ((count / total) * 100).toFixed(1) : '0.0';
-        return `${params[0].axisValue}<br/>频次: ${count}<br/>占比: ${pct}%`;
-      },
+      formatter: (params: Array<{ axisValue: string; value: number }>) => `${params[0].axisValue}<br/>频次: ${params[0].value}`,
     },
     grid: { left: '6%', right: '6%', bottom: '14%', top: '10%', containLabel: true },
-    xAxis: {
-      type: 'category',
-      data: labels,
-      axisLabel: { interval: 0, rotate: 20 },
-    },
+    xAxis: { type: 'category', data: labels, axisLabel: { interval: 0, rotate: 20 } },
     yAxis: { type: 'value', name: '频次' },
     series: [
       {
@@ -256,43 +353,6 @@ function getHoldingDaysOption(data: { bins: number[]; counts: number[] }) {
         data: normalized,
         itemStyle: { color: '#60a5fa' },
         barMaxWidth: 24,
-        label: {
-          show: true,
-          position: 'top',
-          formatter: ({ value }: { value: number }) => {
-            const pct = total > 0 ? ((Number(value) / total) * 100).toFixed(1) : '0.0';
-            return `${value} (${pct}%)`;
-          },
-          fontSize: 11,
-          color: '#475569',
-        },
-      },
-    ],
-  };
-}
-
-function getTradeFrequencyBarOption(series: { dates: string[]; values: number[] }) {
-  return {
-    tooltip: {
-      trigger: 'axis',
-      formatter: (params: Array<{ axisValue: string; value: number }>) => `${params[0].axisValue}<br/>交易次数: ${params[0].value}`,
-    },
-    grid: { left: '6%', right: '6%', bottom: '14%', top: '10%', containLabel: true },
-    xAxis: {
-      type: 'category',
-      data: series.dates,
-      axisLabel: {
-        formatter: (value: string) => value.slice(2, 7),
-      },
-    },
-    yAxis: { type: 'value', name: '次数' },
-    series: [
-      {
-        name: '月度交易次数',
-        type: 'bar',
-        data: series.values,
-        itemStyle: { color: '#60a5fa' },
-        barMaxWidth: 36,
       },
     ],
   };
@@ -302,7 +362,7 @@ function getTradeFrequencyOption(series: { dates: string[]; values: number[] }) 
   return {
     tooltip: {
       trigger: 'axis',
-      formatter: (params: Array<{ axisValue: string; value: number }>) => `${params[0].axisValue}<br/>交易次数: ${params[0].value}`,
+      formatter: (params: Array<{ axisValue: string; value: number }>) => `${params[0].axisValue}<br/>平仓交易数: ${params[0].value}`,
     },
     dataZoom: [
       { type: 'inside', start: 0, end: 100 },
@@ -316,10 +376,10 @@ function getTradeFrequencyOption(series: { dates: string[]; values: number[] }) 
         formatter: (value: string) => value.slice(2, 7),
       },
     },
-    yAxis: { type: 'value', name: '次数' },
+    yAxis: { type: 'value', name: '笔数' },
     series: [
       {
-        name: '交易频率',
+        name: '月度交易次数',
         type: 'line',
         data: series.values,
         smooth: true,
@@ -349,22 +409,14 @@ function normalizeHoldingDistribution(data: { bins: number[]; counts: number[] }
   const bins = Array.isArray(data?.bins) ? data.bins : [];
   const counts = Array.isArray(data?.counts) ? data.counts : [];
   if (!counts.length) return target;
-
-  // 后端已是标准 5 桶时直接使用
   if (counts.length === 5) {
-    return counts.map((v) => Number(v) || 0);
+    return counts.map((value) => Number(value) || 0);
   }
-
-  // 兼容历史自动分箱：按每个箱体中点重新映射
   for (let i = 0; i < counts.length; i += 1) {
     const count = Number(counts[i]) || 0;
     const left = Number(bins[i]);
     const right = Number(bins[i + 1]);
-    const mid = Number.isFinite(left) && Number.isFinite(right)
-      ? (left + right) / 2
-      : Number.isFinite(left)
-        ? left
-        : i + 1;
+    const mid = Number.isFinite(left) && Number.isFinite(right) ? (left + right) / 2 : Number.isFinite(left) ? left : i + 1;
     const idx = holdingBucketIndex(mid);
     if (idx >= 0) target[idx] += count;
   }
@@ -372,7 +424,7 @@ function normalizeHoldingDistribution(data: { bins: number[]; counts: number[] }
 }
 
 function holdingBucketIndex(days: number) {
-  if (days <= 1) return -1; // 忽略
+  if (days <= 1) return -1;
   if (days <= 7) return 0;
   if (days <= 30) return 1;
   if (days <= 90) return 2;
@@ -391,44 +443,49 @@ function extractErrorMessage(error: unknown): string {
 interface MetricCardProps {
   label: string;
   value: number;
+  displayValue?: string;
   format: 'percent' | 'number';
   icon?: React.ComponentType<{ className?: string }>;
   color?: 'blue' | 'green' | 'red' | 'orange' | 'purple' | 'gray';
   decimals?: number;
   suffix?: string;
+  size?: 'lg' | 'sm';
 }
 
 const MetricCard: React.FC<MetricCardProps> = ({
   label,
   value,
+  displayValue,
   format,
   icon: Icon,
-  color = 'gray',
+  color: _color = 'gray',
   decimals = 2,
   suffix = '',
+  size = 'sm',
 }) => {
-  const colorClasses = {
-    blue: 'text-blue-600 bg-blue-50',
-    green: 'text-green-600 bg-green-50',
-    red: 'text-red-600 bg-red-50',
-    orange: 'text-orange-600 bg-orange-50',
-    purple: 'text-purple-600 bg-purple-50',
-    gray: 'text-gray-600 bg-gray-50',
-  };
-
-  const formattedValue = format === 'percent'
+  const formattedValue = displayValue ?? (format === 'percent'
     ? `${(value * 100).toFixed(decimals)}%`
-    : value.toFixed(decimals);
+    : value.toFixed(decimals));
+
+  const palette: Record<string, { shell: string; icon: string; value: string }> = {
+    red: { shell: 'bg-red-50/70 border-red-100', icon: 'bg-red-50 text-red-600', value: 'text-red-600' },
+    green: { shell: 'bg-emerald-50/70 border-emerald-100', icon: 'bg-emerald-50 text-emerald-600', value: 'text-emerald-600' },
+    orange: { shell: 'bg-orange-50/70 border-orange-100', icon: 'bg-orange-50 text-orange-600', value: 'text-orange-600' },
+    purple: { shell: 'bg-violet-50/70 border-violet-100', icon: 'bg-violet-50 text-violet-600', value: 'text-violet-600' },
+    blue: { shell: 'bg-sky-50/70 border-sky-100', icon: 'bg-sky-50 text-sky-600', value: 'text-sky-600' },
+    gray: { shell: 'bg-slate-50/70 border-slate-200', icon: 'bg-slate-50 text-slate-600', value: 'text-slate-800' },
+  };
+  const resolvedPalette = palette[_color] || palette.gray;
 
   return (
-    <div className="bg-white rounded-2xl border border-gray-200 p-4 hover:shadow-md transition-shadow flex flex-col items-center text-center relative overflow-hidden">
+    <div className={`rounded-2xl border p-4 hover:shadow-md transition-shadow flex flex-col items-center text-center relative overflow-hidden ${resolvedPalette.shell}`}>
       {Icon && (
-        <div className={`absolute top-3 right-3 w-6 h-6 rounded-lg ${colorClasses[color]} flex items-center justify-center`}>
+        <div className={`absolute top-3 right-3 w-6 h-6 rounded-lg flex items-center justify-center ${resolvedPalette.icon}`}>
           <Icon className="w-3 h-3" />
         </div>
       )}
-      <span className="text-xs text-gray-500 mb-1">{label}</span>
-      <div className={`text-2xl font-bold ${colorClasses[color].split(' ')[0]}`}>
+      <span className={size === 'lg' ? 'text-xs font-semibold text-gray-700 mb-1' : 'text-[10px] font-semibold text-gray-700 mb-1'}>{label}</span>
+      <div className={`${size === 'lg' ? 'text-lg' : 'text-base'} font-bold ${resolvedPalette.value}`}>
         {formattedValue}{suffix}
       </div>
     </div>

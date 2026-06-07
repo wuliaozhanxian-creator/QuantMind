@@ -1,5 +1,5 @@
 import React from 'react';
-import { Card, Divider, Select, Button, InputNumber, Alert, DatePicker, Tag, Typography, Tooltip } from 'antd';
+import { Card, Divider, Button, InputNumber, Alert, DatePicker, Tag, Typography, Tooltip } from 'antd';
 import { Target, ArrowRightLeft, Info, CalendarRange } from 'lucide-react';
 import { clsx } from 'clsx';
 import { Dayjs } from 'dayjs';
@@ -7,7 +7,6 @@ import dayjs from 'dayjs';
 import { 
   TrainingTarget, 
   TimePeriodMap, 
-  TargetMode, 
   SplitKey, 
   TARGET_PRESETS,
   buildLabelFormula,
@@ -81,19 +80,11 @@ export const TrainingTargetConfig: React.FC<TrainingTargetConfigProps> = ({
         <div className="space-y-4">
           <div>
             <div className="mb-2 text-sm font-semibold text-slate-800">目标类型</div>
-            <Select
-              value={target.mode}
-              onChange={(value) => onTargetChange({ ...target, mode: value as TargetMode })}
-              className="w-full"
-              options={[
-                { label: '回归目标（未来收益率）', value: 'return' },
-                { label: '分类目标（涨跌方向）', value: 'classification' },
-              ]}
-            />
-            <div className="mt-2 text-xs text-slate-500">
-              {target.mode === 'classification'
-                ? '适合做方向预测、事件识别等离散标签任务。'
-                : '适合做未来收益率、rank score 等连续标签任务。'}
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <div className="text-sm font-semibold text-slate-800">回归目标（未来收益率）</div>
+              <div className="mt-1 text-xs text-slate-500">
+                当前训练入口已收敛为回归标签，分类目标仅保留历史元数据兼容，不再开放新任务选择。
+              </div>
             </div>
           </div>
 
@@ -129,8 +120,11 @@ export const TrainingTargetConfig: React.FC<TrainingTargetConfigProps> = ({
 
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
             <div className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">标签预览</div>
-            <div className="mt-2 text-sm font-medium text-slate-800">{target.mode === 'classification' ? '预测未来 N 日涨跌方向' : `预测未来 ${target.horizonDays} 日收益率`}</div>
+            <div className="mt-2 text-sm font-medium text-slate-800">{`预测未来 ${target.horizonDays} 日收益率`}</div>
             <div className="mt-3 rounded-xl bg-white p-3 font-mono text-xs text-slate-700">{labelFormula}</div>
+            <div className="mt-3 text-xs leading-relaxed text-slate-500">
+              实际训练口径为后复权可交易收益率：`T+1` 开盘买入，`T+N` 收盘卖出。
+            </div>
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-white p-4">

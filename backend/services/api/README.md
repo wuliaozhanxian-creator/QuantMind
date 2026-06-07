@@ -118,6 +118,10 @@
 - 当传入显式切分字段时，后端会强制校验时间顺序：
   `train_start <= train_end < valid_start <= valid_end < test_start <= test_end`。
 - `run-training` 返回体新增 `payload`（规范化后的最终配置），便于前端与运维审计。
+- `run-training` 的标签口径已在 `2026-06-07` 收敛：
+  - `target_mode` 当前仅接受 `return`；
+  - `label_formula` 继续作为元数据展示字段保留，但不驱动训练分支；
+  - 实际训练标签以 `docker/training/train.py` 为准：后复权、`T+1` 开盘买入、`T+N` 收盘卖出，即 `adj_close(T+N) / adj_open(T+1) - 1`。
 - 训练回调 `POST /api/v1/admin/models/training-runs/{run_id}/complete` 已改为日志追加模式，不再覆盖已有 Batch 轮询日志。
 - 训练状态新增显式过渡态 `waiting_callback`（前端可直接展示），用于区分“Batch 已结束”与“最终回调未到”。
 - 编排器超时兜底：`waiting_callback` 超过 `BATCH_WAITING_CALLBACK_TIMEOUT_SECONDS`（默认 600 秒）会自动转 `failed` 并记录超时原因。

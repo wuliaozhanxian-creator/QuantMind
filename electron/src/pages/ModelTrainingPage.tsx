@@ -12,7 +12,7 @@ import dayjs, { Dayjs } from 'dayjs';
 import { clsx } from 'clsx';
 import { PAGE_LAYOUT } from '../config/pageLayout';
 import { modelTrainingService } from '../services/modelTrainingService';
-import { TrainingTarget, TrainingParams, TrainingContext, TrainingStatus, TrainingDraft, SplitKey, TimePeriodMap, FeatureCategory, STORAGE_KEY, DEFAULT_FEATURE_CATEGORIES, PRESET_DEFAULT_FEATURES, DEFAULT_TIME_PERIODS, DEFAULT_TARGET, DEFAULT_PARAMS, DEFAULT_CONTEXT, buildAutoDisplayName, buildLabelFormula, buildEffectiveTradeDate, daysBetween, toISOStringRange, restoreRange, shouldMigrateLegacyDraftPeriods, buildTrainingRequest, formatRange, toDynamicCategories, TrainingResult, buildBackendTrainingPayload, parseTrainingResult, parseSuggestedTimePeriods } from './training/trainingUtils';
+import { TrainingTarget, TrainingParams, TrainingContext, TrainingStatus, TrainingDraft, SplitKey, TimePeriodMap, FeatureCategory, STORAGE_KEY, DEFAULT_FEATURE_CATEGORIES, PRESET_DEFAULT_FEATURES, DEFAULT_TIME_PERIODS, DEFAULT_TARGET, DEFAULT_PARAMS, DEFAULT_CONTEXT, buildAutoDisplayName, buildLabelFormula, buildEffectiveTradeDate, daysBetween, toISOStringRange, restoreRange, shouldMigrateLegacyDraftPeriods, buildTrainingRequest, formatRange, toDynamicCategories, TrainingResult, buildBackendTrainingPayload, parseTrainingResult, parseSuggestedTimePeriods, normalizeTargetMode } from './training/trainingUtils';
 import { AdminModelFeatureDataCoverage } from '../features/admin/types';
 import { FeatureSelector } from './training/FeatureSelector';
 import { TrainingTargetConfig } from './training/TrainingTargetConfig';
@@ -145,7 +145,10 @@ export const ModelTrainingPage: React.FC = () => {
         val: restoreRange(parsed.timePeriods?.val, DEFAULT_TIME_PERIODS.val),
         test: restoreRange(parsed.timePeriods?.test, DEFAULT_TIME_PERIODS.test),
       });
-      setTarget(parsed.target || DEFAULT_TARGET);
+      setTarget({
+        ...(parsed.target || DEFAULT_TARGET),
+        mode: normalizeTargetMode(parsed.target?.mode),
+      });
       setParams({ ...DEFAULT_PARAMS, ...parsed.params });
       setContext({ ...DEFAULT_CONTEXT, ...parsed.context });
       setDisplayNameMode(parsed.displayNameMode || 'auto');

@@ -401,6 +401,12 @@ async def _generate_qlib_impl(body: GenerateQlibRequest, trace_id: str | None) -
                 normalized_conditions = _dedupe_condition_tree(body.conditions)
                 cond_json = json.dumps(normalized_conditions, ensure_ascii=False, separators=(",", ":"))
                 code += f"\nSTRATEGY_CONFIG['kwargs']['selection_condition']={cond_json}\n"
+
+            # 添加策略名称（用于回测历史显示）
+            if body.strategy_name:
+                strategy_name_escaped = json.dumps(body.strategy_name, ensure_ascii=False)
+                code += f"\nSTRATEGY_CONFIG['strategy_name'] = {strategy_name_escaped}\n"
+
             ok, err = _syntax_check(code)
             if not ok:
                 for _ in range(2):

@@ -220,6 +220,7 @@ export async function generateQlib(payload: {
     min_score?: number;
     max_weight?: number;
   };
+  strategy_name?: string;
   custom_notes?: string;
 }) {
   const timeoutMs = Number((import.meta as any)?.env?.VITE_STRATEGY_GENERATE_TIMEOUT_MS || 600000);

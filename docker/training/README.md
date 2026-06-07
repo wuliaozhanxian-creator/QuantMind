@@ -4,6 +4,7 @@
 
 ## 说明
 - 统一运行镜像为 `quantmind-ml-runtime:latest`。
+- `train.py` 当前固定使用可交易回归标签：后复权口径、`T+1` 开盘买入、`T+N` 收盘卖出，公式为 `adj_close(T+N) / adj_open(T+1) - 1`；`target_mode` 与 `label_formula` 目前仅作为元数据记录，不切换训练逻辑。
 - `train.py` 会在用户提交特征的基础上自动补齐 6 个基础特征：`mom_ret_1d`、`mom_ret_5d`、`mom_ret_20d`、`liq_volume`、`liq_amount`、`liq_turnover_os`。
 - `metadata.json` 现在会同时记录三层口径：
   - `requested_feature_count/requested_features`：前端提交的特征

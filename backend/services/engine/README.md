@@ -19,6 +19,7 @@
   - `model.early_stopping_rounds`
   - `label.target_horizon_days/target_mode/label_formula/effective_trade_date/training_window`
   - `context.initial_capital/benchmark/commission_rate/slippage/deal_price`
+- 训练标签口径已在 `2026-06-07` 明确收敛：当前训练脚本真实执行的是后复权可交易收益率 `adj_close(T+N) / adj_open(T+1) - 1`；`target_mode=classification` 与自定义 `label_formula` 仅保留元数据兼容，不参与训练分支。
 - 训练链路阻断修复（2026-04-04）：
   - `docker/training/train.py` 已恢复完整训练主流程（调用 `train_model`，并回写 `model/metrics/metadata/result`），消除未定义变量导致的运行时失败；
   - `train.py` 新增 `data.source_mode + data.local_dir` 的本地快照读取能力，`LOCAL` 模式优先读取挂载目录，缺失时回退 COS；

@@ -106,9 +106,23 @@ export interface TradeStatsMetrics {
   win_rate: number;
   profit_loss_ratio: number;
   profit_loss_days_ratio: number;
+  real_win_rate: number;
+  avg_win_return: number;
+  avg_loss_return: number;
+  avg_trade_return: number;
+  median_trade_return: number;
+  max_win_return: number;
+  max_loss_return: number;
   avg_holding_days: number;
   trade_frequency: number;
   total_trades: number;
+  closed_trades: number;
+  open_buy_trades: number;
+  winning_trades: number;
+  losing_trades: number;
+  flat_trades: number;
+  profit_factor: number;
+  metric_basis: string;
 }
 
 export interface TradeStatsResponse {
@@ -306,9 +320,23 @@ function sanitizeTradeStatsResponse(raw: TradeStatsResponse): TradeStatsResponse
       win_rate: Number.isFinite(raw?.metrics?.win_rate) ? raw.metrics.win_rate : 0,
       profit_loss_ratio: Number.isFinite(raw?.metrics?.profit_loss_ratio) ? raw.metrics.profit_loss_ratio : 0,
       profit_loss_days_ratio: Number.isFinite(raw?.metrics?.profit_loss_days_ratio) ? raw.metrics.profit_loss_days_ratio : 0,
+      real_win_rate: Number.isFinite(raw?.metrics?.real_win_rate) ? raw.metrics.real_win_rate : 0,
+      avg_win_return: Number.isFinite(raw?.metrics?.avg_win_return) ? raw.metrics.avg_win_return : 0,
+      avg_loss_return: Number.isFinite(raw?.metrics?.avg_loss_return) ? raw.metrics.avg_loss_return : 0,
+      avg_trade_return: Number.isFinite(raw?.metrics?.avg_trade_return) ? raw.metrics.avg_trade_return : 0,
+      median_trade_return: Number.isFinite(raw?.metrics?.median_trade_return) ? raw.metrics.median_trade_return : 0,
+      max_win_return: Number.isFinite(raw?.metrics?.max_win_return) ? raw.metrics.max_win_return : 0,
+      max_loss_return: Number.isFinite(raw?.metrics?.max_loss_return) ? raw.metrics.max_loss_return : 0,
       avg_holding_days: Number.isFinite(raw?.metrics?.avg_holding_days) ? raw.metrics.avg_holding_days : 0,
       trade_frequency: Number.isFinite(raw?.metrics?.trade_frequency) ? raw.metrics.trade_frequency : 0,
       total_trades: Number.isFinite(raw?.metrics?.total_trades) ? raw.metrics.total_trades : 0,
+      closed_trades: Number.isFinite(raw?.metrics?.closed_trades) ? raw.metrics.closed_trades : 0,
+      open_buy_trades: Number.isFinite(raw?.metrics?.open_buy_trades) ? raw.metrics.open_buy_trades : 0,
+      winning_trades: Number.isFinite(raw?.metrics?.winning_trades) ? raw.metrics.winning_trades : 0,
+      losing_trades: Number.isFinite(raw?.metrics?.losing_trades) ? raw.metrics.losing_trades : 0,
+      flat_trades: Number.isFinite(raw?.metrics?.flat_trades) ? raw.metrics.flat_trades : 0,
+      profit_factor: Number.isFinite(raw?.metrics?.profit_factor) ? raw.metrics.profit_factor : 0,
+      metric_basis: typeof raw?.metrics?.metric_basis === 'string' ? raw.metrics.metric_basis : 'summary_fallback',
     },
     pnl_distribution: raw?.pnl_distribution ?? EMPTY_HISTOGRAM,
     holding_days_distribution: raw?.holding_days_distribution ?? EMPTY_HISTOGRAM,
@@ -360,10 +388,21 @@ function sanitizeHistogram(raw?: HistogramData): HistogramData {
   if (!raw || !Array.isArray(raw.bins) || !Array.isArray(raw.counts)) {
     return EMPTY_HISTOGRAM;
   }
-  const size = Math.min(raw.bins.length, raw.counts.length);
+  const bins = raw.bins.map(finiteOrZero);
+  const counts = raw.counts.map(finiteOrZero);
+
+  // 标准 histogram 场景下 bin edge 会比 count 多 1 个，前端需要保留完整边界。
+  if (bins.length === counts.length + 1) {
+    return {
+      bins,
+      counts,
+    };
+  }
+
+  const size = Math.min(bins.length, counts.length);
   return {
-    bins: raw.bins.slice(0, size).map(finiteOrZero),
-    counts: raw.counts.slice(0, size).map(finiteOrZero),
+    bins: bins.slice(0, size),
+    counts: counts.slice(0, size),
   };
 }
 

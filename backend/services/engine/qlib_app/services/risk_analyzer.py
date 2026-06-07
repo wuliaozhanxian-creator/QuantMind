@@ -13,6 +13,12 @@ from backend.services.engine.qlib_app.schemas.backtest import (
     QlibBacktestResult,
     QlibPortfolioMetrics,
 )
+from backend.services.engine.qlib_app.services.trade_metrics_utils import (
+    build_closed_trade_frame,
+    build_trade_frequency_series_from_closed_trades,
+    calculate_closed_trade_metrics,
+    summarize_trade_matching,
+)
 from backend.services.engine.qlib_app.utils.benchmark_symbol import benchmark_candidates
 from backend.services.engine.qlib_app.utils.qlib_utils import D
 from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
@@ -414,58 +420,28 @@ class RiskAnalyzer:
                 "avg_win": 0.0,
                 "avg_loss": 0.0,
             }
-        wins = []
-        losses = []
-        for t in trades:
-            pnl = t.get("pnl")
-            if pnl is None:
-                pnl = t.get("profit")
-            if pnl is not None:
-                if pnl > 0:
-                    wins.append(pnl)
-                elif pnl < 0:
-                    losses.append(abs(pnl))
+        trade_matching = summarize_trade_matching(trades)
+        closed_trades = trade_matching["closed_trades"]
+        trade_metrics = calculate_closed_trade_metrics(
+            closed_trades,
+            total_trade_events=len(trades),
+            open_buy_trades=int(trade_matching.get("open_buy_trades", 0)),
+            daily_returns=daily_returns,
+        )
 
-        total_trades = len(trades)
-        win_count = len(wins)
-        win_rate = win_count / total_trades if total_trades > 0 else 0.0
-        sum_wins = sum(wins)
-        sum_losses = sum(losses)
-        profit_factor = sum_wins / sum_losses if sum_losses > 0 else (float("inf") if sum_wins > 0 else 0.0)
-        avg_win = sum_wins / len(wins) if wins else 0.0
-        avg_loss = sum_losses / len(losses) if losses else 0.0
-
-        # 部分交易流水只有成交信息无 pnl 时，回退到日收益口径，避免指标长期为 0
-        if win_count == 0 and len(losses) == 0 and daily_returns is not None:
-            try:
-                clean_returns = daily_returns.dropna()
-                if len(clean_returns) > 0:
-                    win_days = clean_returns[clean_returns > 0]
-                    loss_days = clean_returns[clean_returns < 0]
-                    win_rate = float(len(win_days) / len(clean_returns))
-                    # 盈利因子使用传统标准计算：总盈利 / 总亏损
-                    sum_day_wins = float(win_days.sum()) if len(win_days) > 0 else 0.0
-                    sum_day_losses = float(abs(loss_days.sum())) if len(loss_days) > 0 else 0.0
-                    if sum_day_losses > 0:
-                        profit_factor = sum_day_wins / sum_day_losses
-                    elif sum_day_wins > 0:
-                        profit_factor = float("inf")
-                    else:
-                        profit_factor = 0.0
-                    # 平均盈利/亏损用于 avg_win/avg_loss 字段
-                    avg_win = sum_day_wins / len(win_days) if len(win_days) > 0 else 0.0
-                    avg_loss = sum_day_losses / len(loss_days) if len(loss_days) > 0 else 0.0
-            except Exception as e:
-                task_logger.warning(
-                    "fallback_trade_stats_failed",
-                    "Failed to fallback trade stats from daily returns",
-                    error=str(e),
-                )
+        avg_win = 0.0
+        avg_loss = 0.0
+        if not closed_trades.empty and "pnl" in closed_trades.columns:
+            pnl = pd.to_numeric(closed_trades["pnl"], errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
+            pnl_wins = pnl[pnl > 0]
+            pnl_losses = pnl[pnl < 0]
+            avg_win = float(pnl_wins.mean()) if not pnl_wins.empty else 0.0
+            avg_loss = abs(float(pnl_losses.mean())) if not pnl_losses.empty else 0.0
 
         return {
-            "total_trades": total_trades,
-            "win_rate": win_rate,
-            "profit_factor": profit_factor,
+            "total_trades": int(trade_metrics["total_trades"]),
+            "win_rate": float(trade_metrics["win_rate"]),
+            "profit_factor": float(trade_metrics["profit_factor"]),
             "avg_win": avg_win,
             "avg_loss": avg_loss,
         }
@@ -480,91 +456,80 @@ class RiskAnalyzer:
 
         try:
             df_trades = pd.DataFrame(trades)
-            # 确保日期列存在
             date_col = next((c for c in ["date", "datetime", "trade_date"] if c in df_trades.columns), None)
             if date_col:
                 df_trades["_dt"] = pd.to_datetime(df_trades[date_col])
 
-            # 1. PNL 分布
-            if "pnl" in df_trades.columns:
-                raw_pnl = df_trades["pnl"]
-            elif "profit" in df_trades.columns:
-                raw_pnl = df_trades["profit"]
-            else:
-                raw_pnl = pd.Series(0.0, index=df_trades.index)
-            pnl_series = pd.to_numeric(raw_pnl, errors="coerce").fillna(0.0)
-            if (pnl_series == 0).all() and daily_returns is not None:
-                # 兜底：使用收益率抽样模拟分布
-                pnl_series = daily_returns.sample(n=min(len(daily_returns), len(trades)), replace=True)
+            trade_matching = summarize_trade_matching(df_trades)
+            closed_trades = trade_matching["closed_trades"]
+            trade_metrics = calculate_closed_trade_metrics(
+                closed_trades,
+                total_trade_events=len(df_trades),
+                open_buy_trades=int(trade_matching.get("open_buy_trades", 0)),
+                daily_returns=daily_returns,
+            )
 
+            # 1. 单笔收益率分布
+            pnl_series = (
+                pd.to_numeric(closed_trades["return_pct"], errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
+                if not closed_trades.empty and "return_pct" in closed_trades.columns
+                else pd.Series([0.0], dtype=float)
+            )
             pnl_counts, pnl_bins = np.histogram(pnl_series.dropna(), bins=20)
             pnl_distribution = {"bins": pnl_bins.tolist(), "counts": pnl_counts.tolist()}
 
-            # 2. 持仓天数分布（优先使用 holding_days 字段，否则从买卖配对推导）
-            raw_holding_days = (
-                df_trades["holding_days"]
-                if "holding_days" in df_trades.columns
-                else pd.Series(dtype=float, index=df_trades.index)
-            )
-            holding_days = pd.to_numeric(raw_holding_days, errors="coerce").dropna()
-
-            # 如果没有直接的 holding_days 字段，尝试从买卖配对推导
-            if holding_days.empty and "symbol" in df_trades.columns and "action" in df_trades.columns:
-                holding_days = cls._derive_holding_days_from_trades_for_stats(df_trades, date_col)
-
+            # 2. 持仓天数分布
+            holding_days = cls._resolve_holding_days_series_for_advanced_stats(closed_trades, df_trades)
             if holding_days.empty:
-                holding_days = pd.Series([1.0])  # 默认 1 天
+                holding_days = pd.Series([1.0], dtype=float)
 
-            # 固定分箱：1-7天, 7-30天, 30-90天, 90-180天, 180-365天
             holding_bins = [1.0, 7.0, 30.0, 90.0, 180.0, 365.0]
             holding_counts, _ = np.histogram(holding_days.clip(1, 365), bins=holding_bins)
             holding_distribution = {"bins": holding_bins, "counts": holding_counts.tolist()}
 
             # 3. 交易频率 (按月)
-            freq_series = {"dates": [], "values": []}
-            if date_col:
-                grouped = df_trades.groupby(df_trades["_dt"].dt.to_period("M")).size()
-                for period, count in grouped.items():
-                    freq_series["dates"].append(period.to_timestamp().strftime("%Y-%m-%d"))
-                    freq_series["values"].append(float(count))
-
-            # 4. 盈亏天数比：盈利交易日数 / 亏损交易日数
-            profit_loss_days_ratio = 0.0
-            if daily_returns is not None and len(daily_returns) > 0:
-                clean_returns = daily_returns.replace([np.inf, -np.inf], np.nan).dropna()
-                if not clean_returns.empty:
-                    win_days = int((clean_returns > 0).sum())
-                    loss_days = int((clean_returns < 0).sum())
-                    if loss_days > 0:
-                        profit_loss_days_ratio = float(win_days / loss_days)
-                    elif win_days > 0:
-                        profit_loss_days_ratio = float(win_days)
-
-            # 5. 平均持仓天数
-            avg_holding_days = float(holding_days.mean()) if not holding_days.empty else 1.0
-
-            # 6. 交易频率 (每月平均交易次数)
-            trade_frequency = 0.0
-            if freq_series["values"]:
-                # 使用实际月度数据计算平均
-                trade_frequency = float(np.mean(freq_series["values"]))
-            elif date_col and len(df_trades) > 0:
-                # 回退：基于交易记录数和日期范围估算
-                date_range_days = (df_trades["_dt"].max() - df_trades["_dt"].min()).days
-                months = max(int(date_range_days / 21), 1) if date_range_days > 0 else 1
-                trade_frequency = float(len(trades) / months)
+            freq_series = build_trade_frequency_series_from_closed_trades(closed_trades)
 
             return {
                 "pnl_distribution": pnl_distribution,
                 "holding_days_distribution": holding_distribution,
                 "trade_frequency_series": freq_series,
-                "profit_loss_days_ratio": profit_loss_days_ratio,
-                "avg_holding_days": avg_holding_days,
-                "trade_frequency": trade_frequency,
+                "profit_loss_days_ratio": float(trade_metrics["profit_loss_days_ratio"]),
+                "avg_holding_days": float(holding_days.mean()) if not holding_days.empty else 1.0,
+                "trade_frequency": float(trade_metrics["trade_frequency"]),
+                "real_win_rate": float(trade_metrics["real_win_rate"]),
+                "avg_win_return": float(trade_metrics["avg_win_return"]),
+                "avg_loss_return": float(trade_metrics["avg_loss_return"]),
+                "avg_trade_return": float(trade_metrics["avg_trade_return"]),
+                "max_win_return": float(trade_metrics["max_win_return"]),
+                "max_loss_return": float(trade_metrics["max_loss_return"]),
+                "closed_trades": int(trade_metrics["closed_trades"]),
+                "winning_trades": int(trade_metrics["winning_trades"]),
+                "losing_trades": int(trade_metrics["losing_trades"]),
+                "flat_trades": int(trade_metrics["flat_trades"]),
+                "profit_factor": float(trade_metrics["profit_factor"]),
+                "profit_loss_ratio": float(trade_metrics["profit_loss_ratio"]),
+                "metric_basis": str(trade_metrics["metric_basis"]),
             }
         except Exception as e:
             task_logger.warning("calculate_advanced_trade_stats_failed", "Failed to calculate advanced trade stats", error=str(e))
             return {}
+
+    @classmethod
+    def _resolve_holding_days_series_for_advanced_stats(cls, closed_trades: pd.DataFrame, raw_trades: pd.DataFrame) -> pd.Series:
+        if not closed_trades.empty and "holding_days" in closed_trades.columns:
+            holding = pd.to_numeric(closed_trades["holding_days"], errors="coerce")
+            holding = holding.replace([np.inf, -np.inf], np.nan).dropna()
+            if not holding.empty:
+                return holding.clip(lower=1.0)
+
+        if "holding_days" in raw_trades.columns:
+            holding = pd.to_numeric(raw_trades["holding_days"], errors="coerce")
+            holding = holding.replace([np.inf, -np.inf], np.nan).dropna()
+            if not holding.empty:
+                return holding.clip(lower=1.0)
+
+        return pd.Series(dtype=float)
 
     @classmethod
     def _derive_holding_days_from_trades_for_stats(
@@ -970,6 +935,14 @@ class RiskAnalyzer:
 
         if hasattr(request, "strategy_content") and request.strategy_content:
             payload["strategy_content"] = request.strategy_content
+            # 从策略代码中解析 STRATEGY_CONFIG['strategy_name']
+            import re
+            match = re.search(
+                r"STRATEGY_CONFIG\s*\[\s*['\"]strategy_name['\"]\s*\]\s*=\s*['\"]([^'\"]+)['\"]",
+                request.strategy_content,
+            )
+            if match:
+                payload["strategy_name"] = match.group(1)
         if hasattr(request, "strategy_id") and request.strategy_id:
             payload["strategy_id"] = request.strategy_id
         return payload
