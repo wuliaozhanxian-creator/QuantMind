@@ -83,9 +83,19 @@ class FundamentalAligner:
         if data.empty:
             return instruments
 
+        # 使用上一个交易日的数据，因为调仓时刻当天的基本面数据还未计算
         dt = pd.to_datetime(current_date).normalize()
+        # 从缓存数据中找上一个交易日
+        available_dates = data.index.get_level_values("trade_date").unique().sort_values()
+        # 找到小于当前日期的最后一个交易日
+        prev_dates = available_dates[available_dates < dt]
+        if len(prev_dates) == 0:
+            logger.warning("FundamentalAligner: 找不到 %s 之前的交易日数据", dt.date())
+            return instruments
+        prev_dt = prev_dates[-1]
+
         try:
-            snapshot = data.loc[dt]
+            snapshot = data.loc[prev_dt]
         except KeyError:
             return instruments
 
@@ -147,14 +157,22 @@ class FundamentalAligner:
         返回指定交易日的基本面对齐截面。
 
         主要用于策略侧做行业集中度、流动性阈值和大盘状态等日内/盘后风控判断。
+        注意：实际返回的是上一个交易日的数据，因为调仓时刻当天的数据还未计算。
         """
         data = self._load_data()
         if data.empty:
             return pd.DataFrame()
 
+        # 使用上一个交易日的数据
         dt = pd.to_datetime(current_date).normalize()
+        available_dates = data.index.get_level_values("trade_date").unique().sort_values()
+        prev_dates = available_dates[available_dates < dt]
+        if len(prev_dates) == 0:
+            return pd.DataFrame()
+        prev_dt = prev_dates[-1]
+
         try:
-            snapshot = data.loc[dt]
+            snapshot = data.loc[prev_dt]
         except KeyError:
             return pd.DataFrame()
 
