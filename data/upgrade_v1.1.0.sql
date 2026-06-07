@@ -9,6 +9,7 @@
 -- 版本记录：
 --   v1.0.0 (2026-05-11) - 初始版本，修复 stock_daily_latest 表字段类型
 --   v1.1.0 (2026-05-11) - 重建 stock_daily_latest 表，统一 volume_trend_3d 为 double precision
+--   v1.2.0 (2026-06-07) - 升级 sim_trades 表结构，添加缺失字段以匹配代码模型
 -- ============================================================
 
 BEGIN;
@@ -254,9 +255,63 @@ SET
 WHERE model_id = 'model_qlib';
 
 -- 同步模型名称为 Qlib_Base_Signal
-UPDATE public.qm_user_models 
-SET 
+UPDATE public.qm_user_models
+SET
     metadata_json = '{"run_id": "train_20260530233605_37cfc5d5", "job_name": "model_train_t5_20260530233604", "framework": "lightgbm", "model_type": "lightgbm", "model_file": "model.lgb", "feature_count": 48, "requested_feature_count": 48, "requested_features": ["mom_ret_5d", "mom_ret_20d", "mom_ret_60d", "mom_ret_120d", "mom_ma_gap_5", "mom_ma_gap_20", "mom_ma_gap_60", "mom_macd_hist", "mom_rsi_14", "mom_breakout_20d", "vol_std_10", "vol_std_20", "vol_std_60", "vol_atr_14", "vol_parkinson_20", "vol_downside_20", "vol_realized_rv", "liq_turnover_tl", "liq_volume_ratio_5", "liq_volume_ratio_20", "liq_amount_ma_20", "liq_avg_trade_size", "liq_obv_20", "liq_amihud_20", "liq_amihud_60", "liq_mfi_14", "flow_net_amount_ratio", "flow_large_net_ratio", "flow_net_order_ratio", "flow_vpin_ma_20", "micro_imbalance_volume", "micro_effective_spread", "micro_pressure_score", "micro_jump_flag", "style_ln_mv_float", "style_bp", "style_ep_ttm", "style_beta_60", "style_idio_vol_60", "style_residual_ret_20", "style_valuation_composite", "style_size_percentile", "style_value_percentile", "ind_relative_volume_20", "ind_relative_volatility_20", "ind_strength_20", "ind_momentum_rank_20", "ind_value_rank"], "auto_appended_feature_count": 0, "auto_appended_features": [], "features": ["mom_ret_5d", "mom_ret_20d", "mom_ret_60d", "mom_ret_120d", "mom_ma_gap_5", "mom_ma_gap_20", "mom_ma_gap_60", "mom_macd_hist", "mom_rsi_14", "mom_breakout_20d", "vol_std_10", "vol_std_20", "vol_std_60", "vol_atr_14", "vol_parkinson_20", "vol_downside_20", "vol_realized_rv", "liq_turnover_tl", "liq_volume_ratio_5", "liq_volume_ratio_20", "liq_amount_ma_20", "liq_avg_trade_size", "liq_obv_20", "liq_amihud_20", "liq_amihud_60", "liq_mfi_14", "flow_net_amount_ratio", "flow_large_net_ratio", "flow_net_order_ratio", "flow_vpin_ma_20", "micro_imbalance_volume", "micro_effective_spread", "micro_pressure_score", "micro_jump_flag", "style_ln_mv_float", "style_bp", "style_ep_ttm", "style_beta_60", "style_idio_vol_60", "style_residual_ret_20", "style_valuation_composite", "style_size_percentile", "style_value_percentile", "ind_relative_volume_20", "ind_relative_volatility_20", "ind_strength_20", "ind_momentum_rank_20", "ind_value_rank"], "feature_columns": ["mom_ret_5d", "mom_ret_20d", "mom_ret_60d", "mom_ret_120d", "mom_ma_gap_5", "mom_ma_gap_20", "mom_ma_gap_60", "mom_macd_hist", "mom_rsi_14", "mom_breakout_20d", "vol_std_10", "vol_std_20", "vol_std_60", "vol_atr_14", "vol_parkinson_20", "vol_downside_20", "vol_realized_rv", "liq_turnover_tl", "liq_volume_ratio_5", "liq_volume_ratio_20", "liq_amount_ma_20", "liq_avg_trade_size", "liq_obv_20", "liq_amihud_20", "liq_amihud_60", "liq_mfi_14", "flow_net_amount_ratio", "flow_large_net_ratio", "flow_net_order_ratio", "flow_vpin_ma_20", "micro_imbalance_volume", "micro_effective_spread", "micro_pressure_score", "micro_jump_flag", "style_ln_mv_float", "style_bp", "style_ep_ttm", "style_beta_60", "style_idio_vol_60", "style_residual_ret_20", "style_valuation_composite", "style_size_percentile", "style_value_percentile", "ind_relative_volume_20", "ind_relative_volatility_20", "ind_strength_20", "ind_momentum_rank_20", "ind_value_rank"], "fill_values": {"mom_ret_5d": 0.0, "mom_ret_20d": 0.0, "mom_ret_60d": 0.0, "mom_ret_120d": 0.0, "mom_ma_gap_5": 0.0, "mom_ma_gap_20": 0.0, "mom_ma_gap_60": 0.0, "mom_macd_hist": 0.0, "mom_rsi_14": 0.0, "mom_breakout_20d": 0.0, "vol_std_10": 0.0, "vol_std_20": 0.0, "vol_std_60": 0.0, "vol_atr_14": 0.0, "vol_parkinson_20": 0.0, "vol_downside_20": 0.0, "vol_realized_rv": 0.0, "liq_turnover_tl": 0.0, "liq_volume_ratio_5": 0.0, "liq_volume_ratio_20": 0.0, "liq_amount_ma_20": 0.0, "liq_avg_trade_size": 0.0, "liq_obv_20": 0.0, "liq_amihud_20": 0.0, "liq_amihud_60": 0.0, "liq_mfi_14": 0.0, "flow_net_amount_ratio": 0.0, "flow_large_net_ratio": 0.0, "flow_net_order_ratio": 0.0, "flow_vpin_ma_20": 0.0, "micro_imbalance_volume": 0.0, "micro_effective_spread": 0.0, "micro_pressure_score": 0.0, "micro_jump_flag": 0.0, "style_ln_mv_float": 0.0, "style_bp": 0.0, "style_ep_ttm": 0.0, "style_beta_60": 0.0, "style_idio_vol_60": 0.0, "style_residual_ret_20": 0.0, "style_valuation_composite": 0.0, "style_size_percentile": 0.0, "style_value_percentile": 0.0, "ind_relative_volume_20": 0.0, "ind_relative_volatility_20": 0.0, "ind_strength_20": 0.0, "ind_momentum_rank_20": 0.0, "ind_value_rank": 0.0}, "train_start": "2016-01-04", "train_end": "2023-04-09", "val_start": "2023-04-14", "val_end": "2024-10-28", "test_start": "2024-11-02", "test_end": "2026-05-21", "data_source": "parquet", "best_iteration": 1500, "actual_best_iteration": 1500, "target_horizon_days": 5, "target_mode": "return", "label_formula": "label = CSZScore(future_return(T, T+5)) = CSZScore(open(T+5) / open(T) - 1)", "effective_trade_date": "2024-11-07", "training_window": "2016-01-04 → 2023-04-09 | 2023-04-14 → 2024-10-28 | 2024-11-02 → 2026-05-21", "metrics": {"train_ic": 0.13758859529069328, "train_rank_ic": 0.11329817262865656, "train_rank_icir": 1.2016261832599144, "val_ic": 0.10116139348982978, "val_rank_ic": 0.07444384525275476, "val_rank_icir": 0.5893313499152358, "test_ic": 0.09967784084034892, "test_rank_ic": 0.09650378334139832, "test_rank_icir": 0.9637338767045075}, "pred_coverage_start": "2016-01-04", "pred_coverage_end": "2026-05-15", "pred_rows": 10367422, "shap": {"enabled": true, "status": "completed", "split": "valid", "rows_requested": 30000, "rows_used": 30000, "file": "shap_summary.csv", "error": "", "elapsed_seconds": 3.4276957511901855}, "generated_at": "2026-05-30T15:43:40.933551", "elapsed_seconds": 251.22331738471985, "model_name": "Qlib_Base_Signal", "display_name": "Qlib_Base_Signal"}'::jsonb,
     metrics_json = '{"train_ic": 0.13758859529069328, "train_rank_ic": 0.11329817262865656, "train_rank_icir": 1.2016261832599144, "val_ic": 0.10116139348982978, "val_rank_ic": 0.07444384525275476, "val_rank_icir": 0.5893313499152358, "test_ic": 0.09967784084034892, "test_rank_ic": 0.09650378334139832, "test_rank_icir": 0.9637338767045075}'::jsonb,
     updated_at = NOW()
 WHERE model_id = 'model_qlib';
+
+-- ============================================================
+-- v1.2.0: 升级 sim_trades 表结构 (2026-06-07)
+-- ============================================================
+-- 变更说明：
+--   1. 添加缺失字段以匹配 SQLAlchemy 模型
+--   2. 新增: trade_id (UUID唯一标识), portfolio_id, trading_mode
+--   3. 新增: trade_value, stamp_duty, transfer_fee, total_fee
+--   4. 新增: executed_at (执行时间), price_source (价格来源)
+--   5. 数据迁移: trade_time -> executed_at, 计算 trade_value
+--   6. 字段类型变更: id VARCHAR -> INTEGER, user_id VARCHAR -> INTEGER
+-- ============================================================
+
+-- 添加新列（如果不存在）
+ALTER TABLE public.sim_trades
+    ADD COLUMN IF NOT EXISTS trade_id UUID DEFAULT gen_random_uuid(),
+    ADD COLUMN IF NOT EXISTS portfolio_id INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS trading_mode VARCHAR(20) NOT NULL DEFAULT 'SIMULATION',
+    ADD COLUMN IF NOT EXISTS trade_value DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    ADD COLUMN IF NOT EXISTS stamp_duty DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    ADD COLUMN IF NOT EXISTS transfer_fee DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    ADD COLUMN IF NOT EXISTS total_fee DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    ADD COLUMN IF NOT EXISTS executed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    ADD COLUMN IF NOT EXISTS price_source VARCHAR(64);
+
+-- 添加 trade_id 唯一约束
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'sim_trades_trade_id_key') THEN
+        ALTER TABLE public.sim_trades ADD CONSTRAINT sim_trades_trade_id_key UNIQUE (trade_id);
+    END IF;
+END $$;
+
+-- 数据迁移：从 trade_time 复制到 executed_at
+UPDATE public.sim_trades
+SET executed_at = trade_time
+WHERE trade_time IS NOT NULL;
+
+-- 数据迁移：计算 trade_value
+UPDATE public.sim_trades
+SET trade_value = quantity * price
+WHERE trade_value = 0 OR trade_value IS NULL;
+
+-- 创建索引
+CREATE INDEX IF NOT EXISTS idx_sim_trades_trade_id ON public.sim_trades(trade_id);
+CREATE INDEX IF NOT EXISTS idx_sim_trades_order_id ON public.sim_trades(order_id);
+CREATE INDEX IF NOT EXISTS idx_sim_trades_portfolio_id ON public.sim_trades(portfolio_id);
+CREATE INDEX IF NOT EXISTS idx_sim_trades_trading_mode ON public.sim_trades(trading_mode);
+CREATE INDEX IF NOT EXISTS idx_sim_trades_tenant_user_symbol ON public.sim_trades(tenant_id, user_id, symbol);
+
+-- 验证升级：检查列数
+SELECT COUNT(*) AS sim_trades_column_count
+FROM information_schema.columns
+WHERE table_name = 'sim_trades' AND table_schema = 'public';

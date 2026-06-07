@@ -5215,18 +5215,26 @@ ALTER TABLE public.sim_orders OWNER TO quantmind;
 --
 
 CREATE TABLE public.sim_trades (
-    id character varying(64) NOT NULL,
-    job_id character varying(64) NOT NULL,
-    order_id character varying(64) NOT NULL,
-    user_id character varying(64) NOT NULL,
+    id integer NOT NULL,
+    trade_id uuid DEFAULT gen_random_uuid() NOT NULL,
+    order_id uuid NOT NULL,
     tenant_id character varying(64) DEFAULT 'default'::character varying NOT NULL,
+    user_id integer NOT NULL,
+    portfolio_id integer DEFAULT 0 NOT NULL,
     symbol character varying(20) NOT NULL,
     side public.orderside NOT NULL,
-    quantity numeric(18,4) NOT NULL,
-    price numeric(18,4) NOT NULL,
-    commission numeric(18,4) DEFAULT 0,
-    trade_time timestamp with time zone NOT NULL,
-    created_at timestamp with time zone DEFAULT now()
+    trading_mode public.tradingmode DEFAULT 'SIMULATION'::public.tradingmode NOT NULL,
+    quantity double precision NOT NULL,
+    price double precision NOT NULL,
+    trade_value double precision DEFAULT 0.0 NOT NULL,
+    commission double precision DEFAULT 0.0 NOT NULL,
+    stamp_duty double precision DEFAULT 0.0 NOT NULL,
+    transfer_fee double precision DEFAULT 0.0 NOT NULL,
+    total_fee double precision DEFAULT 0.0 NOT NULL,
+    executed_at timestamp with time zone DEFAULT now() NOT NULL,
+    price_source character varying(64),
+    created_at timestamp with time zone DEFAULT now(),
+    updated_at timestamp with time zone DEFAULT now()
 );
 
 
@@ -8613,7 +8621,7 @@ COPY public.sim_orders (id, job_id, user_id, tenant_id, symbol, side, order_type
 -- Data for Name: sim_trades; Type: TABLE DATA; Schema: public; Owner: quantmind
 --
 
-COPY public.sim_trades (id, job_id, order_id, user_id, tenant_id, symbol, side, quantity, price, commission, trade_time, created_at) FROM stdin;
+COPY public.sim_trades (id, trade_id, order_id, tenant_id, user_id, portfolio_id, symbol, side, trading_mode, quantity, price, trade_value, commission, stamp_duty, transfer_fee, total_fee, executed_at, price_source, created_at, updated_at) FROM stdin;
 \.
 
 
@@ -9691,6 +9699,14 @@ ALTER TABLE ONLY public.sim_trades
 
 
 --
+-- Name: sim_trades sim_trades_trade_id_key; Type: CONSTRAINT; Schema: public; Owner: quantmind
+--
+
+ALTER TABLE ONLY public.sim_trades
+    ADD CONSTRAINT sim_trades_trade_id_key UNIQUE (trade_id);
+
+
+--
 -- Name: simulation_daily_reports simulation_daily_reports_pkey; Type: CONSTRAINT; Schema: public; Owner: quantmind
 --
 
@@ -10477,10 +10493,38 @@ CREATE INDEX idx_sim_orders_job_id ON public.sim_orders USING btree (job_id);
 
 
 --
--- Name: idx_sim_trades_job_id; Type: INDEX; Schema: public; Owner: quantmind
+-- Name: idx_sim_trades_trade_id; Type: INDEX; Schema: public; Owner: quantmind
 --
 
-CREATE INDEX idx_sim_trades_job_id ON public.sim_trades USING btree (job_id);
+CREATE INDEX idx_sim_trades_trade_id ON public.sim_trades USING btree (trade_id);
+
+
+--
+-- Name: idx_sim_trades_order_id; Type: INDEX; Schema: public; Owner: quantmind
+--
+
+CREATE INDEX idx_sim_trades_order_id ON public.sim_trades USING btree (order_id);
+
+
+--
+-- Name: idx_sim_trades_tenant_user_symbol; Type: INDEX; Schema: public; Owner: quantmind
+--
+
+CREATE INDEX idx_sim_trades_tenant_user_symbol ON public.sim_trades USING btree (tenant_id, user_id, symbol);
+
+
+--
+-- Name: idx_sim_trades_portfolio_id; Type: INDEX; Schema: public; Owner: quantmind
+--
+
+CREATE INDEX idx_sim_trades_portfolio_id ON public.sim_trades USING btree (portfolio_id);
+
+
+--
+-- Name: idx_sim_trades_trading_mode; Type: INDEX; Schema: public; Owner: quantmind
+--
+
+CREATE INDEX idx_sim_trades_trading_mode ON public.sim_trades USING btree (trading_mode);
 
 
 --
