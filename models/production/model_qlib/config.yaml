@@ -2,7 +2,7 @@ cache:
   dir: /tmp
 callback:
   secret: 83fcf31f7620827251fb4516adf1f928f0ed689b6238407c7d80e617f31d4e5b
-  url: http://114.132.80.206:8000/api/v1/models/training-runs/train_20260530233605_37cfc5d5/complete
+  url: http://114.132.80.206:8000/api/v1/models/training-runs/train_20260601211846_3dc6f1cb/complete
 context:
   commission_rate: 0.00025
   deal_price: open
@@ -59,23 +59,27 @@ data:
   - ind_strength_20
   - ind_momentum_rank_20
   - ind_value_rank
+  - mom_ret_1d
+  - liq_turnover_os
+  - liq_amount
+  - liq_volume
   local_dir: /tmp/feature_snapshots
   source_mode: LOCAL
-  train_end: '2023-04-09'
+  train_end: '2023-04-15'
   train_start: '2016-01-04'
 explain:
   enable_shap: true
   shap_sample_rows: 30000
   shap_split: valid
-job_name: model_train_t5_20260530233604
+job_name: model_train_t5_20260601211846
 label:
-  effective_trade_date: '2024-11-07'
+  effective_trade_date: '2024-11-10'
   label_formula: label = CSZScore(future_return(T, T+5)) = CSZScore(open(T+5) / open(T)
     - 1)
   target_horizon_days: 5
   target_mode: return
-  training_window: 2016-01-04 → 2023-04-09 | 2023-04-14 → 2024-10-28 | 2024-11-02
-    → 2026-05-21
+  training_window: 2016-01-04 → 2023-04-15 | 2023-04-16 → 2024-11-04 | 2024-11-05
+    → 2026-05-29
 model:
   early_stopping_rounds: 150
   inference_best_iteration: null
@@ -96,7 +100,7 @@ model:
   type: lightgbm
   val_ratio: null
 output:
-  cos_prefix: models/candidates/train_20260530233605_37cfc5d5/
+  cos_prefix: models/candidates/train_20260601211846_3dc6f1cb/
   log_path: /workspace/training.log
   required_artifacts:
   - model.lgb
@@ -105,14 +109,14 @@ output:
   - config.yaml
   - result.json
   result_path: /workspace/result.json
-run_id: train_20260530233605_37cfc5d5
+run_id: train_20260601211846_3dc6f1cb
 split:
   test:
-  - '2024-11-02'
-  - '2026-05-21'
+  - '2024-11-09'
+  - '2026-05-29'
   train:
   - '2016-01-04'
-  - '2023-04-09'
+  - '2023-04-15'
   valid:
-  - '2023-04-14'
-  - '2024-10-28'
+  - '2023-04-20'
+  - '2024-11-04'

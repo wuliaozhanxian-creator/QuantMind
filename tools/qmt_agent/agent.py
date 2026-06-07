@@ -10,6 +10,7 @@ import queue
 import sys
 import threading
 import time
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
@@ -43,6 +44,8 @@ except ImportError:
     BridgeReporter = _load_local_module("reporter").BridgeReporter  # type: ignore[attr-defined]
 
 logger = logging.getLogger("qmt_agent")
+
+_QMT_ACTIVE_WINDOW_LABEL = "周一至周五 09:00-17:00"
 
 class QMTAgent:
     def __init__(self, cfg: AgentConfig):
@@ -82,11 +85,85 @@ class QMTAgent:
         self._dispatch_last_submit_at: Optional[float] = None
         self._dispatch_last_submit_kind = ""
         self._watchdog_interval_seconds = max(3, min(10, int(self.cfg.reconnect_interval_seconds or 5)))
+        self._schedule_lock = threading.RLock()
+        self._schedule_paused = False
+        self._schedule_message = f"QMT 通信已按时段策略暂停（{_QMT_ACTIVE_WINDOW_LABEL}）"
         self._startup_grace_seconds = max(
             20,
             int(self.cfg.heartbeat_interval_seconds or 15) * 3,
             int(getattr(self.cfg, "account_report_interval_seconds", 30) or 30) * 2,
         )
+        self._dispatch_executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=max(5, int(getattr(self.cfg, "dispatch_workers", 10) or 10)),
+            thread_name_prefix="dispatch-worker"
+        )
+
+    def _is_qmt_active_window(self, now: Optional[datetime] = None) -> bool:
+        current = now or datetime.now()
+        return current.weekday() < 5 and 9 <= current.hour < 17
+
+    def _seconds_until_qmt_window_transition(self, now: Optional[datetime] = None) -> int:
+        current = now or datetime.now()
+        if self._is_qmt_active_window(current):
+            end_at = current.replace(hour=17, minute=0, second=0, microsecond=0)
+            return max(1, int((end_at - current).total_seconds()))
+
+        if current.weekday() < 5 and current.hour < 9:
+            start_at = current.replace(hour=9, minute=0, second=0, microsecond=0)
+            return max(1, int((start_at - current).total_seconds()))
+
+        next_day = current + timedelta(days=1)
+        while next_day.weekday() >= 5:
+            next_day += timedelta(days=1)
+        start_at = next_day.replace(hour=9, minute=0, second=0, microsecond=0)
+        return max(1, int((start_at - current).total_seconds()))
+
+    def _schedule_wait_seconds(self, active: bool) -> int:
+        transition = self._seconds_until_qmt_window_transition()
+        cap = 30 if active else 60
+        return max(1, min(cap, transition))
+
+    def _ensure_qmt_schedule_state(self) -> bool:
+        active = self._is_qmt_active_window()
+        with self._schedule_lock:
+            was_paused = self._schedule_paused
+            self._schedule_paused = not active
+
+        if active:
+            if was_paused:
+                logger.info("QMT 时段已恢复，重新允许与 QMT 通信")
+                with self._state_lock:
+                    if self.runtime_state == "paused_schedule":
+                        self.runtime_state = "starting"
+                    if self.last_error == self._schedule_message:
+                        self.last_error = None
+                if not self.qmt.is_connected():
+                    self.qmt.request_reconnect()
+            return True
+
+        if not was_paused:
+            logger.info("进入 QMT 非通信时段，暂停 QMT 通信与账户/心跳上报")
+        if self.qmt.is_connected():
+            self.qmt.close()
+        with self._state_lock:
+            self.runtime_state = "paused_schedule"
+            self.last_error = self._schedule_message
+        return False
+
+    def _build_schedule_rejection(self, payload: dict[str, Any], *, action: str) -> dict[str, Any]:
+        message = f"{action}已拒绝：当前为非通信时段，仅允许 {_QMT_ACTIVE_WINDOW_LABEL} 与 QMT 通信"
+        return {
+            "client_order_id": str(payload.get("client_order_id") or "").strip(),
+            "exchange_order_id": None,
+            "exchange_trade_id": None,
+            "account_id": self.cfg.account_id,
+            "symbol": payload.get("symbol"),
+            "side": payload.get("side"),
+            "status": "REJECTED",
+            "filled_quantity": 0.0,
+            "filled_price": None,
+            "message": message,
+        }
 
     def _next_dispatch_seq(self) -> int:
         with self._dispatch_metrics_lock:
@@ -311,14 +388,6 @@ class QMTAgent:
             logger.exception("execution callback report failed")
 
     def _wait_for_snapshot_settle(self, settle_seconds: int, max_wait_seconds: int | None = None) -> bool:
-        """
-        等待资产/持仓更新进入短暂稳定期。
-
-        QMT 的 asset_updated 与 positions_updated 往往会在很短时间内连续触发。
-        如果每次 dirty 事件都立刻上报，会把中间态连续写入 PostgreSQL，前端就会看到
-        两组接近的快照来回跳动。这里做一个小窗口合并，只有在没有新 dirty 事件
-        持续出现一小段时间后才真正上报。
-        """
         settle_seconds = max(1, int(settle_seconds or 1))
         settle_deadline = time.time() + settle_seconds
         hard_deadline = None
@@ -336,8 +405,7 @@ class QMTAgent:
                 settle_deadline = time.time() + settle_seconds
         return False
 
-    def on_open(self, *args, **kwargs) -> None:
-        # 兼容 websocket-client 不同版本：旧版传 (ws)，新版对 bound method 不传 ws。
+    def on_open(self, _ws) -> None:
         logger.info("bridge websocket connected")
         with self._state_lock:
             self.runtime_state = "running"
@@ -345,9 +413,11 @@ class QMTAgent:
             self.last_error = None
 
     def _process_order_message(self, payload: dict[str, Any]) -> None:
-        """在独立线程中处理下单消息，避免阻塞 WebSocket 接收线程。"""
         logger.debug("on_message received complete payload: %s", json.dumps(payload, ensure_ascii=False))
         logger.info("received order client_order_id=%s", payload.get("client_order_id"))
+        if not self._ensure_qmt_schedule_state():
+            self.reporter.report_execution(self._build_schedule_rejection(payload, action="下单"))
+            return
 
         dispatch_mode = str(payload.get("dispatch_mode") or "").strip().lower()
         order_type_str = str(payload.get("order_type") or "").strip().upper()
@@ -360,7 +430,7 @@ class QMTAgent:
                 with self._smart_orders_lock:
                     self._smart_orders[client_order_id] = {
                         "original_payload": payload,
-                        "remaining_quantity": float(int(payload.get("quantity") or 0)),
+                        "remaining_quantity": float(payload.get("quantity") or 0),
                         "current_exchange_order_id": None,
                         "current_sub_client_order_id": None,
                         "state": "pending",
@@ -423,6 +493,7 @@ class QMTAgent:
             logger.info("report_execution succeeded for client_order_id=%s", result.get("client_order_id"))
         except Exception as exc:
             logger.exception("report_execution failed: %s", exc)
+
         if str(result.get("status") or "").strip().upper() in {"SUBMITTED", "PARTIALLY_FILLED"}:
             client_order_id = str(result.get("client_order_id") or "").strip()
             exchange_order_id = str(result.get("exchange_order_id") or "").strip()
@@ -439,7 +510,9 @@ class QMTAgent:
                     }
 
     def _process_cancel_message(self, payload: dict[str, Any]) -> None:
-        """在独立线程中处理撤单消息，避免阻塞 WebSocket 接收线程。"""
+        if not self._ensure_qmt_schedule_state():
+            logger.info("cancel skipped due to inactive QMT schedule: client_order_id=%s", payload.get("client_order_id"))
+            return
         client_order_id = str(payload.get("client_order_id") or "").strip()
         provided_exchange_order_id = str(payload.get("exchange_order_id") or "").strip()
         exchange_order_id = self.qmt.resolve_exchange_order_id(
@@ -472,15 +545,7 @@ class QMTAgent:
         except Exception as exc:
             logger.exception("cancel order failed: %s", exc)
 
-    def on_message(self, *args, **kwargs) -> None:
-        # 兼容 websocket-client 不同版本：旧版传 (ws, message)，新版对 bound method 只传 (message)。
-        if not args:
-            return
-        message = args[-1]
-        if not isinstance(message, (str, bytes, bytearray)):
-            return
-        if isinstance(message, (bytes, bytearray)):
-            message = message.decode("utf-8", errors="ignore")
+    def on_message(self, _ws, message: str) -> None:
         data = json.loads(message)
         msg_type = data.get("type")
         if msg_type == "order":
@@ -490,21 +555,12 @@ class QMTAgent:
             payload = data.get("payload", {}) or {}
             self._enqueue_dispatch("cancel", payload, priority=0)
 
-    def on_error(self, *args, **kwargs) -> None:
-        # 兼容 websocket-client 不同版本：旧版传 (ws, error)，新版对 bound method 只传 (error)。
-        error = args[-1] if args else "unknown error"
+    def on_error(self, _ws, error: Any) -> None:
         with self._state_lock:
             self.last_error = str(error)
         logger.warning("bridge websocket error: %s", error)
 
-    def on_close(self, *args, **kwargs) -> None:
-        # 兼容 websocket-client 不同版本：旧版传 (ws, code, msg)，新版对 bound method 只传 (code, msg)。
-        code: Any = None
-        msg: Any = None
-        if len(args) >= 2:
-            code, msg = args[-2], args[-1]
-        elif len(args) == 1:
-            code = args[0]
+    def on_close(self, _ws, code: Any, msg: Any) -> None:
         with self._state_lock:
             if not self.stop_event.is_set():
                 self.runtime_state = "reconnecting"
@@ -531,6 +587,9 @@ class QMTAgent:
 
     def _heartbeat_loop(self) -> None:
         while not self.stop_event.is_set():
+            if not self._ensure_qmt_schedule_state():
+                self.stop_event.wait(self._schedule_wait_seconds(active=False))
+                continue
             try:
                 self.reporter.report_heartbeat(
                     {
@@ -551,10 +610,6 @@ class QMTAgent:
             self.stop_event.wait(max(1, self.cfg.heartbeat_interval_seconds))
 
     def _ws_app_ping_loop(self) -> None:
-        """
-        向 /ws/bridge 发送应用层 ping，匹配 stream 的连接活跃判定逻辑。
-        仅依赖 websocket 协议层 ping 不会刷新 ws_core 的 heartbeat。
-        """
         interval = max(10, int(self.cfg.ws_ping_interval_seconds or 20))
         while not self.stop_event.is_set():
             try:
@@ -563,7 +618,6 @@ class QMTAgent:
                 if ws is not None:
                     ws.send(json.dumps({"type": "ping", "ts": time.time()}))
             except Exception:
-                # 连接切换期出现发送失败属于正常现象，交由 ws 重连流程处理
                 pass
             self.stop_event.wait(interval)
 
@@ -571,6 +625,9 @@ class QMTAgent:
         interval = max(1, int(getattr(self.cfg, "account_report_interval_seconds", 30) or 30))
         settle_window = max(3, min(10, interval // 2))
         while not self.stop_event.is_set():
+            if not self._ensure_qmt_schedule_state():
+                self.stop_event.wait(self._schedule_wait_seconds(active=False))
+                continue
             triggered = self._dirty_event.wait(timeout=interval)
             self._dirty_event.clear()
 
@@ -594,6 +651,9 @@ class QMTAgent:
         cancel_after_seconds = max(1, int(getattr(self.cfg, "reconcile_cancel_after_seconds", 60) or 60))
         check_interval = min(10, max(3, cancel_after_seconds // 4))
         while not self.stop_event.is_set():
+            if not self._ensure_qmt_schedule_state():
+                self.stop_event.wait(self._schedule_wait_seconds(active=False))
+                continue
             now = time.time()
             stale_orders: list[dict[str, Any]] = []
             with self._pending_orders_lock:
@@ -606,7 +666,6 @@ class QMTAgent:
                     continue
                 if now - submitted_at < cancel_after_seconds:
                     continue
-                # Skip orders that already have a cancel in flight
                 if order.get("cancel_requested_at"):
                     continue
                 stale_orders.append(order)
@@ -646,15 +705,11 @@ class QMTAgent:
             self.stop_event.wait(check_interval)
 
     def _smart_execution_loop(self) -> None:
-        """周期性轮询 _smart_orders 进行发单、撤单、追单操作。
-        
-        设计原则：在锁外完成所有 I/O（get_level1_price、submit_order_async、cancel_order_async），
-        仅在读写 _smart_orders 状态时加锁，避免持锁阻塞其他线程。
-        """
         while not self.stop_event.is_set():
+            if not self._ensure_qmt_schedule_state():
+                self.stop_event.wait(self._schedule_wait_seconds(active=False))
+                continue
             now = time.time()
-
-            # 1. 在锁内快照当前所有 smart order 的状态，锁外执行 I/O
             with self._smart_orders_lock:
                 snapshot = {k: dict(v) for k, v in self._smart_orders.items()}
 
@@ -688,7 +743,6 @@ class QMTAgent:
                     payload = so["original_payload"].copy()
                     symbol = payload.get("symbol")
                     side = payload.get("side")
-                    # I/O 在锁外执行
                     price = self.qmt.get_level1_price(symbol, side)
                     if price <= 0:
                         logger.warning("smart order got 0.0 price for %s, will retry next tick", client_order_id)
@@ -703,7 +757,6 @@ class QMTAgent:
 
                     try:
                         logger.info("smart order %s submitting chunk %s at price %s", client_order_id, new_retry, price)
-                        # I/O 在锁外执行
                         self.qmt.submit_order_async(payload)
                         with self._smart_orders_lock:
                             if client_order_id in self._smart_orders:
@@ -717,7 +770,6 @@ class QMTAgent:
                 elif so["state"] == "submitted":
                     timeout = int(self.cfg.smart_timeout_seconds)
                     if now - so["last_action_ts"] > timeout:
-                        # I/O 在锁外执行
                         exchange_order_id = self.qmt.resolve_exchange_order_id("", so["current_sub_client_order_id"])
                         if exchange_order_id:
                             logger.info("smart order %s timeout, cancelling sub order: %s", client_order_id, exchange_order_id)
@@ -779,7 +831,7 @@ class QMTAgent:
             logger.info("background thread started: %s", name)
             try:
                 return target(*args, **kwargs)
-            except BaseException as exc:  # pragma: no cover - thread boundary guard
+            except BaseException as exc:
                 with self._state_lock:
                     self.last_error = f"{name} crashed: {exc}"
                 logger.exception("background thread crashed: %s", name)
@@ -834,12 +886,14 @@ class QMTAgent:
             "bridge-smart-execution",
             "bridge-app-ping",
             "bridge-watchdog",
+            "qmt-schedule",
         ]
         dead_threads = [name for name in critical_threads if not thread_states.get(name, False)]
         reasons: list[str] = []
-        if (not in_startup_grace) and heartbeat_age > heartbeat_interval * 2:
+        schedule_paused = bool(getattr(self, "_schedule_paused", False))
+        if (not schedule_paused) and (not in_startup_grace) and heartbeat_age > heartbeat_interval * 2:
             reasons.append(self._format_age_reason("heartbeat_stale", heartbeat_age))
-        if (not in_startup_grace) and account_age > account_interval * 2:
+        if (not schedule_paused) and (not in_startup_grace) and account_age > account_interval * 2:
             reasons.append(self._format_age_reason("account_stale", account_age))
         if dead_threads:
             reasons.append(f"thread_dead({','.join(dead_threads)})")
@@ -849,7 +903,9 @@ class QMTAgent:
             reasons.append(f"dispatch_queue_busy({queue_size}/{queue_maxsize})")
         if int(dispatch_metrics.get("dropped") or 0) > 0:
             reasons.append(f"dispatch_queue_dropped({int(dispatch_metrics.get('dropped') or 0)})")
-        if not reasons:
+        if schedule_paused and not reasons:
+            health = "paused"
+        elif not reasons:
             health = "healthy"
         elif dead_threads:
             health = "degraded"
@@ -867,6 +923,8 @@ class QMTAgent:
             "startup_age_seconds": None if not math.isfinite(startup_age) else int(startup_age),
             "startup_grace_seconds": int(self._startup_grace_seconds),
             "in_startup_grace": bool(in_startup_grace),
+            "schedule_paused": schedule_paused,
+            "schedule_window_label": _QMT_ACTIVE_WINDOW_LABEL,
             "worker_threads": thread_states,
             "dispatch_metrics": dispatch_metrics,
         }
@@ -876,30 +934,32 @@ class QMTAgent:
         submit_interval_seconds = float(self._dispatch_submit_interval_ms) / 1000.0
         while not self.stop_event.is_set():
             try:
-                _priority, _seq, item = dispatch_queue.get(timeout=1.0)
+                priority, seq, item = dispatch_queue.get(timeout=1.0)
             except queue.Empty:
                 continue
-
-            started_at = time.time()
-            wait_ms = max(0, int((started_at - float(item.get("enqueued_at") or started_at)) * 1000))
-            kind = str(item.get("kind") or "")
-            payload = dict(item.get("payload") or {})
-
-            try:
-                if kind == "cancel":
-                    self._process_cancel_message(payload)
-                else:
-                    self._process_order_message(payload)
-            finally:
-                with self._dispatch_metrics_lock:
-                    self._dispatch_processed += 1
-                    self._dispatch_last_queue_wait_ms = wait_ms
-                    self._dispatch_last_submit_at = started_at
-                    self._dispatch_last_submit_kind = kind
-                dispatch_queue.task_done()
-
+            self._dispatch_executor.submit(self._dispatch_task_wrapper, priority, seq, item)
             if submit_interval_seconds > 0 and not self.stop_event.is_set():
                 self.stop_event.wait(submit_interval_seconds)
+
+    def _dispatch_task_wrapper(self, priority: int, seq: int, item: dict[str, Any]) -> None:
+        started_at = time.time()
+        wait_ms = max(0, int((started_at - float(item.get("enqueued_at") or started_at)) * 1000))
+        kind = str(item.get("kind") or "")
+        payload = dict(item.get("payload") or {})
+        try:
+            if kind == "cancel":
+                self._process_cancel_message(payload)
+            else:
+                self._process_order_message(payload)
+        except Exception as exc:
+            logger.exception("dispatch task crashed: kind=%s, error=%s", kind, exc)
+        finally:
+            with self._dispatch_metrics_lock:
+                self._dispatch_processed += 1
+                self._dispatch_last_queue_wait_ms = wait_ms
+                self._dispatch_last_submit_at = started_at
+                self._dispatch_last_submit_kind = kind
+            self._dispatch_queue.task_done()
 
     def _ensure_background_threads(self) -> None:
         desired = {
@@ -910,7 +970,8 @@ class QMTAgent:
             "bridge-order-dispatch": self._order_dispatch_loop,
             "bridge-smart-execution": self._smart_execution_loop,
             "bridge-app-ping": self._ws_app_ping_loop,
-            "qmt-reconnect": self.qmt.reconnect_if_needed,
+            "qmt-reconnect": self._qmt_reconnect_loop,
+            "qmt-schedule": self._qmt_schedule_loop,
             "bridge-websocket": self._run_ws_forever,
             "bridge-watchdog": self._watchdog_loop,
         }
@@ -925,6 +986,14 @@ class QMTAgent:
             else:
                 self._spawn_background_thread(name, target)
 
+    def _qmt_reconnect_loop(self, stop_event: threading.Event) -> None:
+        self.qmt.reconnect_if_needed(stop_event, allow_connect=self._is_qmt_active_window)
+
+    def _qmt_schedule_loop(self) -> None:
+        while not self.stop_event.is_set():
+            active = self._ensure_qmt_schedule_state()
+            self.stop_event.wait(self._schedule_wait_seconds(active=active))
+
     def _watchdog_loop(self) -> None:
         while not self.stop_event.is_set():
             try:
@@ -936,7 +1005,11 @@ class QMTAgent:
                         self.runtime_state = "degraded" if health.get("health") != "healthy" else self.runtime_state
                         self.last_error = reason
                     logger.warning("runtime watchdog detected issue: %s", reason)
-                    if ("heartbeat_stale" in reason or "account_stale" in reason) and not bool(health.get("in_startup_grace")):
+                    if (
+                        ("heartbeat_stale" in reason or "account_stale" in reason)
+                        and not bool(health.get("in_startup_grace"))
+                        and not bool(health.get("schedule_paused"))
+                    ):
                         self.qmt.request_reconnect()
             except Exception as exc:
                 with self._state_lock:
@@ -952,43 +1025,46 @@ class QMTAgent:
             self.last_error = None
             self.last_start_at = time.time()
         self.auth.bootstrap()
-        if not self.qmt.connect():
-            logger.warning("QMT initial connection failed, heartbeat will report disconnected state")
-            with self._state_lock:
-                self.runtime_state = "degraded"
-                self.last_error = "QMT initial connection failed"
-        else:
-            with self._state_lock:
-                self.runtime_state = "starting"
-
-        bootstrap_snapshot = None
-        try:
-            bootstrap_snapshot = self.qmt.snapshot(prefer_fresh=True)
-        except Exception as exc:
-            logger.warning("initial account snapshot unavailable: %s", exc)
-        if bootstrap_snapshot is not None:
-            try:
-                self.reporter.report_account(bootstrap_snapshot)
+        if self._ensure_qmt_schedule_state():
+            if not self.qmt.connect():
+                logger.warning("QMT initial connection failed, heartbeat will report disconnected state")
                 with self._state_lock:
-                    self.last_account_report_at = time.time()
+                    self.runtime_state = "degraded"
+                    self.last_error = "QMT initial connection failed"
+            else:
+                with self._state_lock:
+                    self.runtime_state = "starting"
+
+            bootstrap_snapshot = None
+            try:
+                bootstrap_snapshot = self.qmt.snapshot(prefer_fresh=True)
             except Exception as exc:
-                logger.warning("initial account report failed: %s", exc)
-        try:
-            self.reporter.report_heartbeat(
-                {
-                    "account_id": self.cfg.account_id,
-                    "client_version": self.cfg.client_version,
-                    "hostname": self.cfg.hostname,
-                    "status": "running",
-                    "qmt_connected": self.qmt.is_connected(),
-                    "latency_ms": 0,
-                }
-            )
-            with self._state_lock:
-                self.last_heartbeat_at = time.time()
-        except Exception as exc:
-            logger.warning("initial heartbeat report failed: %s", exc)
-        self._run_startup_reconcile()
+                logger.warning("initial account snapshot unavailable: %s", exc)
+            if bootstrap_snapshot is not None:
+                try:
+                    self.reporter.report_account(bootstrap_snapshot)
+                    with self._state_lock:
+                        self.last_account_report_at = time.time()
+                except Exception as exc:
+                    logger.warning("initial account report failed: %s", exc)
+            try:
+                self.reporter.report_heartbeat(
+                    {
+                        "account_id": self.cfg.account_id,
+                        "client_version": self.cfg.client_version,
+                        "hostname": self.cfg.hostname,
+                        "status": "running",
+                        "qmt_connected": self.qmt.is_connected(),
+                        "latency_ms": 0,
+                    }
+                )
+                with self._state_lock:
+                    self.last_heartbeat_at = time.time()
+            except Exception as exc:
+                logger.warning("initial heartbeat report failed: %s", exc)
+            self._run_startup_reconcile()
+        else:
+            logger.info("当前处于非通信时段，启动时跳过 QMT 连接、账户快照和心跳上报")
 
         self._spawn_background_thread("bridge-refresh", self._refresh_loop)
         self._spawn_background_thread("bridge-heartbeat", self._heartbeat_loop)
@@ -997,22 +1073,34 @@ class QMTAgent:
         self._spawn_background_thread("bridge-order-dispatch", self._order_dispatch_loop)
         self._spawn_background_thread("bridge-smart-execution", self._smart_execution_loop)
         self._spawn_background_thread("bridge-app-ping", self._ws_app_ping_loop)
-        self._spawn_background_thread("qmt-reconnect", self.qmt.reconnect_if_needed, self.stop_event)
+        self._spawn_background_thread("qmt-reconnect", self._qmt_reconnect_loop, self.stop_event)
+        self._spawn_background_thread("qmt-schedule", self._qmt_schedule_loop)
         self._spawn_background_thread("bridge-websocket", self._run_ws_forever)
         self._spawn_background_thread("bridge-watchdog", self._watchdog_loop)
 
-        while not self.stop_event.is_set():
-            time.sleep(1)
+    def run_forever(
+        self,
+        external_stop_event: Optional[threading.Event] = None,
+        poll_interval_seconds: float = 0.2,
+    ) -> None:
+        self.start()
+        poll_interval = max(0.1, float(poll_interval_seconds or 0.2))
+        while not self.stop_event.wait(poll_interval):
+            if external_stop_event is not None and external_stop_event.is_set():
+                break
 
     def stop(self) -> None:
         self.stop_event.set()
         self._close_ws()
         self.qmt.close()
+        if hasattr(self, "_dispatch_executor"):
+            self._dispatch_executor.shutdown(wait=False)
         with self._state_lock:
             self.runtime_state = "stopped"
 
     def get_runtime_status(self) -> dict[str, Any]:
-        thread_states = {name: thread.is_alive() for name, thread in self._threads.items()}
+        with self._state_lock:
+            thread_states = {name: thread.is_alive() for name, thread in self._threads.items()}
         health = self._runtime_health_snapshot()
         with self._state_lock:
             return {
@@ -1032,6 +1120,8 @@ class QMTAgent:
                 "client_fingerprint": self.cfg.client_fingerprint,
                 "client_version": self.cfg.client_version,
                 "account_id": self.cfg.account_id,
+                "qmt_schedule_active": not bool(health.get("schedule_paused")),
+                "qmt_schedule_window": health.get("schedule_window_label"),
                 "worker_threads": thread_states,
                 "dispatch_metrics": health.get("dispatch_metrics"),
             }

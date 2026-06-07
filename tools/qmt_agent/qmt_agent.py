@@ -145,9 +145,12 @@ def _supervised_run(
         run_started_at = time.time()
         exit_reason: str | None = None
         try:
-            agent.start()
+            agent.run_forever(external_stop_event=shutdown_event)
             if not shutdown_event.is_set():
-                exit_reason = "agent 主循环意外退出"
+                if agent.stop_event.is_set():
+                    exit_reason = "agent stop_event set unexpectedly"
+                else:
+                    exit_reason = "agent 主循环意外退出"
         except Exception as exc:
             if shutdown_event.is_set():
                 break

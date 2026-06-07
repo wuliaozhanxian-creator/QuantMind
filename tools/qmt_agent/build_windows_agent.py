@@ -133,7 +133,6 @@ def audit_startup_chain_imports() -> None:
 
 
 def smoke_test_desktop_chain() -> None:
-    DIST_ROOT.mkdir(parents=True, exist_ok=True)
     smoke_dir = Path(tempfile.mkdtemp(prefix="qmt_agent_smoke_", dir=str(DIST_ROOT)))
     try:
         for filename in (

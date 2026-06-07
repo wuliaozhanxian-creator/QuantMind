@@ -18,6 +18,7 @@
   - `qmt_agent_desktop.spec`
   - `qmt_agent_setup.iss`
   - `version.json`
+  - `updater.py`
   - `help.md`
   - `qmt_agent_reference.py`
 - 独立部署原则：
@@ -30,6 +31,7 @@
 - 版本源唯一文件：[`version.json`](/Users/qusong/git/quantmind/tools/qmt_agent/version.json)
 - 每次有代码变更并产出新安装包时，必须递增 `version`（至少补丁号）。
 - Windows 打包脚本会自动使用 `version.json` 生成 `client_version`（`{version}-desktop`），避免硬编码版本漂移。
+- 当前版本锁定：`1.3.0`（桌面壳默认回退值、Updater 回退值、打包脚本回退值已统一为 `1.3.0`）。
 
 ## 功能
 
@@ -64,6 +66,8 @@
   - `runtime_status.dispatch_metrics` 会透出队列深度、丢弃数、最近等待时长和最近提交类型，便于桌面端/排障页观测
 - 当本机未安装 `xtquant` 时自动退化为 mock 模式，便于联调
 - 本地桌面 GUI：手动录入 Access Key / Secret Key、扫描 QMT 路径、手填资金账号
+- 桌面端新增“清理缓存”：会先停止 Agent 运行进程并断开 QMT，再清理 `userdata_mini` 根目录下匹配 `queue_*_mutex` 规则的临时文件，最后自动重新拉起 Agent
+- 已增加 QMT 通信时段门控：仅在本机本地时间的周一至周五 `09:00-17:00` 与 QMT 通信；时段外自动断开 QMT，并暂停账户快照与心跳上报
 - 总览页会显示 Agent 状态、QMT 连接、云端桥接、运行健康、最近心跳、最近账户快照、版本、主机名和客户端指纹
 - 桌面壳“云端连接”仅根据真实 bridge 连接状态显示，不再把“测试云端连接成功”误当作持续在线；当运行健康异常时会同步显示为异常态
 - 总览页额外展示最近启动时间、工作线程存活状态、心跳/账户上报年龄与最后错误，便于排查“只发首包后停止”这类问题
@@ -96,8 +100,24 @@
 - 根因：PyInstaller 打包未显式包含 `uuid`，导致 `xtquant.xtdata` 导入链在部分机器上失败。
 - 修复内容：
   - `qmt_agent_desktop.spec` 显式加入 `uuid` hidden import；
-- `desktop_app.py` 总览页新增 `运行健康`、`工作线程`、`最近心跳/账户年龄` 与 `最后错误` 字段，便于判断是否仅完成首包上报后后台循环停止。
+  - `desktop_app.py` 总览页新增 `运行健康`、`工作线程`、`最近心跳/账户年龄` 与 `最后错误` 字段，便于判断是否仅完成首包上报后后台循环停止。
   - `desktop_app.py` 启动 Agent 与“测试 QMT”前都会显式校验 `xtquant/xtdata` 依赖，缺失时直接阻止启动，不再进入“首包成功后半残运行”的状态。
+
+## 运行监督修复（2026-05-13）
+
+- 修复问题：桌面壳日志持续出现 `Agent 主循环意外退出`，运行约 `10s` 后自动重启。
+- 根因：`QMTAgent.start()` 只负责初始化并拉起后台线程，会很快返回；但桌面壳与 CLI 监督器把 `start()` 返回误判为“主循环退出”。
+- 修复内容：
+  - `agent.py` 新增 `run_forever()` 阻塞运行入口，明确“启动后持续等待停止信号”的运行语义。
+  - `qmt_agent.py` 监督器改为调用 `run_forever(external_stop_event=shutdown_event)`，避免正常运行被误判崩溃。
+  - `desktop_app.py` 监督线程改为在 `start()` 后持续等待 `desired_running/stop_event`，仅在真实异常或非预期停止时才进入重启分支。
+  - 补充单测 `tests/test_agent_run_forever.py`，覆盖阻塞等待与退出信号行为。
+
+## Updater 模块接入（2026-05-13）
+
+- 新增接入范围：`updater.py` 已纳入 QMT Agent 启动链审计、启动链烟测文件拷贝、独立部署 zip 打包文件清单。
+- 目的：避免桌面壳运行时出现“源码存在 updater，但打包产物缺失 updater”导致的导入失败或更新检查不可用问题。
+- 版本口径：`version.json` 与相关回退值统一锁定到 `1.3.0`，保证桌面壳、CLI、Updater 对外上报版本一致。
 
 ## 稳定性修复（2026-03-14）
 
@@ -202,7 +222,7 @@ python tools/qmt_agent/build_windows_agent.py
 - `account_type`: 账户类型，默认 `STOCK`；多空（融券）实盘要求 `CREDIT`
 - `enable_short_trading`: 是否启用融券做空通道，默认 `false`
 - `short_check_cache_ttl_sec`: 可融券额度查询缓存 TTL（秒），默认 `30`
-- `session_id`: MiniQMT 会话号；填 `0` 或留空时会自动生成稳定会话号（基于账号/主机名/路径）
+- `session_id`: MiniQMT 会话号，填 `0` 时会按 `account_id + hostname + qmt_path` 生成稳定会话号
 - `heartbeat_interval_seconds`: 心跳上报周期，默认 `15`
 - `account_report_interval_seconds`: 账户快照上报周期，默认 `30`
 - `reconnect_interval_seconds`: WebSocket / QMT 失败后的重试间隔，默认 `5`
@@ -222,6 +242,20 @@ python tools/qmt_agent/build_windows_agent.py
 - `restart_max_attempts_per_window`: 重启窗口内最大尝试次数，默认 `20`
 
 说明：当前推荐的托管逻辑是“桌面壳负责驻留与监督，用户点击‘启动 Agent’后进入托管模式；若 Agent 因高负载或异常退出，桌面壳按重启策略自动拉起 Agent，但不会在软件打开时直接自启动”。
+
+缓存维护补充：
+
+- 桌面端支持“清理缓存”，会先停止 Agent 运行进程并断开 QMT，再清理 `userdata_mini` 根目录下符合 `queue_*_mutex` 规则的临时文件，完成后自动重新拉起 Agent。
+- 本地控制接口支持 `POST /cleanup_cache`；为兼容旧调用，也保留 `POST /stop_and_cleanup_cache`，鉴权级别与 `start/stop/restart` 相同。
+
+通信时段补充：
+
+- 当前版本内置 QMT 通信时间限制：仅允许周一至周五 `09:00-17:00` 与 QMT 通信。
+- 时段外行为：
+- 自动断开现有 QMT 连接，停止从 QMT 拉取账户/持仓数据。
+- 暂停 `bridge/account` 与 `bridge/heartbeat` 上报，降低空闲时段资源占用。
+- 若云端仍下发订单，Agent 会直接拒绝，并返回“当前为非通信时段”的原因。
+- 到达允许时段后，Agent 会自动恢复 QMT 通信并重新进入正常运行状态。
 
 补充：桌面壳现在会优先复用已有本地实例。若后台实例已存在，用户再次打开程序时会把窗口切回前台，而不是再启动第二个实例抢占本地端口。
 
@@ -399,13 +433,20 @@ python tools/qmt_agent/upload_release_to_cos.py \
   - `qmt_path/qmt_bin_path` 是否正确且 QMT 已进入极简模式
 3. Agent 会优先使用 `bridge/session` 响应里的 `ws_url` 作为实时通道地址（覆盖本地 `server_url`），避免环境迁移后仍连旧地址导致 `bridge_agent_offline`。
 
+## 修复记录（2026-06-03，异步下单回报过滤）
+
+- `order_stock_async` 返回的 `seq` 只表示 SDK 异步请求已受理，不等于柜台生成真实委托。
+- `on_order_stock_async_response` 若只携带 `order_id=-1/0/空`，现在会跳过上报，避免云端把伪委托号写入订单。
+- 实盘市价单由云端桥接层下发 `agent_price_mode=protect_limit` 后，Agent 会基于盘口生成保护限价单；无法获取盘口时直接拒绝，避免“云端已提交、柜台无单”的假成功。
+- 真正的委托号和成交状态仍以 QMT 后续 `on_stock_order/on_stock_trade` 回调为准。
+
 ## 修复记录（2026-06-04，保护限价按最小价位单位对齐）
 
 - 现象：保护限价模式会生成诸如 `9.39118`、`61.1774` 的价格，未对齐交易所最小价位单位时，QMT 柜台会返回 `120161 校验最小价差失败`，表现为“Agent 已收到订单但 QMT 无任何有效委托”。
 - 修复：Agent 在提交 `protect_limit` 订单前，现会按证券代码推断最小价位单位并对价格做方向敏感对齐：
   - 买单向上对齐；
   - 卖单向下对齐。
-- 说明：手动任务 `client_order_id=manual-*` 在上游桥接层已改为保留原生 `MARKET` 语义；本对齐逻辑主要兜底自动托管等仍使用保护限价的链路。
+- 说明：企业版手动任务 `client_order_id=manual-*` 已改为保留原生 `MARKET` 语义，不再经由 `protect_limit` 改写；本对齐逻辑主要兜底自动托管等仍使用保护限价的链路。
 
 ## 修复记录（2026-06-04，执行语义与诊断元信息收敛）
 

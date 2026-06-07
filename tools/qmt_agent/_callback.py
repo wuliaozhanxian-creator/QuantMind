@@ -57,10 +57,13 @@ class _QMTCallbackAdapter:
         status: str,
         message: str = "",
         exchange_trade_id: Any = None,
+        require_valid_exchange_order_id: bool = False,
     ) -> dict[str, Any] | None:
         exchange_order_id = _text(_obj_get(data, "order_id", ""))
         if not exchange_order_id:
             exchange_order_id = _text(_obj_get(data, "sysid", ""))
+        if not self.client.is_valid_exchange_order_id(exchange_order_id):
+            exchange_order_id = ""
         seq = _obj_get(data, "seq", None)
         client_order_id = _text(
             self.client.resolve_client_order_id(
@@ -69,6 +72,13 @@ class _QMTCallbackAdapter:
                 seq=seq,
             )
         )
+        if require_valid_exchange_order_id and not exchange_order_id:
+            logger.warning(
+                "skip qmt callback with invalid exchange_order_id: seq=%s payload=%s",
+                seq,
+                data,
+            )
+            return None
         if not client_order_id and not self.client.is_valid_exchange_order_id(exchange_order_id):
             logger.warning(
                 "skip qmt callback without resolvable ids: seq=%s exchange_order_id=%s payload=%s",
@@ -166,6 +176,7 @@ class _QMTCallbackAdapter:
             resp,
             status="SUBMITTED",
             message="async order accepted by qmt",
+            require_valid_exchange_order_id=True,
         )
         if payload:
             self._emit(payload)

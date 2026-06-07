@@ -70,8 +70,10 @@ class AuthManager:
             resp = _do_request(True)
         resp.raise_for_status()
         data = resp.json()
-        # 始终使用本地配置的 server_url，不再被服务端返回的 ws_url 覆盖。
-        # 避免本地部署/内网环境下服务端返回 localhost 等错误地址。
+        ws_url = str(data.get("ws_url") or "").strip()
+        if ws_url:
+            # 服务端返回的 ws_url 优先，避免本地配置与服务端路由漂移导致 bridge_agent_offline。
+            self.cfg.server_url = ws_url
         with self._lock:
             self.token = data["bridge_session_token"]
             self.expires_at = time.time() + int(data["expires_in"])
@@ -94,7 +96,9 @@ class AuthManager:
         )
         resp.raise_for_status()
         data = resp.json()
-        # 始终使用本地配置的 server_url，不再被服务端返回的 ws_url 覆盖。
+        ws_url = str(data.get("ws_url") or "").strip()
+        if ws_url:
+            self.cfg.server_url = ws_url
         with self._lock:
             self.token = data["bridge_session_token"]
             self.expires_at = time.time() + int(data["expires_in"])

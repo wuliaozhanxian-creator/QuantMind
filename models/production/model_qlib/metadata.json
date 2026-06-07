@@ -1,11 +1,11 @@
 {
-  "run_id": "train_20260530233605_37cfc5d5",
-  "job_name": "model_train_t5_20260530233604",
+  "run_id": "train_20260601211846_3dc6f1cb",
+  "job_name": "model_train_t5_20260601211846",
   "framework": "lightgbm",
   "model_type": "lightgbm",
   "model_file": "model.lgb",
-  "feature_count": 48,
-  "requested_feature_count": 48,
+  "feature_count": 52,
+  "requested_feature_count": 52,
   "requested_features": [
     "mom_ret_5d",
     "mom_ret_20d",
@@ -54,7 +54,11 @@
     "ind_relative_volatility_20",
     "ind_strength_20",
     "ind_momentum_rank_20",
-    "ind_value_rank"
+    "ind_value_rank",
+    "mom_ret_1d",
+    "liq_turnover_os",
+    "liq_amount",
+    "liq_volume"
   ],
   "auto_appended_feature_count": 0,
   "auto_appended_features": [],
@@ -106,7 +110,11 @@
     "ind_relative_volatility_20",
     "ind_strength_20",
     "ind_momentum_rank_20",
-    "ind_value_rank"
+    "ind_value_rank",
+    "mom_ret_1d",
+    "liq_turnover_os",
+    "liq_amount",
+    "liq_volume"
   ],
   "feature_columns": [
     "mom_ret_5d",
@@ -156,7 +164,11 @@
     "ind_relative_volatility_20",
     "ind_strength_20",
     "ind_momentum_rank_20",
-    "ind_value_rank"
+    "ind_value_rank",
+    "mom_ret_1d",
+    "liq_turnover_os",
+    "liq_amount",
+    "liq_volume"
   ],
   "fill_values": {
     "mom_ret_5d": 0.0,
@@ -206,36 +218,40 @@
     "ind_relative_volatility_20": 0.0,
     "ind_strength_20": 0.0,
     "ind_momentum_rank_20": 0.0,
-    "ind_value_rank": 0.0
+    "ind_value_rank": 0.0,
+    "mom_ret_1d": 0.0,
+    "liq_turnover_os": 0.0,
+    "liq_amount": 0.0,
+    "liq_volume": 0.0
   },
   "train_start": "2016-01-04",
-  "train_end": "2023-04-09",
-  "val_start": "2023-04-14",
-  "val_end": "2024-10-28",
-  "test_start": "2024-11-02",
-  "test_end": "2026-05-21",
+  "train_end": "2023-04-15",
+  "val_start": "2023-04-20",
+  "val_end": "2024-11-04",
+  "test_start": "2024-11-09",
+  "test_end": "2026-05-29",
   "data_source": "parquet",
-  "best_iteration": 1500,
-  "actual_best_iteration": 1500,
+  "best_iteration": 1433,
+  "actual_best_iteration": 1433,
   "target_horizon_days": 5,
   "target_mode": "return",
   "label_formula": "label = CSZScore(future_return(T, T+5)) = CSZScore(open(T+5) / open(T) - 1)",
-  "effective_trade_date": "2024-11-07",
-  "training_window": "2016-01-04 → 2023-04-09 | 2023-04-14 → 2024-10-28 | 2024-11-02 → 2026-05-21",
+  "effective_trade_date": "2024-11-10",
+  "training_window": "2016-01-04 → 2023-04-15 | 2023-04-16 → 2024-11-04 | 2024-11-05 → 2026-05-29",
   "metrics": {
-    "train_ic": 0.13758859529069328,
-    "train_rank_ic": 0.11329817262865656,
-    "train_rank_icir": 1.2016261832599144,
-    "val_ic": 0.10116139348982978,
-    "val_rank_ic": 0.07444384525275476,
-    "val_rank_icir": 0.5893313499152358,
-    "test_ic": 0.09967784084034892,
-    "test_rank_ic": 0.09650378334139832,
-    "test_rank_icir": 0.9637338767045075
+    "train_ic": 0.13956883486065697,
+    "train_rank_ic": 0.11487093445476357,
+    "train_rank_icir": 1.2133045928997048,
+    "val_ic": 0.10301717185888995,
+    "val_rank_ic": 0.07576373303260288,
+    "val_rank_icir": 0.5948488935262203,
+    "test_ic": 0.0989215353165122,
+    "test_rank_ic": 0.09243744355671457,
+    "test_rank_icir": 0.8928749647972719
   },
   "pred_coverage_start": "2016-01-04",
-  "pred_coverage_end": "2026-05-15",
-  "pred_rows": 10367422,
+  "pred_coverage_end": "2026-05-22",
+  "pred_rows": 10393365,
   "shap": {
     "enabled": true,
     "status": "completed",
@@ -244,8 +260,8 @@
     "rows_used": 30000,
     "file": "shap_summary.csv",
     "error": "",
-    "elapsed_seconds": 3.4276957511901855
+    "elapsed_seconds": 3.340019941329956
   },
-  "generated_at": "2026-05-30T15:43:40.933551",
-  "elapsed_seconds": 251.22331738471985
+  "generated_at": "2026-06-01T13:26:24.093933",
+  "elapsed_seconds": 254.63548159599304
 }

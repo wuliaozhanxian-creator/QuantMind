@@ -151,7 +151,7 @@ def _load_help_text() -> str:
             "",
             "日志位置：",
             f"  桌面壳日志: {LOG_PATH}",
-            f"  CLI 日志: {app_data_dir() / 'qmt_agent.log'}",
+            f"  CLI 日志: {_app_data_dir() / 'qmt_agent.log'}",
         ]
     )
 
@@ -346,6 +346,39 @@ def scan_qmt_installations(seed_paths: Optional[list[str]] = None) -> dict[str, 
     }
 
 
+def _looks_like_qmt_temp_file(name: str) -> bool:
+    text = str(name or "").strip()
+    return bool(text) and "queue_" in text and text.endswith("_mutex")
+
+
+def _cleanup_qmt_temp_files(qmt_path: str | Path) -> dict[str, Any]:
+    root = Path(str(qmt_path or "").strip())
+    result = {
+        "scanned": 0,
+        "removed": 0,
+        "failed": 0,
+        "removed_files": [],
+        "failed_files": [],
+    }
+    if not root.exists() or not root.is_dir():
+        return result
+
+    for entry in root.iterdir():
+        if not entry.is_file():
+            continue
+        result["scanned"] += 1
+        if not _looks_like_qmt_temp_file(entry.name):
+            continue
+        try:
+            entry.unlink()
+            result["removed"] += 1
+            result["removed_files"].append(entry.name)
+        except Exception as exc:
+            result["failed"] += 1
+            result["failed_files"].append({"name": entry.name, "error": str(exc)})
+    return result
+
+
 def build_agent_config(data: dict[str, Any]) -> AgentConfig:
     cfg = dict(default_config())
     cfg.update(data)
@@ -354,46 +387,6 @@ def build_agent_config(data: dict[str, Any]) -> AgentConfig:
     allowed_keys = {item.name for item in fields(AgentConfig)}
     filtered = {key: value for key, value in cfg.items() if key in allowed_keys}
     return AgentConfig(**filtered)
-
-
-def _looks_like_qmt_temp_file(name: str) -> bool:
-    text = str(name or "").strip().lower()
-    if not text or not text.endswith("_mutex"):
-        return False
-    return "queue_" in text
-
-
-def _cleanup_qmt_temp_files(qmt_path: Path) -> dict[str, Any]:
-    if not qmt_path.exists():
-        return {"ok": False, "message": "userdata_mini 不存在"}
-    if not qmt_path.is_dir():
-        return {"ok": False, "message": "qmt_path 不是目录"}
-
-    candidates: list[Path] = []
-    try:
-        for entry in qmt_path.iterdir():
-            if entry.is_file() and _looks_like_qmt_temp_file(entry.name):
-                candidates.append(entry)
-    except Exception as exc:
-        return {"ok": False, "message": f"扫描临时文件失败: {exc}"}
-
-    removed_files: list[str] = []
-    failed_files: list[dict[str, str]] = []
-    for path in sorted(candidates, key=lambda item: item.name):
-        try:
-            path.unlink()
-            removed_files.append(path.name)
-        except Exception as exc:
-            failed_files.append({"name": path.name, "error": str(exc)})
-
-    return {
-        "ok": True,
-        "scanned": len(candidates),
-        "removed": len(removed_files),
-        "failed": len(failed_files),
-        "removed_files": removed_files,
-        "failed_files": failed_files,
-    }
 
 
 class DesktopRuntime:
@@ -512,6 +505,13 @@ class DesktopRuntime:
             run_started_at = time.time()
             try:
                 agent.start()
+                while True:
+                    with self._lock:
+                        still_desired = self._desired_running
+                    if not still_desired:
+                        break
+                    if agent.stop_event.wait(0.2):
+                        break
             except Exception as exc:
                 crashed = True
                 crash_reason = str(exc)
@@ -636,46 +636,63 @@ class DesktopRuntime:
         self._notify()
         return {"ok": True, "message": "Agent 已停止"}
 
+    def cleanup_cache(self, data: dict[str, Any]) -> dict[str, Any]:
+        stop_result = self.stop()
+        cfg = build_agent_config(data)
+        qmt_path = Path(str(cfg.qmt_path or "").strip())
+        if not str(cfg.qmt_path or "").strip():
+            return {"ok": False, "message": "未配置 userdata_mini 路径"}
+        if not qmt_path.exists() or not qmt_path.is_dir():
+            return {"ok": False, "message": "userdata_mini 路径不存在或不是目录"}
+
+        cleanup = _cleanup_qmt_temp_files(qmt_path)
+        if cleanup["failed"] > 0:
+            message = (
+                f"缓存清理完成但存在失败项：扫描 {cleanup['scanned']} 个文件，"
+                f"删除 {cleanup['removed']} 个，失败 {cleanup['failed']} 个"
+            )
+            return {
+                "ok": False,
+                "message": message,
+                "qmt_path": str(qmt_path),
+                "cleanup": cleanup,
+                "stop": stop_result,
+            }
+
+        time.sleep(0.5)
+        restart_result = self.start(data)
+        if not restart_result.get("ok"):
+            return {
+                "ok": False,
+                "message": (
+                    f"缓存已清理，但自动重启 Agent 失败：{restart_result.get('message') or '未知错误'}"
+                ),
+                "qmt_path": str(qmt_path),
+                "cleanup": cleanup,
+                "stop": stop_result,
+                "restart": restart_result,
+            }
+
+        message = (
+            f"缓存清理完成并已重新拉起 Agent：扫描 {cleanup['scanned']} 个文件，"
+            f"删除 {cleanup['removed']} 个，失败 {cleanup['failed']} 个"
+        )
+        return {
+            "ok": True,
+            "message": message,
+            "qmt_path": str(qmt_path),
+            "cleanup": cleanup,
+            "stop": stop_result,
+            "restart": restart_result,
+        }
+
+    def stop_and_cleanup_cache(self, data: dict[str, Any]) -> dict[str, Any]:
+        return self.cleanup_cache(data)
+
     def restart(self, data: dict[str, Any]) -> dict[str, Any]:
         self.stop()
         time.sleep(0.5)
         return self.start(data)
-
-    def stop_and_cleanup_cache(self, data: dict[str, Any]) -> dict[str, Any]:
-        stop_result = self.stop()
-        qmt_path_text = str((data or {}).get("qmt_path") or "").strip()
-        if not qmt_path_text:
-            return {
-                "ok": False,
-                "message": "Agent 已停止；未配置 userdata_mini 路径，无法清理缓存",
-                "stop_result": stop_result,
-            }
-
-        cleanup_result = _cleanup_qmt_temp_files(Path(qmt_path_text))
-        if not cleanup_result.get("ok"):
-            return {
-                "ok": False,
-                "message": f"Agent 已停止；{cleanup_result.get('message')}",
-                "stop_result": stop_result,
-                "cleanup": cleanup_result,
-            }
-
-        scanned = int(cleanup_result.get("scanned") or 0)
-        removed = int(cleanup_result.get("removed") or 0)
-        failed = int(cleanup_result.get("failed") or 0)
-        if scanned <= 0:
-            message = "Agent 已停止；未发现可清理的临时缓存文件"
-        elif failed > 0:
-            message = f"Agent 已停止；清理完成，删除 {removed} 个，失败 {failed} 个"
-        else:
-            message = f"Agent 已停止；清理完成，删除 {removed} 个临时缓存文件"
-
-        return {
-            "ok": failed == 0,
-            "message": message,
-            "stop_result": stop_result,
-            "cleanup": cleanup_result,
-        }
 
     def test_bridge(self, data: dict[str, Any]) -> dict[str, Any]:
         errors = validate_config_dict(data)
@@ -933,15 +950,20 @@ class LocalAPIHandler(BaseHTTPRequestHandler):
                 return
             self._send(app.runtime.stop())
             return
-        if self.path == "/restart":
+        if self.path == "/cleanup_cache":
             if not self._require_auth(sensitive=True):
                 return
-            self._send(app.runtime.restart(app.current_config_snapshot()))
+            self._send(app.runtime.cleanup_cache(app.current_config_snapshot()))
             return
         if self.path == "/stop_and_cleanup_cache":
             if not self._require_auth(sensitive=True):
                 return
-            self._send(app.runtime.stop_and_cleanup_cache(app.current_config_snapshot()))
+            self._send(app.runtime.cleanup_cache(app.current_config_snapshot()))
+            return
+        if self.path == "/restart":
+            if not self._require_auth(sensitive=True):
+                return
+            self._send(app.runtime.restart(app.current_config_snapshot()))
             return
         if self.path == "/test_qmt":
             if not self._require_auth(sensitive=False):
@@ -1619,8 +1641,8 @@ class DesktopApp(QMainWindow):
 
         start_btn = _action_btn("启动 Agent")
         stop_btn = _action_btn("停止 Agent")
+        cleanup_btn = _action_btn("清理缓存")
         restart_btn = _action_btn("重启 Agent")
-        cleanup_cache_btn = _danger_btn("停止并清理缓存")
         test_bridge_btn = _action_btn("测试云端连接")
         test_qmt_btn = _action_btn("测试 QMT 连接")
         self._ctrl_start_btn = start_btn
@@ -1629,14 +1651,14 @@ class DesktopApp(QMainWindow):
 
         start_btn.clicked.connect(lambda: self._do_action(lambda: self.runtime.start(self.current_config())))
         stop_btn.clicked.connect(lambda: self._do_action(self.runtime.stop))
+        cleanup_btn.clicked.connect(self.cleanup_qmt_cache)
         restart_btn.clicked.connect(lambda: self._do_action(lambda: self.runtime.restart(self.current_config())))
-        cleanup_cache_btn.clicked.connect(self.cleanup_qmt_cache)
         test_bridge_btn.clicked.connect(self.test_bridge)
         test_qmt_btn.clicked.connect(self.test_qmt)
 
-        for btn in (start_btn, stop_btn, restart_btn, cleanup_cache_btn, test_bridge_btn, test_qmt_btn):
+        for btn in (start_btn, stop_btn, cleanup_btn, restart_btn, test_bridge_btn, test_qmt_btn):
             btn_layout.addWidget(btn)
-        self._action_buttons.extend([cleanup_cache_btn, test_bridge_btn, test_qmt_btn])
+        self._action_buttons.extend([cleanup_btn, test_bridge_btn, test_qmt_btn])
         btn_layout.addStretch()
         ctrl_vl.addWidget(btn_area)
         layout.addWidget(ctrl_card)
@@ -1935,7 +1957,7 @@ class DesktopApp(QMainWindow):
 
     def cleanup_qmt_cache(self) -> None:
         cfg = self.current_config_snapshot()
-        self.run_async_action("停止并清理缓存", lambda: self.runtime.stop_and_cleanup_cache(cfg))
+        self.run_async_action("清理缓存", lambda: self.runtime.cleanup_cache(cfg))
 
     def _set_action_busy(self, busy: bool, action_name: str = "") -> None:
         for btn in self._action_buttons:

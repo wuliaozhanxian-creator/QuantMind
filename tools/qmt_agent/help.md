@@ -16,6 +16,7 @@ python tools/qmt_agent/build_windows_agent.py
 1. 先填必填字段：`api_base_url`、`server_url`、`access_key`、`secret_key`、`account_id`。
 2. 填 QMT 路径：`qmt_path` 指向 `userdata_mini`，`qmt_bin_path` 指向 `bin.x64`。
 3. 首次建议保留默认时序参数，跑通后再按网络质量微调。
+4. 当前版本内置通信时间限制：仅周一至周五 `09:00-17:00` 与 QMT 通信，时段外会自动暂停 QMT 数据获取和账户/心跳上报。
 
 ## 参数配置（qmt_agent_config.json）
 
@@ -40,7 +41,7 @@ python tools/qmt_agent/build_windows_agent.py
 |---|---|---|---|
 | `qmt_path` | 建议填 | 空 | 必须指向 MiniQMT 的 `userdata_mini` 目录。 |
 | `qmt_bin_path` | 建议填 | 空 | 必须指向 MiniQMT 的 `bin.x64` 目录。 |
-| `session_id` | 否 | `0` | `0` 表示自动生成稳定会话号（基于账号/主机名/路径，重连不漂移）；手工填写时应为非负整数。 |
+| `session_id` | 否 | `0` | `0` 表示按 `account_id + hostname + qmt_path` 生成稳定会话号；手工填写时应为正整数。 |
 | `account_type` | 否 | `STOCK` | 普通股票账户用 `STOCK`；信用账户用 `CREDIT`。 |
 | `enable_short_trading` | 否 | `false` | 仅信用账户且确需融券时设为 `true`。 |
 | `short_check_cache_ttl_sec` | 否 | `30` | 融券额度缓存秒数；建议 `30-60`。最小 `5`。 |
@@ -149,6 +150,8 @@ python tools/qmt_agent/build_windows_agent.py
 3. 如果报 `xtquant` 相关错误，优先核对 `qmt_bin_path` 是否为 `bin.x64`。
 4. 如果 `bridge/session` 401，检查 `access_key/secret_key` 是否包含空格或换行。
 5. 如果 WS 频繁断开，优先把 `ws_ping_interval_seconds` 调到 `60`，`ws_ping_timeout_seconds` 调到 `20-30`。
+6. 如果 `userdata_mini` 下积累了大量 `queue_*_mutex` 文件，可在桌面端点击“清理缓存”；程序会自动停止 Agent 运行进程、清理缓存并重新拉起。也可调用本地接口 `POST /cleanup_cache`（兼容旧路径 `POST /stop_and_cleanup_cache`）。
+7. 如果时段外看到 Agent 显示未连接 QMT 或停止上报，这是预期行为；系统会在下一个允许时段自动恢复。
 
 ## 说明
 
