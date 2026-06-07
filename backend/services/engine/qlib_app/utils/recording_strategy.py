@@ -680,16 +680,19 @@ class FundamentalFilterMixin:
         if not self.use_fundamental_filter or score is None or score.empty:
             return score
 
-        instruments = score.index.get_level_values("instrument").tolist()
+        if isinstance(score.index, pd.MultiIndex) and "instrument" in score.index.names:
+            instruments = score.index.get_level_values("instrument").tolist()
+        else:
+            instruments = [str(idx) for idx in score.index.tolist()]
+
         filtered_list = fundamental_aligner.filter_instruments(
             trade_date, instruments, constraints=self.fundamental_constraints
         )
         if not filtered_list:
             return pd.Series(dtype=float)
 
-        if isinstance(score, pd.DataFrame):
-            return score.loc[pd.IndexSlice[:, filtered_list], :]
-        return score.loc[pd.IndexSlice[:, filtered_list]]
+        # 使用统一的索引过滤方法，兼容单层和多层索引
+        return FundamentalFilteredSignal._filter_score_index(score, list(filtered_list))
 
 
 class RedisRecordingStrategy(
