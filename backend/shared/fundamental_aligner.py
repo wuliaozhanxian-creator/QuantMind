@@ -138,7 +138,9 @@ class FundamentalAligner:
                 mask &= col_data == target_val
 
         valid_symbols = set(snapshot[mask].index)
-        return [symbol for symbol in instruments if symbol in valid_symbols]
+        # 统一大小写：将 valid_symbols 转为大写格式，与信号股票代码格式一致
+        valid_symbols_upper = {s.upper() for s in valid_symbols}
+        return [symbol for symbol in instruments if symbol.upper() in valid_symbols_upper]
 
     def get_snapshot(self, current_date: Any) -> pd.DataFrame:
         """
