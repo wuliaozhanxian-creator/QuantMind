@@ -107,6 +107,29 @@ return cjson.encode({success=true})
     def _utc_now() -> datetime:
         return datetime.now(timezone.utc)
 
+    @staticmethod
+    def _build_account_payload(initial_cash: float) -> dict[str, Any]:
+        normalized_initial_cash = float(initial_cash or 0.0)
+        return {
+            "cash": normalized_initial_cash,
+            "available_cash": normalized_initial_cash,
+            "total_asset": normalized_initial_cash,
+            "market_value": 0.0,
+            "short_market_value": 0.0,
+            "liabilities": 0.0,
+            "maintenance_margin_ratio": 0.0,
+            "warning_level": "normal",
+            "positions": {},
+            "initial_equity": normalized_initial_cash,
+            "day_open_equity": normalized_initial_cash,
+            "month_open_equity": normalized_initial_cash,
+            "baseline": {
+                "initial_equity": normalized_initial_cash,
+                "day_open_equity": normalized_initial_cash,
+                "month_open_equity": normalized_initial_cash,
+            },
+        }
+
     async def get_settings(
         self,
         user_id: int,
@@ -179,16 +202,7 @@ return cjson.encode({success=true})
         tenant_id = self._normalize_tenant(tenant_id)
         key = self._get_key(user_id, tenant_id)
 
-        account_data = {
-            "cash": initial_cash,
-            "total_asset": initial_cash,
-            "market_value": 0.0,
-            "short_market_value": 0.0,
-            "liabilities": 0.0,
-            "maintenance_margin_ratio": 0.0,
-            "warning_level": "normal",
-            "positions": {},
-        }
+        account_data = self._build_account_payload(initial_cash)
 
         write_json_cache(self.redis, key, account_data)
         logger.info(
@@ -233,7 +247,16 @@ return cjson.encode({success=true})
 
         # 如果账户不存在，先初始化（交易时需要账户存在）
         if not self.redis.client.get(key):
-            await self.init_account(user_id, tenant_id=tenant_id)
+            settings = await self.get_settings(
+                user_id=user_id,
+                tenant_id=tenant_id,
+                default_initial_cash=1_000_000.0,
+            )
+            await self.init_account(
+                user_id,
+                initial_cash=float(settings.get("initial_cash", 1_000_000.0) or 1_000_000.0),
+                tenant_id=tenant_id,
+            )
 
         if (
             is_margin_trade

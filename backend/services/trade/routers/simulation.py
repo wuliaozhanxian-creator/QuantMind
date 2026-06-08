@@ -358,6 +358,41 @@ async def _build_realtime_positions_from_db(
     return positions, round(total_market_value, 2)
 
 
+def _derive_seed_initial_equity_from_positions(
+    *,
+    cash: float,
+    positions: dict[str, dict[str, float]],
+) -> float | None:
+    """Estimate baseline equity from Redis-seeded holdings when no成交历史 is available."""
+    estimated_equity = float(cash or 0.0)
+    has_cost_basis = False
+
+    for pos in positions.values():
+        if not isinstance(pos, dict):
+            continue
+        side = str(pos.get("side") or "long").lower()
+        if side == "short":
+            return None
+        volume = float(pos.get("volume") or 0.0)
+        cost_price = float(
+            pos.get("cost_price")
+            or pos.get("avg_cost")
+            or pos.get("avg_price")
+            or pos.get("cost")
+            or 0.0
+        )
+        if volume <= 0:
+            continue
+        if cost_price <= 0:
+            return None
+        estimated_equity += volume * cost_price
+        has_cost_basis = True
+
+    if not has_cost_basis:
+        return None
+    return round(estimated_equity, 2)
+
+
 DEFAULT_INITIAL_CASH = 1_000_000.0
 SIM_AMOUNT_STEP = 100_000
 COOLDOWN_DAYS = 30
@@ -546,7 +581,7 @@ async def get_simulation_account(
             }
         }
 
-    # 从 settings 中读取 initial_cash 作为 initial_equity
+    # 从 settings 中读取初始资金与重置锚点；若账户本身带有显式基线，后续会优先使用账户口径。
     settings = await manager.get_settings(
         user_id=auth.user_id,
         tenant_id=auth.tenant_id,
@@ -582,8 +617,10 @@ async def get_simulation_account(
     cash = float(account.get("cash") or account.get("available_balance") or 0.0)
     market_value = db_market_value
     positions = db_positions
+    used_redis_positions_fallback = False
     redis_positions_map = account.get("positions") if isinstance(account.get("positions"), dict) else {}
     if not positions:
+        used_redis_positions_fallback = True
         # 兼容历史链路：若数据库尚无成交，则回退到 Redis 仓位。
         raw_positions = account.get("positions") or {}
         if isinstance(raw_positions, dict):
@@ -596,12 +633,21 @@ async def get_simulation_account(
                 if volume <= 0 or last_price <= 0:
                     continue
                 market_val = round(volume * last_price, 2)
+                cost_price = float(
+                    pos.get("cost")
+                    or pos.get("cost_price")
+                    or pos.get("avg_cost")
+                    or pos.get("avg_price")
+                    or 0.0
+                )
                 positions[symbol] = {
                     "volume": volume,
                     "available_volume": float(pos.get("available_volume") or volume),
                     "price": round(last_price, 4),
                     "last_price": round(last_price, 4),
                     "market_value": market_val,
+                    "cost_price": round(cost_price, 4) if cost_price > 0 else 0.0,
+                    "side": str(pos.get("side") or "long").lower(),
                 }
                 market_value += market_val
         market_value = round(market_value, 2)
@@ -659,6 +705,23 @@ async def get_simulation_account(
         else:
             floating_pnl += (last_price - cost_price) * volume
     floating_pnl = round(floating_pnl, 2)
+
+    account_initial_equity = float(
+        account.get("initial_equity")
+        or account.get("initial_capital")
+        or ((account.get("baseline") or {}).get("initial_equity") if isinstance(account.get("baseline"), dict) else 0.0)
+        or 0.0
+    )
+    initial_equity = account_initial_equity if account_initial_equity > 0 else float(
+        settings.get("initial_cash", DEFAULT_INITIAL_CASH)
+    )
+    if used_redis_positions_fallback:
+        seed_initial_equity = _derive_seed_initial_equity_from_positions(
+            cash=cash,
+            positions=positions,
+        )
+        if seed_initial_equity and abs(seed_initial_equity - initial_equity) > 1.0:
+            initial_equity = seed_initial_equity
 
     # 今日盈亏基线优先取上一交易日资金快照；没有历史快照时回退初始权益。
     day_open_equity = initial_equity

@@ -83,3 +83,30 @@ async def test_simulation_manager_account_update_uses_cache_helper():
     cached = json.loads(redis.client.get("simulation:account:default:1"))
     assert cached["cash"] == 999000
     assert cached["total_asset"] > 0
+
+
+@pytest.mark.asyncio
+async def test_simulation_manager_auto_init_uses_settings_initial_cash():
+    redis = _FakeRedis()
+    manager = SimulationAccountManager(redis)
+
+    await manager.set_initial_cash(
+        user_id=9,
+        tenant_id="default",
+        initial_cash=1_141_341.47,
+    )
+
+    result = await manager.update_balance(
+        user_id=9,
+        symbol="SH600000",
+        delta_cash=-10_000,
+        delta_volume=100,
+        price=100.0,
+        tenant_id="default",
+    )
+
+    assert result["success"] is True
+    cached = json.loads(redis.client.get("simulation:account:default:9"))
+    assert cached["initial_equity"] == pytest.approx(1_141_341.47)
+    assert cached["baseline"]["initial_equity"] == pytest.approx(1_141_341.47)
+    assert cached["cash"] == pytest.approx(1_131_341.47)

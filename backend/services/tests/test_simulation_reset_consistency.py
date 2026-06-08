@@ -57,6 +57,23 @@ async def test_reset_ignores_custom_initial_cash_and_returns_to_default(monkeypa
         "_build_realtime_positions_from_db",
         _fake_build_realtime_positions_from_db,
     )
+    async def _fake_purge_history(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        simulation_router,
+        "_purge_simulation_history",
+        _fake_purge_history,
+    )
+
+    async def _fake_capture_snapshot(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        simulation_router,
+        "_capture_simulation_snapshot",
+        _fake_capture_snapshot,
+    )
 
     # 先写入一个历史 settings，模拟旧口径值
     await manager.set_initial_cash(user_id=1001, initial_cash=300_000, tenant_id="default")
@@ -138,3 +155,56 @@ async def test_get_simulation_account_non_numeric_user_id_skips_db_query(monkeyp
     resp = await simulation_router.get_simulation_account(auth=auth, redis=redis)
     assert resp["success"] is True
     assert resp["data"]["cash"] == 1_000_000
+
+
+@pytest.mark.asyncio
+async def test_get_simulation_account_reconciles_seeded_holdings_baseline(monkeypatch):
+    redis = _FakeRedis()
+    auth = AuthContext(
+        user_id="2002",
+        tenant_id="default",
+        raw_sub="2002",
+        roles=["user"],
+    )
+    manager = SimulationAccountManager(redis)
+    await manager.init_account(
+        user_id=auth.user_id,
+        initial_cash=114_174.35,
+        tenant_id="default",
+    )
+
+    cached = json.loads(redis.client.get("simulation:account:default:2002"))
+    cached["cash"] = 14_174.35
+    cached["available_cash"] = 14_174.35
+    cached["market_value"] = 99_571.42
+    cached["total_asset"] = 113_745.77
+    cached["positions"] = {
+        "SH600000": {
+            "volume": 1000,
+            "available_volume": 1000,
+            "price": 99.57142,
+            "last_price": 99.57142,
+            "market_value": 99_571.42,
+            "cost": 100.0,
+        }
+    }
+    cached.pop("initial_equity", None)
+    cached.pop("baseline", None)
+    redis.client.set("simulation:account:default:2002", json.dumps(cached, ensure_ascii=False))
+
+    async def _fake_build_realtime_positions_from_db(*, tenant_id, user_id, since_at=None):
+        return {}, 0.0
+
+    monkeypatch.setattr(
+        simulation_router,
+        "_build_realtime_positions_from_db",
+        _fake_build_realtime_positions_from_db,
+    )
+
+    resp = await simulation_router.get_simulation_account(auth=auth, redis=redis)
+    assert resp["success"] is True
+
+    data = resp["data"]
+    assert data["initial_equity"] == pytest.approx(114_174.35, abs=0.02)
+    assert data["total_pnl"] == pytest.approx(-428.58, abs=0.02)
+    assert data["floating_pnl"] == pytest.approx(-428.58, abs=0.05)

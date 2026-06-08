@@ -1,6 +1,8 @@
 from fastapi import APIRouter
 import ast
+from datetime import datetime, timezone
 import logging
+from zoneinfo import ZoneInfo
 from .real_trading_utils import *
 from .real_trading_utils import (
     _active_strategy_key,
@@ -20,6 +22,8 @@ from backend.services.trade.services.manual_execution_service import (
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+_SH_TZ = ZoneInfo("Asia/Shanghai")
+_SIMULATION_BOOTSTRAP_LOCK_TTL_SECONDS = 36 * 3600
 
 
 def _is_native_strategy_config_without_on_tick(code_str: str) -> bool:
@@ -41,6 +45,73 @@ def _is_native_strategy_config_without_on_tick(code_str: str) -> bool:
         ):
             return False
     return True
+
+
+def _prepare_native_simulation_bootstrap(
+    *,
+    tenant_id: str,
+    user_id: str,
+    strategy_id: str,
+    live_trade_config: dict[str, Any],
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    trigger_context = {
+        "source": "simulation_native_bootstrap",
+        "reason": "native_strategy_config_without_on_tick",
+    }
+    local_now = (now or datetime.now(timezone.utc)).astimezone(_SH_TZ)
+    try:
+        from backend.services.trade.services.simulation_hosted_scheduler import (
+            _lock_key,
+            _should_trigger,
+            _task_id,
+        )
+
+        decision = _should_trigger(
+            now=local_now,
+            live_trade_config=live_trade_config,
+            started_day=local_now.date(),
+        )
+        if not decision.should_trigger:
+            return {
+                "task_id": None,
+                "lock_key": None,
+                "trigger_context": trigger_context,
+            }
+        trigger_context.update(
+            {
+                "phase": decision.phase,
+                "runner_trade_date": decision.trade_date,
+                "dedupe_scope": "simulation_scheduler_shared",
+            }
+        )
+        return {
+            "task_id": _task_id(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                strategy_id=strategy_id,
+                trade_date=decision.trade_date,
+                phase=decision.phase,
+            ),
+            "lock_key": _lock_key(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                strategy_id=strategy_id,
+                trade_date=decision.trade_date,
+                phase=decision.phase,
+            ),
+            "trigger_context": trigger_context,
+        }
+    except Exception:
+        logger.debug(
+            "failed to prepare native simulation bootstrap dedupe key",
+            exc_info=True,
+        )
+        return {
+            "task_id": None,
+            "lock_key": None,
+            "trigger_context": trigger_context,
+        }
 
 
 async def _build_signal_source_status(
@@ -309,20 +380,78 @@ async def start_trading(
             # 兼容原生 STRATEGY_CONFIG 策略（通常不定义 on_tick）：
             # 启动后立即触发一次自动托管任务，避免“运行中但无信号产出”的假活跃状态。
             if is_native_cfg and strategy_id:
-                hosted_bootstrap = await manual_execution_service.create_hosted_task(
+                bootstrap_plan = _prepare_native_simulation_bootstrap(
                     tenant_id=resolved_tenant_id,
                     user_id=resolved_user_id,
                     strategy_id=str(strategy_id or ""),
-                    trading_mode="SIMULATION",
-                    execution_config=exec_config,
                     live_trade_config=live_config,
-                    trigger_context={
-                        "source": "simulation_native_bootstrap",
-                        "reason": "native_strategy_config_without_on_tick",
-                    },
-                    parent_runtime_id=run_id,
-                    note="auto bootstrap from simulation start",
                 )
+                bootstrap_task_id = (
+                    str(bootstrap_plan.get("task_id") or "").strip() or None
+                )
+                bootstrap_lock_key = (
+                    str(bootstrap_plan.get("lock_key") or "").strip() or None
+                )
+                bootstrap_lock_acquired = False
+
+                if bootstrap_task_id and bootstrap_lock_key and redis.client:
+                    try:
+                        bootstrap_lock_acquired = bool(
+                            redis.client.set(
+                                bootstrap_lock_key,
+                                bootstrap_task_id,
+                                ex=_SIMULATION_BOOTSTRAP_LOCK_TTL_SECONDS,
+                                nx=True,
+                            )
+                        )
+                    except Exception:
+                        logger.warning(
+                            "[Sim] 原生策略 bootstrap 写入调度去重锁失败: tenant=%s user=%s strategy=%s key=%s",
+                            resolved_tenant_id,
+                            resolved_user_id,
+                            strategy_id,
+                            bootstrap_lock_key,
+                            exc_info=True,
+                        )
+
+                if bootstrap_task_id and bootstrap_lock_key and not bootstrap_lock_acquired:
+                    hosted_bootstrap = {
+                        "task_id": bootstrap_task_id,
+                        "status": "duplicate_skipped",
+                        "noop": True,
+                        "duplicate": True,
+                    }
+                    logger.info(
+                        "[Sim] 原生策略 bootstrap 检测到同日调度任务已存在，跳过重复托管任务: user=%s strategy=%s task_id=%s",
+                        resolved_user_id,
+                        strategy_id,
+                        bootstrap_task_id,
+                    )
+                else:
+                    try:
+                        hosted_bootstrap = await manual_execution_service.create_hosted_task(
+                            tenant_id=resolved_tenant_id,
+                            user_id=resolved_user_id,
+                            strategy_id=str(strategy_id or ""),
+                            trading_mode="SIMULATION",
+                            execution_config=exec_config,
+                            live_trade_config=live_config,
+                            trigger_context=dict(bootstrap_plan.get("trigger_context") or {}),
+                            parent_runtime_id=run_id,
+                            note="auto bootstrap from simulation start",
+                            task_id=bootstrap_task_id,
+                        )
+                    except Exception:
+                        if bootstrap_lock_acquired and bootstrap_lock_key and redis.client:
+                            try:
+                                redis.client.delete(bootstrap_lock_key)
+                            except Exception:
+                                logger.debug(
+                                    "[Sim] 清理 bootstrap 去重锁失败: key=%s",
+                                    bootstrap_lock_key,
+                                    exc_info=True,
+                                )
+                        raise
                 result = {
                     **result,
                     "hosted_bootstrap": {
