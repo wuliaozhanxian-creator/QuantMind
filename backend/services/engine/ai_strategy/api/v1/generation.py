@@ -303,6 +303,20 @@ async def _generate_qlib_impl(body: GenerateQlibRequest, trace_id: str | None) -
             except Exception as e:
                 logger.warning("Failed to read pool from COS: %s", e)
 
+        # 股票池一致性校验：核对前端传入数量与实际内容数量是否一致
+        expected_count = body.pool_expected_count
+        if expected_count is not None and pool_content.strip():
+            actual_count = len([line for line in pool_content.strip().split('\n') if line.strip()])
+            if actual_count != expected_count:
+                logger.warning(
+                    "Pool count mismatch: expected=%d, actual=%d, user_id=%s",
+                    expected_count, actual_count, body.user_id
+                )
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"股票池数量不一致：前端选中 {expected_count} 只，实际内容 {actual_count} 只，请重新保存股票池后再试"
+                )
+
         # 保存股票池到本地
         pool_file_local = _persist_local_pool_file(pool_content, body.user_id) if pool_content.strip() else ""
 

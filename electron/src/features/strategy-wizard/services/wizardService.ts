@@ -211,6 +211,8 @@ export async function generateQlib(payload: {
   conditions: Record<string, any>;
   pool_file_key: string;
   pool_file_url?: string;
+  pool_content?: string;
+  pool_expected_count?: number;
   qlib_params: {
     strategy_type: 'TopkDropout' | 'TopkWeight';
     topk: number;

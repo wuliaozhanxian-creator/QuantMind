@@ -11,15 +11,16 @@ import json
 import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi import APIRouter, HTTPException, Request, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy import text
 
 from backend.shared.redis_sentinel_client import get_redis_sentinel_client
 from ..schemas.stock_pool import (
-    PoolItem, 
-    WorkingPool, 
+    PoolItem,
+    WorkingPool,
     SaveWorkingPoolRequest,
+    SaveWorkingPoolVersionRequest,
     SavePoolFileResponse,
     ListPoolFilesResponse,
     GetActivePoolFileResponse
@@ -91,36 +92,61 @@ async def list_pool_versions(request: Request, limit: int = 50):
     user_id = getattr(request.state, "user", {}).get("user_id")
     return await legacy_list(ListPoolFilesRequest(user_id=user_id, limit=limit))
 
-@router.post("/versions/save")
-async def save_version_from_working(request: Request, pool_name: str):
-    """从当前 WorkingPool 生成一个持久化版本"""
+@router.post("/versions/save", response_model=SavePoolFileResponse)
+async def save_version_from_working(
+    request: Request,
+    body: SaveWorkingPoolVersionRequest | None = None,
+    pool_name: str | None = Query(default=None),
+):
+    """从当前 WorkingPool 或显式传入 items 生成一个持久化版本。"""
     user_id = getattr(request.state, "user", {}).get("user_id")
     if not user_id:
         raise HTTPException(status_code=401, detail="User not authenticated")
-    
-    # 1. 获取 WorkingPool
-    redis = get_redis_sentinel_client()
-    data = redis.get(_get_working_key(user_id))
-    if not data:
+
+    effective_body = body or SaveWorkingPoolVersionRequest(pool_name=pool_name or "", items=None)
+    if pool_name and not str(effective_body.pool_name or "").strip():
+        effective_body = SaveWorkingPoolVersionRequest(pool_name=pool_name, items=effective_body.items)
+
+    if not str(effective_body.pool_name or "").strip():
+        raise HTTPException(status_code=400, detail="pool_name is required")
+
+    items = effective_body.items
+
+    def _normalize_legacy_pool_items(raw_items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        normalized = []
+        for item in raw_items:
+            symbol = str(item.get("symbol") or item.get("code") or "").strip()
+            if not symbol:
+                continue
+            name = str(item.get("name") or "").strip()
+            normalized.append({"symbol": symbol, "name": name})
+        return normalized
+
+    if items:
+        normalized_items = _normalize_legacy_pool_items([item.model_dump() for item in items])
+    else:
+        # 兜底：从 Redis WorkingPool 读取
+        redis = get_redis_sentinel_client()
+        data = redis.get(_get_working_key(user_id))
+        if not data:
+            raise HTTPException(status_code=400, detail="Working pool is empty, nothing to save")
+        pool_data = json.loads(data)
+        normalized_items = _normalize_legacy_pool_items(pool_data.get("items", []))
+
+    if not normalized_items:
         raise HTTPException(status_code=400, detail="Working pool is empty, nothing to save")
-    
-    pool_data = json.loads(data)
-    items = pool_data.get("items", [])
-    
+
     # 2. 调用旧版保存逻辑 (存入 DB/COS)
     from .storage import save_pool_file as legacy_save
     from ..schemas.stock_pool import SavePoolFileRequest
-    
-    # 转换格式为旧版期待的结构
-    legacy_items = [{"symbol": item["symbol"], "name": item.get("name", "")} for item in items]
-    
+
     res = await legacy_save(SavePoolFileRequest(
         user_id=user_id,
-        pool_name=pool_name,
+        pool_name=str(effective_body.pool_name).strip(),
         format="txt",
-        pool=legacy_items
+        pool=normalized_items
     ), request)
-    
+
     return res
 
 @router.post("/versions/{file_key:path}/activate")

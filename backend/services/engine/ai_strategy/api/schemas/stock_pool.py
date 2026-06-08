@@ -155,5 +155,10 @@ class SaveWorkingPoolRequest(BaseModel):
     items: list[PoolItem]
 
 
+class SaveWorkingPoolVersionRequest(BaseModel):
+    pool_name: str | None = None
+    items: list[PoolItem] | None = None
+
+
 class ActivatePoolVersionRequest(BaseModel):
     version_id: int

@@ -100,6 +100,7 @@ const SmartStrategyStudioV2: React.FC = () => {
   // Use V2 store
   const {
     workingPool,
+    selectedSymbols,
     savedPools,
     activePoolVersionId,
     conditions,
@@ -138,10 +139,19 @@ const SmartStrategyStudioV2: React.FC = () => {
       try {
         const userId = getWizardUserId();
         const { generateQlib } = await import('../services/wizardService');
+
+        // 构建股票池内容：优先使用 selectedSymbols，否则使用 workingPool
+        const selectedPool = selectedSymbols && selectedSymbols.length > 0
+          ? workingPool.filter(x => selectedSymbols.includes(x.symbol))
+          : workingPool;
+        const poolContent = selectedPool.map(item => item.symbol).join('\n');
+
         const res = await generateQlib({
           user_id: userId,
           conditions: conditions || {},
           pool_file_key: activePoolVersionId,
+          pool_content: poolContent ? `${poolContent}\n` : '',
+          pool_expected_count: selectedPool.length,
           qlib_params: {
             ...qlibParams,
             rebalance_days: resolveRebalanceDays(qlibParams),
@@ -166,7 +176,7 @@ const SmartStrategyStudioV2: React.FC = () => {
     }
     
     setCurrentStep(Math.min(currentStep + 1, 3));
-  }, [currentStep, activePoolVersionId, conditions, qlibParams, setGenerated]);
+  }, [currentStep, activePoolVersionId, conditions, qlibParams, setGenerated, workingPool, selectedSymbols]);
 
   const steps = useMemo(() => [
     {

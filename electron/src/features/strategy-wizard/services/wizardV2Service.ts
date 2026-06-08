@@ -89,11 +89,23 @@ export async function getWorkingPoolFromBackend(): Promise<WorkingPoolItemV2[]> 
 
 /**
  * 保存 WorkingPool 为持久化版本
+ * 支持显式传入 items，优先使用前端当前页面选中的股票列表，避免竞态
  */
-export async function saveWorkingPoolVersion(name: string, symbols: string[]): Promise<SavedPoolVersionV2 | null> {
-  // 注意：此处优先通过后端 /pool/versions/save 接口，确保从后端缓存生成，保证一致性
-  const res = await client.post(`/strategy/pool/versions/save?pool_name=${encodeURIComponent(name)}`);
-  
+export async function saveWorkingPoolVersion(name: string, symbols: string[], items?: WorkingPoolItemV2[]): Promise<SavedPoolVersionV2 | null> {
+  // 构建请求体，优先使用显式传入的 items
+  const body: { pool_name: string; items?: { symbol: string; name?: string }[] } = {
+    pool_name: name,
+  };
+
+  if (items && items.length > 0) {
+    body.items = items.map(item => ({
+      symbol: item.symbol,
+      name: item.name,
+    }));
+  }
+
+  const res = await client.post('/strategy/pool/versions/save', body);
+
   const ok = res?.data?.success === true;
   if (!ok) return null;
   const data = res?.data;

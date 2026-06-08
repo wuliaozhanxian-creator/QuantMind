@@ -135,8 +135,14 @@ export const useWizardV2Store = create<WizardV2State>((set, get) => ({
   },
 
   saveCurrentPoolAsVersion: async (name: string) => {
-    const symbols = get().workingPool.map(x => x.symbol);
-    const result = await saveWorkingPoolVersion(name, symbols);
+    const workingPool = get().workingPool;
+    const selectedSymbols = get().selectedSymbols;
+    // 优先使用 selectedSymbols 过滤后的股票池
+    const poolToSave = selectedSymbols && selectedSymbols.length > 0
+      ? workingPool.filter(x => selectedSymbols.includes(x.symbol))
+      : workingPool;
+    const symbols = poolToSave.map(x => x.symbol);
+    const result = await saveWorkingPoolVersion(name, symbols, poolToSave);
     if (result) {
       await get().fetchSavedPools();
       set({ dirty: false });
