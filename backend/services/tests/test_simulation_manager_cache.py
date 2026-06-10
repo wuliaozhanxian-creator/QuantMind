@@ -15,6 +15,9 @@ class _FakeRedisClient:
     def set(self, key, value):
         self.store[key] = value
 
+    def delete(self, key):
+        self.store.pop(key, None)
+
     def eval(self, script, numkeys, *args):
         key = args[0]
         symbol = args[1]
@@ -57,11 +60,11 @@ async def test_simulation_manager_writes_settings_and_account_json():
         default_initial_cash=500_000,
     )
     assert settings["initial_cash"] == 1_000_000
-    assert json.loads(redis.client.get("simulation:settings:default:1"))["initial_cash"] == 1_000_000
+    assert json.loads(redis.client.get("simulation:settings:default:00000001"))["initial_cash"] == 1_000_000
 
     account = await manager.init_account(user_id=1, tenant_id="default", initial_cash=2_000_000)
     assert account["cash"] == 2_000_000
-    assert json.loads(redis.client.get("simulation:account:default:1"))["cash"] == 2_000_000
+    assert json.loads(redis.client.get("simulation:account:default:00000001"))["cash"] == 2_000_000
 
 
 @pytest.mark.asyncio
@@ -80,7 +83,7 @@ async def test_simulation_manager_account_update_uses_cache_helper():
     )
 
     assert result["success"] is True
-    cached = json.loads(redis.client.get("simulation:account:default:1"))
+    cached = json.loads(redis.client.get("simulation:account:default:00000001"))
     assert cached["cash"] == 999000
     assert cached["total_asset"] > 0
 
@@ -106,7 +109,7 @@ async def test_simulation_manager_auto_init_uses_settings_initial_cash():
     )
 
     assert result["success"] is True
-    cached = json.loads(redis.client.get("simulation:account:default:9"))
+    cached = json.loads(redis.client.get("simulation:account:default:00000009"))
     assert cached["initial_equity"] == pytest.approx(1_141_341.47)
     assert cached["baseline"]["initial_equity"] == pytest.approx(1_141_341.47)
     assert cached["cash"] == pytest.approx(1_131_341.47)

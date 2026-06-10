@@ -27,6 +27,7 @@ from backend.services.trade.trade_config import settings
 from backend.shared.database_manager_v2 import get_session
 from backend.shared.fundamental_aligner import fundamental_aligner
 from backend.shared.strategy_storage import get_strategy_storage_service
+from backend.shared.trade_redis_keys import normalize_trade_user_id
 
 from backend.services.trade.portfolio.models import Portfolio
 from backend.services.trade.models.order import Order
@@ -924,19 +925,38 @@ class ManualExecutionService:
     ) -> dict[str, Any] | None:
         mode = _normalize_trading_mode(trading_mode)
         if mode == "SIMULATION":
-            redis_client = get_redis().client
-            if not redis_client:
+            redis_wrapper = get_redis()
+            redis_client = getattr(redis_wrapper, "client", None)
+            if redis_client is None:
                 return None
-            raw = redis_client.get(f"simulation:account:{tenant_id}:{user_id}")
+            normalized_user_id = normalize_trade_user_id(user_id) or str(user_id)
+            key = f"simulation:account:{tenant_id}:{normalized_user_id}"
+            raw = redis_client.get(key)
+            if not raw and normalized_user_id.isdigit():
+                legacy_key = f"simulation:account:{tenant_id}:{int(normalized_user_id)}"
+                raw = redis_client.get(legacy_key)
             if not raw:
                 return None
             try:
-                data = json.loads(raw)
+                account = json.loads(raw)
             except Exception:
                 return None
-            if isinstance(data, dict):
-                return data
-            return None
+            if not isinstance(account, dict):
+                return None
+            # 与实盘快照结构做最小兼容，供下游复用 available_cash/cash/snapshot_at。
+            return {
+                "snapshot_at": datetime.now(timezone.utc).isoformat(),
+                "available_cash": _to_float(
+                    account.get("cash") or account.get("available_balance"), 0.0
+                ),
+                "cash": _to_float(
+                    account.get("cash") or account.get("available_balance"), 0.0
+                ),
+                "total_asset": _to_float(account.get("total_asset"), 0.0),
+                "market_value": _to_float(account.get("market_value"), 0.0),
+                "positions": account.get("positions") or {},
+                "source": "simulation_redis_account",
+            }
 
         async with get_session(read_only=True) as session:
             from backend.services.trade.routers.real_trading_utils import (

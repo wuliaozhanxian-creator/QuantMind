@@ -5,11 +5,12 @@ Simulation Account Manager - Manage paper trading accounts in Redis
 import json
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional
+from typing import Any
 
 from backend.services.trade.redis_client import RedisClient
 from backend.services.trade.trade_config import settings
-from backend.shared.trade_account_cache import read_json_cache, write_json_cache
+from backend.shared.trade_redis_keys import normalize_trade_user_id
+from backend.shared.trade_account_cache import write_json_cache
 
 logger = logging.getLogger(__name__)
 
@@ -92,11 +93,134 @@ return cjson.encode({success=true})
     def _normalize_tenant(tenant_id: str | None) -> str:
         return (tenant_id or "").strip() or "default"
 
-    def _get_key(self, user_id: int, tenant_id: str) -> str:
-        return f"simulation:account:{tenant_id}:{user_id}"
+    @staticmethod
+    def _normalize_user_id(user_id: str | int | None) -> str:
+        normalized = normalize_trade_user_id(user_id)
+        if normalized:
+            return normalized
+        return str(user_id or "").strip()
 
-    def _get_settings_key(self, user_id: int, tenant_id: str) -> str:
-        return f"simulation:settings:{tenant_id}:{user_id}"
+    def _get_key(self, user_id: str | int, tenant_id: str) -> str:
+        return f"simulation:account:{tenant_id}:{self._normalize_user_id(user_id)}"
+
+    def _get_settings_key(self, user_id: str | int, tenant_id: str) -> str:
+        return f"simulation:settings:{tenant_id}:{self._normalize_user_id(user_id)}"
+
+    def _account_key_candidates(self, user_id: str | int, tenant_id: str) -> tuple[str, ...]:
+        normalized = self._normalize_user_id(user_id)
+        raw = str(user_id or "").strip()
+        keys = [f"simulation:account:{tenant_id}:{normalized}"]
+        if raw and raw != normalized:
+            keys.append(f"simulation:account:{tenant_id}:{raw}")
+        if raw.isdigit():
+            compact = str(int(raw))
+            if compact and compact != normalized and compact != raw:
+                keys.append(f"simulation:account:{tenant_id}:{compact}")
+        return tuple(dict.fromkeys(keys))
+
+    def _settings_key_candidates(self, user_id: str | int, tenant_id: str) -> tuple[str, ...]:
+        normalized = self._normalize_user_id(user_id)
+        raw = str(user_id or "").strip()
+        keys = [f"simulation:settings:{tenant_id}:{normalized}"]
+        if raw and raw != normalized:
+            keys.append(f"simulation:settings:{tenant_id}:{raw}")
+        if raw.isdigit():
+            compact = str(int(raw))
+            if compact and compact != normalized and compact != raw:
+                keys.append(f"simulation:settings:{tenant_id}:{compact}")
+        return tuple(dict.fromkeys(keys))
+
+    @staticmethod
+    def _payload_score(payload: dict[str, Any]) -> tuple[int, float, float]:
+        positions = payload.get("positions")
+        valid_positions = 0
+        if isinstance(positions, dict):
+            for pos in positions.values():
+                if not isinstance(pos, dict):
+                    continue
+                volume = float(pos.get("volume") or 0.0)
+                if volume > 0:
+                    valid_positions += 1
+        market_value = abs(float(payload.get("market_value") or 0.0))
+        total_asset = abs(float(payload.get("total_asset") or 0.0))
+        return valid_positions, market_value, total_asset
+
+    @staticmethod
+    def _parse_iso(raw: Any) -> datetime | None:
+        if not isinstance(raw, str) or not raw.strip():
+            return None
+        try:
+            return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except Exception:
+            return None
+
+    def _settings_score(self, payload: dict[str, Any]) -> tuple[int, float]:
+        timestamp = self._parse_iso(payload.get("last_modified_at"))
+        if timestamp is None:
+            return 0, float("-inf")
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        return 1, timestamp.timestamp()
+
+    def _load_candidate_payloads(self, candidates: tuple[str, ...]) -> dict[str, dict[str, Any]]:
+        if not self.redis.client:
+            return {}
+        payloads: dict[str, dict[str, Any]] = {}
+        for key in candidates:
+            raw = self.redis.client.get(key)
+            if not raw:
+                continue
+            try:
+                parsed = json.loads(raw)
+            except Exception:
+                continue
+            if isinstance(parsed, dict):
+                payloads[key] = parsed
+        return payloads
+
+    def _reconcile_account_cache(
+        self,
+        *,
+        user_id: str | int,
+        tenant_id: str,
+    ) -> tuple[str, dict[str, Any] | None]:
+        normalized_key = self._get_key(user_id, tenant_id)
+        payloads = self._load_candidate_payloads(self._account_key_candidates(user_id, tenant_id))
+        if not payloads:
+            return normalized_key, None
+
+        preferred_key, preferred_payload = max(
+            payloads.items(),
+            key=lambda item: self._payload_score(item[1]),
+        )
+        if preferred_key != normalized_key:
+            write_json_cache(self.redis, normalized_key, preferred_payload)
+        for key in payloads:
+            if key != normalized_key:
+                self.redis.client.delete(key)
+        return normalized_key, preferred_payload
+
+    def _reconcile_settings_cache(
+        self,
+        *,
+        user_id: str | int,
+        tenant_id: str,
+    ) -> tuple[str, dict[str, Any] | None]:
+        normalized_key = self._get_settings_key(user_id, tenant_id)
+        payloads = self._load_candidate_payloads(self._settings_key_candidates(user_id, tenant_id))
+        if not payloads:
+            return normalized_key, None
+
+        preferred_key, preferred_payload = max(
+            payloads.items(),
+            key=lambda item: self._settings_score(item[1]),
+        )
+        if preferred_key != normalized_key:
+            write_json_cache(self.redis, normalized_key, preferred_payload)
+        for key in payloads:
+            if key != normalized_key:
+                self.redis.client.delete(key)
+        return normalized_key, preferred_payload
 
     @staticmethod
     def _position_key(symbol: str, position_side: str) -> str:
@@ -132,14 +256,13 @@ return cjson.encode({success=true})
 
     async def get_settings(
         self,
-        user_id: int,
+        user_id: str | int,
         tenant_id: str = "default",
         default_initial_cash: float = 1_000_000.0,
         cooldown_days: int = 30,
     ) -> dict[str, Any]:
         tenant_id = self._normalize_tenant(tenant_id)
-        key = self._get_settings_key(user_id, tenant_id)
-        data = read_json_cache(self.redis, key)
+        key, data = self._reconcile_settings_cache(user_id=user_id, tenant_id=tenant_id)
 
         initial_cash = float(default_initial_cash)
         last_modified_at: str | None = None
@@ -168,16 +291,16 @@ return cjson.encode({success=true})
 
     async def set_initial_cash(
         self,
-        user_id: int,
+        user_id: str | int,
         initial_cash: float,
         tenant_id: str = "default",
     ) -> None:
         """Update initial_cash in settings (used when syncing holdings)."""
         tenant_id = self._normalize_tenant(tenant_id)
-        key = self._get_settings_key(user_id, tenant_id)
+        key, data = self._reconcile_settings_cache(user_id=user_id, tenant_id=tenant_id)
 
         # 读取现有 settings，保留其他字段
-        data = read_json_cache(self.redis, key) or {}
+        data = data or {}
         data["initial_cash"] = float(initial_cash)
         data["last_modified_at"] = self._utc_now().isoformat()
 
@@ -194,7 +317,7 @@ return cjson.encode({success=true})
 
     async def init_account(
         self,
-        user_id: int,
+        user_id: str | int,
         initial_cash: float = 1_000_000.0,
         tenant_id: str = "default",
     ) -> dict[str, Any]:
@@ -205,6 +328,9 @@ return cjson.encode({success=true})
         account_data = self._build_account_payload(initial_cash)
 
         write_json_cache(self.redis, key, account_data)
+        for candidate in self._account_key_candidates(user_id, tenant_id):
+            if candidate != key:
+                self.redis.client.delete(candidate)
         logger.info(
             "Initialized simulation account for tenant=%s user=%s with %.2f",
             tenant_id,
@@ -214,21 +340,20 @@ return cjson.encode({success=true})
 
         return account_data
 
-    async def get_account(self, user_id: int, tenant_id: str = "default") -> dict[str, Any] | None:
+    async def get_account(self, user_id: str | int, tenant_id: str = "default") -> dict[str, Any] | None:
         """Get simulation account state. Returns None if account not initialized."""
         if not self.redis.client:
             return None
 
         tenant_id = self._normalize_tenant(tenant_id)
-        key = self._get_key(user_id, tenant_id)
-        data = read_json_cache(self.redis, key)
+        _, data = self._reconcile_account_cache(user_id=user_id, tenant_id=tenant_id)
 
         # 不再自动初始化，返回 None 表示账户未创建
         return data
 
     async def update_balance(
         self,
-        user_id: int,
+        user_id: str | int,
         symbol: str,
         delta_cash: float,
         delta_volume: float,
@@ -243,15 +368,16 @@ return cjson.encode({success=true})
             return {"success": False, "reason": "REDIS_UNAVAILABLE"}
 
         tenant_id = self._normalize_tenant(tenant_id)
-        key = self._get_key(user_id, tenant_id)
+        key, account_data = self._reconcile_account_cache(user_id=user_id, tenant_id=tenant_id)
 
         # 如果账户不存在，先初始化（交易时需要账户存在）
-        if not self.redis.client.get(key):
+        if account_data is None:
             settings = await self.get_settings(
                 user_id=user_id,
                 tenant_id=tenant_id,
                 default_initial_cash=1_000_000.0,
             )
+            key = self._get_key(user_id, tenant_id)
             await self.init_account(
                 user_id,
                 initial_cash=float(settings.get("initial_cash", 1_000_000.0) or 1_000_000.0),
@@ -293,7 +419,7 @@ return cjson.encode({success=true})
     async def _update_balance_margin(
         self,
         *,
-        user_id: int,
+        user_id: str | int,
         symbol: str,
         price: float,
         tenant_id: str,

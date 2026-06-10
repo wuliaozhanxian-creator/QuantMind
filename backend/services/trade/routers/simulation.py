@@ -17,6 +17,7 @@ from backend.services.trade.simulation.services.simulation_manager import (
 from backend.services.trade.simulation.services.ocr_service import SimulationOCRService
 from backend.services.trade.trade_config import settings
 from backend.shared.database_manager_v2 import get_db_manager, get_session
+from backend.shared.trade_redis_keys import normalize_trade_user_id
 import logging
 import httpx
 from sqlalchemy import text
@@ -476,7 +477,8 @@ async def _capture_simulation_snapshot(redis: RedisClient) -> None:
 
 async def _purge_simulation_history(*, tenant_id: str, user_id: int) -> dict[str, int]:
     """清理当前用户模拟盘历史记录，避免重置后旧数据继续进入仪表盘。"""
-    user_id_text = str(user_id)
+    normalized_user_id = normalize_trade_user_id(user_id) or str(user_id)
+    legacy_user_id = str(int(normalized_user_id)) if normalized_user_id.isdigit() else normalized_user_id
     statements = [
         (
             "sim_trades",
@@ -486,7 +488,7 @@ async def _purge_simulation_history(*, tenant_id: str, user_id: int) -> dict[str
                 WHERE tenant_id = :tenant_id AND user_id = :user_id
                 """
             ),
-            {"tenant_id": tenant_id, "user_id": user_id_text},
+            {"tenant_id": tenant_id, "user_id": int(user_id)},
         ),
         (
             "sim_orders",
@@ -496,17 +498,22 @@ async def _purge_simulation_history(*, tenant_id: str, user_id: int) -> dict[str
                 WHERE tenant_id = :tenant_id AND user_id = :user_id
                 """
             ),
-            {"tenant_id": tenant_id, "user_id": user_id_text},
+            {"tenant_id": tenant_id, "user_id": int(user_id)},
         ),
         (
             "simulation_fund_snapshots",
             text(
                 """
                 DELETE FROM simulation_fund_snapshots
-                WHERE tenant_id = :tenant_id AND user_id = :user_id
+                WHERE tenant_id = :tenant_id
+                  AND (user_id = :normalized_user_id OR user_id = :legacy_user_id)
                 """
             ),
-            {"tenant_id": tenant_id, "user_id": user_id_text},
+            {
+                "tenant_id": tenant_id,
+                "normalized_user_id": normalized_user_id,
+                "legacy_user_id": legacy_user_id,
+            },
         ),
     ]
 

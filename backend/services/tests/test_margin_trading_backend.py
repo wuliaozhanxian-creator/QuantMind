@@ -22,6 +22,9 @@ class _FakeRedisClient:
     def set(self, key, value):
         self.store[key] = value
 
+    def delete(self, key):
+        self.store.pop(key, None)
+
     def eval(self, *args, **kwargs):
         raise AssertionError("margin branch should not call lua eval")
 
@@ -106,7 +109,7 @@ async def test_simulation_manager_supports_margin_short_open_and_close():
         is_margin_trade=True,
     )
     assert open_res["success"] is True
-    raw = redis.client.get("simulation:account:default:1")
+    raw = redis.client.get("simulation:account:default:00000001")
     account = json.loads(raw)
     assert account["liabilities"] > 0
     assert any("::short" in key for key in account["positions"].keys())

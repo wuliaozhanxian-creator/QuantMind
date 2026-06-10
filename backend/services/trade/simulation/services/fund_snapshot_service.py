@@ -11,7 +11,6 @@ import os
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
-from typing import Dict, List, Optional, Tuple
 
 import httpx
 from sqlalchemy import select
@@ -22,6 +21,7 @@ from backend.services.trade.simulation.models.fund_snapshot import (
     SimulationFundSnapshot,
 )
 from backend.shared.database_manager_v2 import get_session
+from backend.shared.trade_redis_keys import normalize_trade_user_id
 from backend.shared.trade_account_cache import write_trade_account_cache
 
 logger = logging.getLogger(__name__)
@@ -103,7 +103,7 @@ async def _recalculate_account_market_value(account: dict) -> dict:
     return account
 
 
-def _parse_account_key(key: str) -> tuple[str, str] | None:
+def _parse_account_key(key: str) -> tuple[str, str, str] | None:
     # simulation:account:{tenant_id}:{user_id}
     parts = key.split(":")
     if len(parts) != 4:
@@ -111,10 +111,26 @@ def _parse_account_key(key: str) -> tuple[str, str] | None:
     if parts[0] != "simulation" or parts[1] != "account":
         return None
     tenant_id = parts[2].strip() or "default"
-    user_id = parts[3].strip()
-    if not user_id:
+    raw_user_id = parts[3].strip()
+    if not raw_user_id:
         return None
-    return tenant_id, user_id
+    user_id = normalize_trade_user_id(raw_user_id) or raw_user_id
+    return tenant_id, user_id, raw_user_id
+
+
+def _score_account_payload(account: dict[str, object]) -> tuple[int, float, float]:
+    positions = account.get("positions")
+    valid_positions = 0
+    if isinstance(positions, dict):
+        for pos in positions.values():
+            if not isinstance(pos, dict):
+                continue
+            volume = float(pos.get("volume") or 0.0)
+            if volume > 0:
+                valid_positions += 1
+    market_value = abs(float(account.get("market_value") or 0.0))
+    total_asset = abs(float(account.get("total_asset") or 0.0))
+    return valid_positions, market_value, total_asset
 
 
 @dataclass
@@ -125,18 +141,27 @@ class SnapshotUpsertResult:
 
 class SimulationFundSnapshotService:
     @staticmethod
-    def _read_settings_initial_cash(redis: RedisClient, tenant_id: str, user_id: str) -> Decimal:
+    def _read_settings_initial_cash(
+        redis: RedisClient,
+        tenant_id: str,
+        user_id: str,
+        raw_user_id: str | None = None,
+    ) -> Decimal:
         if not redis.client:
             return Decimal("0")
-        settings_key = f"simulation:settings:{tenant_id}:{user_id}"
-        raw = redis.client.get(settings_key)
-        if not raw:
-            return Decimal("0")
-        try:
-            data = json.loads(raw)
-        except Exception:
-            return Decimal("0")
-        return _to_decimal(data.get("initial_cash"), Decimal("0"))
+        keys = [f"simulation:settings:{tenant_id}:{user_id}"]
+        if raw_user_id and raw_user_id != user_id:
+            keys.append(f"simulation:settings:{tenant_id}:{raw_user_id}")
+        for settings_key in tuple(dict.fromkeys(keys)):
+            raw = redis.client.get(settings_key)
+            if not raw:
+                continue
+            try:
+                data = json.loads(raw)
+            except Exception:
+                continue
+            return _to_decimal(data.get("initial_cash"), Decimal("0"))
+        return Decimal("0")
 
     @classmethod
     def _build_row(
@@ -180,21 +205,17 @@ class SimulationFundSnapshotService:
         if not redis.client:
             return SnapshotUpsertResult(upserted_rows=0, scanned_accounts=0)
 
-        if hasattr(redis.client, "scan_iter"):
-            keys = list(redis.client.scan_iter(match="simulation:account:*", count=500))
-        elif hasattr(redis.client, "keys"):
-            keys = redis.client.keys("simulation:account:*")
-        elif hasattr(redis.client, "store") and isinstance(redis.client.store, dict):
-            import fnmatch
-            keys = [k for k in redis.client.store.keys() if fnmatch.fnmatch(str(k), "simulation:account:*")]
-        else:
-            keys = []
+        keys = list(redis.client.scan_iter(match="simulation:account:*", count=500))
         rows: list[dict[str, object]] = []
+        deduped_accounts: dict[
+            tuple[str, str],
+            tuple[str, str, dict[str, object]],
+        ] = {}
         for key in keys:
             parsed = _parse_account_key(str(key))
             if not parsed:
                 continue
-            tenant_id, user_id = parsed
+            tenant_id, user_id, raw_user_id = parsed
             raw = redis.client.get(key)
             if not raw:
                 continue
@@ -202,6 +223,28 @@ class SimulationFundSnapshotService:
                 account = json.loads(raw)
             except Exception:
                 continue
+            if not isinstance(account, dict):
+                continue
+
+            dedupe_key = (tenant_id, user_id)
+            existing = deduped_accounts.get(dedupe_key)
+            if existing is None:
+                deduped_accounts[dedupe_key] = (str(key), raw_user_id, account)
+            else:
+                _, _, existing_account = existing
+                if _score_account_payload(account) > _score_account_payload(existing_account):
+                    deduped_accounts[dedupe_key] = (str(key), raw_user_id, account)
+
+        for (tenant_id, user_id), (source_key, raw_user_id, account) in deduped_accounts.items():
+            canonical_key = f"simulation:account:{tenant_id}:{user_id}"
+            if source_key != canonical_key:
+                redis.client.set(canonical_key, json.dumps(account, ensure_ascii=False))
+            for legacy_key in (
+                f"simulation:account:{tenant_id}:{raw_user_id}",
+                source_key,
+            ):
+                if legacy_key != canonical_key:
+                    redis.client.delete(legacy_key)
 
             # 用最新行情重算市值（避免快照时价格陈旧）
             try:
@@ -211,7 +254,7 @@ class SimulationFundSnapshotService:
             else:
                 # 实时重算后立即回写 simulation 账户与交易账户缓存，供前端/交易链路统一消费。
                 try:
-                    redis.client.set(key, json.dumps(account, ensure_ascii=False))
+                    redis.client.set(canonical_key, json.dumps(account, ensure_ascii=False))
                     write_trade_account_cache(redis, tenant_id, user_id, dict(account))
                 except Exception as exc:
                     logger.warning("Simulation account cache writeback failed for %s/%s: %s", tenant_id, user_id, exc)
@@ -237,7 +280,12 @@ class SimulationFundSnapshotService:
 
             row = cls._build_row(tenant_id, user_id, account, prev_total_asset=prev_total_asset)
             if row["initial_capital"] == 0:
-                row["initial_capital"] = cls._read_settings_initial_cash(redis, tenant_id, user_id)
+                row["initial_capital"] = cls._read_settings_initial_cash(
+                    redis,
+                    tenant_id,
+                    user_id,
+                    raw_user_id=raw_user_id,
+                )
                 if row["initial_capital"] == 0:
                     row["initial_capital"] = row["total_asset"]
                     row["total_pnl"] = Decimal("0")
@@ -278,12 +326,13 @@ class SimulationFundSnapshotService:
         user_id: str,
         days: int = 30,
     ) -> list[SimulationFundSnapshot]:
+        normalized_user_id = normalize_trade_user_id(user_id) or str(user_id)
         async with get_session(read_only=True) as session:
             stmt = (
                 select(SimulationFundSnapshot)
                 .where(
                     SimulationFundSnapshot.tenant_id == tenant_id,
-                    SimulationFundSnapshot.user_id == user_id,
+                    SimulationFundSnapshot.user_id == normalized_user_id,
                 )
                 .order_by(SimulationFundSnapshot.snapshot_date.desc())
                 .limit(max(1, min(days, 3650)))

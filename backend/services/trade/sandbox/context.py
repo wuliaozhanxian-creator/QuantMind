@@ -5,6 +5,8 @@ from typing import Any, Dict, List
 
 import redis
 
+from backend.shared.trade_redis_keys import normalize_trade_user_id
+
 
 class SandboxContext:
     """
@@ -22,7 +24,7 @@ class SandboxContext:
         live_trade_config: dict | None = None,
     ):
         self.tenant_id = tenant_id
-        self.user_id = user_id
+        self.user_id = normalize_trade_user_id(user_id) or str(user_id)
         self.strategy_id = strategy_id
         self.run_id = run_id
         self.exec_config = exec_config

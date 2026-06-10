@@ -17,6 +17,9 @@ class _FakeRedisClient:
     def set(self, key, value):
         self.store[key] = value
 
+    def delete(self, key):
+        self.store.pop(key, None)
+
     def eval(self, script, numkeys, *args):
         key = args[0]
         symbol = args[1]
@@ -173,7 +176,7 @@ async def test_get_simulation_account_reconciles_seeded_holdings_baseline(monkey
         tenant_id="default",
     )
 
-    cached = json.loads(redis.client.get("simulation:account:default:2002"))
+    cached = json.loads(redis.client.get("simulation:account:default:00002002"))
     cached["cash"] = 14_174.35
     cached["available_cash"] = 14_174.35
     cached["market_value"] = 99_571.42
@@ -190,7 +193,7 @@ async def test_get_simulation_account_reconciles_seeded_holdings_baseline(monkey
     }
     cached.pop("initial_equity", None)
     cached.pop("baseline", None)
-    redis.client.set("simulation:account:default:2002", json.dumps(cached, ensure_ascii=False))
+    redis.client.set("simulation:account:default:00002002", json.dumps(cached, ensure_ascii=False))
 
     async def _fake_build_realtime_positions_from_db(*, tenant_id, user_id, since_at=None):
         return {}, 0.0
