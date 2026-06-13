@@ -209,17 +209,13 @@ class VectorizedMatcher:
             )
 
     async def _consume_sandbox_signals(self):
-        """监控沙箱信号队列状态（只读探针，不消费信号）"""
+        """探针检测沙箱 Worker 信号队列状态（只读，不消费）"""
         try:
-            # 使用 LLEN 获取队列长度而非 LPOP 消费信号
             queue_len = self.redis.llen("trade:simulation:signals")
             if queue_len > 0:
-                logger.debug(
-                    "[VectorizedMatcher] 沙箱信号队列待消费: %d 条",
-                    queue_len,
-                )
+                logger.debug("[VectorizedMatcher] 沙箱信号队列待消费: %d 条", queue_len)
         except Exception as e:
-            logger.error("[VectorizedMatcher] Error probing sandbox signals: %s", e)
+            logger.error("[VectorizedMatcher] Error checking sandbox signals: %s", e)
 
     def stop(self):
         self.is_running = False

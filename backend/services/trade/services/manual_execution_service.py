@@ -6,6 +6,7 @@ import json
 import logging
 import math
 import os
+import uuid as uuid_lib
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import Any
@@ -45,12 +46,22 @@ def _get_quote_redis():
     global _quote_redis
     if _quote_redis is None:
         try:
-            from backend.services.trade.utils.quote_redis import get_quote_redis
-            _quote_redis = get_quote_redis()
+            host = os.getenv("REMOTE_QUOTE_REDIS_HOST", "quantmind-market-redis")
+            port = int(os.getenv("REMOTE_QUOTE_REDIS_PORT", "6379"))
+            password = os.getenv("REMOTE_QUOTE_REDIS_PASSWORD", "quantmind_market_2026")
+            db = int(os.getenv("REMOTE_QUOTE_REDIS_DB", "0"))
+            _quote_redis = redis_lib.Redis(
+                host=host,
+                port=port,
+                password=password,
+                db=db,
+                decode_responses=True,
+                socket_timeout=2,
+            )
             _quote_redis.ping()
-            logger.info("[ManualExecution] 已连接远程行情 Redis DB 0")
+            logger.info(f"[ManualExecution] 已连接行情 Redis: {host}:{port} db={db}")
         except Exception as e:
-            logger.warning(f"[ManualExecution] 无法连接远程行情 Redis: {e}")
+            logger.warning(f"[ManualExecution] 无法连接行情 Redis: {e}")
             _quote_redis = None
     return _quote_redis
 
@@ -119,7 +130,7 @@ def _parse_iso_date(value: Any) -> date:
     except Exception as exc:
         raise HTTPException(
             status_code=400, detail=f"prediction_trade_date 非法: {exc}"
-        ) from exc
+        )
 
 
 def _normalize_trading_mode(value: Any) -> str:
@@ -155,58 +166,48 @@ def _normalize_to_broker_symbol(sym: str) -> str:
     return s
 
 
+def _manual_task_sell_buy_interval_seconds() -> int:
+    raw = _to_int(os.getenv("MANUAL_TASK_SELL_BUY_INTERVAL_SECONDS"), 300)
+    if raw < 0:
+        return 0
+    return min(raw, 3600)
+
+
 def _manual_task_wait_next_account_timeout_seconds() -> int:
-    timeout = _to_int(
-        os.getenv("MANUAL_TASK_WAIT_NEXT_ACCOUNT_TIMEOUT_SECONDS", "120"),
+    raw = _to_int(
+        os.getenv("MANUAL_TASK_WAIT_NEXT_ACCOUNT_TIMEOUT_SECONDS"),
         120,
     )
-    if timeout <= 0:
-        return 1
-    return min(timeout, 900)
+    return max(10, min(raw, 1800))
 
 
-def _manual_task_account_poll_interval_seconds() -> float:
-    poll = _to_float(
-        os.getenv("MANUAL_TASK_ACCOUNT_POLL_INTERVAL_SECONDS", "3"),
-        3.0,
-    )
-    if poll <= 0:
-        return 3.0
-    return min(max(poll, 1.0), 10.0)
+def _manual_task_account_poll_interval_seconds() -> int:
+    raw = _to_int(os.getenv("MANUAL_TASK_ACCOUNT_POLL_INTERVAL_SECONDS"), 3)
+    return max(1, min(raw, 30))
 
 
 def _manual_task_buy_cancel_timeout_seconds() -> int:
-    timeout = _to_int(
-        os.getenv("MANUAL_TASK_BUY_CANCEL_TIMEOUT_SECONDS", "300"),
-        300,
-    )
-    if timeout <= 0:
-        return 1
-    return min(timeout, 1800)
+    raw = _to_int(os.getenv("MANUAL_TASK_BUY_CANCEL_TIMEOUT_SECONDS"), 300)
+    return max(10, min(raw, 3600))
 
 
-def _parse_iso_datetime(value: Any) -> datetime | None:
-    if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
-    text_value = str(value or "").strip()
-    if not text_value:
+def _parse_snapshot_at(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
         return None
-    if text_value.endswith("Z"):
-        text_value = f"{text_value[:-1]}+00:00"
     try:
-        parsed = datetime.fromisoformat(text_value)
+        normalized = text.replace("Z", "+00:00")
+        parsed = datetime.fromisoformat(normalized)
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
     except Exception:
         return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
-def _order_status_text(value: Any) -> str:
-    raw = getattr(value, "value", value)
-    return str(raw or "").strip().lower()
-
-
-def _should_request_cancel_for_buy_status(status_text: str) -> bool:
-    return status_text in {"submitted", "partially_filled"}
+def _is_cancelable_buy_status(value: Any) -> bool:
+    status = str(getattr(value, "value", value) or "").strip().lower()
+    return status in {"submitted", "partially_filled"}
 
 
 def _rebuild_buy_orders_by_available_cash(
@@ -332,8 +333,8 @@ def _rebuild_buy_orders_for_simulation_cash(
                 {
                     "symbol": symbol,
                     "action": "BUY",
-                    "reason": "缺少实时参考价格且无预置价格，无法重算买入数量",
-                    "source": "buy_rebudget",
+                    "reason": "缺少行情价格，无法生成模拟买单",
+                    "source": "buy_rebudget_sim",
                 }
             )
             continue
@@ -353,29 +354,37 @@ def _rebuild_buy_orders_for_simulation_cash(
 
     rebuilt: list[dict[str, Any]] = []
     for index, row in enumerate(candidates):
-        slots = max(1, len(candidates) - index)
-        alloc_budget = remaining_cash / slots
-
-        symbol = row["symbol"]
-        reference_price = row["reference_price"]
+        left = len(candidates) - index
+        alloc_budget = remaining_cash / max(1, left)
+        symbol = str(row.get("symbol") or "").strip().upper()
+        reference_price = _to_float(row.get("reference_price"), 0.0)
         lot_size = _resolve_board_lot_size(symbol)
-        quantity = _floor_board_lot(alloc_budget / reference_price, lot_size)
-
+        quantity = _floor_board_lot(alloc_budget / max(reference_price, 1e-12), lot_size)
         if quantity <= 0:
             skipped.append(
                 {
                     "symbol": symbol,
                     "action": "BUY",
-                    "reason": f"可用重算资金不足以买入最小手数 {lot_size} 股",
-                    "source": "buy_rebudget",
+                    "reason": f"等额预算 {alloc_budget:.2f} 不足最小手数 {lot_size}",
+                    "source": "buy_rebudget_sim",
                 }
             )
             continue
-
         estimated_notional = round(quantity * reference_price, 2)
+        if estimated_notional > remaining_cash + 1e-6:
+            skipped.append(
+                {
+                    "symbol": symbol,
+                    "action": "BUY",
+                    "reason": f"可用资金不足覆盖买入金额 {estimated_notional:.2f}",
+                    "source": "buy_rebudget_sim",
+                }
+            )
+            continue
         remaining_cash = max(0.0, remaining_cash - estimated_notional)
-
         rebuilt_row = dict(row)
+        rebuilt_row["reference_price"] = reference_price
+        rebuilt_row["price"] = reference_price
         rebuilt_row["planned_budget"] = round(alloc_budget, 2)
         rebuilt_row["quantity"] = quantity
         rebuilt_row["estimated_notional"] = estimated_notional
@@ -415,13 +424,59 @@ def _resolve_board_lot_size(symbol: str) -> int:
 
 
 def _build_preview_hash(payload: dict[str, Any]) -> str:
-    # 只对"执行意图"部分做哈希：策略上下文 + 卖出/买入预案。
-    # 故意排除 account_snapshot，避免账户快照时间戳在 preview→submit 的短暂间隔内
-    # 因行情更新而变化，导致 submit 侧重算哈希不匹配从而误报 409。
+    # 只对稳定的"执行意图"做哈希，避免 preview->submit 间隔内实时行情波动
+    # 导致参考价/估算金额变化，从而误报 409。
+    strategy_context = (
+        payload.get("strategy_context")
+        if isinstance(payload.get("strategy_context"), dict)
+        else {}
+    )
+    stable_context = {
+        "model_id": str(strategy_context.get("model_id") or "").strip(),
+        "run_id": str(strategy_context.get("run_id") or "").strip(),
+        "prediction_trade_date": str(
+            strategy_context.get("prediction_trade_date") or ""
+        ).strip(),
+        "strategy_id": str(strategy_context.get("strategy_id") or "").strip(),
+        "trading_mode": str(strategy_context.get("trading_mode") or "").strip(),
+    }
+
+    def _normalize_orders(items: Any) -> list[dict[str, Any]]:
+        normalized: list[dict[str, Any]] = []
+        if not isinstance(items, list):
+            return normalized
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            normalized.append(
+                {
+                    "symbol": str(item.get("symbol") or "").strip().upper(),
+                    "side": str(item.get("side") or "").strip().upper(),
+                    "trade_action": str(item.get("trade_action") or "").strip().upper(),
+                    "order_type": str(item.get("order_type") or "").strip().upper(),
+                    "quantity": _to_int(item.get("quantity"), 0),
+                }
+            )
+        normalized.sort(
+            key=lambda row: (
+                str(row.get("symbol") or ""),
+                str(row.get("side") or ""),
+                str(row.get("trade_action") or ""),
+                str(row.get("order_type") or ""),
+                _to_int(row.get("quantity"), 0),
+            )
+        )
+        return normalized
+
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
     stable = {
-        "strategy_context": payload.get("strategy_context"),
-        "sell_orders": payload.get("sell_orders"),
-        "buy_orders": payload.get("buy_orders"),
+        "strategy_context": stable_context,
+        "sell_orders": _normalize_orders(payload.get("sell_orders")),
+        "buy_orders": _normalize_orders(payload.get("buy_orders")),
+        "summary": {
+            "sell_order_count": _to_int(summary.get("sell_order_count"), 0),
+            "buy_order_count": _to_int(summary.get("buy_order_count"), 0),
+        },
     }
     return hashlib.sha256(_stable_json(stable).encode("utf-8")).hexdigest()
 
@@ -429,6 +484,53 @@ def _build_preview_hash(payload: dict[str, Any]) -> str:
 def _normalize_strategy_params(strategy: dict[str, Any] | None) -> dict[str, Any]:
     params = strategy.get("parameters") if isinstance(strategy, dict) else {}
     return params if isinstance(params, dict) else {}
+
+
+def _parse_json_object(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except Exception:
+            return {}
+        return dict(parsed) if isinstance(parsed, dict) else {}
+    return {}
+
+
+def _resolve_run_target_horizon_days(run: dict[str, Any] | None) -> int:
+    request_payload = _parse_json_object((run or {}).get("request_json"))
+    result_payload = _parse_json_object((run or {}).get("result_json"))
+    for source in (request_payload, result_payload):
+        horizon = _to_int(source.get("target_horizon_days"), 0)
+        if horizon > 0:
+            return horizon
+    return 5
+
+
+def _require_strict_hosted_signal_context(
+    *,
+    strategy_params: dict[str, Any],
+    signal_rows: list[dict[str, Any]],
+) -> None:
+    if not signal_rows:
+        raise HTTPException(
+            status_code=409,
+            detail="当前策略最新推理批次无可用信号，已拒绝自动托管执行",
+        )
+
+    strategy_type = str(strategy_params.get("strategy_type") or "").strip().lower()
+    has_explicit_side = any(
+        str(item.get("signal_side") or "").strip().lower() in {"buy", "sell"}
+        for item in signal_rows
+        if isinstance(item, dict)
+    )
+    if strategy_type in _TOPK_STYLE_STRATEGIES and not has_explicit_side:
+        if _to_int(strategy_params.get("topk"), 0) <= 0:
+            raise HTTPException(
+                status_code=409,
+                detail="当前策略缺少有效的 topk 参数，系统已拒绝回退默认 TopK 执行",
+            )
 
 
 def _extract_fundamental_constraints(strategy_params: dict[str, Any]) -> dict[str, Any]:
@@ -474,12 +576,15 @@ def _apply_fundamental_constraints_to_signal_rows(
     input_symbols = [str(row["symbol"]) for row in candidates]
     filtered_symbols = set(
         fundamental_aligner.filter_instruments(
-            trade_date, input_symbols, constraints=constraints
+            trade_date,
+            input_symbols,
+            constraints=constraints,
         )
     )
     filtered_rows = [row for row in candidates if row["symbol"] in filtered_symbols]
     dropped_count = len(candidates) - len(filtered_rows)
-    return explicit_sell_rows + filtered_rows, max(0, dropped_count)
+    merged_rows = explicit_sell_rows + filtered_rows
+    return merged_rows, max(0, dropped_count)
 
 
 def _normalize_positions(raw_positions: Any) -> dict[str, dict[str, Any]]:
@@ -643,18 +748,18 @@ def _build_execution_plan_from_signals(
     signal_rows: list[dict[str, Any]],
     strategy_params: dict[str, Any],
     account_snapshot: dict[str, Any],
-    trade_date: date | None = None,
+    prediction_trade_date: date | None = None,
 ) -> dict[str, Any]:
-    filtered_rows, fundamental_dropped = _apply_fundamental_constraints_to_signal_rows(
+    constrained_rows, fundamental_filtered_count = _apply_fundamental_constraints_to_signal_rows(
         signal_rows,
         strategy_params=strategy_params,
-        trade_date=trade_date,
+        trade_date=prediction_trade_date,
     )
     positions = _normalize_positions((account_snapshot or {}).get("positions"))
     cash = _to_float(
         account_snapshot.get("available_cash") or account_snapshot.get("cash"), 0.0
     )
-    signal_plan = _filter_signal_rows(filtered_rows, strategy_params, positions)
+    signal_plan = _filter_signal_rows(constrained_rows, strategy_params, positions)
     skipped_items: list[dict[str, Any]] = []
     sell_orders: list[dict[str, Any]] = []
     buy_orders: list[dict[str, Any]] = []
@@ -695,7 +800,7 @@ def _build_execution_plan_from_signals(
                 "side": "SELL",
                 "trade_action": "SELL_TO_CLOSE",
                 "quantity": quantity,
-                "order_type": "LIMIT",
+                "order_type": "MARKET",
                 "price": limit_price,
                 "reference_price": reference_price,
                 "estimated_notional": round(quantity * reference_price, 2),
@@ -737,10 +842,13 @@ def _build_execution_plan_from_signals(
             dict(row, symbol=symbol, reference_price=reference_price)
         )
 
-    for index, row in enumerate(valid_candidates):
-        slots = max(1, len(valid_candidates) - index)
-        per_slot_budget = sequential_budget / slots
+    per_order_budget = (
+        (sequential_budget / len(valid_candidates))
+        if valid_candidates
+        else 0.0
+    )
 
+    for row in valid_candidates:
         ref_price = row.get("reference_price", 0.0)
         if ref_price <= 0:
             quantity = 0
@@ -748,20 +856,22 @@ def _build_execution_plan_from_signals(
             reason = "缺少实时价格，无法估算买入数量"
         else:
             lot_size = _resolve_board_lot_size(str(row["symbol"]))
-            quantity = _floor_board_lot(per_slot_budget / ref_price, lot_size)
+            quantity = _floor_board_lot(per_order_budget / ref_price, lot_size)
             if quantity <= 0:
                 skipped_items.append(
                     {
                         "symbol": row["symbol"],
                         "action": "BUY",
-                        "reason": f"预算不足以买入最小手数 {lot_size} 股",
+                        "reason": (
+                            f"预分配预算 {per_order_budget:.2f} 不足以买入最小手数 {lot_size} 股"
+                        ),
                         "source": "buy_signal",
                     }
                 )
                 continue
             estimated_notional = round(quantity * ref_price, 2)
             sequential_budget = max(0.0, sequential_budget - estimated_notional)
-            reason = "按预估可用资金等额分配买入预算"
+            reason = "按预分配预算等额生成买单"
 
         buy_orders.append(
             {
@@ -770,9 +880,10 @@ def _build_execution_plan_from_signals(
                 "side": "BUY",
                 "trade_action": "BUY_TO_OPEN",
                 "quantity": quantity,
-                "order_type": "LIMIT",
+                "order_type": "MARKET",
                 "price": ref_price,
                 "reference_price": ref_price,
+                "planned_budget": round(per_order_budget, 2),
                 "estimated_notional": estimated_notional,
                 "current_volume": 0,
                 "current_market_value": 0.0,
@@ -786,9 +897,9 @@ def _build_execution_plan_from_signals(
         "buy_orders": buy_orders,
         "skipped_items": skipped_items,
         "summary": {
-            "signal_count": len(filtered_rows),
+            "signal_count": len(constrained_rows),
             "raw_signal_count": len(signal_rows),
-            "fundamental_filtered_count": fundamental_dropped,
+            "fundamental_filtered_count": fundamental_filtered_count,
             "buy_candidate_count": len(raw_buy_candidates),
             "sell_candidate_count": len(signal_plan["sell_candidates"]),
             "sell_order_count": len(sell_orders),
@@ -812,19 +923,18 @@ def _build_execution_plan_from_signals(
     }
 
 
-def _normalize_hosted_signal_rows(
-    raw_signals: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
+def _normalize_hosted_signal_rows(raw_signals: list[dict[str, Any]]) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     for item in raw_signals or []:
         if not isinstance(item, dict):
             continue
         symbol = _normalize_to_broker_symbol(item.get("symbol"))
-        side = (
-            str(item.get("action") or item.get("side") or item.get("signal_side") or "")
-            .strip()
-            .upper()
-        )
+        side = str(
+            item.get("action")
+            or item.get("side")
+            or item.get("signal_side")
+            or ""
+        ).strip().upper()
         if not symbol or side not in {"BUY", "SELL"}:
             continue
         normalized.append(
@@ -893,11 +1003,7 @@ class ManualExecutionService:
 
     @staticmethod
     def _build_task_label(task_type: str) -> str:
-        return (
-            "自动托管任务"
-            if str(task_type or "").strip().lower() == "hosted"
-            else "手动执行任务"
-        )
+        return "自动托管任务" if str(task_type or "").strip().lower() == "hosted" else "手动执行任务"
 
     @staticmethod
     def _build_strategy_snapshot(
@@ -921,7 +1027,7 @@ class ManualExecutionService:
         return snapshot
 
     async def _load_latest_account_snapshot(
-        self, *, tenant_id: str, user_id: str, trading_mode: Any = "REAL"
+        self, *, tenant_id: str, user_id: str, trading_mode: str = "REAL"
     ) -> dict[str, Any] | None:
         mode = _normalize_trading_mode(trading_mode)
         if mode == "SIMULATION":
@@ -969,105 +1075,73 @@ class ManualExecutionService:
                 user_id=user_id,
             )
 
-    async def _load_user_default_model_record(
+    async def _wait_for_next_account_snapshot(
         self,
         *,
         tenant_id: str,
         user_id: str,
-        db: Any | None = None,
-    ) -> dict[str, Any] | None:
-        if db is not None:
-            row = (
-                (
-                    await db.execute(
-                        text(
-                            """
-                        SELECT model_id, metadata_json, status, activated_at, updated_at
-                        FROM qm_user_models
-                        WHERE tenant_id = :tenant_id
-                          AND user_id = :user_id
-                          AND is_default = TRUE
-                          AND status IN ('ready', 'active')
-                          AND COALESCE((metadata_json->>'system_default')::boolean, FALSE) = FALSE
-                        ORDER BY activated_at DESC NULLS LAST, updated_at DESC
-                        LIMIT 1
-                        """
-                        ),
-                        {"tenant_id": tenant_id, "user_id": user_id},
-                    )
-                )
-                .mappings()
-                .first()
+        trading_mode: str,
+        baseline_snapshot_at: datetime | None,
+        timeout_seconds: int,
+        poll_interval_seconds: int,
+    ) -> tuple[dict[str, Any] | None, int]:
+        started_at = datetime.now(timezone.utc)
+        baseline = baseline_snapshot_at
+        while True:
+            snapshot = await self._load_latest_account_snapshot(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                trading_mode=trading_mode,
             )
-            return dict(row) if row else None
+            snapshot_at = _parse_snapshot_at(
+                snapshot.get("snapshot_at") if isinstance(snapshot, dict) else None
+            )
+            if snapshot is not None and snapshot_at is not None:
+                if baseline is None or snapshot_at > baseline:
+                    waited = max(
+                        0,
+                        int((datetime.now(timezone.utc) - started_at).total_seconds()),
+                    )
+                    return snapshot, waited
 
+            waited_seconds = int(
+                (datetime.now(timezone.utc) - started_at).total_seconds()
+            )
+            if waited_seconds >= timeout_seconds:
+                return None, waited_seconds
+            await asyncio.sleep(poll_interval_seconds)
+
+    async def _load_user_default_model_record(
+        self, *, tenant_id: str, user_id: str
+    ) -> dict[str, Any] | None:
         async with get_session(read_only=True) as session:
             row = (
-                (
-                    await session.execute(
-                        text(
-                            """
+                await session.execute(
+                    text(
+                        """
                         SELECT model_id, metadata_json, status, activated_at, updated_at
                         FROM qm_user_models
                         WHERE tenant_id = :tenant_id
                           AND user_id = :user_id
                           AND is_default = TRUE
                           AND status IN ('ready', 'active')
-                          AND COALESCE((metadata_json->>'system_default')::boolean, FALSE) = FALSE
                         ORDER BY activated_at DESC NULLS LAST, updated_at DESC
                         LIMIT 1
                         """
-                        ),
-                        {"tenant_id": tenant_id, "user_id": user_id},
-                    )
+                    ),
+                    {"tenant_id": tenant_id, "user_id": user_id},
                 )
-                .mappings()
-                .first()
-            )
+            ).mappings().first()
         return dict(row) if row else None
 
     async def _load_latest_default_model_inference_run(
-        self,
-        *,
-        tenant_id: str,
-        user_id: str,
-        model_id: str,
-        db: Any | None = None,
+        self, *, tenant_id: str, user_id: str, model_id: str
     ) -> dict[str, Any] | None:
-        if db is not None:
-            row = (
-                (
-                    await db.execute(
-                        text(
-                            """
-                        SELECT *
-                        FROM qm_model_inference_runs
-                        WHERE tenant_id = :tenant_id
-                          AND user_id = :user_id
-                          AND model_id = :model_id
-                          AND status = 'completed'
-                        ORDER BY prediction_trade_date DESC, created_at DESC
-                        LIMIT 1
-                        """
-                        ),
-                        {
-                            "tenant_id": tenant_id,
-                            "user_id": user_id,
-                            "model_id": model_id,
-                        },
-                    )
-                )
-                .mappings()
-                .first()
-            )
-            return dict(row) if row else None
-
         async with get_session(read_only=True) as session:
             row = (
-                (
-                    await session.execute(
-                        text(
-                            """
+                await session.execute(
+                    text(
+                        """
                         SELECT *
                         FROM qm_model_inference_runs
                         WHERE tenant_id = :tenant_id
@@ -1077,17 +1151,37 @@ class ManualExecutionService:
                         ORDER BY prediction_trade_date DESC, created_at DESC
                         LIMIT 1
                         """
-                        ),
-                        {
-                            "tenant_id": tenant_id,
-                            "user_id": user_id,
-                            "model_id": model_id,
-                        },
-                    )
+                    ),
+                    {"tenant_id": tenant_id, "user_id": user_id, "model_id": model_id},
                 )
-                .mappings()
-                .first()
-            )
+            ).mappings().first()
+        return dict(row) if row else None
+
+    async def _load_latest_strategy_inference_run(
+        self, *, tenant_id: str, user_id: str, strategy_id: str
+    ) -> dict[str, Any] | None:
+        async with get_session(read_only=True) as session:
+            row = (
+                await session.execute(
+                    text(
+                        """
+                        SELECT *
+                        FROM qm_model_inference_runs
+                        WHERE tenant_id = :tenant_id
+                          AND user_id = :user_id
+                          AND status = 'completed'
+                          AND COALESCE(request_json ->> 'strategy_id', '') = :strategy_id
+                        ORDER BY prediction_trade_date DESC, created_at DESC
+                        LIMIT 1
+                        """
+                    ),
+                    {
+                        "tenant_id": tenant_id,
+                        "user_id": user_id,
+                        "strategy_id": strategy_id,
+                    },
+                )
+            ).mappings().first()
         return dict(row) if row else None
 
     def _resolve_hosted_execution_window(
@@ -1146,20 +1240,12 @@ class ManualExecutionService:
                 stage=stage,
                 progress=progress,
                 signal_count=_to_int((initial_summary or {}).get("signal_count"), 0),
-                order_count=_to_int((initial_summary or {}).get("sell_order_count"), 0)
+                order_count=_to_int(
+                    (initial_summary or {}).get("sell_order_count"), 0
+                )
                 + _to_int((initial_summary or {}).get("buy_order_count"), 0),
-                success_count=_to_int(
-                    result_payload.get("success_count")
-                    if isinstance(result_payload, dict)
-                    else 0,
-                    0,
-                ),
-                failed_count=_to_int(
-                    result_payload.get("failed_count")
-                    if isinstance(result_payload, dict)
-                    else 0,
-                    0,
-                ),
+                success_count=_to_int(result_payload.get("success_count") if isinstance(result_payload, dict) else 0, 0),
+                failed_count=_to_int(result_payload.get("failed_count") if isinstance(result_payload, dict) else 0, 0),
                 result_payload=result_payload,
             )
         manual_execution_log_stream.update_state(
@@ -1173,25 +1259,17 @@ class ManualExecutionService:
             order_count=_to_int((initial_summary or {}).get("sell_order_count"), 0)
             + _to_int((initial_summary or {}).get("buy_order_count"), 0),
             success_count=_to_int(
-                result_payload.get("success_count")
-                if isinstance(result_payload, dict)
-                else 0,
+                result_payload.get("success_count") if isinstance(result_payload, dict) else 0,
                 0,
             ),
             failed_count=_to_int(
-                result_payload.get("failed_count")
-                if isinstance(result_payload, dict)
-                else 0,
+                result_payload.get("failed_count") if isinstance(result_payload, dict) else 0,
                 0,
             ),
             summary=initial_summary or {},
             last_line=initial_line,
-            error_stage=result_payload.get("error_stage")
-            if isinstance(result_payload, dict)
-            else None,
-            error_message=result_payload.get("error")
-            if isinstance(result_payload, dict)
-            else None,
+            error_stage=result_payload.get("error_stage") if isinstance(result_payload, dict) else None,
+            error_message=result_payload.get("error") if isinstance(result_payload, dict) else None,
         )
         if initial_line:
             manual_execution_log_stream.append_log(
@@ -1238,36 +1316,13 @@ class ManualExecutionService:
         return dict(row) if row else None
 
     async def get_default_model_hosted_status(
-        self,
-        *,
-        tenant_id: str,
-        user_id: str,
-        db: Any | None = None,
+        self, *, tenant_id: str, user_id: str
     ) -> dict[str, Any]:
         tenant = (tenant_id or "").strip() or "default"
         uid = str(user_id or "").strip()
         default_model = await self._load_user_default_model_record(
-            tenant_id=tenant,
-            user_id=uid,
-            db=db,
+            tenant_id=tenant, user_id=uid
         )
-        if not default_model:
-            current_default_model = None
-            try:
-                from backend.shared.model_registry import model_registry_service
-
-                current_default_model = await model_registry_service.get_default_model(
-                    tenant_id=tenant,
-                    user_id=uid,
-                )
-            except Exception as exc:
-                logger.warning(
-                    "Failed to inspect current default model for hosted status: %s",
-                    exc,
-                )
-
-            if current_default_model:
-                default_model = current_default_model
         if not default_model:
             return {
                 "available": False,
@@ -1288,19 +1343,14 @@ class ManualExecutionService:
         else:
             model_meta = {}
         target_horizon_days = _to_int(
-            model_meta.get("target_horizon_days")
-            if isinstance(model_meta, dict)
-            else None,
+            model_meta.get("target_horizon_days") if isinstance(model_meta, dict) else None,
             5,
         )
         if target_horizon_days <= 0:
             target_horizon_days = 5
 
         latest_run = await self._load_latest_default_model_inference_run(
-            tenant_id=tenant,
-            user_id=uid,
-            model_id=default_model_id,
-            db=db,
+            tenant_id=tenant, user_id=uid, model_id=default_model_id
         )
         if not latest_run:
             return {
@@ -1322,9 +1372,7 @@ class ManualExecutionService:
                 "latest_run_id": str(latest_run.get("run_id") or "").strip() or None,
                 "target_horizon_days": target_horizon_days,
                 "data_trade_date": str(latest_run.get("data_trade_date") or ""),
-                "prediction_trade_date": str(
-                    latest_run.get("prediction_trade_date") or ""
-                ),
+                "prediction_trade_date": str(latest_run.get("prediction_trade_date") or ""),
             }
         latest_model_source = str(latest_run.get("model_source") or "").strip()
         allowed_sources = {"user_default", "explicit_system_model"}
@@ -1338,9 +1386,7 @@ class ManualExecutionService:
                 "latest_run_id": str(latest_run.get("run_id") or "").strip() or None,
                 "target_horizon_days": target_horizon_days,
                 "data_trade_date": str(latest_run.get("data_trade_date") or ""),
-                "prediction_trade_date": str(
-                    latest_run.get("prediction_trade_date") or ""
-                ),
+                "prediction_trade_date": str(latest_run.get("prediction_trade_date") or ""),
             }
 
         data_trade_date = _parse_iso_date(latest_run.get("data_trade_date"))
@@ -1399,6 +1445,111 @@ class ManualExecutionService:
             "execution_window_end": execution_deadline.isoformat(),
             "fallback_used": bool(latest_run.get("fallback_used")),
             "model_source": latest_model_source or None,
+        }
+
+    async def get_strategy_hosted_status(
+        self, *, tenant_id: str, user_id: str, strategy_id: str
+    ) -> dict[str, Any]:
+        tenant = (tenant_id or "").strip() or "default"
+        uid = str(user_id or "").strip()
+        sid = str(strategy_id or "").strip()
+        if not sid:
+            return {
+                "available": False,
+                "source": "missing",
+                "reason_code": "missing_strategy_id",
+                "message": "未提供策略 ID，无法定位当前策略的最新推理信号",
+            }
+
+        latest_run = await self._load_latest_strategy_inference_run(
+            tenant_id=tenant,
+            user_id=uid,
+            strategy_id=sid,
+        )
+        if not latest_run:
+            return {
+                "available": False,
+                "source": "missing",
+                "reason_code": "missing_strategy_latest_run",
+                "message": "未找到当前策略对应的最新完成推理信号，已拒绝自动托管执行",
+                "strategy_id": sid,
+            }
+
+        if bool(latest_run.get("fallback_used")):
+            return {
+                "available": False,
+                "source": "fallback",
+                "reason_code": "fallback_used",
+                "message": "当前策略最新推理数据来自兜底结果，已拒绝自动托管执行",
+                "strategy_id": sid,
+                "latest_run_id": str(latest_run.get("run_id") or "").strip() or None,
+                "data_trade_date": str(latest_run.get("data_trade_date") or ""),
+                "prediction_trade_date": str(latest_run.get("prediction_trade_date") or ""),
+            }
+
+        target_horizon_days = _resolve_run_target_horizon_days(latest_run)
+        data_trade_date = _parse_iso_date(latest_run.get("data_trade_date"))
+        prediction_trade_date = _parse_iso_date(latest_run.get("prediction_trade_date"))
+        generation_start, execution_deadline = self._resolve_hosted_execution_window(
+            data_trade_date=data_trade_date,
+            target_horizon_days=target_horizon_days,
+        )
+        current_trade_date = datetime.now(_SH_TZ).date()
+        if current_trade_date < generation_start:
+            return {
+                "available": False,
+                "source": "window_pending",
+                "reason_code": "window_pending",
+                "message": (
+                    "当前策略最新推理结果尚未进入可执行窗口，"
+                    f"开始日期={generation_start.isoformat()}"
+                ),
+                "strategy_id": sid,
+                "latest_run_id": str(latest_run.get("run_id") or "").strip() or None,
+                "target_horizon_days": target_horizon_days,
+                "data_trade_date": data_trade_date.isoformat(),
+                "prediction_trade_date": prediction_trade_date.isoformat(),
+                "execution_window_start": generation_start.isoformat(),
+                "execution_window_end": execution_deadline.isoformat(),
+            }
+        if current_trade_date > execution_deadline:
+            return {
+                "available": False,
+                "source": "expired",
+                "reason_code": "window_expired",
+                "message": (
+                    "当前策略最新推理结果已超过可执行窗口，"
+                    f"截止日期={execution_deadline.isoformat()}"
+                ),
+                "strategy_id": sid,
+                "latest_run_id": str(latest_run.get("run_id") or "").strip() or None,
+                "target_horizon_days": target_horizon_days,
+                "data_trade_date": data_trade_date.isoformat(),
+                "prediction_trade_date": prediction_trade_date.isoformat(),
+                "execution_window_start": generation_start.isoformat(),
+                "execution_window_end": execution_deadline.isoformat(),
+            }
+
+        effective_model_id = (
+            str(latest_run.get("effective_model_id") or "").strip()
+            or str(latest_run.get("active_model_id") or "").strip()
+            or str(latest_run.get("model_id") or "").strip()
+        )
+        return {
+            "available": True,
+            "source": "strategy_latest_run",
+            "reason_code": "ready",
+            "message": "当前策略最新推理结果可用于自动托管",
+            "strategy_id": sid,
+            "latest_run_id": str(latest_run.get("run_id") or "").strip() or None,
+            "latest_model_id": effective_model_id,
+            "target_horizon_days": target_horizon_days,
+            "data_trade_date": data_trade_date.isoformat(),
+            "prediction_trade_date": prediction_trade_date.isoformat(),
+            "execution_window_start": generation_start.isoformat(),
+            "execution_window_end": execution_deadline.isoformat(),
+            "fallback_used": bool(latest_run.get("fallback_used")),
+            "model_source": str(latest_run.get("model_source") or "").strip() or None,
         }
 
     async def _load_signal_rows(
@@ -1669,7 +1820,7 @@ class ManualExecutionService:
             signal_rows=signal_rows,
             strategy_params=strategy_params,
             account_snapshot=account_snapshot,
-            trade_date=prepared.prediction_trade_date,
+            prediction_trade_date=prepared.prediction_trade_date,
         )
         if not plan["sell_orders"] and not plan["buy_orders"]:
             raise HTTPException(status_code=400, detail="策略计算后无可执行调仓动作")
@@ -2084,9 +2235,7 @@ class ManualExecutionService:
         mode = _normalize_trading_mode(trading_mode)
         provided_task_id = str(task_id or "").strip()
         if provided_task_id:
-            existing_task = await manual_execution_persistence.get_task_any(
-                provided_task_id
-            )
+            existing_task = await manual_execution_persistence.get_task_any(provided_task_id)
             if existing_task:
                 return {
                     "task_id": provided_task_id,
@@ -2096,36 +2245,42 @@ class ManualExecutionService:
                     "duplicate": True,
                 }
 
-        hosted_status = await self.get_default_model_hosted_status(
-            tenant_id=tenant, user_id=uid
+        hosted_status = await self.get_strategy_hosted_status(
+            tenant_id=tenant,
+            user_id=uid,
+            strategy_id=sid,
         )
+        if (
+            not bool(hosted_status.get("available"))
+            and mode == "SIMULATION"
+            and hosted_status.get("reason_code") == "missing_strategy_latest_run"
+        ):
+            hosted_status = await self.get_default_model_hosted_status(
+                tenant_id=tenant,
+                user_id=uid,
+            )
+
         if not bool(hosted_status.get("available")):
             raise HTTPException(
                 status_code=409,
-                detail=str(
-                    hosted_status.get("message")
-                    or "当前默认模型最新推理不可用于自动托管"
-                ),
+                detail=str(hosted_status.get("message") or "当前策略最新推理不可用于自动托管"),
             )
 
-        default_model_id = str(
-            hosted_status.get("latest_default_model_id") or ""
-        ).strip()
+        latest_model_id = str(hosted_status.get("latest_model_id") or "").strip()
         target_horizon_days = _to_int(hosted_status.get("target_horizon_days"), 5)
+        data_trade_date = _parse_iso_date(hosted_status.get("data_trade_date"))
+        prediction_trade_date = _parse_iso_date(hosted_status.get("prediction_trade_date"))
         generation_start = _parse_iso_date(hosted_status.get("execution_window_start"))
         execution_deadline = _parse_iso_date(hosted_status.get("execution_window_end"))
         latest_run_id = str(hosted_status.get("latest_run_id") or "").strip()
-        task_id = (
-            provided_task_id
-            or f"hosted_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}_{uuid4().hex[:8]}"
-        )
+        task_id = provided_task_id or f"hosted_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}_{uuid4().hex[:8]}"
 
         prepared = await self.prepare_manual_execution(
             tenant_id=tenant,
             user_id=uid,
             run_id=latest_run_id,
             strategy_id=sid,
-            model_id=default_model_id,
+            model_id=latest_model_id or None,
             trading_mode=mode,
             note=note,
         )
@@ -2135,13 +2290,14 @@ class ManualExecutionService:
             trading_mode=mode,
         )
         if not latest_snapshot:
+            detail = (
+                "未检测到最新模拟账户快照，请先确认模拟账户已初始化并有最新资金快照"
+                if mode == "SIMULATION"
+                else "未检测到最新实盘账户快照，请先确认 QMT Agent 已上报账户数据"
+            )
             raise HTTPException(
                 status_code=400,
-                detail=(
-                    "未检测到最新模拟账户快照，请先确认模拟账户已初始化并有最新资金快照"
-                    if mode == "SIMULATION"
-                    else "未检测到最新实盘账户快照，请先确认 QMT Agent 已上报账户数据"
-                ),
+                detail=detail,
             )
         normalized_signals = await self._load_signal_rows(
             tenant_id=prepared.tenant_id,
@@ -2149,11 +2305,15 @@ class ManualExecutionService:
             run_id=prepared.run_id,
         )
         strategy_params = _normalize_strategy_params(prepared.strategy)
+        _require_strict_hosted_signal_context(
+            strategy_params=strategy_params,
+            signal_rows=normalized_signals,
+        )
         execution_plan = _build_execution_plan_from_signals(
             signal_rows=normalized_signals,
             strategy_params=strategy_params,
             account_snapshot=latest_snapshot,
-            trade_date=prepared.prediction_trade_date,
+            prediction_trade_date=prepared.prediction_trade_date,
         )
         created_at = datetime.now(timezone.utc)
         plan_summary = execution_plan.get("summary") or {}
@@ -2190,16 +2350,14 @@ class ManualExecutionService:
             "trading_mode": prepared.trading_mode,
             "trigger_context": trigger_context or {},
             "preview_summary": plan_summary,
-            "signal_count": _to_int(
-                plan_summary.get("signal_count"), len(normalized_signals)
-            ),
+            "signal_count": _to_int(plan_summary.get("signal_count"), len(normalized_signals)),
             "buy_order_count": _to_int(plan_summary.get("buy_order_count"), 0),
             "sell_order_count": _to_int(plan_summary.get("sell_order_count"), 0),
             "skipped_count": _to_int(plan_summary.get("skipped_count"), 0),
             "target_horizon_days": target_horizon_days,
             "execution_window_start": generation_start.isoformat(),
             "execution_window_end": execution_deadline.isoformat(),
-            "latest_default_model_id": default_model_id,
+            "latest_model_id": latest_model_id,
         }
         if not actionable_orders:
             result_payload = {
@@ -2211,9 +2369,7 @@ class ManualExecutionService:
                 "strategy_name": prepared.strategy_name,
                 "prediction_trade_date": prepared.prediction_trade_date.isoformat(),
                 "trading_mode": prepared.trading_mode,
-                "signal_count": _to_int(
-                    plan_summary.get("signal_count"), len(normalized_signals)
-                ),
+                "signal_count": _to_int(plan_summary.get("signal_count"), len(normalized_signals)),
                 "order_count": 0,
                 "success_count": 0,
                 "failed_count": 0,
@@ -2242,12 +2398,7 @@ class ManualExecutionService:
                 result_payload=result_payload,
                 progress=100,
             )
-            return {
-                "task_id": task_id,
-                "status": "completed",
-                "task": task,
-                "noop": True,
-            }
+            return {"task_id": task_id, "status": "completed", "task": task, "noop": True}
 
         task = await self._persist_task(
             prepared=prepared,
@@ -2513,13 +2664,13 @@ class ManualExecutionService:
                     signal_rows=signal_rows,
                     strategy_params=strategy_params,
                     account_snapshot=latest_snapshot,
-                    trade_date=prepared.prediction_trade_date,
+                    prediction_trade_date=prepared.prediction_trade_date,
                 )
 
             sell_orders = list(execution_plan.get("sell_orders") or [])
             buy_orders = list(execution_plan.get("buy_orders") or [])
             skipped_items = list(execution_plan.get("skipped_items") or [])
-            plan_summary = dict(execution_plan.get("summary") or {})
+            plan_summary = execution_plan.get("summary") or {}
             actionable_orders = sell_orders + buy_orders
             if not actionable_orders:
                 error_msg = "调仓预案无可执行委托"
@@ -2546,13 +2697,6 @@ class ManualExecutionService:
             failed_count = 0
             first_error = ""
             total = len(actionable_orders)
-            submit_index = 0
-            submitted_sell_orders: list[dict[str, Any]] = []
-            submitted_buy_orders: list[dict[str, Any]] = []
-            runtime_plan_summary = dict(plan_summary)
-            from .trading_engine import TradingEngine
-
-            trading_engine = TradingEngine(db, get_redis())
 
             await manual_execution_persistence.update_task(
                 task_id=task_id,
@@ -2663,240 +2807,74 @@ class ManualExecutionService:
                 ),
             )
 
-            async def _submit_one_order(row: dict[str, Any], index: int) -> None:
-                nonlocal processed
-                nonlocal success_count
-                nonlocal failed_count
-                nonlocal first_error
-                nonlocal submitted_sell_orders
-                nonlocal submitted_buy_orders
+            phase_orders: list[tuple[str, list[dict[str, Any]]]] = [
+                ("SELL", sell_orders),
+                ("BUY", buy_orders),
+            ]
+            wait_snapshot_timeout = _manual_task_wait_next_account_timeout_seconds()
+            wait_snapshot_poll_interval = _manual_task_account_poll_interval_seconds()
+            buy_cancel_timeout = _manual_task_buy_cancel_timeout_seconds()
+            snapshot_wait_seconds = 0
+            buy_budget_from_snapshot: float | None = None
+            buy_cancel_requested_count = 0
+            buy_cancel_targets: list[dict[str, Any]] = []
+            buy_submitted_order_ids: list[str] = []
+            baseline_snapshot = await self._load_latest_account_snapshot(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                trading_mode=trading_mode,
+            )
+            baseline_snapshot_at = _parse_snapshot_at(
+                baseline_snapshot.get("snapshot_at")
+                if isinstance(baseline_snapshot, dict)
+                else None
+            )
 
-                symbol = str(row.get("symbol") or "").strip().upper()
-                fusion_score = _to_float(row.get("fusion_score"), 0.0)
-                expected_price = _to_float(row.get("price"), 0.0)
-                reference_price = _to_float(row.get("reference_price"), 0.0)
-                preview_price = (
-                    expected_price if expected_price > 0 else reference_price
-                )
-                side = str(row.get("side") or "").strip().upper()
-                trade_action = (
-                    str(
-                        row.get("trade_action")
-                        or ("BUY_TO_OPEN" if side == "BUY" else "SELL_TO_CLOSE")
+            for phase_name, raw_phase_rows in phase_orders:
+                phase_rows = list(raw_phase_rows or [])
+                if phase_name == "BUY" and buy_orders:
+                    should_wait_next_snapshot = (
+                        trading_mode == "REAL" and len(sell_orders) > 0
                     )
-                    .strip()
-                    .upper()
-                )
-                order_type = "MARKET"
-                quantity = _to_int(row.get("quantity"), 0)
-
-                order_payload = {
-                    "symbol": symbol,
-                    "side": side,
-                    "quantity": quantity,
-                    "price": 0.0,
-                    "client_order_id": f"manual-{task_id[-8:]}-{index:04d}",
-                    "order_type": order_type,
-                    "trading_mode": trading_mode,
-                    "remarks": (
-                        f"manual_task={task_id} run_id={run_id} "
-                        f"fusion_score={fusion_score:.6f} "
-                        f"order_type=MARKET "
-                        f"preview_price={preview_price:.4f} "
-                        f"reason={str(row.get('reason') or '').strip()}"
-                    ),
-                    "strategy_id": strategy_id,
-                    "trade_action": trade_action,
-                    "position_side": "LONG",
-                    "is_margin_trade": False,
-                }
-
-                manual_execution_log_stream.append_log(
-                    task_id=task_id,
-                    tenant_id=tenant_id,
-                    user_id=user_id,
-                    level="info",
-                    stage="dispatching",
-                    status="running",
-                    progress=int((index - 1) * 100 / total),
-                    line=(
-                        f"[{index}/{total}] 正在提交委托: {side} {symbol} "
-                        f"qty={quantity} preview={preview_price:.2f} "
-                        f"order_type=MARKET"
-                    ),
-                )
-
-                try:
-                    # 策略计算与下单
-                    from backend.services.trade.services.internal_strategy_dispatcher import (
-                        dispatch_internal_strategy_order,
-                    )
-
-                    result = await dispatch_internal_strategy_order(
-                        order_data=order_payload,
-                        user_id=user_id,
-                        tenant_id=tenant_id,
-                        redis=get_redis(),
-                        db=db,
-                    )
-
-                    # 严格的状态判断：必须 result["status"] == "success" 且其内部 result["success"] 也是 True
-                    # 针对 internal_strategy_dispatcher 的结构进行优化
-                    submit_inner_res = result.get("result", {})
-                    is_success = (result.get("status") == "success") and (
-                        submit_inner_res.get("success") is not False
-                    )
-
-                    execution = result.get("execution")
-                    order_id = result.get("order_id", "-")
-
-                    if is_success:
-                        success_count += 1
-                        if side == "SELL":
-                            submitted_sell_orders.append(
-                                {
-                                    "symbol": symbol,
-                                    "client_order_id": str(
-                                        order_payload.get("client_order_id") or ""
-                                    ),
-                                    "order_id": str(order_id or ""),
-                                    "quantity": quantity,
-                                }
-                            )
-                        elif side == "BUY":
-                            submitted_buy_orders.append(
-                                {
-                                    "symbol": symbol,
-                                    "client_order_id": str(
-                                        order_payload.get("client_order_id") or ""
-                                    ),
-                                    "order_id": str(order_id or ""),
-                                    "quantity": quantity,
-                                }
-                            )
-                        line = f"  >> 提交完成: {symbol} | 订单ID: {order_id} | 派发类型: {execution}"
-                        level = "info"
-                    elif result.get("status") == "rejected":
-                        failed_count += 1
-                        violations = result.get("violations", [])
-                        line = f"  >> [拦截] 风控拒绝: {symbol} | 原因: {violations}"
-                        level = "warning"
-                        if not first_error:
-                            first_error = f"{symbol}: 风控拦截({violations})"
-                    else:
-                        failed_count += 1
-                        error_detail = (
-                            submit_inner_res.get("message")
-                            or result.get("detail")
-                            or "柜台拒绝或连接断开"
+                    if should_wait_next_snapshot:
+                        manual_execution_log_stream.append_log(
+                            task_id=task_id,
+                            tenant_id=tenant_id,
+                            user_id=user_id,
+                            level="info",
+                            stage="dispatching",
+                            status="running",
+                            progress=int((processed / total) * 100),
+                            line=(
+                                f"卖单已全部提交，开始等待下一次账户上报 "
+                                f"(timeout={wait_snapshot_timeout}s, poll={wait_snapshot_poll_interval}s)"
+                            ),
                         )
-                        line = f"  >> [失败] 执行异常: {symbol} | 详情: {error_detail}"
-                        level = "error"
-                        if not first_error:
-                            first_error = f"{symbol}: {error_detail}"
-
-                    manual_execution_log_stream.append_log(
-                        task_id=task_id,
-                        tenant_id=tenant_id,
-                        user_id=user_id,
-                        level=level,
-                        stage="dispatching",
-                        line=line,
-                    )
-
-                except Exception as e:
-                    failed_count += 1
-                    error_msg = (
-                        f"  >> [崩溃] 处理标的 {symbol} 时发生程序异常: {str(e)}"
-                    )
-                    manual_execution_log_stream.append_log(
-                        task_id=task_id,
-                        tenant_id=tenant_id,
-                        user_id=user_id,
-                        level="error",
-                        stage="dispatching",
-                        line=error_msg,
-                    )
-                    if not first_error:
-                        first_error = str(e)
-
-                processed = index
-                progress = int((processed / max(total, 1)) * 100)
-
-                # 实时更新进度
-                if index % 5 == 0 or index == total:
-                    await manual_execution_persistence.update_task(
-                        task_id=task_id,
-                        status="running" if index < total else "completed",
-                        progress=progress,
-                        order_count=index,
-                        success_count=success_count,
-                        failed_count=failed_count,
-                    )
-
-                # 给日志流一点喘息时间，避免瞬间冲刷
-                await asyncio.sleep(0.05)
-
-            # Phase 1: 先提交卖单
-            if sell_orders:
-                manual_execution_log_stream.append_log(
-                    task_id=task_id,
-                    tenant_id=tenant_id,
-                    user_id=user_id,
-                    level="info",
-                    stage="dispatching",
-                    status="running",
-                    line=f"进入卖单执行阶段，共 {len(sell_orders)} 笔卖单",
-                )
-                for row in sell_orders:
-                    submit_index += 1
-                    await _submit_one_order(row, submit_index)
-
-                snapshot_wait_timeout_sec = (
-                    _manual_task_wait_next_account_timeout_seconds()
-                )
-                account_poll_interval_sec = (
-                    _manual_task_account_poll_interval_seconds()
-                )
-                snapshot_wait_seconds = 0
-
-                baseline_snapshot = await self._load_latest_account_snapshot(
-                    tenant_id=tenant_id,
-                    user_id=user_id,
-                    trading_mode=trading_mode,
-                )
-                baseline_snapshot_at = _parse_iso_datetime(
-                    (baseline_snapshot or {}).get("snapshot_at")
-                )
-                next_snapshot: dict[str, Any] | None = baseline_snapshot
-
-                if submitted_sell_orders:
-                    manual_execution_log_stream.append_log(
-                        task_id=task_id,
-                        tenant_id=tenant_id,
-                        user_id=user_id,
-                        level="info",
-                        stage="dispatching",
-                        status="running",
-                        line=(
-                            "卖单提交完成，等待下一次账户上报："
-                            f"submitted={len(submitted_sell_orders)}，"
-                            f"timeout={snapshot_wait_timeout_sec}s，"
-                            f"poll={account_poll_interval_sec:.1f}s"
-                        ),
-                    )
-                    loop = asyncio.get_running_loop()
-                    start_ts = loop.time()
-                    deadline_ts = start_ts + float(snapshot_wait_timeout_sec)
-                    last_log_elapsed = -1
-
-                    while True:
-                        now_ts = loop.time()
-                        elapsed = int(now_ts - start_ts)
-                        if now_ts >= deadline_ts:
+                        next_snapshot, snapshot_wait_seconds = (
+                            await self._wait_for_next_account_snapshot(
+                                tenant_id=tenant_id,
+                                user_id=user_id,
+                                trading_mode=trading_mode,
+                                baseline_snapshot_at=baseline_snapshot_at,
+                                timeout_seconds=wait_snapshot_timeout,
+                                poll_interval_seconds=wait_snapshot_poll_interval,
+                            )
+                        )
+                        if not next_snapshot:
                             error_msg = (
-                                "等待账户上报超时，已终止买单阶段："
-                                f"timeout={snapshot_wait_timeout_sec}s"
+                                f"等待下一次账户上报超时({snapshot_wait_seconds}s)，"
+                                "已终止买单提交"
+                            )
+                            await manual_execution_persistence.update_task(
+                                task_id=task_id,
+                                status="failed",
+                                stage="dispatching",
+                                error_stage="portfolio_lookup",
+                                error_message=error_msg,
+                                signal_count=total,
+                                order_count=processed,
+                                success_count=success_count,
+                                failed_count=failed_count + 1,
                             )
                             manual_execution_log_stream.append_log(
                                 task_id=task_id,
@@ -2907,63 +2885,14 @@ class ManualExecutionService:
                                 status="failed",
                                 line=error_msg,
                             )
-                            await manual_execution_persistence.update_task(
-                                task_id=task_id,
-                                status="failed",
-                                stage="dispatching",
-                                error_stage="account_snapshot_wait",
-                                error_message=error_msg,
-                                result_payload={
-                                    "success": False,
-                                    "task_id": task_id,
-                                    "task_type": task_type,
-                                    "run_id": run_id,
-                                    "model_id": prepared.model_id,
-                                    "strategy_id": strategy_id,
-                                    "strategy_name": prepared.strategy_name,
-                                    "stage": "dispatching",
-                                    "stage_label": _stage_label("dispatching"),
-                                    "error_stage": "account_snapshot_wait",
-                                    "error_stage_label": "等待账户上报",
-                                    "error": error_msg,
-                                    "preview_summary": {
-                                        **runtime_plan_summary,
-                                        "snapshot_wait_timeout_seconds": snapshot_wait_timeout_sec,
-                                        "snapshot_wait_seconds": elapsed,
-                                        "account_poll_interval_seconds": account_poll_interval_sec,
-                                    },
-                                },
-                            )
-                            manual_execution_log_stream.update_state(
-                                task_id=task_id,
-                                tenant_id=tenant_id,
-                                user_id=user_id,
-                                stage="dispatching",
-                                status="failed",
-                                error_stage="account_snapshot_wait",
-                                error_message=error_msg,
-                            )
                             return
-
-                        latest_snapshot = await self._load_latest_account_snapshot(
+                    else:
+                        next_snapshot = baseline_snapshot or await self._load_latest_account_snapshot(
                             tenant_id=tenant_id,
                             user_id=user_id,
                             trading_mode=trading_mode,
                         )
-                        latest_snapshot_at = _parse_iso_datetime(
-                            (latest_snapshot or {}).get("snapshot_at")
-                        )
-                        has_next_snapshot = (
-                            latest_snapshot is not None
-                            and latest_snapshot_at is not None
-                            and (
-                                baseline_snapshot_at is None
-                                or latest_snapshot_at > baseline_snapshot_at
-                            )
-                        )
-                        if has_next_snapshot:
-                            snapshot_wait_seconds = elapsed
-                            next_snapshot = latest_snapshot
+                        if trading_mode == "SIMULATION":
                             manual_execution_log_stream.append_log(
                                 task_id=task_id,
                                 tenant_id=tenant_id,
@@ -2971,264 +2900,291 @@ class ManualExecutionService:
                                 level="info",
                                 stage="dispatching",
                                 status="running",
-                                line=(
-                                    "已检测到下一次账户上报："
-                                    f"wait={snapshot_wait_seconds}s，"
-                                    f"snapshot_at={latest_snapshot.get('snapshot_at')}"
-                                ),
-                            )
-                            break
-
-                        if elapsed // 15 > last_log_elapsed:
-                            last_log_elapsed = elapsed // 15
-                            manual_execution_log_stream.append_log(
-                                task_id=task_id,
-                                tenant_id=tenant_id,
-                                user_id=user_id,
-                                level="info",
-                                stage="dispatching",
-                                status="running",
-                                line=(
-                                    "等待账户上报中："
-                                    f"elapsed={elapsed}s，"
-                                    f"baseline_snapshot_at={str((baseline_snapshot or {}).get('snapshot_at') or '-')}"
-                                ),
+                                progress=int((processed / total) * 100),
+                                line="模拟盘模式：使用当前模拟账户快照重算买单预算，不等待实盘账户上报",
                             )
 
-                        await asyncio.sleep(
-                            min(
-                                account_poll_interval_sec,
-                                max(0.2, deadline_ts - now_ts),
+                    buy_budget_from_snapshot = round(
+                        _to_float(
+                            (next_snapshot or {}).get("available_cash")
+                            or (next_snapshot or {}).get("cash"),
+                            0.0,
+                        ),
+                        2,
+                    )
+                    if trading_mode == "SIMULATION":
+                        phase_rows, rebudget_skipped, remaining_cash = (
+                            _rebuild_buy_orders_for_simulation_cash(
+                                buy_orders,
+                                available_cash=buy_budget_from_snapshot,
                             )
                         )
-                else:
+                    else:
+                        phase_rows, rebudget_skipped, remaining_cash = (
+                            _rebuild_buy_orders_by_available_cash(
+                                buy_orders,
+                                available_cash=buy_budget_from_snapshot,
+                            )
+                        )
+                    skipped_items.extend(rebudget_skipped)
                     manual_execution_log_stream.append_log(
                         task_id=task_id,
                         tenant_id=tenant_id,
                         user_id=user_id,
-                        level="warning",
+                        level="info",
                         stage="dispatching",
                         status="running",
-                        line="卖单阶段未产生成功提交的卖单，使用当前账户快照继续买单阶段",
+                        progress=int((processed / total) * 100),
+                        line=(
+                            f"检测到新账户快照并重算买单: available_cash={buy_budget_from_snapshot:.2f}, "
+                            f"buy_orders={len(phase_rows)}, skipped={len(rebudget_skipped)}, "
+                            f"remaining={remaining_cash:.2f}, mode={trading_mode}"
+                        ),
                     )
+                    for skipped in rebudget_skipped:
+                        skip_symbol = str(skipped.get("symbol") or "").strip().upper()
+                        skip_reason = str(skipped.get("reason") or "资金不足").strip()
+                        manual_execution_log_stream.append_log(
+                            task_id=task_id,
+                            tenant_id=tenant_id,
+                            user_id=user_id,
+                            level="warning",
+                            stage="dispatching",
+                            status="running",
+                            progress=int((processed / total) * 100),
+                            line=f"买单跳过: {skip_symbol} | 原因: {skip_reason}",
+                        )
 
-                if not next_snapshot:
-                    error_msg = "未获取到可用账户快照，无法继续买单重算"
+                if not phase_rows:
+                    continue
+
+                for row in phase_rows:
+                    index = processed + 1
+                    symbol = str(row.get("symbol") or "").strip().upper()
+                    fusion_score = _to_float(row.get("fusion_score"), 0.0)
+                    expected_price = _to_float(row.get("price"), 0.0)
+                    reference_price = _to_float(row.get("reference_price"), 0.0)
+                    preview_price = expected_price if expected_price > 0 else reference_price
+                    side = str(row.get("side") or "").strip().upper()
+                    trade_action = (
+                        str(
+                            row.get("trade_action")
+                            or ("BUY_TO_OPEN" if side == "BUY" else "SELL_TO_CLOSE")
+                        )
+                        .strip()
+                        .upper()
+                    )
+                    order_type = "MARKET"
+                    quantity = _to_int(row.get("quantity"), 0)
+
+                    order_payload = {
+                        "symbol": symbol,
+                        "side": side,
+                        "quantity": quantity,
+                        "price": 0.0,
+                        "client_order_id": f"manual-{task_id[-8:]}-{index:04d}",
+                        "order_type": order_type,
+                        "trading_mode": trading_mode,
+                        "remarks": (
+                            f"manual_task={task_id} run_id={run_id} "
+                            f"fusion_score={fusion_score:.6f} "
+                            f"order_type=MARKET "
+                            f"preview_price={preview_price:.4f} "
+                            f"reason={str(row.get('reason') or '').strip()}"
+                        ),
+                        "strategy_id": strategy_id,
+                        "trade_action": trade_action,
+                        "position_side": "LONG",
+                        "is_margin_trade": False,
+                    }
+
                     manual_execution_log_stream.append_log(
                         task_id=task_id,
                         tenant_id=tenant_id,
                         user_id=user_id,
-                        level="error",
-                        stage="dispatching",
-                        status="failed",
-                        line=error_msg,
-                    )
-                    await manual_execution_persistence.update_task(
-                        task_id=task_id,
-                        status="failed",
-                        stage="dispatching",
-                        error_stage="account_snapshot_wait",
-                        error_message=error_msg,
-                    )
-                    manual_execution_log_stream.update_state(
-                        task_id=task_id,
-                        tenant_id=tenant_id,
-                        user_id=user_id,
-                        stage="dispatching",
-                        status="failed",
-                        error_stage="account_snapshot_wait",
-                        error_message=error_msg,
-                    )
-                    return
-
-                buy_budget_from_snapshot = _to_float(
-                    next_snapshot.get("available_cash") or next_snapshot.get("cash"),
-                    0.0,
-                )
-                if trading_mode == "SIMULATION":
-                    recalculated_buy_orders, buy_skipped_items, buy_remaining_cash = (
-                        _rebuild_buy_orders_for_simulation_cash(
-                            buy_orders=buy_orders,
-                            available_cash=buy_budget_from_snapshot,
-                        )
-                    )
-                else:
-                    recalculated_buy_orders, buy_skipped_items, buy_remaining_cash = (
-                        _rebuild_buy_orders_by_available_cash(
-                            buy_orders=buy_orders,
-                            available_cash=buy_budget_from_snapshot,
-                        )
-                    )
-                if buy_skipped_items:
-                    skipped_items.extend(buy_skipped_items)
-                    manual_execution_log_stream.append_log(
-                        task_id=task_id,
-                        tenant_id=tenant_id,
-                        user_id=user_id,
-                        level="warning",
+                        level="info",
                         stage="dispatching",
                         status="running",
-                        line=f"买单重算后新增跳过 {len(buy_skipped_items)} 笔（资金不足或缺少行情）",
+                        progress=int((index - 1) * 100 / total),
+                        line=(
+                            f"[{index}/{total}] 正在提交委托: {side} {symbol} "
+                            f"qty={quantity} preview={preview_price:.2f} order_type=MARKET"
+                        ),
                     )
-                buy_orders = recalculated_buy_orders
 
-                runtime_plan_summary.update(
-                    {
-                        "execution_phase": "sell_snapshot_poll_buy",
-                        "sell_order_count": len(sell_orders),
-                        "buy_order_count": len(buy_orders),
-                        "skipped_count": len(skipped_items),
-                        "sell_submitted_count": len(submitted_sell_orders),
-                        "snapshot_wait_timeout_seconds": snapshot_wait_timeout_sec,
-                        "account_poll_interval_seconds": account_poll_interval_sec,
-                        "snapshot_wait_seconds": snapshot_wait_seconds,
-                        "baseline_snapshot_at": (baseline_snapshot or {}).get("snapshot_at"),
-                        "used_snapshot_at": (next_snapshot or {}).get("snapshot_at"),
-                        "buy_budget_from_snapshot": round(buy_budget_from_snapshot, 2),
-                        "estimated_remaining_cash": round(buy_remaining_cash, 2),
-                    }
-                )
+                    try:
+                        # 策略计算与下单
+                        from backend.services.trade.services.internal_strategy_dispatcher import (
+                            dispatch_internal_strategy_order,
+                        )
 
-                manual_execution_log_stream.append_log(
-                    task_id=task_id,
-                    tenant_id=tenant_id,
-                    user_id=user_id,
-                    level="info",
-                    stage="dispatching",
-                    status="running",
-                    line=(
-                        "使用最新可用资金重算买单："
-                        f"buy_budget={buy_budget_from_snapshot:.2f}，"
-                        f"buy_orders={len(buy_orders)}"
-                    ),
-                )
-            else:
-                runtime_plan_summary.update(
-                    {
-                        "execution_phase": "buy_only",
-                        "sell_order_count": 0,
-                        "buy_order_count": len(buy_orders),
-                        "skipped_count": len(skipped_items),
-                    }
-                )
-                manual_execution_log_stream.append_log(
-                    task_id=task_id,
-                    tenant_id=tenant_id,
-                    user_id=user_id,
-                    level="info",
-                    stage="dispatching",
-                    status="running",
-                    line="本次预案无卖单，直接进入买单阶段",
-                )
+                        result = await dispatch_internal_strategy_order(
+                            order_data=order_payload,
+                            user_id=user_id,
+                            tenant_id=tenant_id,
+                            redis=get_redis(),
+                            db=db,
+                        )
 
-            # Phase 2: 提交买单（若存在）
-            if buy_orders:
-                manual_execution_log_stream.append_log(
-                    task_id=task_id,
-                    tenant_id=tenant_id,
-                    user_id=user_id,
-                    level="info",
-                    stage="dispatching",
-                    status="running",
-                    line=f"进入买单执行阶段，共 {len(buy_orders)} 笔买单",
-                )
-                for row in buy_orders:
-                    submit_index += 1
-                    await _submit_one_order(row, submit_index)
-            else:
-                manual_execution_log_stream.append_log(
-                    task_id=task_id,
-                    tenant_id=tenant_id,
-                    user_id=user_id,
-                    level="warning",
-                    stage="dispatching",
-                    status="running",
-                    line="买单阶段无可执行委托（可能因卖单未成交释放资金）",
-                )
+                        # 严格的状态判断：必须 result["status"] == "success" 且其内部 result["success"] 也是 True
+                        # 针对 internal_strategy_dispatcher 的结构进行优化
+                        submit_inner_res = result.get("result", {})
+                        is_success = (result.get("status") == "success") and (
+                            submit_inner_res.get("success") is not False
+                        )
 
-            buy_cancel_timeout_sec = _manual_task_buy_cancel_timeout_seconds()
-            buy_cancel_requested_count = 0
-            buy_cancel_targets: list[dict[str, Any]] = []
-            if submitted_buy_orders:
-                manual_execution_log_stream.append_log(
-                    task_id=task_id,
-                    tenant_id=tenant_id,
-                    user_id=user_id,
-                    level="info",
-                    stage="dispatching",
-                    status="running",
-                    line=(
-                        "买单已提交，进入超时撤单观察窗："
-                        f"submitted={len(submitted_buy_orders)}，timeout={buy_cancel_timeout_sec}s"
-                    ),
-                )
-                await asyncio.sleep(float(buy_cancel_timeout_sec))
+                        execution = result.get("execution")
+                        order_id = result.get("order_id", "-")
 
-                buy_client_ids = [
-                    str(item.get("client_order_id") or "")
-                    for item in submitted_buy_orders
-                    if str(item.get("client_order_id") or "")
-                ]
-                if buy_client_ids:
-                    buy_order_rows = (
-                        await db.execute(
-                            select(Order).where(
-                                and_(
-                                    Order.tenant_id == tenant_id,
-                                    Order.user_id == user_id,
-                                    Order.client_order_id.in_(buy_client_ids),
+                        if is_success:
+                            success_count += 1
+                            if trading_mode == "REAL":
+                                line = (
+                                    f"  >> 已派发: {symbol} | 订单ID: {order_id} | "
+                                    f"派发类型: {execution} | 等待QMT委托/成交回报"
                                 )
+                            else:
+                                line = f"  >> 提交完成: {symbol} | 订单ID: {order_id} | 派发类型: {execution}"
+                            level = "info"
+                            if phase_name == "BUY":
+                                try:
+                                    buy_submitted_order_ids.append(str(uuid_lib.UUID(str(order_id))))
+                                except Exception:
+                                    pass
+                        elif result.get("status") == "rejected":
+                            failed_count += 1
+                            violations = result.get("violations", [])
+                            line = f"  >> [拦截] 风控拒绝: {symbol} | 原因: {violations}"
+                            level = "warning"
+                            if not first_error:
+                                first_error = f"{symbol}: 风控拦截({violations})"
+                        else:
+                            failed_count += 1
+                            error_detail = (
+                                submit_inner_res.get("message")
+                                or result.get("detail")
+                                or "柜台拒绝或连接断开"
+                            )
+                            line = f"  >> [失败] 执行异常: {symbol} | 详情: {error_detail}"
+                            level = "error"
+                            if not first_error:
+                                first_error = f"{symbol}: {error_detail}"
+
+                        manual_execution_log_stream.append_log(
+                            task_id=task_id,
+                            tenant_id=tenant_id,
+                            user_id=user_id,
+                            level=level,
+                            stage="dispatching",
+                            line=line,
+                        )
+
+                    except Exception as e:
+                        failed_count += 1
+                        error_msg = (
+                            f"  >> [崩溃] 处理标的 {symbol} 时发生程序异常: {str(e)}"
+                        )
+                        manual_execution_log_stream.append_log(
+                            task_id=task_id,
+                            tenant_id=tenant_id,
+                            user_id=user_id,
+                            level="error",
+                            stage="dispatching",
+                            line=error_msg,
+                        )
+                        if not first_error:
+                            first_error = str(e)
+
+                    processed = index
+                    progress = int((processed / total) * 100)
+
+                    # 实时更新进度
+                    if index % 5 == 0 or index == total:
+                        await manual_execution_persistence.update_task(
+                            task_id=task_id,
+                            status="running" if index < total else "completed",
+                            progress=progress,
+                            order_count=index,
+                            success_count=success_count,
+                            failed_count=failed_count,
+                        )
+
+                    # 给日志流一点喘息时间，避免瞬间冲刷
+                    await asyncio.sleep(0.05)
+
+            if buy_submitted_order_ids:
+                manual_execution_log_stream.append_log(
+                    task_id=task_id,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    level="info",
+                    stage="dispatching",
+                    status="running",
+                    progress=int((processed / total) * 100),
+                    line=(
+                        f"买单已全部提交，开始 {buy_cancel_timeout}s 成交观察窗，"
+                        "超时将对未完全成交买单发起撤单"
+                    ),
+                )
+                await asyncio.sleep(buy_cancel_timeout)
+                from backend.services.trade.services.trading_engine import TradingEngine
+
+                parsed_ids: list[uuid_lib.UUID] = []
+                for order_id in buy_submitted_order_ids:
+                    try:
+                        parsed_ids.append(uuid_lib.UUID(str(order_id)))
+                    except Exception:
+                        continue
+
+                if parsed_ids:
+                    engine = TradingEngine(db, get_redis())
+                    buy_orders_stmt = (
+                        select(Order)
+                        .where(
+                            and_(
+                                Order.tenant_id == tenant_id,
+                                Order.user_id == int(user_id),
+                                Order.order_id.in_(parsed_ids),
                             )
                         )
-                    ).scalars().all()
-                    order_map = {
-                        str(getattr(order, "client_order_id", "") or ""): order
-                        for order in buy_order_rows
-                    }
-                    for item in submitted_buy_orders:
-                        client_order_id = str(item.get("client_order_id") or "")
-                        order = order_map.get(client_order_id)
-                        if not order:
-                            continue
-                        status_text = _order_status_text(getattr(order, "status", ""))
-                        if not _should_request_cancel_for_buy_status(status_text):
-                            continue
-                        cancelled = await trading_engine.cancel_order_execution(order)
-                        if not cancelled:
-                            continue
-                        buy_cancel_requested_count += 1
+                    )
+                    buy_order_rows = (
+                        (await db.execute(buy_orders_stmt)).scalars().all()
+                    )
+                    for submitted_order in buy_order_rows:
+                        current_status = str(
+                            getattr(submitted_order.status, "value", submitted_order.status)
+                            or ""
+                        )
+                        cancel_requested = False
+                        if _is_cancelable_buy_status(submitted_order.status):
+                            cancel_requested = bool(
+                                await engine.cancel_order_execution(submitted_order)
+                            )
+                            if cancel_requested:
+                                buy_cancel_requested_count += 1
                         buy_cancel_targets.append(
                             {
-                                "symbol": str(getattr(order, "symbol", "") or ""),
-                                "order_id": str(getattr(order, "order_id", "") or ""),
-                                "client_order_id": client_order_id,
-                                "status_before_cancel": status_text,
+                                "order_id": str(submitted_order.order_id),
+                                "symbol": str(submitted_order.symbol or ""),
+                                "status": current_status,
+                                "cancel_requested": cancel_requested,
                             }
                         )
 
-                manual_execution_log_stream.append_log(
-                    task_id=task_id,
-                    tenant_id=tenant_id,
-                    user_id=user_id,
-                    level="info",
-                    stage="dispatching",
-                    status="running",
-                    line=(
-                        "超时撤单统计："
-                        f"submitted_buy={len(submitted_buy_orders)}，"
-                        f"cancel_requested={buy_cancel_requested_count}"
-                    ),
-                )
-
-            runtime_plan_summary.update(
-                {
-                    "buy_cancel_timeout_seconds": buy_cancel_timeout_sec,
-                    "buy_cancel_requested_count": buy_cancel_requested_count,
-                    "buy_cancel_targets": buy_cancel_targets,
-                }
-            )
-
-            plan_summary = runtime_plan_summary
+                    manual_execution_log_stream.append_log(
+                        task_id=task_id,
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        level="info",
+                        stage="dispatching",
+                        status="running",
+                        progress=int((processed / total) * 100),
+                        line=(
+                            f"买单超时撤单统计: submitted={len(buy_submitted_order_ids)}, "
+                            f"cancel_requested={buy_cancel_requested_count}"
+                        ),
+                    )
 
             result_payload = {
                 "success": failed_count == 0,
@@ -3246,6 +3202,10 @@ class ManualExecutionService:
                 "failed_count": failed_count,
                 "first_error": first_error or None,
                 "preview_summary": plan_summary,
+                "snapshot_wait_seconds": snapshot_wait_seconds,
+                "buy_budget_from_snapshot": buy_budget_from_snapshot,
+                "buy_cancel_requested_count": buy_cancel_requested_count,
+                "buy_cancel_targets": buy_cancel_targets,
                 "stage_label": _stage_label("completed"),
             }
             await manual_execution_persistence.update_task(

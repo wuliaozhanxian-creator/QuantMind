@@ -57,6 +57,8 @@ SCHEMA_SPECS: tuple[SchemaSpec, ...] = (
             "backend.services.api.user_app.models.notification",
             "backend.services.api.user_app.models.kyc",
             "backend.services.api.user_app.models.rbac",
+            "backend.services.api.user_app.models.data_download",
+            "backend.services.api.user_app.models.data_update",
         ),
     ),
     SchemaSpec(
@@ -83,8 +85,17 @@ SCHEMA_SPECS: tuple[SchemaSpec, ...] = (
         service="quantmind-trade",
         base_module="backend.services.trade.simulation.models",
         bootstrap_modules=(
+            "backend.services.trade.simulation.models.account",
+            "backend.services.trade.simulation.models.cash_ledger",
             "backend.services.trade.simulation.models.order",
+            "backend.services.trade.simulation.models.order_v2",
+            "backend.services.trade.simulation.models.position_lot",
             "backend.services.trade.simulation.models.trade",
+            "backend.services.trade.simulation.models.fill",
+            "backend.services.trade.simulation.models.account_daily",
+            "backend.services.trade.simulation.models.position_daily",
+            "backend.services.trade.simulation.models.corporate_action",
+            "backend.services.trade.simulation.models.rebalance_job",
             "backend.services.trade.simulation.models.fund_snapshot",
         ),
     ),
@@ -163,8 +174,6 @@ async def create_registered_tables(
     schema_keys: Iterable[str] | None = None,
     checkfirst: bool = True,
 ) -> None:
-    """已禁用自动建表，强制使用 quantmind_init.sql"""
-    # for schema in load_registered_schemas(schema_keys):
-    #     async with engine.begin() as conn:
-    #         await conn.run_sync(lambda sync_conn: schema.metadata.create_all(sync_conn, checkfirst=checkfirst))
-    pass
+    for schema in load_registered_schemas(schema_keys):
+        async with engine.begin() as conn:
+            await conn.run_sync(lambda sync_conn: schema.metadata.create_all(sync_conn, checkfirst=checkfirst))

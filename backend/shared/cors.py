@@ -70,8 +70,7 @@ def resolve_cors_origins(
                         runtime,
                     )
                 return []
-            # 在开发模式下，如果配置了 *，则返回 ["*"] 允许所有来源（包括 Electron 的 file://）
-            return ["*"]
+            return default_dev_origins or list(DEFAULT_DEV_ORIGINS)
         return origins
 
     if prod_like:

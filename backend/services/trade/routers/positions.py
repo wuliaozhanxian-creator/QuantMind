@@ -42,7 +42,7 @@ async def create_position(
     portfolio_id: int = Path(..., description="投资组合ID"),
     data: PositionCreate = ...,
     tenant_id: str = Depends(get_current_tenant_id),
-    user_id: str = Depends(get_current_user_id),
+    user_id: int = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
     """创建持仓（开仓）"""
@@ -76,7 +76,7 @@ async def list_positions(
     portfolio_id: int = Path(..., description="投资组合ID"),
     status: str | None = Query(None, description="状态过滤"),
     tenant_id: str = Depends(get_current_tenant_id),
-    user_id: str = Depends(get_current_user_id),
+    user_id: int = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
     """查询持仓列表"""
@@ -125,7 +125,7 @@ async def get_position(
     request: Request,
     position_id: int = Path(..., description="持仓ID"),
     tenant_id: str = Depends(get_current_tenant_id),
-    user_id: str = Depends(get_current_user_id),
+    user_id: int = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
     """查询持仓详情"""
@@ -154,7 +154,7 @@ async def update_position_price(
     position_id: int = Path(..., description="持仓ID"),
     current_price: Decimal = Query(..., gt=0, description="当前价格"),
     tenant_id: str = Depends(get_current_tenant_id),
-    user_id: str = Depends(get_current_user_id),
+    user_id: int = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
     """更新持仓价格"""
@@ -183,7 +183,7 @@ async def adjust_position(
     position_id: int = Path(..., description="持仓ID"),
     data: PositionAdjust = ...,
     tenant_id: str = Depends(get_current_tenant_id),
-    user_id: str = Depends(get_current_user_id),
+    user_id: int = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
     """调整持仓（加仓/减仓）"""
@@ -211,7 +211,7 @@ async def close_position(
     price: Decimal = Query(..., gt=0, description="平仓价格"),
     note: str | None = Query(None, description="备注"),
     tenant_id: str = Depends(get_current_tenant_id),
-    user_id: str = Depends(get_current_user_id),
+    user_id: int = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
     """平仓"""
@@ -240,7 +240,7 @@ async def get_position_history(
     position_id: int = Path(..., description="持仓ID"),
     limit: int = Query(100, ge=1, le=1000, description="限制数量"),
     tenant_id: str = Depends(get_current_tenant_id),
-    user_id: str = Depends(get_current_user_id),
+    user_id: int = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
     """查询持仓历史"""

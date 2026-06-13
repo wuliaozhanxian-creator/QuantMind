@@ -14,6 +14,17 @@ from backend.services.trade.models.order import Order
 from backend.services.trade.portfolio.models import Portfolio
 from backend.services.trade.redis_client import RedisClient
 from backend.services.trade.schemas.order import OrderCreate
+from backend.services.trade.simulation.models.order import (
+    OrderSide as SimOrderSide,
+    OrderStatus as SimOrderStatus,
+    OrderType as SimOrderType,
+)
+from backend.services.trade.simulation.schemas.order import SimOrderCreate
+from backend.services.trade.simulation.services.execution_engine import SimulationExecutionEngine
+from backend.services.trade.simulation.services.order_service import SimOrderService
+from backend.services.trade.simulation.services.order_submission_service import (
+    SimulationOrderSubmissionService,
+)
 from backend.services.trade.services.order_service import OrderService
 from backend.services.trade.services.simulation_manager import SimulationAccountManager
 from backend.services.trade.services.trading_engine import TradingEngine
@@ -40,6 +51,70 @@ _TRADE_ACTION_ALIAS = {
 def _normalize_trade_action(raw: Any) -> str | None:
     value = str(getattr(raw, "value", raw) or "").strip().lower()
     return _TRADE_ACTION_ALIAS.get(value, value) or None
+
+
+async def _resolve_portfolio_id(
+    *,
+    db: AsyncSession,
+    tenant_id: str,
+    user_id: int,
+    strategy_id: Any,
+) -> int:
+    snapshot = await _fetch_active_portfolio_snapshot(
+        db,
+        tenant_id=tenant_id,
+        user_id=str(user_id),
+        strategy_id=str(strategy_id or ""),
+    )
+    if snapshot:
+        return int(snapshot.get("portfolio_id") or 0)
+
+    stmt = (
+        select(Portfolio.id)
+        .where(
+            and_(
+                Portfolio.tenant_id == tenant_id,
+                Portfolio.user_id == user_id,
+                Portfolio.status == "active",
+            )
+        )
+        .order_by(Portfolio.updated_at.desc())
+        .limit(1)
+    )
+    result = await db.execute(stmt)
+    return int(result.scalar_one_or_none() or 0)
+
+
+async def _resolve_virtual_fill_price(
+    *,
+    symbol: str,
+    requested_price: float,
+    user_id: int,
+    tenant_id: str,
+    db: AsyncSession,
+    sim_manager: SimulationAccountManager,
+) -> tuple[float, str]:
+    if requested_price > 0:
+        return requested_price, "signal_price"
+
+    try:
+        engine = SimulationExecutionEngine(db, sim_manager)
+        snapshot = await engine._latest_price(symbol, user_id=user_id, tenant_id=tenant_id)
+        resolved_price = float(snapshot.price or 0.0)
+        if resolved_price <= 0:
+            raise ValueError("non-positive market snapshot")
+        return resolved_price, str(snapshot.price_source or "quote_fallback")
+    except Exception as exc:
+        logger.error(
+            "[Shadow/Sim] 行情兜底失败 | tenant=%s user=%s symbol=%s requested_price=%s err=%s",
+            tenant_id,
+            user_id,
+            symbol,
+            requested_price,
+            exc,
+            exc_info=True,
+        )
+        raise HTTPException(status_code=500, detail=f"failed to resolve simulation fill price for {symbol}: {exc}")
 
 
 async def dispatch_internal_strategy_order(
@@ -92,60 +167,105 @@ async def dispatch_internal_strategy_order(
         is_margin_trade,
     )
 
-    if trading_mode in {TradingMode.SHADOW, TradingMode.SIMULATION}:
+    strategy_id = order_data.get("strategy_id")
+    strategy_id_str = str(strategy_id or "").strip()
+    strategy_id_val = int(strategy_id_str) if strategy_id_str.isdigit() else None
+    portfolio_id = int(order_data.get("portfolio_id") or 0)
+    if portfolio_id <= 0:
+        portfolio_id = await _resolve_portfolio_id(
+            db=db,
+            tenant_id=tenant,
+            user_id=uid,
+            strategy_id=strategy_id,
+        )
+
+    if trading_mode in {TradingMode.SIMULATION, TradingMode.SHADOW}:
         sim_manager = SimulationAccountManager(redis)
+        sim_side = SimOrderSide.BUY if side_raw == "BUY" else SimOrderSide.SELL
         try:
-            side = 1 if side_raw == "BUY" else -1
-            gross = price * quantity
-            delta_cash = -gross if side > 0 else gross
-            result = await sim_manager.update_balance(
-                user_id=uid,
-                symbol=symbol,
-                delta_cash=delta_cash,
-                delta_volume=quantity if side > 0 else -quantity,
-                price=price,
+            sim_order_type = SimOrderType(order_type_raw.lower())
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"invalid order_type: {order_type_raw}")
+        try:
+            submission = await SimulationOrderSubmissionService(
+                db,
+                sim_manager,
+            ).submit_and_fill(
                 tenant_id=tenant,
+                user_id=uid,
+                portfolio_id=max(0, portfolio_id),
+                strategy_id=strategy_id_val,
+                symbol=symbol,
+                side=sim_side.value,
+                order_type=sim_order_type.value,
+                quantity=quantity,
+                price=price if price > 0 else None,
+                remarks=remarks,
                 trade_action=trade_action_raw,
-                position_side=position_side_raw,
+                position_side=position_side_raw or "long",
                 is_margin_trade=is_margin_trade,
+                client_order_id=client_order_id,
+                trigger_source="strategy_dispatch",
             )
-            logger.info("[Shadow/Sim] 虚拟成交完成: %s", symbol)
-            return {"status": "success", "execution": "virtual", "detail": result}
+            if not submission.success:
+                logger.warning(
+                    "[%s] 虚拟成交拒绝: symbol=%s side=%s qty=%s reason=%s",
+                    trading_mode.value,
+                    symbol,
+                    side_raw,
+                    quantity,
+                    submission.message,
+                )
+                return {
+                    "status": "failed",
+                    "execution": (
+                        "simulation_rejected"
+                        if trading_mode == TradingMode.SIMULATION
+                        else "virtual_rejected"
+                    ),
+                    "order_id": str(submission.order_id or ""),
+                    "reason": submission.message,
+                }
+
+            logger.info(
+                "[%s] 虚拟成交完成: %s qty=%s fill_price=%.4f source=%s order_id=%s trade_id=%s",
+                trading_mode.value,
+                symbol,
+                quantity,
+                submission.fill_price,
+                submission.price_source,
+                submission.order_id,
+                submission.trade_id,
+            )
+            submission_message = str(getattr(submission, "message", "") or "")
+            return {
+                "status": "success",
+                "execution": (
+                    "duplicate_skipped"
+                    if submission_message == "duplicate client_order_id skipped"
+                    else "queued_pending_session"
+                    if submission_message == "queued_pending_session"
+                    else "simulation_filled"
+                    if trading_mode == TradingMode.SIMULATION
+                    else "virtual"
+                ),
+                "order_id": str(submission.order_id or ""),
+                "trade_id": str(submission.trade_id or ""),
+                "client_order_id": str(
+                    getattr(submission, "client_order_id", None) or client_order_id or ""
+                ),
+                "fill_price": submission.fill_price,
+                "price_source": submission.price_source,
+                "filled_quantity": submission.filled_quantity,
+                "commission": submission.commission,
+            }
+        except HTTPException:
+            raise
         except Exception as exc:
-            logger.error("[Shadow/Sim] 虚拟成交失败: %s", exc, exc_info=True)
+            logger.error("[%s] 虚拟成交失败: %s", trading_mode.value, exc, exc_info=True)
             raise HTTPException(status_code=500, detail=str(exc))
 
     try:
-        strategy_id = order_data.get("strategy_id")
-        strategy_id_str = str(strategy_id or "").strip()
-        strategy_id_val = int(strategy_id_str) if strategy_id_str.isdigit() else None
-        portfolio_id = int(order_data.get("portfolio_id") or 0)
-        if portfolio_id <= 0:
-            snapshot = await _fetch_active_portfolio_snapshot(
-                db,
-                tenant_id=tenant,
-                user_id=str(uid),
-                strategy_id=str(strategy_id or ""),
-            )
-            if snapshot:
-                portfolio_id = int(snapshot.get("portfolio_id") or 0)
-
-        if portfolio_id <= 0:
-            stmt = (
-                select(Portfolio.id)
-                .where(
-                    and_(
-                        Portfolio.tenant_id == tenant,
-                        Portfolio.user_id == uid,
-                        Portfolio.status == "active",
-                    )
-                )
-                .order_by(Portfolio.updated_at.desc())
-                .limit(1)
-            )
-            result = await db.execute(stmt)
-            portfolio_id = int(result.scalar_one_or_none() or 0)
-
         if portfolio_id <= 0:
             raise HTTPException(status_code=400, detail="no active portfolio available")
 

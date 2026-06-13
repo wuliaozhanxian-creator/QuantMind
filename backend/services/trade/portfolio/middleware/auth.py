@@ -8,9 +8,12 @@ from fastapi import Depends, HTTPException
 from backend.services.trade.deps import AuthContext, get_auth_context
 
 
-async def get_current_user_id(auth: AuthContext = Depends(get_auth_context)) -> str:
-    """获取当前用户 ID (字符串类型，兼容 'admin' 等非数字ID)"""
-    return auth.user_id
+async def get_current_user_id(auth: AuthContext = Depends(get_auth_context)) -> int:
+    """获取当前用户 ID (adapted from portfolio_service)"""
+    try:
+        return int(auth.user_id)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid user_id in token")
 
 
 async def get_current_tenant_id(auth: AuthContext = Depends(get_auth_context)) -> str:

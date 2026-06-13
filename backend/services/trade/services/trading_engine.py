@@ -425,7 +425,11 @@ class TradingEngine:
         available_cash = 0.0
         portfolio_value = 0.0
         trading_mode_value = str(
-            getattr(getattr(order, "trading_mode", None), "value", getattr(order, "trading_mode", ""))
+            getattr(
+                getattr(order, "trading_mode", None),
+                "value",
+                getattr(order, "trading_mode", ""),
+            )
         ).upper()
         try:
             portfolio_stmt = (
@@ -448,7 +452,7 @@ class TradingEngine:
         except Exception as e:
             logger.warning(f"Failed to read portfolio cash from DB: {e}")
 
-        # REAL 模式优先使用最新账户快照的 available_cash，与手动任务买单预算口径一致。
+        # REAL 模式优先使用最新账户快照 available_cash，和手动任务预算口径保持一致。
         if trading_mode_value == "REAL":
             try:
                 from backend.services.trade.routers.real_trading_utils import (

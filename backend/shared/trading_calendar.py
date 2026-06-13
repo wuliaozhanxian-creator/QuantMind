@@ -54,6 +54,52 @@ class SessionWindow:
 
 
 class TradingCalendarService:
+    @staticmethod
+    def _classify_market_phase(
+        *,
+        local_dt: datetime,
+        sessions: list[SessionWindow],
+        is_trading_day: bool,
+    ) -> str:
+        def _coerce_window_dt(value: datetime) -> datetime:
+            if value.tzinfo is None and local_dt.tzinfo is not None:
+                return value.replace(tzinfo=local_dt.tzinfo)
+            if value.tzinfo is not None and local_dt.tzinfo is None:
+                return value.replace(tzinfo=None)
+            return value
+
+        if not is_trading_day:
+            return "CLOSED"
+        if not sessions:
+            return "CLOSED"
+        ordered = sorted(sessions, key=lambda item: item.start_at)
+        first_session = ordered[0]
+        if local_dt < _coerce_window_dt(first_session.start_at):
+            return "PRE_OPEN"
+        previous = None
+        for window in ordered:
+            start_at = _coerce_window_dt(window.start_at)
+            end_at = _coerce_window_dt(window.end_at)
+            if start_at <= local_dt <= end_at:
+                text = str(window.session_name or "").strip().upper()
+                if text in {"AM", "CONTINUOUS_AM"}:
+                    return "CONTINUOUS_AM"
+                if text in {"PM", "CONTINUOUS_PM"}:
+                    return "CONTINUOUS_PM"
+                return text or "CLOSED"
+            if previous is not None:
+                prev_end_at = _coerce_window_dt(previous.end_at)
+                if prev_end_at < local_dt < start_at:
+                    prev_name = str(previous.session_name or "").strip().upper()
+                    next_name = str(window.session_name or "").strip().upper()
+                    if prev_name in {"AM", "CONTINUOUS_AM"} and next_name in {"PM", "CONTINUOUS_PM"}:
+                        return "LUNCH_BREAK"
+                    return "CLOSED"
+            previous = window
+        if local_dt > _coerce_window_dt(ordered[-1].end_at):
+            return "AFTER_CLOSE"
+        return "CLOSED"
+
     async def ensure_tables(self) -> None:
         stmts = [
             """
@@ -399,15 +445,17 @@ class TradingCalendarService:
         now_dt = dt or datetime.now(market_tz)
         local_dt = now_dt.astimezone(market_tz)
         local_date = local_dt.date()
-        if not await self.is_trading_day(
+        is_trading_day = await self.is_trading_day(
             market=mkt,
             trade_date=local_date,
             tenant_id=tenant_id,
             user_id=user_id,
-        ):
+        )
+        if not is_trading_day:
             return {
                 "is_trading_time": False,
                 "matched_session": None,
+                "market_phase": "CLOSED",
                 "timezone": getattr(local_dt.tzinfo, "key", str(local_dt.tzinfo)),
             }
         sessions = await self.get_sessions(
@@ -416,16 +464,29 @@ class TradingCalendarService:
             tenant_id=tenant_id,
             user_id=user_id,
         )
+        def _coerce_window_dt(value: datetime) -> datetime:
+            if value.tzinfo is None and local_dt.tzinfo is not None:
+                return value.replace(tzinfo=local_dt.tzinfo)
+            if value.tzinfo is not None and local_dt.tzinfo is None:
+                return value.replace(tzinfo=None)
+            return value
+        market_phase = self._classify_market_phase(
+            local_dt=local_dt,
+            sessions=sessions,
+            is_trading_day=is_trading_day,
+        )
         for window in sessions:
-            if window.start_at <= local_dt <= window.end_at:
+            if _coerce_window_dt(window.start_at) <= local_dt <= _coerce_window_dt(window.end_at):
                 return {
                     "is_trading_time": True,
                     "matched_session": window.session_name,
+                    "market_phase": market_phase,
                     "timezone": getattr(local_dt.tzinfo, "key", str(local_dt.tzinfo)),
                 }
         return {
             "is_trading_time": False,
             "matched_session": None,
+            "market_phase": market_phase,
             "timezone": getattr(local_dt.tzinfo, "key", str(local_dt.tzinfo)),
         }
 

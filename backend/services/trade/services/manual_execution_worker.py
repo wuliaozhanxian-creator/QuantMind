@@ -20,19 +20,16 @@ async def run_manual_execution_worker(poll_interval: float = 1.0) -> None:
                 if task is None:
                     await asyncio.sleep(interval)
                     continue
-                task_id = str(task.get("task_id") or "").strip()
                 if await manual_execution_persistence.has_completed_predecessor(task):
+                    task_id = str(task.get("task_id") or "")
                     await manual_execution_persistence.update_task(
                         task_id=task_id,
                         status="cancelled",
                         stage="cancelled",
                         error_stage="duplicate_suppressed",
-                        error_message="检测到更早同批次手动任务已完成，当前积压任务自动取消",
+                        error_message="同批次已有更早提交的手动任务完成，本任务已自动取消以避免重复报单",
                     )
-                    logger.warning(
-                        "suppressed duplicate queued manual execution task: %s",
-                        task_id,
-                    )
+                    logger.warning("suppressed duplicate queued manual execution task: %s", task_id)
                     continue
                 await manual_execution_service.process_task(task)
             except asyncio.CancelledError:

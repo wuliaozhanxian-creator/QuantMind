@@ -1,11 +1,6 @@
 import json
-import os
 import time
 from typing import Any, Dict, List
-
-import redis
-
-from backend.shared.trade_redis_keys import normalize_trade_user_id
 
 
 class SandboxContext:
@@ -24,50 +19,13 @@ class SandboxContext:
         live_trade_config: dict | None = None,
     ):
         self.tenant_id = tenant_id
-        self.user_id = normalize_trade_user_id(user_id) or str(user_id)
+        self.user_id = user_id
         self.strategy_id = strategy_id
         self.run_id = run_id
         self.exec_config = exec_config
         self.live_trade_config = live_trade_config or {}
         self.signals_queue: list[dict[str, Any]] = []
         self._current_time: float = time.time()
-        self._redis: redis.Redis | None = None
-        self._account_cache: dict[str, Any] = {}
-        self._last_cache_time: float = 0
-
-    def _get_redis(self) -> redis.Redis | None:
-        """Worker 进程独立获取 Redis 连接"""
-        if self._redis is not None:
-            return self._redis
-        try:
-            host = os.getenv("REDIS_HOST", "127.0.0.1")
-            port = int(os.getenv("REDIS_PORT", "6379"))
-            password = os.getenv("REDIS_PASSWORD", None)
-            db = int(os.getenv("REDIS_DB_TRADE", "2"))
-            self._redis = redis.Redis(host=host, port=port, password=password, db=db, decode_responses=True)
-            return self._redis
-        except Exception:
-            return None
-
-    def _load_account_from_redis(self) -> dict[str, Any]:
-        """从 Redis 加载账户状态，带 1 秒缓存"""
-        now = time.time()
-        if now - self._last_cache_time < 1.0 and self._account_cache:
-            return self._account_cache
-
-        r = self._get_redis()
-        if not r:
-            return self._account_cache
-
-        key = f"simulation:account:{self.tenant_id}:{self.user_id}"
-        try:
-            raw = r.get(key)
-            if raw:
-                self._account_cache = json.loads(raw)
-                self._last_cache_time = now
-        except Exception:
-            pass
-        return self._account_cache
 
     def set_time(self, current_time: float):
         """由 Worker 事件循环驱动当前时间"""
@@ -90,14 +48,23 @@ class SandboxContext:
         self.signals_queue.append(signal)
 
     def order(self, symbol: str, quantity: int, price: float, side: str, order_type: str = "limit"):
-        """直接下单接口：手动指定买卖方向和数量/价格"""
-        self._add_order_signal(symbol=symbol, quantity=quantity, price=price, side=side, order_type=order_type)
+        """
+        直接下单接口：发送订单信号到沙箱引擎。
+        参数:
+            symbol: 股票代码 (如 "SH600036")
+            quantity: 数量 (正整数)
+            price: 价格 (限价单必填)
+            side: 方向 ("buy" 或 "sell")
+            order_type: 订单类型 ("limit" 或 "market")
+        """
+        self._add_order_signal(symbol, quantity, price, side, order_type)
 
     def order_target_percent(self, symbol: str, target_percent: float):
         """
         常见交易API接口：设置目标持仓比例。
         沙箱在这里只产生一条 intent (意图信号)，不真实向柜台发单。
         """
+        # 注意：这里我们简化的输出一个特殊信号，交给后端的中央引擎去解析当前仓位并转换成具体单量
         signal = {
             "type": "order_target_percent",
             "tenant_id": self.tenant_id,
@@ -109,30 +76,17 @@ class SandboxContext:
         }
         self.signals_queue.append(signal)
 
-    def get_position(self, symbol: str) -> dict[str, Any]:
-        """从 Redis 读取真实持仓状态"""
-        account = self._load_account_from_redis()
-        positions = account.get("positions", {})
-        pos = positions.get(symbol.upper())
-        if pos:
-            return {
-                "symbol": symbol.upper(),
-                "volume": float(pos.get("volume", 0)),
-                "cost": float(pos.get("cost", 0)),
-                "price": float(pos.get("price", 0)),
-                "market_value": float(pos.get("market_value", 0)),
-            }
-        return {"symbol": symbol.upper(), "volume": 0, "cost": 0, "price": 0, "market_value": 0}
+    def get_position(self, symbol: str):
+        """由于隔离，暂时不支持在模拟沙箱中通过 SDK 实时同步读取 Redis 回来的资金。只支持粗粒度撮合意图"""
+        return 0
 
-    def get_cash(self) -> float:
-        """从 Redis 读取真实可用现金"""
-        account = self._load_account_from_redis()
-        return float(account.get("cash", 0))
+    def get_cash(self):
+        """获取当前现金（沙箱模式下返回 0）"""
+        return 0
 
-    def get_total_asset(self) -> float:
-        """从 Redis 读取真实总资产"""
-        account = self._load_account_from_redis()
-        return float(account.get("total_asset", 0))
+    def get_total_asset(self):
+        """获取总资产（沙箱模式下返回 0）"""
+        return 0
 
     def flush_signals(self) -> list[dict[str, Any]]:
         """Worker 每个 Tick 结束后，将收集到的信号抛出。"""

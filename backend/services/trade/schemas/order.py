@@ -101,7 +101,7 @@ class OrderResponse(OrderBase):
             from datetime import timedelta
             shanghai_tz = timezone(timedelta(hours=8))
             aware_value = value.replace(tzinfo=shanghai_tz)
-
+        
         return aware_value.astimezone(timezone.utc).isoformat()
 
 
@@ -116,7 +116,7 @@ class OrderListQuery(BaseModel):
     """Order list query"""
 
     tenant_id: str | None = None
-    user_id: str | None = None
+    user_id: int | None = None
     portfolio_id: int | None = None
     symbol: str | None = None
     status: OrderStatus | None = None

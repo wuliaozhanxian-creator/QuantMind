@@ -18,6 +18,7 @@ from backend.services.trade.redis_client import RedisClient
 from backend.services.trade.schemas.trade import TradeListQuery
 from backend.services.trade.services.remote_service import remote_service
 from backend.services.trade.trade_config import settings
+from backend.services.trade.portfolio.schemas.portfolio import TradeSync
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ class TradeService:
         await self.redis.delete_pattern(pattern)
         logger.debug(f"Invalidated all trade caches for user {user_id}")
 
-    async def list_trades(self, query: TradeListQuery) -> list[Trade]:
+    async def list_trades(self, query: TradeListQuery) -> List[Trade]:
         """List trades with aggressive Redis caching"""
         # Try cache for standard list queries (no specific symbol/date filters)
         cache_key = None
@@ -53,7 +54,7 @@ class TradeService:
             cache_key = self._get_trade_list_cache_key(query.user_id, query.portfolio_id, query.trading_mode)
             # Add paging info to key
             cache_key += f":limit:{query.limit}:offset:{query.offset}"
-
+            
             cached_data = await self.redis.get(cache_key)
             if cached_data:
                 logger.info(f"Cache hit for trade list: {cache_key}")
@@ -73,7 +74,7 @@ class TradeService:
             filters.append(Trade.trading_mode == query.trading_mode)
 
         stmt = select(Trade).where(and_(*filters)).order_by(Trade.executed_at.desc())
-
+        
         if query.limit:
             stmt = stmt.limit(query.limit)
         if query.offset:
@@ -91,7 +92,7 @@ class TradeService:
                     if isinstance(v, (datetime, UUID, Decimal)):
                         d[k] = str(v)
                 trade_dicts.append(d)
-
+            
             await self.redis.set(cache_key, json.dumps(trade_dicts), expire=settings.CACHE_TTL_TRADE)
 
         return trades

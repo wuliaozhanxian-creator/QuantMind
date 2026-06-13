@@ -1,11 +1,46 @@
 """统一日志配置模块"""
 
+from __future__ import annotations
+
+import json
 import logging
 import logging.handlers
 import sys
 from pathlib import Path
+from typing import Any
 
 from config.settings import settings
+
+
+class JsonLogFormatter(logging.Formatter):
+    """输出结构化 JSON 日志，兼容 LOG_FORMAT=json 的运行时配置。"""
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload: dict[str, Any] = {
+            "timestamp": self.formatTime(record, self.datefmt),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        if record.exc_info:
+            payload["exception"] = self.formatException(record.exc_info)
+        if record.stack_info:
+            payload["stack_info"] = self.formatStack(record.stack_info)
+        return json.dumps(payload, ensure_ascii=False)
+
+
+def _build_formatter(log_format: str) -> logging.Formatter:
+    fmt = str(log_format or "").strip()
+    if fmt.lower() == "json":
+        return JsonLogFormatter(datefmt="%Y-%m-%d %H:%M:%S")
+    try:
+        return logging.Formatter(fmt=fmt or "%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        # 配置被写成了非 logging.Formatter 兼容格式时，回退到安全默认值。
+        return logging.Formatter(
+            fmt="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
 
 
 def setup_logging(service_name: str = "quantmind"):
@@ -22,7 +57,7 @@ def setup_logging(service_name: str = "quantmind"):
     root_logger.handlers.clear()
 
     # 创建格式器
-    formatter = logging.Formatter(fmt=settings.logging.log_format, datefmt="%Y-%m-%d %H:%M:%S")
+    formatter = _build_formatter(settings.logging.log_format)
 
     # 控制台处理器
     console_handler = logging.StreamHandler(sys.stdout)

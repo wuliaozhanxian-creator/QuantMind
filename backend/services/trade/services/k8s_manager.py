@@ -5,6 +5,16 @@ import os
 import re
 from typing import Any, Dict, Optional
 
+# Try to import kubernetes, but don't fail if not present
+try:
+    from kubernetes import client, config
+    from kubernetes.client.rest import ApiException
+except ImportError:
+    client = None
+    config = None
+    ApiException = Exception
+
+# Try to import docker
 try:
     import docker
 except ImportError:
@@ -17,33 +27,63 @@ logger = logging.getLogger(__name__)
 
 class K8sManager:
     """
-    Docker-based strategy runner manager (OSS Edition).
-    Kubernetes support has been removed for OSS edition.
+    Manager for orchestrating strategy runners.
+    Supports both Kubernetes (standard) and Docker (lightweight) modes.
     """
 
     def __init__(self):
-        self.mode = "docker"
+        # Determine mode based on environment variable
+        self.mode = "docker" if os.getenv("DOCKER_MODE", "false").lower() == "true" else "k8s"
         self.api = None
         self.core_api = None
         self.docker_client = None
-        self._init_docker()
+
+        if self.mode == "docker":
+            self._init_docker()
+        else:
+            self._init_k8s()
 
     def _init_docker(self):
         """Initialize Docker client for local/lightweight orchestration."""
         try:
             if docker:
+                # Use from_env() which respects DOCKER_HOST, etc.
                 self.docker_client = docker.from_env()
-                logger.info(
-                    "Initialized Docker client for strategy orchestration (Docker Mode)"
-                )
+                logger.info("Initialized Docker client for strategy orchestration (Docker Mode)")
+                # Mock APIs to satisfy frontend/precheck logic that checks for their existence
                 self.api = True
                 self.core_api = True
             else:
-                logger.error("Docker SDK (docker-py) not installed")
+                logger.error("Docker SDK (docker-py) not installed, but DOCKER_MODE=true")
                 self.api = None
                 self.core_api = None
         except Exception as e:
             logger.error(f"Failed to initialize Docker client: {e}")
+            self.api = None
+            self.core_api = None
+
+    def _init_k8s(self):
+        """Initialize Kubernetes client."""
+        try:
+            if not config:
+                raise ImportError("Kubernetes SDK not installed")
+
+            try:
+                config.load_incluster_config()
+                logger.info("Loaded in-cluster Kubernetes config")
+            except Exception:
+                try:
+                    config.load_kube_config()
+                    logger.info("Loaded local kube config")
+                except Exception as e:
+                    logger.warning(f"Could not load any K8s config: {e}")
+                    raise
+
+            self.api = client.AppsV1Api()
+            self.core_api = client.CoreV1Api()
+            self.namespace = str(os.getenv("K8S_NAMESPACE", "quantmind")).strip() or "quantmind"
+        except Exception as e:
+            logger.error(f"Failed to initialize K8s client: {e}")
             self.api = None
             self.core_api = None
 
@@ -78,7 +118,6 @@ class K8sManager:
                 if strategy_file_path
                 else "default"
             )
-
         if self.mode == "docker":
             return self._create_docker_container(
                 user_id,
@@ -87,7 +126,7 @@ class K8sManager:
                 exec_config or {},
                 tenant_id,
                 live_trade_config or {},
-                strategy_id=resolved_strategy_id,
+                resolved_strategy_id,
             )
         return self._create_k8s_deployment(
             user_id,
@@ -96,7 +135,7 @@ class K8sManager:
             exec_config or {},
             tenant_id,
             live_trade_config or {},
-            strategy_id=resolved_strategy_id,
+            resolved_strategy_id,
         )
 
     def _create_docker_container(
@@ -126,12 +165,16 @@ class K8sManager:
             except Exception:
                 pass
 
-            # strategy_id is now explicitly passed
+            resolved_strategy_id = str(strategy_id or "").strip() or (
+                os.path.basename(strategy_file_path).replace(".py", "")
+                if strategy_file_path
+                else "default"
+            )
 
             env = {
                 "USER_ID": str(user_id),
                 "TENANT_ID": str(tenant_id or "default"),
-                "STRATEGY_ID": strategy_id,
+                "STRATEGY_ID": resolved_strategy_id,
                 "RUN_ID": str(run_id),
                 "EXECUTION_CONFIG": json.dumps(exec_config or {}),
                 "LIVE_TRADE_CONFIG": json.dumps(live_trade_config or {}),
@@ -143,17 +186,17 @@ class K8sManager:
                 # runner/main.py 读取 ENGINE_SERVICE_INTERNAL_URL（保留 ENGINE_SERVICE_URL 兼容）
                 "ENGINE_SERVICE_INTERNAL_URL": os.getenv(
                     "ENGINE_SERVICE_INTERNAL_URL",
-                    "http://127.0.0.1:8001/api/v1",
+                    "http://quantmind-engine:8001/api/v1",
                 ),
                 "ENGINE_SERVICE_URL": os.getenv(
                     "ENGINE_SERVICE_URL",
-                    "http://127.0.0.1:8001",
+                    "http://quantmind-engine:8001",
                 ),
                 "PYTHONPATH": "/app",
                 "TZ": os.getenv("TZ", "Asia/Shanghai"),
                 "RUNNER_TIMEZONE": os.getenv("RUNNER_TIMEZONE", "Asia/Shanghai"),
-                "REDIS_HOST": os.getenv("REDIS_HOST", "quantmind-redis"),
-                "REDIS_PASSWORD": os.getenv("REDIS_PASSWORD", ""),
+                "REDIS_HOST": os.getenv("REDIS_HOST", "quantmind-trade-redis"),
+                "REDIS_PASSWORD": os.getenv("REDIS_PASSWORD", "quantmind2026"),
             }
 
             container = self.docker_client.containers.run(
@@ -166,28 +209,18 @@ class K8sManager:
                 restart_policy={"Name": "unless-stopped"},
                 # Mount project dir for strategy code accessibility
                 # If running inside docker, we need the HOST path of the project
-                volumes={
-                    os.getenv("HOST_PROJECT_PATH", os.getcwd()): {
-                        "bind": "/app",
-                        "mode": "rw",
-                    }
-                },
+                volumes={os.getenv("HOST_PROJECT_PATH", os.getcwd()): {"bind": "/app", "mode": "rw"}},
                 mem_limit=os.getenv("STRATEGY_MEM_LIMIT", "1g"),
                 command=[
                     "python",
                     "/app/backend/services/trade/runner/main.py",
-                    "--user_id",
-                    str(user_id),
-                    "--strategy",
-                    strategy_id,
-                    "--tenant_id",
-                    str(tenant_id or "default"),
+                    "--user_id", str(user_id),
+                    "--strategy", resolved_strategy_id,
+                    "--tenant_id", str(tenant_id or "default")
                 ],
             )
 
-            logger.info(
-                f"Successfully started Docker container {name} (ID: {container.short_id})"
-            )
+            logger.info(f"Successfully started Docker container {name} (ID: {container.short_id})")
             return {"status": "success", "message": f"Container {name} started"}
         except Exception as e:
             logger.error(f"Failed to start Docker container {name}: {e}")
@@ -201,7 +234,7 @@ class K8sManager:
         exec_config,
         tenant_id,
         live_trade_config,
-        strategy_id: str,
+        strategy_id,
     ):
         if not self.api:
             return {"status": "error", "message": "K8s client not initialized"}
@@ -226,16 +259,20 @@ class K8sManager:
             "memory": os.getenv("STRATEGY_MEM_REQUEST", "256Mi"),  # 保证最少 256MB 内存
         }
 
+        resolved_strategy_id = str(strategy_id or "").strip() or (
+            os.path.basename(strategy_file_path).replace(".py", "")
+            if strategy_file_path
+            else "default"
+        )
+
         # 定义容器
         container = client.V1Container(
             name=name,
             image=image_path,
             image_pull_policy="Always",
             command=["python", "/app/main.py"],
-            args=["--strategy", strategy_id, "--user_id", user_id],
-            resources=client.V1ResourceRequirements(
-                limits=resource_limits, requests=resource_requests
-            ),
+            args=["--strategy", resolved_strategy_id, "--user_id", user_id],
+            resources=client.V1ResourceRequirements(limits=resource_limits, requests=resource_requests),
             liveness_probe=client.V1Probe(
                 exec=client.V1ExecAction(
                     command=[
@@ -249,46 +286,31 @@ class K8sManager:
                 failure_threshold=3,
             ),
             readiness_probe=client.V1Probe(
-                exec=client.V1ExecAction(command=["ls", "/app/main.py"]),
-                initial_delay_seconds=5,
-                period_seconds=10,
+                exec=client.V1ExecAction(command=["ls", "/app/main.py"]), initial_delay_seconds=5, period_seconds=10
             ),
             env=[
                 client.V1EnvVar(name="USER_ID", value=user_id),
                 client.V1EnvVar(name="TENANT_ID", value=str(tenant_id or "default")),
-                client.V1EnvVar(name="STRATEGY_ID", value=strategy_id),
+                client.V1EnvVar(name="STRATEGY_ID", value=resolved_strategy_id),
                 client.V1EnvVar(name="RUN_ID", value=run_id),
                 client.V1EnvVar(name="EXECUTION_CONFIG", value=json.dumps(exec_config)),
+                client.V1EnvVar(name="LIVE_TRADE_CONFIG", value=json.dumps(live_trade_config)),
+                client.V1EnvVar(name="INTERNAL_CALL_SECRET", value=get_internal_call_secret()),
                 client.V1EnvVar(
-                    name="LIVE_TRADE_CONFIG", value=json.dumps(live_trade_config)
+                    name="TRADE_SERVICE_INTERNAL_URL", value="http://quantmind-trade:8002/api/v1/internal/strategy"
                 ),
                 client.V1EnvVar(
-                    name="INTERNAL_CALL_SECRET", value=get_internal_call_secret()
+                    name="ENGINE_SERVICE_URL", value=os.getenv("ENGINE_SERVICE_URL", "http://quantmind-engine:8001")
                 ),
                 client.V1EnvVar(
-                    name="TRADE_SERVICE_INTERNAL_URL",
-                    value="http://quantmind-trade:8002/api/v1/internal/strategy",
-                ),
-                client.V1EnvVar(
-                    name="ENGINE_SERVICE_URL",
-                    value=os.getenv(
-                        "ENGINE_SERVICE_URL", "http://127.0.0.1:8001"
-                    ),
-                ),
-                client.V1EnvVar(
-                    name="COS_BUCKET_URL",
-                    value=os.getenv("COS_BUCKET_URL", "http://localhost:8000/uploads"),
+                    name="COS_BUCKET_URL", value=os.getenv("COS_BUCKET_URL", "https://cos.quantmind.cloud")
                 ),
             ],
         )
 
         template = client.V1PodTemplateSpec(
             metadata=client.V1ObjectMeta(
-                labels={
-                    "app": "quantmind-strategy",
-                    "user": str(user_id),
-                    "tenant": str(tenant_id or "default"),
-                }
+                labels={"app": "quantmind-strategy", "user": str(user_id), "tenant": str(tenant_id or "default")}
             ),
             spec=client.V1PodSpec(containers=[container]),
         )
@@ -298,11 +320,7 @@ class K8sManager:
             kind="Deployment",
             metadata=client.V1ObjectMeta(
                 name=name,
-                labels={
-                    "app": "quantmind-strategy",
-                    "user": str(user_id),
-                    "tenant": str(tenant_id or "default"),
-                },
+                labels={"app": "quantmind-strategy", "user": str(user_id), "tenant": str(tenant_id or "default")},
             ),
             spec=client.V1DeploymentSpec(
                 replicas=1,
@@ -318,9 +336,7 @@ class K8sManager:
         )
 
         try:
-            self.api.create_namespaced_deployment(
-                namespace=self.namespace, body=deployment, _request_timeout=10
-            )
+            self.api.create_namespaced_deployment(namespace=self.namespace, body=deployment, _request_timeout=10)
             logger.info(f"Created K8s deployment {name}")
             return {"status": "success", "message": f"Deployment {name} created"}
         except ApiException as e:
@@ -374,9 +390,7 @@ class K8sManager:
 
         name = self._deployment_name(tenant_id, user_id)
         try:
-            dep = self.api.read_namespaced_deployment(
-                name=name, namespace=self.namespace, _request_timeout=5
-            )
+            dep = self.api.read_namespaced_deployment(name=name, namespace=self.namespace, _request_timeout=5)
             return {
                 "name": name,
                 "replicas": dep.status.replicas,
@@ -420,18 +434,13 @@ class K8sManager:
         try:
             label_selector = f"user={user_id},tenant={tenant_id}"
             pods = self.core_api.list_namespaced_pod(
-                namespace=self.namespace,
-                label_selector=label_selector,
-                _request_timeout=5,
+                namespace=self.namespace, label_selector=label_selector, _request_timeout=5
             )
             if not pods.items:
                 return "No running pods found."
             pod_name = pods.items[0].metadata.name
             return self.core_api.read_namespaced_pod_log(
-                name=pod_name,
-                namespace=self.namespace,
-                tail_lines=tail,
-                _request_timeout=10,
+                name=pod_name, namespace=self.namespace, tail_lines=tail, _request_timeout=10
             )
         except Exception as e:
             return f"Error fetching K8s logs: {e}"

@@ -3,7 +3,7 @@ import json
 import logging
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Optional
@@ -23,9 +23,10 @@ from pydantic import BaseModel
 from sqlalchemy import bindparam, desc, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from starlette.concurrency import run_in_threadpool
 
-
+import redis as redis_lib
 from backend.services.trade.deps import AuthContext, get_auth_context, get_db
 from backend.services.trade.models.order import Order
 from backend.services.trade.models.preflight_snapshot import PreflightSnapshot
@@ -51,7 +52,6 @@ from backend.services.trade.trade_config import settings
 from backend.shared.margin_stock_pool import get_margin_stock_pool_service
 from backend.shared.notification_publisher import publish_notification_async
 from backend.shared.strategy_storage import get_strategy_storage_service
-from backend.shared.stock_utils import StockCodeUtil
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -190,8 +190,6 @@ class TradingPrecheckResponse(BaseModel):
     passed: bool
     checked_at: str
     items: list[TradingPrecheckItem]
-    trading_permission: str | None = None
-    signal_readiness: dict[str, Any] | None = None
 
 
 # 策略文件存储基准路径
@@ -242,15 +240,15 @@ async def _fetch_active_portfolio_snapshot(
 ) -> dict | None:
     sid = str(strategy_id or "").strip()
 
-    # user_id 在数据库中是 VARCHAR 类型，直接使用字符串查询
-    normalized_user_id = str(user_id or "").strip()
-    if not normalized_user_id:
+    try:
+        user_id_int = int(user_id)
+    except (TypeError, ValueError):
         return None
 
     # 有 strategy_id 时精确匹配；否则取该用户最近的 portfolio
     base_where = [
         Portfolio.tenant_id == tenant_id,
-        Portfolio.user_id == normalized_user_id,
+        Portfolio.user_id == user_id_int,
         Portfolio.is_deleted.is_(False),
     ]
     if sid:
@@ -270,6 +268,7 @@ async def _fetch_active_portfolio_snapshot(
 
     stmt = (
         select(Portfolio)
+        .options(selectinload(Portfolio.positions))
         .where(*base_where)
         .order_by(
             desc(Portfolio.run_status == "running"),
@@ -381,7 +380,6 @@ async def _upsert_real_account_baseline(
     stmt = text(
         """
         INSERT INTO real_account_baselines (
-            id,
             tenant_id,
             user_id,
             account_id,
@@ -390,7 +388,6 @@ async def _upsert_real_account_baseline(
             source
         )
         VALUES (
-            DEFAULT,
             :tenant_id,
             :user_id,
             :account_id,
@@ -772,11 +769,11 @@ def _schedule_user_notification(
     )
 
 
-def _parse_user_id(raw_user_id: str) -> str:
-    """获取用户ID (字符串类型，兼容 'admin' 等非数字ID)"""
-    if not raw_user_id:
+def _parse_int_user_id(raw_user_id: str) -> int:
+    try:
+        return int(raw_user_id)
+    except (TypeError, ValueError):
         raise HTTPException(status_code=400, detail="Invalid user_id in token")
-    return raw_user_id
 
 
 def _normalize_execution_config(user_exec_cfg: dict, base_exec_cfg: dict) -> dict:
@@ -829,10 +826,10 @@ def _default_live_trade_config() -> dict:
         "schedule_type": "interval",
         "trade_weekdays": [],
         "enabled_sessions": ["PM"],
-        "sell_time": "14:30",
-        "buy_time": "14:45",
+        "sell_time": "14:45",
+        "buy_time": "14:50",
         "sell_first": True,
-        "order_type": "LIMIT",
+        "order_type": "MARKET",
         "max_price_deviation": 0.02,
         "max_orders_per_cycle": 20,
     }
@@ -858,7 +855,7 @@ def _normalize_live_trade_config(user_live_cfg: dict, base_live_cfg: dict) -> di
     normalized["enabled_sessions"] = [
         str(item).upper() for item in (normalized.get("enabled_sessions") or [])
     ]
-    normalized["order_type"] = str(normalized.get("order_type") or "LIMIT").upper()
+    normalized["order_type"] = str(normalized.get("order_type") or "MARKET").upper()
     normalized["sell_first"] = bool(normalized.get("sell_first", True))
     normalized["rebalance_days"] = int(normalized.get("rebalance_days") or 3)
     normalized["max_orders_per_cycle"] = int(
@@ -933,6 +930,7 @@ def _parse_bridge_report_ts(report: dict) -> float | None:
 
 
 def _resolve_preflight_symbols() -> list[str]:
+    # 优先使用项目标准的 Prefix 格式 (AGENTS.md)
     raw = str(os.getenv("PREFLIGHT_STREAM_SYMBOLS", "SZ000001,SH600000")).strip()
     symbols = [item.strip() for item in raw.split(",") if item.strip()]
     return symbols or ["SZ000001", "SH600000"]
@@ -984,125 +982,22 @@ def _resolve_runner_image_for_mode() -> tuple[str, str]:
 def _get_stream_series_redis_client():
     """
     Stream 行情时序 Redis（quote->series）客户端。
-    使用远程行情服务器 DB 0（交易服务行情数据）。
+    优先使用 REMOTE_QUOTE_REDIS_*，与 stream 写入端保持一致。
     """
-    from backend.services.trade.utils.quote_redis import get_quote_redis
-    client = get_quote_redis()
-    return client, "106.53.100.144", 6379
-
-
-def check_stream_series_freshness(redis_client=None) -> dict[str, Any]:
-    """
-    统一的 Stream 行情时序新鲜度检测逻辑。
-    返回 {ok, message, details}
-    """
-    stream_symbols = _resolve_preflight_symbols()
-    stream_redis, stream_redis_host, stream_redis_port = _get_stream_series_redis_client()
-    threshold_sec = int(os.getenv("PREFLIGHT_SERIES_STALE_THRESHOLD_SEC", "300"))
-
-    matched_symbol = None
-    latest_age_sec = None
-    try:
-        stream_redis.ping()
-        for symbol in stream_symbols:
-            normalized = StockCodeUtil.to_prefix(symbol)
-            # 兼容两种 key 格式:
-            # 1. market:series:SH600000 (前缀格式，规范)
-            # 2. market:series:600000.SH (后缀格式，旧数据)
-            prefix_key = f"market:series:{normalized}"
-            suffix_key = f"market:series:{normalized[2:]}.{normalized[:2]}"
-
-            latest = stream_redis.zrevrange(prefix_key, 0, 0, withscores=True)
-            if not latest:
-                latest = stream_redis.zrevrange(suffix_key, 0, 0, withscores=True)
-            if latest:
-                _, score = latest[0]
-                age = max(0, int(time.time() - float(score)))
-                if latest_age_sec is None or age < latest_age_sec:
-                    matched_symbol = normalized
-                    latest_age_sec = age
-    except Exception:
-        # 降级：尝试本地/交易 Redis
-        if redis_client:
-            try:
-                for symbol in stream_symbols:
-                    normalized = StockCodeUtil.to_prefix(symbol)
-                    prefix_key = f"market:series:{normalized}"
-                    suffix_key = f"market:series:{normalized[2:]}.{normalized[:2]}"
-                    latest = redis_client.zrevrange(prefix_key, 0, 0, withscores=True)
-                    if not latest:
-                        latest = redis_client.zrevrange(suffix_key, 0, 0, withscores=True)
-                    if latest:
-                        _, score = latest[0]
-                        age = max(0, int(time.time() - float(score)))
-                        if latest_age_sec is None or age < latest_age_sec:
-                            matched_symbol = normalized
-                            latest_age_sec = age
-            except Exception:
-                pass
-
-    ok = latest_age_sec is not None and latest_age_sec < threshold_sec
-    message = (
-        f"行情新鲜（{matched_symbol} 延迟 {latest_age_sec}s）"
-        if ok
-        else (
-            f"行情延迟过高（{matched_symbol} 延迟 {latest_age_sec}s > {threshold_sec}s）"
-            if matched_symbol
-            else "未发现可用行情序列"
-        )
+    host = _get_env_with_root_fallback("REMOTE_QUOTE_REDIS_HOST", "localhost")
+    port = int(
+        _get_env_with_root_fallback("REMOTE_QUOTE_REDIS_PORT", "36379") or "36379"
     )
-
-    return {
-        "ok": ok,
-        "message": message,
-        "details": {
-            "matched_symbol": matched_symbol,
-            "age_seconds": latest_age_sec,
-            "threshold_seconds": threshold_sec,
-            "series_redis": f"{stream_redis_host}:{stream_redis_port}",
-        },
-    }
-
-
-def check_stream_quote_persist_rate(redis_client=None) -> dict[str, Any]:
-    """
-    统一的 Stream 行情落库速率检测逻辑。
-    """
-    try:
-        # 获取落库监控 Key (由 stream 服务定时写入)
-        key = "market:stream:persist_stats"
-        stats_raw = None
-        if redis_client:
-            stats_raw = redis_client.get(key)
-
-        if not stats_raw:
-            # 尝试从行情 Redis 获取
-            stream_redis, _, _ = _get_stream_series_redis_client()
-            stats_raw = stream_redis.get(key)
-
-        if not stats_raw:
-            return {"ok": False, "message": "未检测到行情落库统计信息", "details": {}}
-
-        stats = json.loads(stats_raw)
-        rps = float(stats.get("quotes_per_sec", 0))
-        last_update = float(stats.get("ts", 0))
-        age = max(0, int(time.time() - last_update))
-
-        ok = rps > 0 and age < 60
-        message = (
-            f"行情落库正常 ({rps:.1f} qps)"
-            if ok
-            else f"行情落库异常 (qps={rps:.1f}, age={age}s)"
-        )
-
-        return {
-            "ok": ok,
-            "message": message,
-            "details": stats,
-        }
-    except Exception as e:
-        return {"ok": False, "message": f"行情落库检测异常: {e}", "details": {}}
-
+    password = _get_env_with_root_fallback("REMOTE_QUOTE_REDIS_PASSWORD", "") or None
+    client = redis_lib.Redis(
+        host=host,
+        port=port,
+        password=password,
+        decode_responses=True,
+        socket_timeout=3.0,
+        socket_connect_timeout=3.0,
+    )
+    return client, host, port
 
 
 def _local_today_for_preflight():

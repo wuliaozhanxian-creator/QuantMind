@@ -11,96 +11,150 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
+
+from sqlalchemy import func, select
 
 from backend.services.trade.redis_client import redis_client
-from backend.services.trade.trade_config import settings
-from backend.shared.trade_account_cache import read_json_cache, write_json_cache
+from backend.services.trade.simulation.models.account import SimulationAccount
+from backend.services.trade.simulation.models.cash_ledger import SimulationCashLedger
+from backend.shared.database_manager_v2 import get_session
+from backend.services.trade.simulation.services.ledger_service import (
+    SimulationLedgerService,
+)
+from backend.shared.trade_account_cache import write_json_cache, write_trade_account_cache
 
 logger = logging.getLogger(__name__)
 
 _INTERVAL_SEC = 3600  # 默认每小时检查一次，但内部根据上次结算时间控制每日一次
 
 
+def _compute_margin_interest_charge(
+    *,
+    cash: float,
+    short_market_value: float,
+    days_diff: int,
+    annual_rate: float = 0.06,
+) -> float:
+    cash_debt = max(0.0, -float(cash or 0.0))
+    total_debt = max(0.0, float(short_market_value or 0.0)) + cash_debt
+    if total_debt <= 0 or days_diff <= 0:
+        return 0.0
+    return total_debt * float(annual_rate) / 365.0 * int(days_diff)
+
+
 async def _scan_and_settle() -> int:
     """扫描所有仿真账户，应用日计息。"""
     try:
-        if not redis_client.client:
-            logger.warning("Redis client not available for margin interest scanner.")
-            return 0
-
-        # 获取所有的模拟账户 key
-        # 考虑到量级，如果是超大规模可以使用 scan_iter，此处简化使用 keys
-        keys = redis_client.client.keys("quantmind:trade:sim:account:*")
-        if not keys:
-            return 0
-
         settled_count = 0
         now = datetime.now(timezone.utc)
-        today_str = now.strftime("%Y-%m-%d")
 
-        for key_bytes in keys:
-            key = key_bytes.decode("utf-8") if isinstance(key_bytes, bytes) else key_bytes
+        async with get_session(read_only=False) as session:
+            accounts = list(
+                (
+                    await session.execute(
+                        select(SimulationAccount).where(
+                            SimulationAccount.status == "active"
+                        )
+                    )
+                ).scalars().all()
+            )
+            for account in accounts:
+                try:
+                    last_interest_date = (
+                        await session.execute(
+                            select(func.max(SimulationCashLedger.occurred_at)).where(
+                                SimulationCashLedger.account_id == account.account_id,
+                                SimulationCashLedger.event_type == "MARGIN_INTEREST",
+                            )
+                        )
+                    ).scalar_one_or_none()
+                    last_date = (
+                        last_interest_date.date()
+                        if last_interest_date is not None
+                        else (
+                            account.created_at.date()
+                            if account.created_at is not None
+                            else now.date()
+                        )
+                    )
+                    days_diff = (now.date() - last_date).days
+                    if days_diff <= 0:
+                        continue
 
-            account = read_json_cache(redis_client, key)
-            if not account:
-                continue
+                    interest_charge = _compute_margin_interest_charge(
+                        cash=float(account.cash or 0.0),
+                        short_market_value=float(account.short_market_value or 0.0),
+                        days_diff=days_diff,
+                    )
+                    if interest_charge <= 0:
+                        continue
 
-            try:
-                last_interest_date_str = account.get("last_interest_date")
+                    account.cash = float(account.cash or 0.0) - interest_charge
+                    account.available_cash = float(account.available_cash or 0.0) - interest_charge
+                    account.total_asset = float(account.total_asset or 0.0) - interest_charge
+                    account.equity = float(account.equity or account.total_asset or 0.0) - interest_charge
+                    if float(account.liabilities or 0.0) > 0:
+                        account.maintenance_margin_ratio = float(account.equity or 0.0) / float(account.liabilities or 1.0)
+                    account.last_projected_at = now.replace(tzinfo=None)
 
-                # 如果没有上次计息日期，初始化为今天并跳过计息（从明天开始算）
-                if not last_interest_date_str:
-                    account["last_interest_date"] = today_str
-                    write_json_cache(redis_client, key, account)
-                    continue
+                    session.add(
+                        SimulationCashLedger(
+                            account_id=account.account_id,
+                            tenant_id=account.tenant_id,
+                            user_id=account.user_id,
+                            event_type="MARGIN_INTEREST",
+                            ref_type="interest",
+                            ref_id=now.strftime("%Y-%m-%d"),
+                            amount=-interest_charge,
+                            balance_after=float(account.cash or 0.0),
+                            trade_date=now.replace(tzinfo=None),
+                            occurred_at=now.replace(tzinfo=None),
+                            note=f"margin interest for {days_diff} day(s)",
+                        )
+                    )
+                    settled_count += 1
 
-                if last_interest_date_str == today_str:
-                    # 今天已经计过息了
-                    continue
-
-                last_date = datetime.strptime(last_interest_date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-                days_diff = (now - last_date).days
-
-                if days_diff <= 0:
-                    continue
-
-                cash = float(account.get("cash") or 0.0)
-                short_market_value = float(account.get("short_market_value") or 0.0)
-
-                cash_debt = max(0.0, -cash)
-                total_debt = short_market_value + cash_debt
-
-                if total_debt > 0:
-                    daily_rate = 0.06 / 365.0
-                    interest_charge = total_debt * daily_rate * days_diff
-
-                    # 扣除利息
-                    new_cash = cash - interest_charge
-                    account["cash"] = new_cash
-
-                    # 重新计算 equity 等
-                    total_market_value = float(account.get("market_value") or 0.0)
-                    short_proceeds = float(account.get("short_proceeds") or 0.0)
-                    equity = new_cash + short_proceeds + total_market_value
-                    account["total_asset"] = equity
-
-                    liabilities = float(account.get("liabilities") or 0.0)
-                    if liabilities > 0:
-                        account["maintenance_margin_ratio"] = equity / liabilities
+                    if redis_client.client:
+                        payload = {
+                            "cash": float(account.cash or 0.0),
+                            "available_cash": float(account.available_cash or 0.0),
+                            "frozen_cash": float(account.frozen_cash or 0.0),
+                            "market_value": float(account.long_market_value or 0.0)
+                            - float(account.short_market_value or 0.0),
+                            "short_market_value": float(account.short_market_value or 0.0),
+                            "total_asset": float(account.total_asset or 0.0),
+                            "liabilities": float(account.liabilities or 0.0),
+                            "equity": float(account.equity or 0.0),
+                            "maintenance_margin_ratio": float(account.maintenance_margin_ratio or 0.0),
+                            "last_interest_date": now.date().isoformat(),
+                            "last_interest_amount": round(float(interest_charge), 6),
+                            "reprojected_from": "simulation_accounts",
+                        }
+                        sim_key = SimulationLedgerService.build_account_id(
+                            account.tenant_id, account.user_id
+                        ).replace("sim:", "simulation:account:", 1)
+                        write_json_cache(redis_client, sim_key, payload)
+                        write_trade_account_cache(
+                            redis_client,
+                            account.tenant_id,
+                            account.user_id,
+                            payload,
+                        )
 
                     if interest_charge > 1:
                         logger.info(
-                            f"Account {key} charged {interest_charge:.2f} margin interest for {days_diff} days."
+                            "Account %s charged %.2f margin interest for %s days.",
+                            account.account_id,
+                            interest_charge,
+                            days_diff,
                         )
-
-                account["last_interest_date"] = today_str
-                write_json_cache(redis_client, key, account)
-                settled_count += 1
-
-            except Exception as e:
-                logger.error(f"Failed to process margin interest for {key}: {e}")
+                except Exception as e:
+                    logger.error(
+                        "Failed to process margin interest for account=%s: %s",
+                        account.account_id,
+                        e,
+                    )
 
         return settled_count
 

@@ -16,11 +16,11 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-def _require_user_id(raw_user_id: str) -> str:
-    """获取用户ID (字符串类型，兼容 'admin' 等非数字ID)"""
-    if not raw_user_id:
+def _require_int_user_id(raw_user_id: str) -> int:
+    try:
+        return int(raw_user_id)
+    except (TypeError, ValueError):
         raise HTTPException(status_code=400, detail="Invalid user_id in token")
-    return raw_user_id
 
 
 @router.get("/trades", response_model=list[SimTradeResponse])
@@ -32,7 +32,7 @@ async def list_trades(
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    user_id = _require_user_id(auth.user_id)
+    user_id = _require_int_user_id(auth.user_id)
     service = SimTradeService(db)
     return await service.list_trades(
         auth.tenant_id,
@@ -50,7 +50,7 @@ async def get_trade(
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    user_id = _require_user_id(auth.user_id)
+    user_id = _require_int_user_id(auth.user_id)
     service = SimTradeService(db)
     trade = await service.get_trade(auth.tenant_id, user_id, trade_id)
     if not trade:
@@ -64,7 +64,7 @@ async def get_trade_stats(
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    user_id = _require_user_id(auth.user_id)
+    user_id = _require_int_user_id(auth.user_id)
     service = SimTradeService(db)
     stats = await service.get_stats(auth.tenant_id, user_id, portfolio_id=portfolio_id)
     logger.info(

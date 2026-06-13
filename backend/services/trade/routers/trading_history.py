@@ -20,11 +20,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _require_user_id(raw_user_id: str) -> str:
-    """获取用户ID (字符串类型，兼容 'admin' 等非数字ID)"""
-    if not raw_user_id:
+def _require_int_user_id(raw_user_id: str) -> int:
+    try:
+        return int(raw_user_id)
+    except (TypeError, ValueError):
         raise HTTPException(status_code=400, detail="Invalid user_id in token")
-    return raw_user_id
 
 
 @router.get("/{trade_id}", response_model=TradeResponse)
@@ -35,7 +35,7 @@ async def get_trade(
     redis: RedisClient = Depends(get_redis),
 ):
     """Get trade by ID"""
-    user_id = _require_user_id(auth.user_id)
+    user_id = _require_int_user_id(auth.user_id)
     trade_service = TradeService(db, redis)
     trade = await trade_service.get_trade(trade_id, tenant_id=auth.tenant_id, user_id=user_id)
 
@@ -58,7 +58,7 @@ async def list_trades(
     redis: RedisClient = Depends(get_redis),
 ):
     """List trades with filters"""
-    user_id = _require_user_id(auth.user_id)
+    user_id = _require_int_user_id(auth.user_id)
     normalized_trading_mode = None
     if trading_mode is not None:
         try:
@@ -94,7 +94,7 @@ async def get_trades_by_order(
     redis: RedisClient = Depends(get_redis),
 ):
     """Get all trades for a specific order"""
-    user_id = _require_user_id(auth.user_id)
+    user_id = _require_int_user_id(auth.user_id)
     trade_service = TradeService(db, redis)
     trades = await trade_service.get_trades_by_order(auth.tenant_id, user_id, order_id)
 
@@ -110,7 +110,7 @@ async def get_trade_statistics(
     redis: RedisClient = Depends(get_redis),
 ):
     """Get trade statistics"""
-    user_id = _require_user_id(auth.user_id)
+    user_id = _require_int_user_id(auth.user_id)
     
     normalized_trading_mode = None
     if trading_mode is not None:

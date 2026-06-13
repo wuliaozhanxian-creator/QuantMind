@@ -24,11 +24,11 @@ from backend.services.trade.simulation.services.simulation_manager import (
 router = APIRouter()
 
 
-def _require_user_id(raw_user_id: str) -> str:
-    """获取用户ID（字符串口径，兼容历史库 user_id 字段类型）"""
-    if not raw_user_id:
+def _require_int_user_id(raw_user_id: str) -> int:
+    try:
+        return int(raw_user_id)
+    except (TypeError, ValueError):
         raise HTTPException(status_code=400, detail="Invalid user_id in token")
-    return str(raw_user_id).strip()
 
 
 @router.post("/orders", response_model=SimOrderResponse, status_code=status.HTTP_201_CREATED)
@@ -48,21 +48,50 @@ async def create_order(
     manager = SimulationAccountManager(redis)
     engine = SimulationExecutionEngine(db, manager)
 
-    user_id = _require_user_id(auth.user_id)
-    order = await order_service.create_order(auth.tenant_id, user_id, data)
+    user_id = _require_int_user_id(auth.user_id)
+    order = await order_service.create_order(
+        auth.tenant_id,
+        user_id,
+        data,
+        trigger_source="manual",
+    )
+    expires_at = engine._normalize_runtime_datetime(getattr(order, "expires_at", None))
+    if expires_at is not None and expires_at <= datetime.now():
+        await engine.mark_expired(order, "Order expired before execution")
+        return await order_service.get_order(auth.tenant_id, user_id, order.order_id)
+
+    session_decision = await engine.assess_execution_window(order)
+    if session_decision.target_trade_date is not None:
+        order.trading_session_date = session_decision.target_trade_date
+    if not session_decision.can_execute:
+        if session_decision.final_state == "expired":
+            await engine.mark_expired(order, session_decision.message)
+            return await order_service.get_order(auth.tenant_id, user_id, order.order_id)
+        if session_decision.retryable:
+            await order_service.queue_order(
+                order,
+                session_decision.message,
+                trading_session_date=session_decision.target_trade_date,
+            )
+            return await order_service.get_order(auth.tenant_id, user_id, order.order_id)
+        await engine.mark_rejected(order, session_decision.message)
+        return await order_service.get_order(auth.tenant_id, user_id, order.order_id)
+
     order.status = OrderStatus.SUBMITTED
+    order.submitted_at = order.submitted_at or datetime.now()
+    await order_service.sync_order_projection(order)
     await db.commit()
-    await db.refresh(order)
 
     result = await engine.execute_order(order)
     if not result.success:
-        await engine.mark_rejected(order, result.message)
-        await db.refresh(order)
-        return order
+        if str(result.message or "") == "Order expired before execution":
+            await engine.mark_expired(order, result.message)
+        else:
+            await engine.mark_rejected(order, result.message)
+        return await order_service.get_order(auth.tenant_id, user_id, order.order_id)
 
     await engine.apply_filled(order, result)
-    await db.refresh(order)
-    return order
+    return await order_service.get_order(auth.tenant_id, user_id, order.order_id)
 
 
 @router.get("/orders", response_model=list[SimOrderResponse])
@@ -77,7 +106,7 @@ async def list_orders(
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    user_id = _require_user_id(auth.user_id)
+    user_id = _require_int_user_id(auth.user_id)
     service = SimOrderService(db)
     return await service.list_orders(
         auth.tenant_id,
@@ -98,7 +127,7 @@ async def get_order(
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    user_id = _require_user_id(auth.user_id)
+    user_id = _require_int_user_id(auth.user_id)
     service = SimOrderService(db)
     order = await service.get_order(auth.tenant_id, user_id, order_id)
     if not order:
@@ -113,7 +142,7 @@ async def cancel_order(
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    user_id = _require_user_id(auth.user_id)
+    user_id = _require_int_user_id(auth.user_id)
     service = SimOrderService(db)
     order = await service.get_order(auth.tenant_id, user_id, order_id)
     if not order:

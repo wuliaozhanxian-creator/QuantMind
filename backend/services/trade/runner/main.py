@@ -22,9 +22,7 @@ import requests
 import redis
 
 try:
-    from backend.shared.auth import (
-        get_internal_call_secret as _shared_internal_call_secret,
-    )
+    from backend.shared.auth import get_internal_call_secret as _shared_internal_call_secret
 except Exception:  # pragma: no cover - runner image keeps auth deps minimal
     _shared_internal_call_secret = None
 
@@ -71,14 +69,14 @@ start_time = time.time()
 _RUNNER_TZ = ZoneInfo(os.getenv("RUNNER_TIMEZONE", "Asia/Shanghai"))
 
 _DEFAULT_LIVE_TRADE_CONFIG = {
-    "rebalance_days": 5,
+    "rebalance_days": 3,
     "schedule_type": "interval",
     "trade_weekdays": [],
     "enabled_sessions": ["PM"],
-    "sell_time": "14:30",
-    "buy_time": "14:45",
+    "sell_time": "14:45",
+    "buy_time": "14:50",
     "sell_first": True,
-    "order_type": "LIMIT",
+    "order_type": "MARKET",
     "max_price_deviation": 0.02,
     "max_orders_per_cycle": 20,
 }
@@ -101,11 +99,7 @@ def get_internal_call_secret() -> str:
         except Exception:
             pass
 
-    return str(
-        os.getenv("INTERNAL_CALL_SECRET")
-        or os.getenv("SECRET_KEY")
-        or "dev-internal-call-secret"
-    ).strip()
+    return str(os.getenv("INTERNAL_CALL_SECRET") or os.getenv("SECRET_KEY") or "dev-internal-call-secret").strip()
 
 
 def _headers(user_id: str, tenant_id: str) -> dict[str, str]:
@@ -122,14 +116,10 @@ def _load_live_trade_config() -> dict[str, Any]:
     cfg = _safe_json_loads(raw, {})
     merged = {**_DEFAULT_LIVE_TRADE_CONFIG, **(cfg or {})}
     merged["schedule_type"] = str(merged.get("schedule_type") or "interval").lower()
-    merged["trade_weekdays"] = [
-        str(item).upper() for item in (merged.get("trade_weekdays") or [])
-    ]
-    merged["enabled_sessions"] = [
-        str(item).upper() for item in (merged.get("enabled_sessions") or ["PM"])
-    ]
-    merged["order_type"] = str(merged.get("order_type") or "LIMIT").upper()
-    merged["rebalance_days"] = int(merged.get("rebalance_days") or 5)
+    merged["trade_weekdays"] = [str(item).upper() for item in (merged.get("trade_weekdays") or [])]
+    merged["enabled_sessions"] = [str(item).upper() for item in (merged.get("enabled_sessions") or ["PM"])]
+    merged["order_type"] = str(merged.get("order_type") or "MARKET").upper()
+    merged["rebalance_days"] = int(merged.get("rebalance_days") or 3)
     merged["max_orders_per_cycle"] = int(merged.get("max_orders_per_cycle") or 20)
     merged["sell_first"] = bool(merged.get("sell_first", True))
     return merged
@@ -163,9 +153,7 @@ def _is_rebalance_day(ts_value: float, live_trade_config: dict[str, Any]) -> boo
         if get_calendar is None:
             raise RuntimeError("exchange_calendars unavailable")
         calendar = get_calendar("XSHG")
-        session = calendar.date_to_session(
-            pd.Timestamp(local_dt.date()), direction="previous"
-        )
+        session = calendar.date_to_session(pd.Timestamp(local_dt.date()), direction="previous")
         idx = int(calendar.sessions.get_loc(session))
         return idx % rebalance_days == 0
     except Exception:
@@ -174,8 +162,8 @@ def _is_rebalance_day(ts_value: float, live_trade_config: dict[str, Any]) -> boo
 
 
 def _current_phase(now_hhmm: str, live_trade_config: dict[str, Any]) -> str:
-    sell_time = str(live_trade_config.get("sell_time") or "14:30")
-    buy_time = str(live_trade_config.get("buy_time") or "14:45")
+    sell_time = str(live_trade_config.get("sell_time") or "14:45")
+    buy_time = str(live_trade_config.get("buy_time") or "14:50")
     if now_hhmm < sell_time:
         return "IDLE"
     if sell_time <= now_hhmm < buy_time:
@@ -183,9 +171,7 @@ def _current_phase(now_hhmm: str, live_trade_config: dict[str, Any]) -> str:
     return "BUY"
 
 
-def _is_within_enabled_session(
-    now_hhmm: str, live_trade_config: dict[str, Any]
-) -> bool:
+def _is_within_enabled_session(now_hhmm: str, live_trade_config: dict[str, Any]) -> bool:
     enabled = set(live_trade_config.get("enabled_sessions") or [])
     if "AM" in enabled and "09:30" <= now_hhmm <= "11:30":
         return True
@@ -194,9 +180,7 @@ def _is_within_enabled_session(
     return False
 
 
-def _filter_signals_by_phase(
-    signals: list[dict[str, Any]], phase: str
-) -> list[dict[str, Any]]:
+def _filter_signals_by_phase(signals: list[dict[str, Any]], phase: str) -> list[dict[str, Any]]:
     def _resolve_action(sig: dict[str, Any]) -> str:
         trade_action = str(sig.get("trade_action") or "").upper()
         if trade_action in {"SELL_TO_CLOSE", "SELL_TO_OPEN"}:
@@ -222,41 +206,26 @@ def _latest_signal_run_key(tenant_id: str, user_id: str) -> str:
     return f"qm:signal:latest:{tenant_id}:{user_id}"
 
 
-def _get_latest_signal_run_id(
-    signal_redis_client: redis.Redis, tenant_id: str, user_id: str
-) -> str | None:
+def _get_latest_signal_run_id(redis_client: redis.Redis, tenant_id: str, user_id: str) -> str | None:
     try:
-        latest = str(
-            signal_redis_client.get(_latest_signal_run_key(tenant_id, user_id)) or ""
-        ).strip()
+        latest = str(redis_client.get(_latest_signal_run_key(tenant_id, user_id)) or "").strip()
         return latest or None
     except Exception as e:
         logger.warning("[SignalStream] 读取最新推理版本失败: %s", e)
         return None
 
 
-def _signal_stream_group_name(
-    tenant_id: str, user_id: str, strategy: str, exec_config: dict[str, Any]
-) -> str:
-    return (
-        exec_config.get("signal_stream_group")
-        or f"signal-runners-{tenant_id}-{user_id}"
-    )
+def _signal_stream_group_name(tenant_id: str, user_id: str, strategy: str, exec_config: dict[str, Any]) -> str:
+    return exec_config.get("signal_stream_group") or f"signal-runners-{tenant_id}-{user_id}"
 
 
-def _signal_stream_consumer_name(
-    tenant_id: str, user_id: str, strategy: str, exec_config: dict[str, Any]
-) -> str:
+def _signal_stream_consumer_name(tenant_id: str, user_id: str, strategy: str, exec_config: dict[str, Any]) -> str:
     pod_name = os.getenv("HOSTNAME", "local-runner")
     return f"runner-{pod_name}"
 
 
 def _ensure_signal_stream_group(
-    redis_client: redis.Redis,
-    tenant_id: str,
-    user_id: str,
-    strategy: str,
-    exec_config: dict[str, Any],
+    redis_client: redis.Redis, tenant_id: str, user_id: str, strategy: str, exec_config: dict[str, Any]
 ):
     stream = _signal_stream_name(tenant_id)
     group = _signal_stream_group_name(tenant_id, user_id, strategy, exec_config)
@@ -270,9 +239,9 @@ def _ensure_signal_stream_group(
             logger.warning("[SignalStream] xgroup_create 失败: %s", e)
 
 
-def fetch_market_snapshot(market_redis_client: redis.Redis) -> dict[str, Any]:
+def fetch_market_snapshot(redis_client: redis.Redis) -> dict[str, Any]:
     try:
-        data = market_redis_client.get("market:snapshot")
+        data = redis_client.get("market:snapshot")
         return _safe_json_loads(data, {})
     except Exception as e:
         logger.error("获取行情快照失败: %s", e)
@@ -280,10 +249,9 @@ def fetch_market_snapshot(market_redis_client: redis.Redis) -> dict[str, Any]:
 
 
 def _fetch_account_state(user_id: str, tenant_id: str) -> dict[str, Any]:
-    base_url = os.getenv(
-        "TRADE_SERVICE_INTERNAL_URL",
-        "http://quantmind-trade:8002/api/v1/internal/strategy",
-    ).rstrip("/")
+    base_url = os.getenv("TRADE_SERVICE_INTERNAL_URL", "http://quantmind-trade:8002/api/v1/internal/strategy").rstrip(
+        "/"
+    )
     url = f"{base_url}/sync-account"
     try:
         resp = requests.get(url, headers=_headers(user_id, tenant_id), timeout=3)
@@ -307,25 +275,17 @@ def _to_float(value):
         return None
 
 
-def _apply_portfolio_risk_gate(
-    signals, account, exec_config, market_snapshot, live_trade_config=None
-):
+def _apply_portfolio_risk_gate(signals, account, exec_config, market_snapshot, live_trade_config=None):
     """委托 RiskGate.apply()，保留此名称以兼容已有调用点。"""
-    return RiskGate.apply(
-        signals, account, exec_config, market_snapshot, live_trade_config
-    )
+    return RiskGate.apply(signals, account, exec_config, market_snapshot, live_trade_config)
 
 
 def _signal_fingerprint(signals):
     return RiskGate.fingerprint(signals)
 
 
-def _acquire_idempotency_lock(
-    redis_client, tenant_id, user_id, strategy, fingerprint, ttl_seconds
-):
-    return RiskGate.acquire_lock(
-        redis_client, tenant_id, user_id, strategy, fingerprint, ttl_seconds
-    )
+def _acquire_idempotency_lock(redis_client, tenant_id, user_id, strategy, fingerprint, ttl_seconds):
+    return RiskGate.acquire_lock(redis_client, tenant_id, user_id, strategy, fingerprint, ttl_seconds)
 
 
 def _report_dispatch_item_status(
@@ -340,9 +300,7 @@ def _report_dispatch_item_status(
 ) -> None:
     if not batch_id or not run_id:
         return
-    base_url = os.getenv(
-        "ENGINE_SERVICE_INTERNAL_URL", "http://quantmind-engine:8001/api/v1"
-    ).rstrip("/")
+    base_url = os.getenv("ENGINE_SERVICE_INTERNAL_URL", "http://quantmind-engine:8001/api/v1").rstrip("/")
     url = f"{base_url}/dispatch/{batch_id}/items/upsert"
     payload = {
         "run_id": run_id,
@@ -369,9 +327,7 @@ def _report_dispatch_item_status(
         ],
     }
     try:
-        requests.post(
-            url, json=payload, headers=_headers(user_id, tenant_id), timeout=3
-        )
+        requests.post(url, json=payload, headers=_headers(user_id, tenant_id), timeout=3)
     except Exception as e:
         logger.warning("[E2E] 状态机回写失败: %s", e)
 
@@ -380,7 +336,7 @@ def _consume_signal_events(
     user_id: str,
     tenant_id: str,
     strategy: str,
-    signal_redis_client: redis.Redis,
+    redis_client: redis.Redis,
     exec_config: dict[str, Any],
     latest_run_id: str | None = None,
     last_id: str = ">",
@@ -389,13 +345,9 @@ def _consume_signal_events(
     group = _signal_stream_group_name(tenant_id, user_id, strategy, exec_config)
     consumer = _signal_stream_consumer_name(tenant_id, user_id, strategy, exec_config)
     batch_size = int(exec_config.get("signal_stream_batch_size", 100))
-    block_ms = (
-        int(exec_config.get("signal_stream_block_ms", 1000)) if last_id == ">" else None
-    )
+    block_ms = int(exec_config.get("signal_stream_block_ms", 1000)) if last_id == ">" else None
 
-    records = signal_redis_client.xreadgroup(
-        group, consumer, {stream: last_id}, count=batch_size, block=block_ms
-    )
+    records = redis_client.xreadgroup(group, consumer, {stream: last_id}, count=batch_size, block=block_ms)
     if not records:
         return [], []
 
@@ -432,9 +384,7 @@ def _consume_signal_events(
                         "action": side,
                         "trade_action": str(fields.get("trade_action") or "") or None,
                         "position_side": str(fields.get("position_side") or "") or None,
-                        "is_margin_trade": str(
-                            fields.get("is_margin_trade") or ""
-                        ).lower()
+                        "is_margin_trade": str(fields.get("is_margin_trade") or "").lower()
                         in {"1", "true", "yes", "on"},
                         "volume": int(float(fields.get("quantity") or 0)),
                         "price": float(fields.get("price") or 0),
@@ -459,10 +409,9 @@ def create_hosted_execution_task(
     trigger_context: dict[str, Any],
     task_id: str,
 ):
-    base_url = os.getenv(
-        "TRADE_SERVICE_INTERNAL_URL",
-        "http://quantmind-trade:8002/api/v1/internal/strategy",
-    ).rstrip("/")
+    base_url = os.getenv("TRADE_SERVICE_INTERNAL_URL", "http://quantmind-trade:8002/api/v1/internal/strategy").rstrip(
+        "/"
+    )
     trade_api = f"{base_url}/hosted-executions"
     mode = str(exec_config.get("trading_mode", "REAL")).upper()
     payload = {
@@ -484,9 +433,7 @@ def create_hosted_execution_task(
                 "trigger_context": trigger_context,
             },
         )
-        resp = requests.post(
-            trade_api, json=payload, headers=_headers(user_id, tenant_id), timeout=8
-        )
+        resp = requests.post(trade_api, json=payload, headers=_headers(user_id, tenant_id), timeout=8)
         resp.raise_for_status()
         return resp.json()
     except Exception as e:
@@ -499,7 +446,7 @@ def create_hosted_execution_task(
 
 
 def _ack_signal_events(
-    signal_redis_client: redis.Redis,
+    redis_client: redis.Redis,
     tenant_id: str,
     user_id: str,
     strategy: str,
@@ -511,7 +458,7 @@ def _ack_signal_events(
     stream = _signal_stream_name(tenant_id)
     group = _signal_stream_group_name(tenant_id, user_id, strategy, exec_config)
     try:
-        signal_redis_client.xack(stream, group, *ack_ids)
+        redis_client.xack(stream, group, *ack_ids)
     except Exception as e:
         logger.warning("[SignalStream] ACK 失败: %s", e)
 
@@ -554,17 +501,10 @@ def process_cycle(
     tenant_id: str,
     strategy: str,
     redis_client: redis.Redis,
-    signal_redis_client: redis.Redis,
-    market_redis_client: redis.Redis,
     exec_config: dict[str, Any],
     live_trade_config: dict[str, Any],
 ):
-    test_mode = str(os.getenv("RUNNER_TEST_MODE", "")).strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+    test_mode = str(os.getenv("RUNNER_TEST_MODE", "")).strip().lower() in {"1", "true", "yes", "on"}
     current_ts = _current_local_ts()
     now_hhmm = _runner_local_dt(current_ts).strftime("%H:%M")
     is_rebalance_day = _is_rebalance_day(current_ts, live_trade_config)
@@ -588,9 +528,7 @@ def process_cycle(
     )
 
     if not test_mode and (
-        not is_rebalance_day
-        or not _is_within_enabled_session(now_hhmm, live_trade_config)
-        or phase == "IDLE"
+        not is_rebalance_day or not _is_within_enabled_session(now_hhmm, live_trade_config) or phase == "IDLE"
     ):
         return False
 
@@ -610,9 +548,7 @@ def process_cycle(
     except Exception as e:
         logger.warning("[HostedRunner] 读取调度锁失败: %s", e)
 
-    task_id = _build_hosted_runner_task_id(
-        tenant_id, user_id, strategy, trade_date, phase
-    )
+    task_id = _build_hosted_runner_task_id(tenant_id, user_id, strategy, trade_date, phase)
     trigger_context = {
         "schedule_type": str(live_trade_config.get("schedule_type") or "interval"),
         "phase": phase,
@@ -643,11 +579,10 @@ def process_cycle(
 
 
 def _build_redis_client() -> redis.Redis:
-    """交易主连接 DB 2 — trade:account, trade:agent:heartbeat, runner 锁等"""
-    host = os.getenv("REDIS_HOST", "quantmind-redis")
+    host = os.getenv("REDIS_HOST", "quantmind-trade-redis")
     port = int(os.getenv("REDIS_PORT", "6379"))
-    password = os.getenv("REDIS_PASSWORD", "")
-    db = int(os.getenv("REDIS_DB_TRADE", "2"))
+    password = os.getenv("REDIS_PASSWORD", "quantmind2026")
+    db = int(os.getenv("REDIS_DB", "0"))
     return redis.Redis(
         host=host,
         port=port,
@@ -656,28 +591,6 @@ def _build_redis_client() -> redis.Redis:
         decode_responses=True,
         socket_timeout=2,
     )
-
-
-def _build_signal_redis_client() -> redis.Redis:
-    """信号流连接 DB 0 — qm:signal:stream, qm:signal:latest (engine 写 trade 读)"""
-    host = os.getenv("SIGNAL_STREAM_REDIS_HOST", os.getenv("REDIS_HOST", "quantmind-redis"))
-    port = int(os.getenv("SIGNAL_STREAM_REDIS_PORT", os.getenv("REDIS_PORT", "6379")))
-    password = os.getenv("SIGNAL_STREAM_REDIS_PASSWORD", os.getenv("REDIS_PASSWORD", ""))
-    db = int(os.getenv("SIGNAL_STREAM_REDIS_DB", "0"))
-    return redis.Redis(
-        host=host,
-        port=port,
-        password=password,
-        db=db,
-        decode_responses=True,
-        socket_timeout=2,
-    )
-
-
-def _build_market_redis_client() -> redis.Redis:
-    """行情连接 — 远程行情服务器 DB 0（交易服务行情数据）"""
-    from backend.services.trade.utils.quote_redis import get_quote_redis
-    return get_quote_redis()
 
 
 def _resolve_runner_identity(args: argparse.Namespace) -> tuple[str, str, str] | None:
@@ -693,17 +606,16 @@ def _resolve_runner_identity(args: argparse.Namespace) -> tuple[str, str, str] |
         or os.getenv("RUNNER_STRATEGY_ID")
         or ""
     ).strip()
-    tenant_id = (
-        str(
-            getattr(args, "tenant_id", None)
-            or os.getenv("TENANT_ID")
-            or os.getenv("RUNNER_TENANT_ID")
-            or "default"
-        ).strip()
+    tenant_id = str(
+        getattr(args, "tenant_id", None)
+        or os.getenv("TENANT_ID")
+        or os.getenv("RUNNER_TENANT_ID")
         or "default"
-    )
+    ).strip() or "default"
     if not user_id or not strategy:
-        logger.error("缺少必要参数: user_id 或 strategy (可通过命令行或环境变量提供)")
+        logger.error(
+            "缺少必要参数: user_id 或 strategy (可通过命令行或环境变量提供)"
+        )
         return None
     return user_id, strategy, tenant_id
 
@@ -714,8 +626,6 @@ def _run_scheduler_once(
     tenant_id: str,
     strategy: str,
     redis_client: redis.Redis,
-    signal_redis_client: redis.Redis,
-    market_redis_client: redis.Redis,
     exec_config: dict[str, Any],
     live_trade_config: dict[str, Any],
 ) -> bool:
@@ -724,8 +634,6 @@ def _run_scheduler_once(
         tenant_id=tenant_id,
         strategy=strategy,
         redis_client=redis_client,
-        signal_redis_client=signal_redis_client,
-        market_redis_client=market_redis_client,
         exec_config=exec_config,
         live_trade_config=live_trade_config,
     )
@@ -737,8 +645,6 @@ def _run_scheduler_loop(
     tenant_id: str,
     strategy: str,
     redis_client: redis.Redis,
-    signal_redis_client: redis.Redis,
-    market_redis_client: redis.Redis,
     exec_config: dict[str, Any],
     live_trade_config: dict[str, Any],
     poll_interval_seconds: int,
@@ -759,8 +665,6 @@ def _run_scheduler_loop(
                 tenant_id=tenant_id,
                 strategy=strategy,
                 redis_client=redis_client,
-                signal_redis_client=signal_redis_client,
-                market_redis_client=market_redis_client,
                 exec_config=exec_config,
                 live_trade_config=live_trade_config,
             )
@@ -795,15 +699,11 @@ def _bootstrap_from_cli() -> int:
         or 30
     )
     redis_client = _build_redis_client()
-    signal_redis_client = _build_signal_redis_client()
-    market_redis_client = _build_market_redis_client()
     _run_scheduler_loop(
         user_id=user_id,
         tenant_id=tenant_id,
         strategy=strategy,
         redis_client=redis_client,
-        signal_redis_client=signal_redis_client,
-        market_redis_client=market_redis_client,
         exec_config=exec_config,
         live_trade_config=live_trade_config,
         poll_interval_seconds=poll_interval,

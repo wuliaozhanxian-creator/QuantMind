@@ -1,7 +1,7 @@
 from fastapi import APIRouter
+import logging
 import ast
 from datetime import datetime, timezone
-import logging
 from zoneinfo import ZoneInfo
 from .real_trading_utils import *
 from .real_trading_utils import (
@@ -12,7 +12,7 @@ from .real_trading_utils import (
     _normalize_execution_config,
     _normalize_identity,
     _normalize_live_trade_config,
-    _parse_user_id,
+    _parse_int_user_id,
     _schedule_status_writeback,
     _schedule_user_notification,
 )
@@ -115,13 +115,12 @@ def _prepare_native_simulation_bootstrap(
 
 
 async def _build_signal_source_status(
-    _redis_client, tenant_id: str, user_id: str, db: AsyncSession | None = None
+    _redis_client, tenant_id: str, user_id: str
 ) -> tuple[str | None, dict]:
     try:
         hosted_status = await manual_execution_service.get_default_model_hosted_status(
             tenant_id=tenant_id,
             user_id=user_id,
-            db=db,
         )
     except Exception as exc:
         return None, {
@@ -273,12 +272,6 @@ async def start_trading(
                 user_id=resolved_user_id,
                 tenant_id=resolved_tenant_id,
             )
-        signal_readiness = readiness.get("signal_readiness") or {}
-        trading_permission = str(
-            readiness.get("trading_permission")
-            or signal_readiness.get("trading_permission")
-            or "trade_enabled"
-        )
         if not readiness.get("passed"):
             failed_items = [
                 item
@@ -295,47 +288,22 @@ async def start_trading(
                     "items": readiness.get("items", []),
                     "first_failed_reason": (first_failed or {}).get("detail")
                     or (first_failed or {}).get("label"),
-                    "signal_readiness": signal_readiness,
-                    "trading_permission": trading_permission,
                 },
             )
-        if trading_permission == "blocked":
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "message": "默认模型没有可交易的目标交易日推理信号，实盘启动已阻断",
-                    "precheck_failed": True,
-                    "checked_at": readiness.get("checked_at"),
-                    "items": readiness.get("items", []),
-                    "signal_readiness": signal_readiness,
-                    "trading_permission": trading_permission,
-                },
-            )
-        if trading_permission == "observe_only":
-            exec_config = {
-                **exec_config,
-                "trading_permission": "observe_only",
-                "auto_trade_enabled": False,
-            }
-            live_config = {
-                **live_config,
-                "trading_permission": "observe_only",
-                "auto_trade_enabled": False,
-            }
 
         run_id = f"run_{int(time.time())}"
         strategy_dir = get_strategy_path(resolved_user_id)
         os.makedirs(strategy_dir, exist_ok=True)
         file_path = os.path.join(strategy_dir, f"{run_id}.py")
-        code_str = ""  # 初始化，避免未定义
         if strategy_file:
             content = await strategy_file.read()
             with open(file_path, "wb") as f:
                 f.write(content)
             code_str = content.decode("utf-8")
         else:
+            code_str = detail.get("code") or ""
             with open(file_path, "w", encoding="utf-8") as f:
-                f.write(f"# strategy_ref={strategy_id}\n")
+                f.write(code_str if code_str else f"# strategy_ref={strategy_id}\n")
 
         # 3. K8s 调度 (仅针对 REAL 和 SHADOW 模式)
         result = {"status": "success", "mode": mode}
@@ -345,11 +313,7 @@ async def start_trading(
                 resolved_user_id,
                 file_path,
                 run_id=run_id,
-                exec_config={
-                    **exec_config,
-                    "trading_mode": mode,
-                    "trading_permission": trading_permission,
-                },
+                exec_config={**exec_config, "trading_mode": mode},
                 tenant_id=resolved_tenant_id,
                 live_trade_config=live_config,
                 strategy_id=strategy_id,
@@ -363,7 +327,7 @@ async def start_trading(
             is_native_cfg = _is_native_strategy_config_without_on_tick(code_str)
 
             try:
-                sandbox_manager.submit_strategy(
+                sandbox_run_id = sandbox_manager.submit_strategy(
                     tenant_id=resolved_tenant_id,
                     user_id=resolved_user_id,
                     strategy_id=strategy_id or strategy_name,
@@ -375,7 +339,7 @@ async def start_trading(
                     f"[Sim] 用户 {resolved_user_id} 启动了沙箱模拟盘 {strategy_name} -> PID Task"
                 )
             except Exception as e:
-                raise HTTPException(status_code=500, detail=f"沙箱启动失败: {str(e)}") from e
+                raise HTTPException(status_code=500, detail=f"沙箱启动失败: {str(e)}")
 
             # 兼容原生 STRATEGY_CONFIG 策略（通常不定义 on_tick）：
             # 启动后立即触发一次自动托管任务，避免“运行中但无信号产出”的假活跃状态。
@@ -386,12 +350,8 @@ async def start_trading(
                     strategy_id=str(strategy_id or ""),
                     live_trade_config=live_config,
                 )
-                bootstrap_task_id = (
-                    str(bootstrap_plan.get("task_id") or "").strip() or None
-                )
-                bootstrap_lock_key = (
-                    str(bootstrap_plan.get("lock_key") or "").strip() or None
-                )
+                bootstrap_task_id = str(bootstrap_plan.get("task_id") or "").strip() or None
+                bootstrap_lock_key = str(bootstrap_plan.get("lock_key") or "").strip() or None
                 bootstrap_lock_acquired = False
 
                 if bootstrap_task_id and bootstrap_lock_key and redis.client:
@@ -477,11 +437,9 @@ async def start_trading(
                     "run_id": run_id,
                     "mode": mode,
                     "strategy_name": strategy_name,
+                    "started_at": datetime.now(timezone.utc).isoformat(),
                     "execution_config": exec_config,
                     "live_trade_config": live_config,
-                    "started_at": datetime.now(timezone.utc).isoformat(),
-                    "trading_permission": trading_permission,
-                    "signal_readiness": signal_readiness,
                     "launch_result": result,
                 }
             ),
@@ -507,8 +465,6 @@ async def start_trading(
             "message": f"策略 {strategy_name} 已成功启动",
             "effective_execution_config": exec_config,
             "effective_live_trade_config": live_config,
-            "trading_permission": trading_permission,
-            "signal_readiness": signal_readiness,
             "k8s_result": result,
             "orchestration_mode": k8s_manager.mode,
         }
@@ -585,12 +541,18 @@ async def stop_trading(
 
         # 同步更新数据库中 portfolio 的 run_status
         try:
-            stmt = select(Portfolio).where(
-                Portfolio.tenant_id == resolved_tenant_id,
-                Portfolio.user_id == resolved_user_id,
-                Portfolio.run_status == "running",
-                Portfolio.is_deleted.is_(False),
-            ).order_by(desc(Portfolio.updated_at)).limit(1)
+            user_id_int = int(resolved_user_id)
+            stmt = (
+                select(Portfolio)
+                .where(
+                    Portfolio.tenant_id == resolved_tenant_id,
+                    Portfolio.user_id == user_id_int,
+                    Portfolio.run_status == "running",
+                    Portfolio.is_deleted.is_(False),
+                )
+                .order_by(desc(Portfolio.updated_at))
+                .limit(1)
+            )
             db_result = await db.execute(stmt)
             portfolio = db_result.scalars().first()
 
@@ -600,8 +562,9 @@ async def stop_trading(
                 portfolio.updated_at = datetime.utcnow()
                 await db.commit()
                 logger.info(
-                    "Updated portfolio %d run_status: %s -> stopped",
-                    portfolio.id, old_status
+                    f"Updated portfolio %d run_status: %s -> stopped",
+                    portfolio.id,
+                    old_status,
                 )
         except Exception as db_err:
             logger.warning("Failed to update portfolio run_status: %s", db_err)
@@ -678,8 +641,9 @@ async def get_status(
     current_mode = "REAL"
     active_exec_config = None
     active_live_trade_config = None
-    trading_permission = "trade_enabled"
-    signal_readiness = None
+    requested_mode = str(trading_mode or "").strip().upper()
+    if requested_mode not in {"REAL", "SHADOW", "SIMULATION"}:
+        requested_mode = ""
     if active_strat_raw:
         try:
             active_data = json.loads(active_strat_raw)
@@ -705,15 +669,19 @@ async def get_status(
             active_exec_config = active_data.get("execution_config")
         if isinstance(active_data.get("live_trade_config"), dict):
             active_live_trade_config = active_data.get("live_trade_config")
-        if active_data.get("trading_permission"):
-            trading_permission = str(active_data.get("trading_permission"))
-        if isinstance(active_data.get("signal_readiness"), dict):
-            signal_readiness = active_data.get("signal_readiness")
         if active_data.get("strategy_name"):
             strategy_info = {
                 "id": active_strat_id,
                 "name": active_data.get("strategy_name"),
             }
+
+        if requested_mode and current_mode != requested_mode:
+            active_data = {}
+            active_strat_id = None
+            strategy_info = None
+            active_exec_config = None
+            active_live_trade_config = None
+            current_mode = requested_mode
 
         # 兼容老数据：没有 strategy_name 时再按 strategy_id 回查
         if (
@@ -759,14 +727,15 @@ async def get_status(
         redis.client,
         resolved_tenant_id,
         resolved_user_id,
-        db,
     )
     latest_hosted_task = await manual_execution_service.get_latest_hosted_task(
         tenant_id=resolved_tenant_id,
         user_id=resolved_user_id,
-        active_runtime_id=active_data.get("run_id")
-        if "active_data" in locals() and isinstance(active_data, dict)
-        else None,
+        active_runtime_id=(
+            active_data.get("run_id")
+            if "active_data" in locals() and isinstance(active_data, dict)
+            else None
+        ),
     )
 
     # 获取投资组合快照，优先尊重请求的 trading_mode
@@ -775,11 +744,32 @@ async def get_status(
         db,
         tenant_id=resolved_tenant_id,
         user_id=resolved_user_id,
-        strategy_id=str(active_strat_id or "").strip() or None
-        if not trading_mode
-        else None,
+        strategy_id=(
+            str(active_strat_id or "").strip() or None if not trading_mode else None
+        ),
         mode=lookup_mode,
     )
+
+    if requested_mode == "SIMULATION" and not strategy_info:
+        return {
+            "status": "not_running",
+            "user_id": resolved_user_id,
+            "mode": "SIMULATION",
+            "orchestration_mode": k8s_manager.mode,
+            "strategy": None,
+            "execution_config": None,
+            "live_trade_config": None,
+            "daily_pnl": (
+                portfolio_snapshot["daily_pnl"] if portfolio_snapshot else None
+            ),
+            "daily_return": (
+                portfolio_snapshot["daily_return"] if portfolio_snapshot else None
+            ),
+            "portfolio": portfolio_snapshot,
+            "latest_hosted_task": latest_hosted_task,
+            "latest_signal_run_id": latest_signal_run_id,
+            "signal_source_status": signal_source_status,
+        }
 
     if current_mode == "SIMULATION" and strategy_info:
         simulation_runtime_alive = False
@@ -841,12 +831,12 @@ async def get_status(
                 "strategy": strategy_info,
                 "execution_config": active_exec_config,
                 "live_trade_config": active_live_trade_config,
-                "daily_pnl": portfolio_snapshot["daily_pnl"]
-                if portfolio_snapshot
-                else None,
-                "daily_return": portfolio_snapshot["daily_return"]
-                if portfolio_snapshot
-                else None,
+                "daily_pnl": (
+                    portfolio_snapshot["daily_pnl"] if portfolio_snapshot else None
+                ),
+                "daily_return": (
+                    portfolio_snapshot["daily_return"] if portfolio_snapshot else None
+                ),
                 "portfolio": portfolio_snapshot,
                 "latest_hosted_task": latest_hosted_task,
                 "latest_signal_run_id": latest_signal_run_id,
@@ -861,12 +851,12 @@ async def get_status(
             "strategy": strategy_info,
             "execution_config": active_exec_config,
             "live_trade_config": active_live_trade_config,
-            "daily_pnl": portfolio_snapshot["daily_pnl"]
-            if portfolio_snapshot
-            else None,
-            "daily_return": portfolio_snapshot["daily_return"]
-            if portfolio_snapshot
-            else None,
+            "daily_pnl": (
+                portfolio_snapshot["daily_pnl"] if portfolio_snapshot else None
+            ),
+            "daily_return": (
+                portfolio_snapshot["daily_return"] if portfolio_snapshot else None
+            ),
             "portfolio": portfolio_snapshot,
             "k8s_status": {
                 "name": "batch-executor",
@@ -887,18 +877,16 @@ async def get_status(
             "strategy": strategy_info,
             "execution_config": active_exec_config,
             "live_trade_config": active_live_trade_config,
-            "daily_pnl": portfolio_snapshot["daily_pnl"]
-            if portfolio_snapshot
-            else None,
-            "daily_return": portfolio_snapshot["daily_return"]
-            if portfolio_snapshot
-            else None,
+            "daily_pnl": (
+                portfolio_snapshot["daily_pnl"] if portfolio_snapshot else None
+            ),
+            "daily_return": (
+                portfolio_snapshot["daily_return"] if portfolio_snapshot else None
+            ),
             "portfolio": portfolio_snapshot,
             "latest_hosted_task": latest_hosted_task,
             "latest_signal_run_id": latest_signal_run_id,
             "signal_source_status": signal_source_status,
-            "trading_permission": trading_permission,
-            "signal_readiness": signal_readiness,
         }
 
     if "error" in status:
@@ -911,18 +899,16 @@ async def get_status(
             "strategy": strategy_info,
             "execution_config": active_exec_config,
             "live_trade_config": active_live_trade_config,
-            "daily_pnl": portfolio_snapshot["daily_pnl"]
-            if portfolio_snapshot
-            else None,
-            "daily_return": portfolio_snapshot["daily_return"]
-            if portfolio_snapshot
-            else None,
+            "daily_pnl": (
+                portfolio_snapshot["daily_pnl"] if portfolio_snapshot else None
+            ),
+            "daily_return": (
+                portfolio_snapshot["daily_return"] if portfolio_snapshot else None
+            ),
             "portfolio": portfolio_snapshot,
             "latest_hosted_task": latest_hosted_task,
             "latest_signal_run_id": latest_signal_run_id,
             "signal_source_status": signal_source_status,
-            "trading_permission": trading_permission,
-            "signal_readiness": signal_readiness,
         }
 
     state = "running" if status.get("available_replicas", 0) > 0 else "starting"
@@ -936,15 +922,13 @@ async def get_status(
         "execution_config": active_exec_config,
         "live_trade_config": active_live_trade_config,
         "daily_pnl": portfolio_snapshot["daily_pnl"] if portfolio_snapshot else None,
-        "daily_return": portfolio_snapshot["daily_return"]
-        if portfolio_snapshot
-        else None,
+        "daily_return": (
+            portfolio_snapshot["daily_return"] if portfolio_snapshot else None
+        ),
         "portfolio": portfolio_snapshot,
         "latest_hosted_task": latest_hosted_task,
         "latest_signal_run_id": latest_signal_run_id,
         "signal_source_status": signal_source_status,
-        "trading_permission": trading_permission,
-        "signal_readiness": signal_readiness,
     }
 
 
@@ -981,7 +965,7 @@ async def get_orders(
         resolved_user_id, resolved_tenant_id = _normalize_identity(
             auth, user_id=user_id, tenant_id=tenant_id
         )
-        uid_int = _parse_user_id(resolved_user_id)
+        uid_int = _parse_int_user_id(resolved_user_id)
         stmt = select(Order).where(
             Order.user_id == uid_int, Order.tenant_id == resolved_tenant_id
         )
@@ -1017,7 +1001,7 @@ async def get_trade_history(
         resolved_user_id, resolved_tenant_id = _normalize_identity(
             auth, user_id=user_id, tenant_id=tenant_id
         )
-        uid_int = _parse_user_id(resolved_user_id)
+        uid_int = _parse_int_user_id(resolved_user_id)
         stmt = select(Trade).where(
             Trade.user_id == uid_int, Trade.tenant_id == resolved_tenant_id
         )

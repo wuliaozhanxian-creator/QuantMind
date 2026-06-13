@@ -1,25 +1,45 @@
 import logging
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date, timedelta, time as time_obj
+from pathlib import Path
+
+def _is_trading_session_now() -> bool:
+    """检查当前是否处于 A 股交易时段（09:15-11:30, 13:00-15:00）"""
+    now = datetime.now()
+    if now.weekday() >= 5:
+        return False
+    try:
+        import exchange_calendars as xcals
+        calendar = xcals.get_calendar("XSHG")
+        if not calendar.is_session(now.date()):
+            return False
+    except Exception:
+        pass
+    curr = now.time()
+    if curr >= time_obj(9, 15) and curr <= time_obj(11, 30):
+        return True
+    if curr >= time_obj(13, 0) and curr <= time_obj(15, 0):
+        return True
+    return False
+
 
 from fastapi import APIRouter
 from .real_trading_utils import *
 from .real_trading_utils import (
-    _check_inference_model_exists,
     _fetch_latest_real_account_snapshot,
     _get_stream_series_redis_client,
     _normalize_identity,
     _parse_bridge_report_ts,
-    _parse_user_id,
-    _resolve_preflight_symbols,
     _resolve_runner_image_for_mode,
     _upsert_preflight_snapshot,
 )
-from backend.services.trade.services.signal_readiness_service import (
-    signal_readiness_service,
+from backend.services.trade.services.manual_execution_service import manual_execution_service
+from backend.services.trade.services.trading_precheck_service import (
+    _check_simulation_model_ready,
+    _check_user_hosting_permission,
+    _resolve_user_model_context,
 )
-from backend.services.trade.utils.redis_cache import redis_cache
 from backend.shared.trade_redis_keys import build_trade_agent_heartbeat_key
 
 router = APIRouter()
@@ -44,22 +64,7 @@ def _parse_snapshot_timestamp(raw: Any) -> float | None:
         return parsed.timestamp()
     return None
 
-
-def _is_cn_trading_hours() -> bool:
-    try:
-        from zoneinfo import ZoneInfo
-
-        now = datetime.now(ZoneInfo("Asia/Shanghai"))
-    except Exception:
-        now = datetime.now()
-    return (
-        now.weekday() < 5
-        and ((now.hour == 9 and now.minute >= 15) or (10 <= now.hour < 15))
-    )
-
-
 @router.get("/preflight")
-@redis_cache(ttl=30)
 async def preflight_check(
     trading_mode: str = "REAL",
     user_id: Optional[str] = None,
@@ -121,7 +126,6 @@ async def preflight_check(
         add_check("db", "PostgreSQL", True, True, "数据库连接正常")
     except Exception as e:
         add_check("db", "PostgreSQL", False, True, f"数据库自检失败: {e}")
-        await db.rollback()
 
     # 3) Internal Secret
     internal_secret = str(os.getenv("INTERNAL_CALL_SECRET", "")).strip()
@@ -130,66 +134,40 @@ async def preflight_check(
     else:
         add_check("internal_secret", "内部密钥", False, True, "缺少 INTERNAL_CALL_SECRET 配置")
 
-    # 4) User ID 格式（执行链路要求可转 int）
+    # 4) 商业化门禁：仅 Pro 用户可托管 (模拟盘放行)
     try:
-        _parse_user_id(resolved_user_id)
-        add_check("user_id", "用户标识", True, True, "用户标识格式合法")
-    except HTTPException:
-        add_check(
-            "user_id",
-            "用户标识",
-            False,
-            True,
-            "当前用户ID不是数字，实盘执行链路可能失败",
-        )
-
-    try:
-        signal_readiness = await signal_readiness_service.evaluate(
+        permission_ok, permission_message = await _check_user_hosting_permission(
             db,
-            redis_client=redis.client,
             tenant_id=resolved_tenant_id,
             user_id=resolved_user_id,
-            mode=mode,
         )
     except Exception as exc:
-        signal_readiness = {
+        permission_ok, permission_message = False, f"用户权限检测失败: {exc}"
+    
+    permission_required = (mode != "SIMULATION")
+    if not permission_required:
+        permission_ok = True
+        permission_message = f"[SIMULATION] 订阅门禁已放行; {permission_message}"
+
+    add_check("user_permission", "用户权限", permission_ok, permission_required, permission_message)
+
+    try:
+        hosted_status = await manual_execution_service.get_default_model_hosted_status(
+            tenant_id=resolved_tenant_id,
+            user_id=resolved_user_id,
+        )
+    except Exception as exc:
+        hosted_status = {
             "available": False,
-            "blocking": mode == "REAL",
-            "trading_permission": "blocked" if mode == "REAL" else "observe_only",
             "message": f"读取默认模型托管状态失败: {exc}",
         }
-        await db.rollback()
     add_check(
-        "signal_readiness",
-        "默认模型信号可交易",
-        not bool(signal_readiness.get("blocking")),
-        bool(signal_readiness.get("blocking")),
-        (
-            str(signal_readiness.get("message") or "默认模型信号状态正常")
-            if signal_readiness.get("available")
-            else (
-                f"[阻断] {signal_readiness.get('message')}"
-                if signal_readiness.get("blocking")
-                else f"[观察态] {signal_readiness.get('message')}"
-            )
-        ),
-        signal_readiness,
-    )
-    add_check(
-        "latest_signal_run",
-        "最新推理批次",
-        bool(signal_readiness.get("latest_run_id")),
+        "signal_pipeline_enabled",
+        "自动托管默认模型",
+        bool(hosted_status.get("available")),
         False,
-        (
-            f"latest_run_id={signal_readiness.get('latest_run_id')}"
-            if signal_readiness.get("latest_run_id")
-            else str(
-                signal_readiness.get("message")
-                or "[WARNING] 未检测到当前用户默认模型的最新完成推理"
-            )
-        ),
+        str(hosted_status.get("message") or "默认模型托管状态正常"),
     )
-
     # 5) Runner 镜像
     image, image_source = _resolve_runner_image_for_mode()
     image_required = mode in {"REAL", "SHADOW"}
@@ -313,8 +291,6 @@ async def preflight_check(
                 bridge_required,
                 f"QMT Agent 检测失败: {e}",
             )
-            # 回滚事务以清除 aborted 状态，避免后续查询失败
-            await db.rollback()
 
     # 7.1~7.4) 双向交易专属预检
     margin_enabled = bool(getattr(settings, "ENABLE_MARGIN_TRADING", False))
@@ -421,89 +397,72 @@ async def preflight_check(
             else "未检测到账户快照",
         )
 
-    # 8~10) Stream 探针：REAL/SHADOW/SIMULATION 均检测行情质量
+    # 8~9) Stream 探针：REAL/SHADOW 必需；SIMULATION 仅在交易时段必需。
+    is_trading = _is_trading_session_now()
     if mode in {"REAL", "SHADOW", "SIMULATION"}:
-        # 1. Stream时序序列 (始终阻断)
-        try:
-            res = check_stream_series_freshness(redis_client=redis.client)
-            add_check(
-                "stream_series_freshness",
-                "Stream时序序列",
-                res["ok"],
-                True,
-                res["message"],
-                res["details"],
-            )
-        except Exception as e:
-            add_check(
-                "stream_series_freshness",
-                "Stream时序序列",
-                False,
-                True,
-                f"行情检测异常: {e}",
-            )
 
-        # 2. Stream行情落库 (REAL/SHADOW 必需，SIMULATION 非阻断)
-        persist_required = mode in {"REAL", "SHADOW"}
+        stream_required = True
+        # 统一使用 trading_precheck_service 中已经容器实测通过的逻辑
+        from backend.services.trade.services.trading_precheck_service import _check_stream_series_freshness
+        stream_ok, stream_msg = _check_stream_series_freshness(None)
+        add_check("stream_series_freshness", "Stream时序序列", stream_ok, stream_required, stream_msg)
+
+        # 9) Stream quote 落库速率检测（quotes 表）
+        quote_window_min = int(os.getenv("PREFLIGHT_QUOTE_WINDOW_MINUTES", "5"))
+        quote_min_count = int(os.getenv("PREFLIGHT_QUOTE_MIN_COUNT", "5"))
         try:
-            res = check_stream_quote_persist_rate(redis_client=redis.client)
+            quote_sql = text("""
+                SELECT COUNT(1) AS cnt
+                FROM quotes
+                WHERE timestamp >= NOW() - make_interval(mins => :window)
+                """)
+            quote_cnt = int((await db.execute(quote_sql, {"window": quote_window_min})).scalar() or 0)
+            quote_ok = quote_cnt >= quote_min_count
             add_check(
                 "stream_quote_persist_rate",
                 "Stream行情落库",
-                res["ok"],
-                persist_required,
-                res["message"],
-                res["details"],
-            )
-        except Exception as e:
-            add_check(
-                "stream_quote_persist_rate",
-                "Stream行情落库",
-                False,
-                persist_required,
-                f"行情落库检测失败: {e}",
-            )
-            await db.rollback()
-
-    # 11) 模拟盘专用：沙箱进程池与关键表可用性
-    simulation_required = mode == "SIMULATION"
-    if simulation_required:
-        # 11.0 默认模型检测（检查用户是否配置了默认模型）
-        try:
-            from backend.shared.model_registry import model_registry_service
-
-            default_model = await model_registry_service.get_default_model(
-                tenant_id=resolved_tenant_id,
-                user_id=resolved_user_id,
-            )
-            model_configured = bool(default_model)
-            add_check(
-                "default_model_configured",
-                "默认模型已配置",
-                model_configured,
-                True,
+                True,  # 警告：不阻断启动
+                stream_required,
                 (
-                    f"默认模型已配置 (model_id={default_model.get('model_id')})"
-                    if model_configured
-                    else "未配置默认模型，请先在模型管理中设置默认模型"
+                    f"最近{quote_window_min}分钟落库 {quote_cnt} 条"
+                    if quote_ok
+                    else f"[WARNING] 最近{quote_window_min}分钟落库过少（{quote_cnt} 条）"
                 ),
                 {
-                    "model_id": default_model.get("model_id") if model_configured else None,
-                    "model_name": default_model.get("model_name") if model_configured else None,
+                    "window_minutes": quote_window_min,
+                    "recent_quote_count": quote_cnt,
+                    "min_required_count": quote_min_count,
                 },
             )
         except Exception as e:
             add_check(
-                "default_model_configured",
-                "默认模型已配置",
+                "stream_quote_persist_rate",
+                "Stream行情落库",
                 False,
-                True,
-                f"默认模型检测失败: {e}",
+                stream_required,
+                f"行情落库检测失败: {e}",
             )
 
-        # 11.1 推理模型就绪度（检查生产模型目录是否有模型文件）
+    # 11) 模拟盘专用：沙箱进程池与关键表可用性
+    simulation_required = mode == "SIMULATION"
+    if simulation_required:
+        # 11.0 推理模型就绪度
         try:
-            model_ok, model_detail = _check_inference_model_exists()
+            model_context = await _resolve_user_model_context(
+                tenant_id=resolved_tenant_id,
+                user_id=resolved_user_id,
+            )
+            production_dir = model_context.get("model_dir")
+            if not isinstance(production_dir, Path):
+                production_dir = Path(
+                    str(production_dir or os.getenv("MODELS_PRODUCTION", "/app/models/production/model_qlib"))
+                )
+            model_ok, model_detail = await _check_simulation_model_ready(
+                tenant_id=resolved_tenant_id,
+                user_id=resolved_user_id,
+                production_dir=production_dir,
+                model_context=model_context,
+            )
             add_check(
                 "inference_database_ready",
                 "推理模型已就绪",
@@ -520,7 +479,7 @@ async def preflight_check(
                 f"推理模型检测失败: {e}",
             )
 
-        # 11.2 沙箱进程池
+        # 11.1 沙箱进程池
         try:
             from backend.services.trade.sandbox.manager import sandbox_manager
 
@@ -549,39 +508,54 @@ async def preflight_check(
                 f"沙箱进程池检测失败: {e}",
             )
 
-        # 11.3 模拟盘关键表（防止库被清空后启动才报错）
+        # 11.2 模拟盘关键表（防止库被清空后启动才报错）
         try:
             table_probe_sql = text("""
                 SELECT
                     to_regclass('public.sim_orders') IS NOT NULL AS sim_orders,
                     to_regclass('public.sim_trades') IS NOT NULL AS sim_trades,
+                    to_regclass('public.simulation_orders') IS NOT NULL AS simulation_orders,
+                    to_regclass('public.simulation_fills') IS NOT NULL AS simulation_fills,
+                    to_regclass('public.simulation_accounts') IS NOT NULL AS simulation_accounts,
                     to_regclass('public.simulation_fund_snapshots') IS NOT NULL AS simulation_fund_snapshots
                 """)
             table_probe_row = (await db.execute(table_probe_sql)).mappings().one()
-            missing_tables = [
-                name
-                for name in (
-                    "sim_orders",
-                    "sim_trades",
-                    "simulation_fund_snapshots",
-                )
+
+            required_tables = [
+                "simulation_orders",
+                "simulation_fills",
+                "simulation_accounts",
+                "simulation_fund_snapshots",
+            ]
+            legacy_tables = [
+                "sim_orders",
+                "sim_trades",
+            ]
+            missing_required = [
+                name for name in required_tables
                 if not bool(table_probe_row.get(name))
             ]
-            tables_ok = len(missing_tables) == 0
+            missing_legacy = [
+                name for name in legacy_tables
+                if not bool(table_probe_row.get(name))
+            ]
+            tables_ok = len(missing_required) == 0
+            details: dict = {
+                "required_tables": required_tables,
+                "missing_required_tables": missing_required,
+                "legacy_tables": legacy_tables,
+                "missing_legacy_tables": missing_legacy,
+            }
+            message = "模拟盘关键表已就绪" if tables_ok else f"缺少模拟盘关键表: {', '.join(missing_required)}"
+            if missing_legacy:
+                message += f" (legacy表缺失: {', '.join(missing_legacy)})"
             add_check(
                 "simulation_tables",
                 "模拟盘数据表",
                 tables_ok,
                 True,
-                "模拟盘关键表已就绪" if tables_ok else f"缺少模拟盘关键表: {', '.join(missing_tables)}",
-                {
-                    "required_tables": [
-                        "sim_orders",
-                        "sim_trades",
-                        "simulation_fund_snapshots",
-                    ],
-                    "missing_tables": missing_tables,
-                },
+                message,
+                details,
             )
         except Exception as e:
             add_check(
@@ -591,10 +565,8 @@ async def preflight_check(
                 True,
                 f"模拟盘关键表检测失败: {e}",
             )
-            # 回滚事务以清除 aborted 状态
-            await db.rollback()
 
-        # 11.4 资金快照任务配置（非阻断，便于排障）
+        # 11.3 资金快照任务配置（非阻断，便于排障）
         snapshot_enabled = str(os.getenv("SIM_FUND_SNAPSHOT_ENABLED", "true")).strip().lower() != "false"
         interval_raw = str(os.getenv("SIM_FUND_SNAPSHOT_INTERVAL_SECONDS", "300")).strip()
         try:
@@ -622,75 +594,6 @@ async def preflight_check(
             },
         )
 
-        try:
-            stream_symbols = _resolve_preflight_symbols()
-            stream_redis, stream_redis_host, stream_redis_port = _get_stream_series_redis_client()
-            stream_redis.ping()
-            matched_symbol = None
-            latest_age_sec = None
-            for symbol in stream_symbols:
-                normalized = StockCodeUtil.to_prefix(symbol)
-                # 兼容两种 key 格式:
-                # 1. market:series:SH600000 (前缀格式，规范)
-                # 2. market:series:600000.SH (后缀格式，旧数据)
-                prefix_key = f"market:series:{normalized}"
-                suffix_key = f"market:series:{normalized[2:]}.{normalized[:2]}"
-
-                latest = stream_redis.zrevrange(prefix_key, 0, 0, withscores=True)
-                if not latest:
-                    latest = stream_redis.zrevrange(suffix_key, 0, 0, withscores=True)
-                if latest:
-                    _, score = latest[0]
-                    age = max(0, int(time.time() - float(score)))
-                    if latest_age_sec is None or age < latest_age_sec:
-                        matched_symbol = normalized
-                        latest_age_sec = age
-            stream_ok = latest_age_sec is not None and latest_age_sec < 300
-            threshold_sec = 300
-            # 交易时段（9:15-15:00 工作日）严格检查，非交易时段仅警告
-            is_trading_hours = _is_cn_trading_hours()
-            stream_required = is_trading_hours
-            add_check(
-                "stream_series_freshness",
-                "实时行情服务",
-                stream_ok if is_trading_hours else True,
-                stream_required,
-                (
-                    f"行情新鲜（{matched_symbol} 延迟 {latest_age_sec}s）"
-                    if stream_ok
-                    else (
-                        f"行情不新鲜（{matched_symbol} 延迟 {latest_age_sec}s > {threshold_sec}s）"
-                        if matched_symbol
-                        else "未发现可用行情序列"
-                    )
-                ),
-                {
-                    "matched_symbol": matched_symbol,
-                    "age_seconds": latest_age_sec,
-                    "threshold_seconds": threshold_sec,
-                    "is_trading_hours": is_trading_hours,
-                    "series_redis": f"{stream_redis_host}:{stream_redis_port}",
-                },
-            )
-        except Exception as e:
-            is_trading_hours = _is_cn_trading_hours()
-            add_check(
-                "stream_series_freshness",
-                "实时行情服务",
-                not is_trading_hours,
-                is_trading_hours,
-                f"行情检测失败: {e}",
-            )
-
-    check_order: list[str] = []
-    checks_by_key: dict[str, dict] = {}
-    for item in checks:
-        key = str(item.get("key") or "")
-        if key and key not in checks_by_key:
-            check_order.append(key)
-        checks_by_key[key] = item
-    checks = [checks_by_key[key] for key in check_order]
-
     ready = all(item["ok"] for item in checks if item["required"])
 
     try:
@@ -711,14 +614,11 @@ async def preflight_check(
         "mode": mode,
         "user_id": resolved_user_id,
         "tenant_id": resolved_tenant_id,
-        "trading_permission": signal_readiness.get("trading_permission"),
-        "signal_readiness": signal_readiness,
         "checks": checks,
     }
 
 
 @router.get("/trading-precheck", response_model=TradingPrecheckResponse)
-@redis_cache(ttl=30)
 async def trading_precheck(
     trading_mode: str = "REAL",
     auth: AuthContext = Depends(get_auth_context),

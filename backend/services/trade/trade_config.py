@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     SERVICE_VERSION: str = "1.0.0"
     HOST: str = "0.0.0.0"
     PORT: int = 8002
-    
+
     # AI / LLM
     DASHSCOPE_API_KEY: str = os.getenv("DASHSCOPE_API_KEY", "")
 
@@ -35,16 +35,29 @@ class Settings(BaseSettings):
     DATABASE_POOL_SIZE: int = int(os.getenv("DB_POOL_SIZE", "20"))
     DATABASE_MAX_OVERFLOW: int = int(os.getenv("DB_MAX_OVERFLOW", "30"))
 
-    # Redis (Unified - OSS Edition)
-    REDIS_HOST: str = Field(default="quantmind-redis")
-    REDIS_PORT: int = Field(default=6379)
+    # Redis (Trade-dedicated configuration)
+    REDIS_HOST: str = Field(
+        default="localhost",
+        validation_alias=AliasChoices("REDIS_TRADE_HOST", "REDIS_HOST"),
+    )
+    REDIS_PORT: int = Field(
+        default=6379,
+        validation_alias=AliasChoices("REDIS_TRADE_PORT", "REDIS_PORT"),
+    )
     REDIS_DB: int = int(os.getenv("REDIS_DB_TRADE", "2"))
-    REDIS_PASSWORD: str | None = Field(default="")
+    REDIS_PASSWORD: str | None = Field(
+        default="",
+        validation_alias=AliasChoices("REDIS_TRADE_PASSWORD", "REDIS_PASSWORD"),
+    )
 
-    # Redis Sentinel (Disabled in OSS)
-    REDIS_SENTINEL_ENABLED: bool = False
-    REDIS_SENTINEL_HOSTS: str = "localhost:26379"
-    REDIS_MASTER_NAME: str = "quantmind-master"
+    # Redis Sentinel (Unified Configuration)
+    REDIS_SENTINEL_ENABLED: bool = (
+        os.getenv("REDIS_USE_SENTINEL", "false").lower() == "true"
+    )
+    REDIS_SENTINEL_HOSTS: str = os.getenv(
+        "REDIS_SENTINELS", "localhost:26379,localhost:26380,localhost:26381"
+    )
+    REDIS_MASTER_NAME: str = os.getenv("REDIS_MASTER_NAME", "quantmind-master")
 
     # Cache TTL (seconds)
     CACHE_TTL_ORDER: int = 300  # 5 minutes
@@ -95,7 +108,7 @@ class Settings(BaseSettings):
     MIN_LOT_STAR_BOARD: int = int(os.getenv("MIN_LOT_STAR_BOARD", "200"))
     MIN_LOT_BJ_BOARD: int = int(os.getenv("MIN_LOT_BJ_BOARD", "100"))
     ENABLE_MARGIN_TRADING: bool = (
-        os.getenv("ENABLE_MARGIN_TRADING", "true").lower() == "true"
+        os.getenv("ENABLE_MARGIN_TRADING", "false").lower() == "true"
     )
     ENABLE_SHORT_SELLING_REAL: bool = (
         os.getenv("ENABLE_SHORT_SELLING_REAL", "false").lower() == "true"
@@ -108,8 +121,7 @@ class Settings(BaseSettings):
         os.getenv("SHORT_ADMISSION_STRICT", "true").lower() == "true"
     )
     MARGIN_STOCK_POOL_PATH: str = os.getenv(
-        "MARGIN_STOCK_POOL_PATH",
-        os.path.join(os.getenv("STORAGE_ROOT", "data"), "融资融券.json"),
+        "MARGIN_STOCK_POOL_PATH", "data/融资融券.json"
     )
     MARGIN_SHORT_MARGIN_RATE: float = float(
         os.getenv("MARGIN_SHORT_MARGIN_RATE", "0.5")
@@ -149,31 +161,10 @@ class Settings(BaseSettings):
         os.getenv("SIMULATION_COMMISSION_RATE", "0.0003")
     )
     SIMULATION_STAMP_DUTY_RATE: float = float(
-        os.getenv("SIMULATION_STAMP_DUTY_RATE", "0.001")
-    )  # 印花税（卖出）
+        os.getenv("SIMULATION_STAMP_DUTY_RATE", "0.0005")
+    )
     SIMULATION_TRANSFER_FEE_RATE: float = float(
         os.getenv("SIMULATION_TRANSFER_FEE_RATE", "0.00001")
-    )  # 过户费（双向）
-
-    # Simulation Hosted Scheduler
-    SIM_HOSTED_SCHEDULER_ENABLED: bool = (
-        os.getenv("SIM_HOSTED_SCHEDULER_ENABLED", "true").lower() == "true"
-    )
-    SIM_HOSTED_SCHEDULER_INTERVAL_SECONDS: int = int(
-        os.getenv("SIM_HOSTED_SCHEDULER_INTERVAL_SECONDS", "30")
-    )
-
-    # Simulation Runtime Restorer
-    SIM_RUNTIME_RESTORE_ENABLED: bool = (
-        os.getenv("SIM_RUNTIME_RESTORE_ENABLED", "true").lower() == "true"
-    )
-
-    # Simulation Fund Snapshot
-    SIM_FUND_SNAPSHOT_ENABLED: bool = (
-        os.getenv("SIM_FUND_SNAPSHOT_ENABLED", "true").lower() == "true"
-    )
-    SIM_FUND_SNAPSHOT_INTERVAL_SECONDS: int = int(
-        os.getenv("SIM_FUND_SNAPSHOT_INTERVAL_SECONDS", "30")
     )
 
     # Commission rates for risk purchasing-power check

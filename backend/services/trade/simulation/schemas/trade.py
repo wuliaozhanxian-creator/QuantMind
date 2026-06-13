@@ -28,6 +28,7 @@ class SimTradeResponse(BaseModel):
     commission: float
     executed_at: datetime
     price_source: str | None
+    session_phase: str | None
     created_at: datetime
     updated_at: datetime
 

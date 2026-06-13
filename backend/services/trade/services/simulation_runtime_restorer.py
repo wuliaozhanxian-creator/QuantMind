@@ -1,10 +1,7 @@
-"""
-Simulation Runtime Restorer - 服务重启后恢复模拟盘沙箱策略
-"""
-
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 from typing import Any
@@ -32,13 +29,13 @@ class SimulationRuntimeRestorer:
                 restored += 1 if await self.restore_key(str(raw_key)) else 0
             except Exception as exc:
                 logger.warning(
-                    "SimulationRuntimeRestorer skipped key=%s error=%s",
+                    "simulation runtime restore skipped key=%s error=%s",
                     raw_key,
                     exc,
                     exc_info=True,
                 )
         if restored > 0:
-            logger.info("SimulationRuntimeRestorer restored active sandboxes: %s", restored)
+            logger.info("simulation runtime restored active sandboxes: %s", restored)
         return restored
 
     async def restore_key(self, key: str) -> bool:
@@ -84,7 +81,7 @@ class SimulationRuntimeRestorer:
         code_str = await self._resolve_code(strategy_id=strategy_id, user_id=user_id)
         if not code_str.strip():
             logger.warning(
-                "SimulationRuntimeRestorer skipped missing code: tenant=%s user=%s strategy=%s",
+                "simulation runtime restore skipped missing code: tenant=%s user=%s strategy=%s",
                 tenant_id,
                 user_id,
                 strategy_id,
@@ -118,7 +115,7 @@ class SimulationRuntimeRestorer:
         except Exception:
             pass
         logger.info(
-            "SimulationRuntimeRestorer sandbox restored: tenant=%s user=%s strategy=%s run_id=%s",
+            "simulation sandbox restored: tenant=%s user=%s strategy=%s run_id=%s",
             tenant_id,
             user_id,
             strategy_id,
@@ -146,16 +143,17 @@ class SimulationRuntimeRestorer:
             from backend.shared.strategy_storage import get_strategy_storage_service
 
             storage_svc = get_strategy_storage_service()
-            strategy = await asyncio.to_thread(
-                storage_svc.get,
+            strategy = storage_svc.get(
                 strategy_id=int(strategy_id),
                 user_id=user_id,
             )
+            if inspect.isawaitable(strategy):
+                strategy = await strategy
             if isinstance(strategy, dict):
                 return str(strategy.get("code") or "")
         except Exception as exc:
             logger.warning(
-                "SimulationRuntimeRestorer failed to resolve strategy code: strategy=%s error=%s",
+                "failed to resolve simulation strategy code for restore: strategy=%s error=%s",
                 strategy_id,
                 exc,
             )

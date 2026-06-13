@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -6,7 +6,9 @@ from sqlalchemy.orm import Session
 from backend.services.trade.deps import AuthContext, get_auth_context, get_db
 from backend.services.trade.services.simulation_settler import settler
 
-router = APIRouter(prefix="/api/v1/simulation/batch", tags=["Simulation Batch Operations"])
+router = APIRouter(
+    prefix="/api/v1/simulation/batch", tags=["Simulation Batch Operations"]
+)
 
 
 @router.post("/step")
@@ -46,4 +48,4 @@ async def trigger_simulation_step(
             "data": result,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail=str(e))

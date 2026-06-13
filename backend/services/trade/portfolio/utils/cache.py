@@ -4,7 +4,7 @@ import json
 import logging
 from typing import Any, Optional
 
-from backend.services.trade.redis_client import get_redis as get_trade_redis
+from backend.shared.redis_sentinel_client import get_redis_sentinel_client
 
 logger = logging.getLogger(__name__)
 
@@ -15,8 +15,7 @@ class RedisCache:
 
     def _get_client(self):
         if self._client is None:
-            # 使用 trade 专用 Redis 连接 (DB 2)，与交易数据在同一 DB
-            self._client = get_trade_redis().client
+            self._client = get_redis_sentinel_client()
         return self._client
 
     async def get(self, key: str) -> Any | None:
@@ -34,7 +33,7 @@ class RedisCache:
     async def set(self, key: str, value: Any, ttl: int = 300) -> bool:
         try:
             payload = json.dumps(value, default=str)
-            return bool(self._get_client().setex(key, ttl, payload))
+            return bool(self._get_client().setex(key, ttl, payload.encode("utf-8")))
         except Exception as exc:
             logger.warning(f"Redis set failed ({key}): {exc}")
             return False

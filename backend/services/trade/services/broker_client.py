@@ -13,9 +13,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 if TYPE_CHECKING:
-    from backend.services.trade.services.simulation_manager import (
-        SimulationAccountManager,
-    )
+    from backend.services.trade.services.simulation_manager import SimulationAccountManager
 
 from sqlalchemy import text
 
@@ -45,14 +43,13 @@ class BrokerResult:
         self.message = message
 
 
-
-
 @dataclass
 class MarketQuoteSnapshot:
     price: float
     limit_up: bool = False
     limit_down: bool = False
     suspended: bool = False
+
 
 class BaseBroker(abc.ABC):
     """Broker 抽象基类"""
@@ -72,9 +69,7 @@ class BaseBroker(abc.ABC):
         ...
 
     @abc.abstractmethod
-    async def query_account(
-        self, user_id: str, tenant_id: str = "default"
-    ) -> dict[str, Any]:
+    async def query_account(self, user_id: str, tenant_id: str = "default") -> dict[str, Any]:
         """查询账户信息"""
         ...
 
@@ -154,8 +149,7 @@ class PaperTradingBroker(BaseBroker):
         # Level 1: 实时行情
         try:
             client = await self._get_client()
-            headers = {"X-Internal-Call": get_internal_call_secret()}
-            resp = await client.get(f"{self.market_url}/api/v1/quotes/{symbol}", headers=headers)
+            resp = await client.get(f"{self.market_url}/api/v1/quotes/{symbol}")
             if resp.status_code == 200:
                 data = resp.json()
                 px = self._as_float(data.get("current_price") or data.get("last_price"))
@@ -194,8 +188,8 @@ class PaperTradingBroker(BaseBroker):
             async with get_session(read_only=True) as session:
                 query_with_limits = text("""
                     SELECT close, adj_factor, limit_up_today, limit_down_today, volume
-                    FROM stock_daily_latest
-                    WHERE symbol = :symbol
+                    FROM stock_daily_latest 
+                    WHERE symbol = :symbol 
                     ORDER BY trade_date DESC LIMIT 1
                 """)
                 try:
@@ -215,8 +209,8 @@ class PaperTradingBroker(BaseBroker):
                 except Exception:
                     query_legacy = text("""
                         SELECT close, adj_factor
-                        FROM stock_daily_latest
-                        WHERE symbol = :symbol
+                        FROM stock_daily_latest 
+                        WHERE symbol = :symbol 
                         ORDER BY trade_date DESC LIMIT 1
                     """)
                     result = await session.execute(query_legacy, {"symbol": symbol})
@@ -247,95 +241,60 @@ class PaperTradingBroker(BaseBroker):
         price: float | None = None,
         tenant_id: str = "default",
     ) -> BrokerResult:
-        snapshot = await self._get_market_snapshot(symbol)
-        market_price = snapshot.price
-        exec_price = 0.0
-        slippage = random.uniform(-0.0005, 0.0005)
-
         normalized_side = str(side or "").strip().lower()
-        if snapshot.suspended:
-            return BrokerResult(success=False, message="Security is suspended, cannot trade")
-        if normalized_side == "buy" and snapshot.limit_up:
-            return BrokerResult(success=False, message="Limit-up locked, buy order cannot be filled")
-        if normalized_side == "sell" and snapshot.limit_down:
-            return BrokerResult(success=False, message="Limit-down locked, sell order cannot be filled")
-
-        if order_type == "market":
-            exec_price = market_price * (1 + slippage)
-        elif order_type == "limit":
-            if not price:
-                return BrokerResult(success=False, message="Limit price required")
-            if side == "buy":
-                if price >= market_price:
-                    exec_price = market_price
-                else:
-                    return BrokerResult(
-                        success=False, message="Limit price not reached"
-                    )
-            else:
-                if price <= market_price:
-                    exec_price = market_price
-                else:
-                    return BrokerResult(
-                        success=False, message="Limit price not reached"
-                    )
-        else:
-            return BrokerResult(
-                success=False, message=f"Unsupported order type: {order_type}"
+        normalized_order_type = str(order_type or "").strip().lower()
+        try:
+            from backend.services.trade.simulation.services.order_submission_service import (
+                SimulationOrderSubmissionService,
             )
 
-        exec_price = round(exec_price, 4)
-        commission = round(quantity * exec_price * self.COMMISSION_RATE, 2)
-        cost_or_proceeds = quantity * exec_price
+            async with get_session(read_only=False) as session:
+                submission = await SimulationOrderSubmissionService(
+                    session,
+                    self.simulation_manager,
+                ).submit_and_fill(
+                    tenant_id=tenant_id,
+                    user_id=int(user_id),
+                    symbol=symbol,
+                    side=normalized_side,
+                    quantity=float(quantity),
+                    order_type=normalized_order_type,
+                    price=price,
+                    portfolio_id=0,
+                    strategy_id=None,
+                    trade_action=None,
+                    position_side="long",
+                    is_margin_trade=False,
+                    remarks="paper_trading_broker",
+                    trigger_source="paper_broker",
+                )
+            if not submission.success:
+                return BrokerResult(success=False, message=submission.message)
 
-        if side == "buy":
-            delta_cash = -(cost_or_proceeds + commission)
-            delta_volume = quantity
-        else:
-            delta_cash = cost_or_proceeds - commission
-            delta_volume = -quantity
+            logger.info(
+                "[PaperTrading] User %s filled %s %s %s @ %s order_id=%s trade_id=%s",
+                user_id,
+                normalized_side,
+                quantity,
+                symbol,
+                submission.fill_price,
+                submission.order_id,
+                submission.trade_id,
+            )
+            return BrokerResult(
+                success=True,
+                filled_price=submission.fill_price,
+                filled_quantity=submission.filled_quantity,
+                commission=submission.commission,
+                exchange_order_id=str(submission.order_id or submission.trade_id or ""),
+                message="Paper Trading Fill",
+            )
+        except ValueError as exc:
+            return BrokerResult(success=False, message=str(exc))
 
-        # Update State
-        update_result = await self.simulation_manager.update_balance(
-            user_id=user_id,
-            symbol=symbol,
-            delta_cash=delta_cash,
-            delta_volume=delta_volume,
-            price=exec_price,
-            tenant_id=tenant_id,
-        )
-
-        if not update_result.get("success"):
-            reason = update_result.get("reason", "BALANCE_UPDATE_FAILED")
-            if reason == "INSUFFICIENT_CASH":
-                message = "Insufficient cash for buy order"
-            elif reason == "INSUFFICIENT_HOLDINGS":
-                message = "Insufficient holdings for sell order"
-            else:
-                message = f"Balance update failed: {reason}"
-            return BrokerResult(success=False, message=message)
-
-        exchange_id = f"SIM-{datetime.now().strftime('%Y%m%d%H%M%S')}-{random.randint(1000, 9999)}"
-        logger.info(
-            f"[PaperTrading] User {user_id} filled {side} {quantity} {symbol} @ {exec_price}"
-        )
-
-        return BrokerResult(
-            success=True,
-            filled_price=exec_price,
-            filled_quantity=quantity,
-            commission=commission,
-            exchange_order_id=exchange_id,
-            message="Paper Trading Fill",
-        )
-
-    async def query_account(
-        self, user_id: str, tenant_id: str = "default"
-    ) -> dict[str, Any]:
+    async def query_account(self, user_id: str, tenant_id: str = "default") -> dict[str, Any]:
         """Query account state from Redis"""
-        account = await self.simulation_manager.get_account(
-            int(user_id), tenant_id=tenant_id
-        )
+        account = await self.simulation_manager.get_account(int(user_id), tenant_id=tenant_id)
         if not account:
             return {}
         return account
@@ -412,9 +371,7 @@ class QMTBroker(BaseBroker):
             logger.error(f"[QMTBroker] place_order failed: {e}")
             return BrokerResult(success=False, message=str(e))
 
-    async def query_account(
-        self, user_id: str, tenant_id: str = "default"
-    ) -> dict[str, Any]:
+    async def query_account(self, user_id: str, tenant_id: str = "default") -> dict[str, Any]:
         try:
             client = await self._get_session()
             resp = await client.get(f"{self.base_url}/api/account")
@@ -525,9 +482,7 @@ class QMTBridgeBroker(BaseBroker):
         redis_client: Any = None,
     ):
         self.stream_base_url = str(stream_base_url or "").rstrip("/")
-        self.internal_secret = (
-            str(internal_secret or "").strip() or get_internal_call_secret()
-        )
+        self.internal_secret = str(internal_secret or "").strip() or get_internal_call_secret()
         self.redis_client = redis_client
         self._session = None
 
@@ -554,9 +509,7 @@ class QMTBridgeBroker(BaseBroker):
     ) -> BrokerResult:
         client_oid = str(client_order_id or "").strip()
         if not client_oid:
-            return BrokerResult(
-                success=False, message="client_order_id is required in bridge mode"
-            )
+            return BrokerResult(success=False, message="client_order_id is required in bridge mode")
         if not self.stream_base_url:
             return BrokerResult(success=False, message="stream_base_url is empty")
 
@@ -572,19 +525,14 @@ class QMTBridgeBroker(BaseBroker):
                 "price": float(price or 0.0),
                 "trade_action": str(trade_action or "").strip().lower() or None,
                 "position_side": str(position_side or "").strip().lower() or None,
-                "is_margin_trade": bool(is_margin_trade)
-                if is_margin_trade is not None
-                else None,
+                "is_margin_trade": bool(is_margin_trade) if is_margin_trade is not None else None,
                 "dispatch_mode": "async",  # 使用异步下单，避免 QMT SDK 同步调用挂起 WS 接收线程
             },
         }
         if payload["payload"]["quantity"] <= 0:
             return BrokerResult(success=False, message="quantity must be > 0")
         client_oid_lower = client_oid.lower()
-        is_manual_market_order = (
-            client_oid_lower.startswith("manual-")
-            and str(order_type or "").strip().lower() == "market"
-        )
+        is_manual_market_order = client_oid_lower.startswith("manual-") and str(order_type or "").strip().lower() == "market"
         if (
             not is_manual_market_order
             and (
@@ -632,16 +580,13 @@ class QMTBridgeBroker(BaseBroker):
             logger.error("[QMTBridgeBroker] place_order failed: %s", e)
             return BrokerResult(success=False, message=str(e))
 
-    async def query_account(
-        self, user_id: str, tenant_id: str = "default"
-    ) -> dict[str, Any]:
+    async def query_account(self, user_id: str, tenant_id: str = "default") -> dict[str, Any]:
         try:
             async with get_session(read_only=True) as session:
                 row = (
-                    (
-                        await session.execute(
-                            text(
-                                """
+                    await session.execute(
+                        text(
+                            """
                             SELECT *
                             FROM real_account_snapshot_overview_v
                             WHERE tenant_id = :tenant_id
@@ -649,13 +594,10 @@ class QMTBridgeBroker(BaseBroker):
                             ORDER BY snapshot_at DESC, id DESC
                             LIMIT 1
                             """
-                            ),
-                            {"tenant_id": tenant_id, "user_id": str(user_id).strip()},
-                        )
+                        ),
+                        {"tenant_id": tenant_id, "user_id": str(user_id).strip()},
                     )
-                    .mappings()
-                    .first()
-                )
+                ).mappings().first()
             if row:
                 data = dict(row)
                 payload = data.get("payload_json") or {}
@@ -696,9 +638,7 @@ class QMTBridgeBroker(BaseBroker):
         side = str(kwargs.get("side") or "").strip()
 
         if not user_id:
-            logger.warning(
-                "[QMTBridgeBroker] cancel_order missing user_id, skipping bridge dispatch"
-            )
+            logger.warning("[QMTBridgeBroker] cancel_order missing user_id, skipping bridge dispatch")
             return False
         if not self.stream_base_url:
             return False
@@ -726,11 +666,7 @@ class QMTBridgeBroker(BaseBroker):
                 headers={"X-Internal-Call": self.internal_secret},
             )
             if resp.status_code != 200:
-                logger.warning(
-                    "[QMTBridgeBroker] cancel_order HTTP %s: %s",
-                    resp.status_code,
-                    resp.text,
-                )
+                logger.warning("[QMTBridgeBroker] cancel_order HTTP %s: %s", resp.status_code, resp.text)
                 return False
             data = resp.json()
             if not data.get("ok"):
@@ -869,9 +805,7 @@ class RedisBroker(BaseBroker):
         if self._hmac_secret:
             typed_cmd["hmac"] = self._sign_cmd(typed_cmd)
         else:
-            logger.warning(
-                "[RedisBroker] QMT_CMD_HMAC_SECRET 未配置，指令将以明文发送（不安全）"
-            )
+            logger.warning("[RedisBroker] QMT_CMD_HMAC_SECRET 未配置，指令将以明文发送（不安全）")
 
         # Stream 字段必须全部为字符串
         stream_fields = {k: str(v) for k, v in typed_cmd.items()}
@@ -901,16 +835,13 @@ class RedisBroker(BaseBroker):
             logger.error("[RedisBroker] XADD failed: %s", e)
             return BrokerResult(success=False, message=str(e))
 
-    async def query_account(
-        self, user_id: str, tenant_id: str = "default"
-    ) -> dict[str, Any]:
+    async def query_account(self, user_id: str, tenant_id: str = "default") -> dict[str, Any]:
         try:
             async with get_session(read_only=True) as session:
                 row = (
-                    (
-                        await session.execute(
-                            text(
-                                """
+                    await session.execute(
+                        text(
+                            """
                             SELECT *
                             FROM real_account_snapshot_overview_v
                             WHERE tenant_id = :tenant_id
@@ -918,13 +849,10 @@ class RedisBroker(BaseBroker):
                             ORDER BY snapshot_at DESC, id DESC
                             LIMIT 1
                             """
-                            ),
-                            {"tenant_id": tenant_id, "user_id": str(user_id).strip()},
-                        )
+                        ),
+                        {"tenant_id": tenant_id, "user_id": str(user_id).strip()},
                     )
-                    .mappings()
-                    .first()
-                )
+                ).mappings().first()
             if row:
                 data = dict(row)
                 payload = data.get("payload_json") or {}
@@ -958,9 +886,7 @@ class RedisBroker(BaseBroker):
 
     async def cancel_order(self, exchange_order_id: str) -> bool:
         # 撤单指令可扩展为向 quantmind:trade:cancel:{user_id} publish
-        logger.warning(
-            "[RedisBroker] cancel_order not implemented yet: %s", exchange_order_id
-        )
+        logger.warning("[RedisBroker] cancel_order not implemented yet: %s", exchange_order_id)
         return False
 
     async def query_quote(self, symbol: str) -> dict[str, Any]:
@@ -983,26 +909,20 @@ def create_broker(enable_real: bool, **kwargs) -> BaseBroker:
     if enable_real:
         if broker_type == "redis":
             redis_password = kwargs.get("redis_trade_password") or os.getenv(
-                "REDIS_PASSWORD", ""
+                "REDIS_TRADE_PASSWORD", os.getenv("REDIS_PASSWORD", "")
             )
-            hmac_secret = kwargs.get("hmac_secret") or os.getenv(
-                "QMT_CMD_HMAC_SECRET", ""
-            )
+            hmac_secret = kwargs.get("hmac_secret") or os.getenv("QMT_CMD_HMAC_SECRET", "")
             if not hmac_secret:
-                logger.warning(
-                    "[create_broker] QMT_CMD_HMAC_SECRET 未设置，RedisBroker 将以不签名模式运行"
-                )
+                logger.warning("[create_broker] QMT_CMD_HMAC_SECRET 未设置，RedisBroker 将以不签名模式运行")
             return RedisBroker(
                 redis_host=kwargs.get("redis_trade_host")
-                or os.getenv("REDIS_HOST", "localhost"),
+                or os.getenv("REDIS_TRADE_HOST", os.getenv("REDIS_HOST", "localhost")),
                 redis_port=int(
-                    kwargs.get("redis_trade_port") or os.getenv("REDIS_PORT", "6379")
+                    kwargs.get("redis_trade_port") or os.getenv("REDIS_TRADE_PORT", os.getenv("REDIS_PORT", "6379"))
                 ),
                 redis_password=redis_password,
                 hmac_secret=hmac_secret,
-                cmd_stream_prefix=os.getenv(
-                    "TRADE_CMD_STREAM_PREFIX", "quantmind:trade:cmds"
-                ),
+                cmd_stream_prefix=os.getenv("TRADE_CMD_STREAM_PREFIX", "quantmind:trade:cmds"),
                 cmd_stream_maxlen=int(os.getenv("TRADE_CMD_STREAM_MAXLEN", "10000")),
             )
         if broker_type == "qmt":
@@ -1015,8 +935,7 @@ def create_broker(enable_real: bool, **kwargs) -> BaseBroker:
                 stream_base_url=kwargs.get("stream_base_url")
                 or kwargs.get("market_url")
                 or os.getenv("MARKET_DATA_SERVICE_URL", "http://stream-gateway:8003"),
-                internal_secret=kwargs.get("internal_secret")
-                or get_internal_call_secret(),
+                internal_secret=kwargs.get("internal_secret") or get_internal_call_secret(),
                 redis_client=kwargs.get("redis_client"),
             )
         raise ValueError(

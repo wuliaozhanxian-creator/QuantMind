@@ -130,16 +130,7 @@ def _safe_level(value: str) -> str:
 
 def _looks_like_missing_table_error(error: ProgrammingError) -> bool:
     msg = str(error).lower()
-    # 必须同时包含 "notifications" 和明确的表不存在标识
-    # "relation" 单独出现可能是其他错误（如外键约束），需要更精确匹配
-    if "notifications" not in msg:
-        return False
-    # PostgreSQL 表不存在的典型错误模式
-    return (
-        "undefinedtable" in msg
-        or 'relation "notifications" does not exist' in msg
-        or '"notifications" does not exist' in msg
-    )
+    return "notifications" in msg and ("undefinedtable" in msg or "does not exist" in msg or "relation" in msg)
 
 
 def _looks_like_user_fk_violation(error: IntegrityError) -> bool:
@@ -191,7 +182,7 @@ def publish_notification(
 
     sql = text("""
         INSERT INTO notifications (
-            user_id, tenant_id, title, content, notification_type, level, action_url, expires_at
+            user_id, tenant_id, title, content, type, level, action_url, expires_at
         )
         VALUES (
             :user_id, :tenant_id, :title, :content, :type, :level, :action_url, :expires_at
@@ -231,7 +222,7 @@ def publish_notification(
         return True
     except ProgrammingError as exc:
         if _looks_like_missing_table_error(exc):
-            logger.warning("notification table missing, publish skipped. error=%s", exc)
+            logger.warning("notification table missing, publish skipped")
             inc_counter(notification_publish_total, "skipped")
             return False
         inc_counter(notification_publish_total, "failed")

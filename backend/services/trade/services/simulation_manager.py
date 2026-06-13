@@ -88,6 +88,132 @@ account.total_asset = new_cash + total_market_value
 redis.call("SET", key, cjson.encode(account))
 return cjson.encode({success=true})
 """
+        self._update_balance_margin_lua = """
+local key = KEYS[1]
+local pos_key = ARGV[1]
+local price = tonumber(ARGV[2])
+local action = string.lower(tostring(ARGV[3] or ""))
+local quantity = tonumber(ARGV[4])
+local borrow_rate_daily = tonumber(ARGV[5])
+local closeout_ratio = tonumber(ARGV[6])
+local warning_ratio = tonumber(ARGV[7])
+local snapshot_at = tostring(ARGV[8] or "")
+
+local raw = redis.call("GET", key)
+if not raw then
+    return cjson.encode({success=false, reason="ACCOUNT_NOT_FOUND"})
+end
+
+local account = cjson.decode(raw)
+local positions = account.positions or {}
+local cash = tonumber(account.cash or 0)
+local liabilities = tonumber(account.liabilities or 0)
+local short_proceeds = tonumber(account.short_proceeds or 0)
+local account_version = tonumber(account.account_version or 0)
+local pos = positions[pos_key]
+if not pos then
+    pos = {volume=0, cost=0, market_value=0, price=0, side="short", borrow_fee=0}
+end
+
+local old_qty = tonumber(pos.volume or 0)
+local gross = quantity * price
+local borrow_fee = gross * borrow_rate_daily
+
+if action == "sell_to_open" then
+    local new_qty = old_qty + quantity
+    local total_cost = (tonumber(pos.cost or 0) * old_qty) + gross
+    pos.volume = new_qty
+    pos.cost = new_qty > 0 and (total_cost / new_qty) or 0
+    pos.price = price
+    pos.market_value = new_qty * price
+    pos.side = "short"
+    pos.borrow_fee = tonumber(pos.borrow_fee or 0) + borrow_fee
+    positions[pos_key] = pos
+
+    short_proceeds = short_proceeds + gross
+    cash = cash - borrow_fee
+    liabilities = liabilities + gross
+elseif action == "buy_to_close" then
+    if old_qty + 0.000001 < quantity then
+        return cjson.encode({success=false, reason="INSUFFICIENT_SHORT_POSITION"})
+    end
+
+    local avg_cost = tonumber(pos.cost or 0)
+    local short_entry_val = avg_cost * quantity
+    local realized = short_entry_val - gross - borrow_fee
+
+    cash = cash + realized
+    short_proceeds = math.max(0, short_proceeds - short_entry_val)
+    liabilities = math.max(0, liabilities - short_entry_val)
+
+    local new_qty = old_qty - quantity
+    if new_qty <= 0.000001 then
+        positions[pos_key] = nil
+    else
+        pos.volume = new_qty
+        pos.price = price
+        pos.market_value = new_qty * price
+        pos.side = "short"
+        pos.borrow_fee = tonumber(pos.borrow_fee or 0) + borrow_fee
+        pos.realized_pnl = tonumber(pos.realized_pnl or 0) + realized
+        positions[pos_key] = pos
+    end
+else
+    return cjson.encode({success=false, reason="UNSUPPORTED_TRADE_ACTION:" .. action})
+end
+
+local total_market_value = 0
+local long_market_value = 0
+local short_market_value = 0
+for _, position in pairs(positions) do
+    local qty = tonumber(position.volume or 0)
+    local px = tonumber(position.price or 0)
+    local side = string.lower(tostring(position.side or "long"))
+    local mv = qty * px
+    if side == "short" then
+        total_market_value = total_market_value - mv
+        short_market_value = short_market_value + mv
+    else
+        total_market_value = total_market_value + mv
+        long_market_value = long_market_value + mv
+    end
+end
+
+local equity = cash + short_proceeds + total_market_value
+local maintenance_ratio = 0
+local warning_level = "normal"
+if liabilities > 0 then
+    maintenance_ratio = equity / liabilities
+    if maintenance_ratio <= closeout_ratio then
+        warning_level = "closeout"
+    elseif maintenance_ratio <= warning_ratio then
+        warning_level = "warning"
+    end
+end
+
+account.cash = cash
+account.available_cash = cash
+account.frozen_cash = short_proceeds
+account.short_proceeds = short_proceeds
+account.positions = positions
+account.market_value = total_market_value
+account.long_market_value = long_market_value
+account.short_market_value = short_market_value
+account.liabilities = liabilities
+account.maintenance_margin_ratio = maintenance_ratio
+account.warning_level = warning_level
+account.total_asset = equity
+account.equity = equity
+account.account_version = account_version + 1
+if snapshot_at ~= "" then
+    account.snapshot_at = snapshot_at
+    account.rebuilt_at = snapshot_at
+end
+account.rebuild_source = "simulation_margin_update"
+
+redis.call("SET", key, cjson.encode(account))
+return cjson.encode({success=true, reason="OK", account=account})
+"""
 
     @staticmethod
     def _normalize_tenant(tenant_id: str | None) -> str:
@@ -234,12 +360,18 @@ return cjson.encode({success=true})
     @staticmethod
     def _build_account_payload(initial_cash: float) -> dict[str, Any]:
         normalized_initial_cash = float(initial_cash or 0.0)
+        snapshot_at = SimulationAccountManager._utc_now().isoformat()
         return {
+            "account_version": 1,
+            "snapshot_at": snapshot_at,
             "cash": normalized_initial_cash,
             "available_cash": normalized_initial_cash,
+            "frozen_cash": 0.0,
             "total_asset": normalized_initial_cash,
             "market_value": 0.0,
+            "long_market_value": 0.0,
             "short_market_value": 0.0,
+            "equity": normalized_initial_cash,
             "liabilities": 0.0,
             "maintenance_margin_ratio": 0.0,
             "warning_level": "normal",
@@ -252,6 +384,8 @@ return cjson.encode({success=true})
                 "day_open_equity": normalized_initial_cash,
                 "month_open_equity": normalized_initial_cash,
             },
+            "rebuild_source": "simulation_account_init",
+            "rebuilt_at": snapshot_at,
         }
 
     async def get_settings(
@@ -427,107 +561,27 @@ return cjson.encode({success=true})
         quantity: float,
     ) -> dict[str, Any]:
         key = self._get_key(user_id, tenant_id)
-        account = await self.get_account(user_id, tenant_id=tenant_id) or {}
-        positions = dict(account.get("positions") or {})
-        cash = float(account.get("cash") or 0.0)
-        liabilities = float(account.get("liabilities") or 0.0)
-        short_market_value = float(account.get("short_market_value") or 0.0)
-        short_proceeds = float(account.get("short_proceeds") or 0.0)
-        maintenance_ratio = float(account.get("maintenance_margin_ratio") or 0.0)
-        warning_level = str(account.get("warning_level") or "normal")
-
+        snapshot_at = self._utc_now().isoformat()
         action = str(trade_action or "").lower()
         pos_key = self._position_key(symbol, "short")
-        pos = dict(positions.get(pos_key) or {})
-        old_qty = float(pos.get("volume") or 0.0)
-        gross = float(quantity) * float(price)
-        # 统一手续费费率，回测默认约 0.0015 包含印花税，这里简化表示
-        borrow_fee = gross * float(settings.DEFAULT_BORROW_RATE) / 252.0
-
-        if action == "sell_to_open":
-            new_qty = old_qty + float(quantity)
-            total_cost = float(pos.get("cost") or 0.0) * old_qty + gross
-            pos["volume"] = new_qty
-            pos["cost"] = total_cost / new_qty if new_qty > 0 else 0.0
-            pos["price"] = float(price)
-            pos["market_value"] = new_qty * float(price)
-            pos["side"] = "short"
-            pos["borrow_fee"] = float(pos.get("borrow_fee") or 0.0) + borrow_fee
-
-            # 融券所得资金冻结
-            short_proceeds += gross
-            # 现金只扣减手续费
-            cash -= borrow_fee
-
-            liabilities += gross
-            short_market_value += pos["market_value"]
-        elif action == "buy_to_close":
-            if old_qty < float(quantity):
-                return {"success": False, "reason": "INSUFFICIENT_SHORT_POSITION"}
-
-            avg_cost = float(pos.get("cost") or 0.0)
-            short_entry_val = avg_cost * float(quantity)
-
-            # 实现盈亏 = 融券开仓价值 - 买入平仓成本 - 手续费
-            realized = short_entry_val - gross - borrow_fee
-
-            # 只有净盈亏结算至可用现金
-            cash += realized
-
-            # 释放对应的冻结本金
-            short_proceeds = max(0.0, short_proceeds - short_entry_val)
-
-            new_qty = old_qty - float(quantity)
-            liabilities = max(0.0, liabilities - short_entry_val)
-            short_market_value = max(0.0, short_market_value - short_entry_val)
-
-            if new_qty <= 1e-6:
-                positions.pop(pos_key, None)
-            else:
-                pos["volume"] = new_qty
-                pos["price"] = float(price)
-                pos["market_value"] = new_qty * float(price)
-                pos["borrow_fee"] = float(pos.get("borrow_fee") or 0.0) + borrow_fee
-                pos["realized_pnl"] = float(pos.get("realized_pnl") or 0.0) + realized
-                positions[pos_key] = pos
-        else:
-            return {"success": False, "reason": f"UNSUPPORTED_TRADE_ACTION:{action}"}
-
-        if action == "sell_to_open":
-            positions[pos_key] = pos
-
-        total_market_value = 0.0
-        for position in positions.values():
-            qty = float(position.get("volume") or 0.0)
-            px = float(position.get("price") or 0.0)
-            side = str(position.get("side") or "long").lower()
-            mv = qty * px
-            total_market_value += mv if side == "long" else -mv
-
-        equity = cash + short_proceeds + total_market_value
-
-        # 维持担保比例 = 总资产 / 总负债
-        if liabilities > 0:
-            maintenance_ratio = equity / liabilities if liabilities else 0.0
-            if maintenance_ratio <= float(settings.MARGIN_CLOSEOUT_RATIO):
-                warning_level = "closeout"
-            elif maintenance_ratio <= float(settings.MARGIN_WARNING_RATIO):
-                warning_level = "warning"
-            else:
-                warning_level = "normal"
-
-        account.update(
-            {
-                "cash": cash,
-                "short_proceeds": short_proceeds,
-                "positions": positions,
-                "market_value": total_market_value,
-                "short_market_value": short_market_value,
-                "liabilities": liabilities,
-                "maintenance_margin_ratio": maintenance_ratio,
-                "warning_level": warning_level,
-                "total_asset": equity,
-            }
-        )
-        write_json_cache(self.redis, key, account)
-        return {"success": True, "reason": "OK", "account": account}
+        try:
+            result = self.redis.client.eval(
+                self._update_balance_margin_lua,
+                1,
+                key,
+                pos_key,
+                str(float(price)),
+                action,
+                str(float(quantity)),
+                str(float(settings.DEFAULT_BORROW_RATE) / 252.0),
+                str(float(settings.MARGIN_CLOSEOUT_RATIO)),
+                str(float(settings.MARGIN_WARNING_RATIO)),
+                snapshot_at,
+            )
+            payload = json.loads(result) if isinstance(result, str) else result
+            if isinstance(payload, dict):
+                return payload
+            return {"success": False, "reason": "INVALID_SCRIPT_RESULT"}
+        except Exception as e:
+            logger.error("Failed to update simulation margin account atomically: %s", e)
+            return {"success": False, "reason": "ATOMIC_MARGIN_UPDATE_FAILED"}

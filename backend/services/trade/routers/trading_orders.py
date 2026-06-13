@@ -28,11 +28,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _require_user_id(raw_user_id: str) -> str:
-    """获取用户ID (字符串类型，兼容 'admin' 等非数字ID)"""
-    if not raw_user_id:
+def _require_int_user_id(raw_user_id: str) -> int:
+    try:
+        return int(raw_user_id)
+    except (TypeError, ValueError):
         raise HTTPException(status_code=400, detail="Invalid user_id in token")
-    return raw_user_id
 
 
 @router.post("/", response_model=OrderResponse, status_code=status.HTTP_201_CREATED)
@@ -44,7 +44,7 @@ async def create_order(
 ):
     """Create a new order"""
     try:
-        user_id = _require_user_id(auth.user_id)
+        user_id = _require_int_user_id(auth.user_id)
         if (order_data.trading_mode or TradingMode.SIMULATION) == TradingMode.SIMULATION:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -96,7 +96,7 @@ async def get_order(
     redis: RedisClient = Depends(get_redis),
 ):
     """Get order by ID"""
-    user_id = _require_user_id(auth.user_id)
+    user_id = _require_int_user_id(auth.user_id)
     order_service = OrderService(db, redis)
     order = await order_service.get_order(order_id, tenant_id=auth.tenant_id, user_id=user_id)
 
@@ -116,7 +116,7 @@ async def update_order(
 ):
     """Update order (only pending orders)"""
     try:
-        user_id = _require_user_id(auth.user_id)
+        user_id = _require_int_user_id(auth.user_id)
         order_service = OrderService(db, redis)
         existing = await order_service.get_order(order_id, tenant_id=auth.tenant_id, user_id=user_id)
         if not existing:
@@ -150,7 +150,7 @@ async def cancel_order(
 ):
     """Cancel order — 先向 Broker 发撤单指令，再更新本地状态。"""
     try:
-        user_id = _require_user_id(auth.user_id)
+        user_id = _require_int_user_id(auth.user_id)
         order_service = OrderService(db, redis)
         existing = await order_service.get_order(order_id, tenant_id=auth.tenant_id, user_id=user_id)
         if not existing:
@@ -220,7 +220,7 @@ async def list_orders(
     redis: RedisClient = Depends(get_redis),
 ):
     """List orders with filters"""
-    user_id = _require_user_id(auth.user_id)
+    user_id = _require_int_user_id(auth.user_id)
     normalized_trading_mode = None
     if trading_mode is not None:
         try:
@@ -268,7 +268,7 @@ async def get_order_statistics(
     redis: RedisClient = Depends(get_redis),
 ):
     """Get order statistics"""
-    user_id = _require_user_id(auth.user_id)
+    user_id = _require_int_user_id(auth.user_id)
     order_service = OrderService(db, redis)
     stats = await order_service.get_order_statistics(auth.tenant_id, user_id, portfolio_id)
 

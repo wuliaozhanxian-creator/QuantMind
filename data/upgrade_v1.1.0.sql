@@ -10,6 +10,7 @@
 --   v1.0.0 (2026-05-11) - 初始版本，修复 stock_daily_latest 表字段类型
 --   v1.1.0 (2026-05-11) - 重建 stock_daily_latest 表，统一 volume_trend_3d 为 double precision
 --   v1.2.0 (2026-06-07) - 升级 sim_trades 表结构，添加缺失字段以匹配代码模型
+--   v1.3.0 (2026-06-13) - 对齐模拟盘三表与 ORM：sim_orders / sim_trades / simulation_fund_snapshots
 -- ============================================================
 
 BEGIN;
@@ -315,3 +316,75 @@ CREATE INDEX IF NOT EXISTS idx_sim_trades_tenant_user_symbol ON public.sim_trade
 SELECT COUNT(*) AS sim_trades_column_count
 FROM information_schema.columns
 WHERE table_name = 'sim_trades' AND table_schema = 'public';
+
+-- ============================================================
+-- v1.3.0: 对齐模拟盘三表与 ORM 模型 (2026-06-13)
+-- ============================================================
+-- 变更说明：
+--   1. sim_orders / sim_trades 新增 trade_action / position_side / is_margin_trade
+--      （对应 backend/services/trade/simulation/models/{order,trade}.py）
+--   2. sim_orders / sim_trades 的 user_id 从 VARCHAR/INTEGER 统一升级为 BIGINT
+--      （ORM 中 SimOrder.user_id / SimTrade.user_id 均为 Mapped[int]）
+--   3. simulation_fund_snapshots 新增 account_id / data(JSONB) / created_at
+--      （对应 SimulationFundSnapshotService.capture_all 写入的字段集）
+-- 幂等：所有语句使用 IF NOT EXISTS 与 DO 块，可重复执行
+-- ============================================================
+
+BEGIN;
+
+-- --- sim_orders 列扩展 ---
+ALTER TABLE public.sim_orders
+    ADD COLUMN IF NOT EXISTS trade_action    VARCHAR(32),
+    ADD COLUMN IF NOT EXISTS position_side   VARCHAR(16) DEFAULT 'long',
+    ADD COLUMN IF NOT EXISTS is_margin_trade INTEGER NOT NULL DEFAULT 0;
+
+-- --- sim_orders.user_id -> bigint ---
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name   = 'sim_orders'
+          AND column_name  = 'user_id'
+          AND data_type IN ('character varying', 'text', 'integer')
+    ) THEN
+        EXECUTE 'ALTER TABLE public.sim_orders ALTER COLUMN user_id TYPE BIGINT USING user_id::bigint';
+    END IF;
+END $$;
+
+-- --- sim_trades 列扩展 ---
+ALTER TABLE public.sim_trades
+    ADD COLUMN IF NOT EXISTS trade_action    VARCHAR(32),
+    ADD COLUMN IF NOT EXISTS position_side   VARCHAR(16) DEFAULT 'long',
+    ADD COLUMN IF NOT EXISTS is_margin_trade INTEGER NOT NULL DEFAULT 0;
+
+-- --- sim_trades.user_id -> bigint ---
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name   = 'sim_trades'
+          AND column_name  = 'user_id'
+          AND data_type IN ('character varying', 'text', 'integer')
+    ) THEN
+        EXECUTE 'ALTER TABLE public.sim_trades ALTER COLUMN user_id TYPE BIGINT USING user_id::bigint';
+    END IF;
+END $$;
+
+-- --- simulation_fund_snapshots 列扩展 ---
+ALTER TABLE public.simulation_fund_snapshots
+    ADD COLUMN IF NOT EXISTS account_id VARCHAR(64),
+    ADD COLUMN IF NOT EXISTS data       JSONB,
+    ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT now();
+
+COMMIT;
+
+-- 验证升级：确认关键列已存在
+SELECT table_name, column_name, data_type
+FROM information_schema.columns
+WHERE table_schema = 'public'
+  AND table_name IN ('sim_orders', 'sim_trades', 'simulation_fund_snapshots')
+  AND column_name IN ('user_id', 'trade_action', 'position_side', 'is_margin_trade',
+                      'account_id', 'data', 'created_at')
+ORDER BY table_name, column_name;

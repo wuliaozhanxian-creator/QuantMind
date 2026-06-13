@@ -15,6 +15,15 @@ from backend.services.trade.simulation.models.order import OrderSide, TradingMod
 
 
 class SimTrade(Base, TimestampMixin):
+    """[DEPRECATED] Legacy simulation trade model. Use SimulationFill instead.
+
+    This model is retained only for:
+    - Historical migration replay (SimulationMigrationService)
+    - Account audit legacy comparison (account-audit endpoint)
+    - Preflight table existence checks
+
+    Runtime trade recording must use SimulationFill via SimulationLedgerService.
+    """
     __tablename__ = "sim_trades"
 
     id: Mapped[int] = mapped_column(
@@ -63,8 +72,11 @@ class SimTrade(Base, TimestampMixin):
     executed_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=datetime.utcnow
     )
-    price_source: Mapped[str | None] = mapped_column(
+    price_source: Mapped[Optional[str]] = mapped_column(
         String(64), nullable=True)
+    trade_action: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    position_side: Mapped[Optional[str]] = mapped_column(String(16), nullable=True, default="long")
+    is_margin_trade: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     __table_args__ = (
         Index("idx_sim_trade_tenant_user_symbol",

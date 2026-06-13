@@ -5,36 +5,47 @@ from datetime import datetime
 from typing import Any, Dict, List
 
 from sqlalchemy import text
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.trade.deps import get_redis
 from backend.services.trade.services.simulation_manager import SimulationAccountManager
-from backend.services.trade.simulation.models.trade import SimTrade
-from backend.services.trade.simulation.models.order import SimOrder
+from backend.services.trade.simulation.models.order import (
+    OrderSide,
+    OrderStatus,
+    OrderType,
+)
+from backend.services.trade.simulation.schemas.order import SimOrderCreate
+from backend.services.trade.simulation.services.execution_engine import (
+    SimulationExecutionEngine,
+)
+from backend.services.trade.simulation.services.order_service import SimOrderService
 
 logger = logging.getLogger(__name__)
 
 
 class SimulationSettler:
     """
-    模拟交易结算器：负责无需 Pod 的"公式化"模拟盘运行逻辑
+    模拟交易结算器：负责无需 Pod 的“公式化”模拟盘运行逻辑
     """
 
     async def run_daily_settlement(
-        self, db: Session, user_id: int, strategy_id: str, tenant_id: str = "default"
+        self, db: AsyncSession, user_id: str | int, strategy_id: str, tenant_id: str = "default"
     ):
         """
-        执行一次模拟盘的"每日步进"
+        执行一次模拟盘的“每日步进”
         """
         logger.info(f"[SimSettle] 开始结算用户 {user_id} 的策略 {strategy_id}...")
 
         # 获取 Redis 客户端
         redis = get_redis()
         sim_manager = SimulationAccountManager(redis)
+        order_service = SimOrderService(db)
+        execution_engine = SimulationExecutionEngine(db, sim_manager)
 
         # 1. 获取当前账户状态
         tenant_id = str(tenant_id or "default")
-        account_data = await sim_manager.get_account(user_id, tenant_id=tenant_id)
+        normalized_user_id = str(user_id)
+        account_data = await sim_manager.get_account(normalized_user_id, tenant_id=tenant_id)
         if not account_data:
             logger.error(f"找不到用户 {user_id} 的模拟账户")
             return
@@ -76,7 +87,9 @@ class SimulationSettler:
                 or 0
             )
             target_value = max(0.0, float(weight) * total_asset)
-            target_volume = int(target_value / real_price) if real_price > 0 else 0
+            target_volume = self._floor_board_lot(
+                target_value / real_price if real_price > 0 else 0.0
+            )
             delta_volume = target_volume - int(current_volume)
 
             # --- 核心风控逻辑：大跌拦截 (Falling Knife Protection) ---
@@ -95,90 +108,50 @@ class SimulationSettler:
                 continue
 
             try:
-                delta_cash = -delta_volume * real_price
-                order_result = await sim_manager.update_balance(
-                    user_id=user_id,
+                side = OrderSide.BUY if delta_volume > 0 else OrderSide.SELL
+                order = await order_service.create_order(
                     tenant_id=tenant_id,
-                    symbol=symbol,
-                    delta_cash=delta_cash,
-                    delta_volume=delta_volume,
-                    price=real_price,
+                    user_id=int(normalized_user_id),
+                    data=SimOrderCreate(
+                        portfolio_id=0,
+                        strategy_id=int(strategy_id) if str(strategy_id).isdigit() else None,
+                        symbol=symbol,
+                        side=side,
+                        order_type=OrderType.MARKET,
+                        quantity=abs(int(delta_volume)),
+                        price=real_price,
+                        remarks="simulation_settler_rebalance",
+                        trade_action="buy_to_open" if delta_volume > 0 else "sell_to_close",
+                        position_side="long",
+                        is_margin_trade=False,
+                    ),
+                    trigger_source="settlement_rebalance",
                 )
-                if order_result.get("success"):
-                    executed_trades.append(order_result)
+                order.status = OrderStatus.SUBMITTED
+                await db.commit()
 
-                    try:
-                        order_side = "buy" if delta_volume > 0 else "sell"
-                        sim_order = SimOrder(
-                            tenant_id=tenant_id,
-                            user_id=int(user_id),
-                            portfolio_id=0,
-                            strategy_id=None,
-                            symbol=symbol,
-                            side=order_side,
-                            order_type="market",
-                            trading_mode="SIMULATION",
-                            status="filled",
-                            quantity=abs(int(delta_volume)),
-                            filled_quantity=abs(int(delta_volume)),
-                            price=real_price,
-                            average_price=real_price,
-                            order_value=abs(int(delta_volume)) * real_price,
-                            filled_value=abs(int(delta_volume)) * real_price,
-                            commission=0.0,
-                            submitted_at=datetime.utcnow(),
-                            filled_at=datetime.utcnow(),
-                            execution_model="synthetic_price",
-                            price_source="simulation_settler",
-                        )
-                        db.add(sim_order)
-                        try:
-                            db.flush()
-                        except Exception:
-                            pass
+                execution_result = await execution_engine.execute_order(order)
+                if not execution_result.success:
+                    await execution_engine.mark_rejected(order, execution_result.message)
+                    logger.warning(
+                        "[SimSettle] 虚拟成交拒绝: symbol=%s qty=%s reason=%s",
+                        symbol,
+                        abs(int(delta_volume)),
+                        execution_result.message,
+                    )
+                    continue
 
-                        order_uuid = getattr(sim_order, "order_id", None)
-                        if not order_uuid:
-                            try:
-                                db.refresh(sim_order)
-                                order_uuid = getattr(sim_order, "order_id", None)
-                            except Exception:
-                                order_uuid = None
-
-                        trade = SimTrade(
-                            order_id=order_uuid,
-                            tenant_id=tenant_id,
-                            user_id=int(user_id),
-                            portfolio_id=0,
-                            symbol=symbol,
-                            side=order_side,
-                            trading_mode="SIMULATION",
-                            quantity=abs(int(delta_volume)),
-                            price=real_price,
-                            trade_value=abs(int(delta_volume)) * real_price,
-                            commission=0.0,
-                            stamp_duty=0.0,
-                            transfer_fee=0.0,
-                            total_fee=0.0,
-                            executed_at=datetime.utcnow(),
-                            price_source="simulation_settler",
-                            trade_action=None,
-                            position_side="long",
-                            is_margin_trade=0,
-                        )
-                        db.add(trade)
-                        try:
-                            db.commit()
-                        except Exception as e:
-                            logger.warning(
-                                f"Failed to commit sim order/trade for {symbol}: {e}"
-                            )
-                            try:
-                                db.rollback()
-                            except Exception:
-                                pass
-                    except Exception as e:
-                        logger.warning(f"Failed to persist sim trade for {symbol}: {e}")
+                trade = await execution_engine.apply_filled(order, execution_result)
+                executed_trades.append(
+                    {
+                        "order_id": str(order.order_id),
+                        "trade_id": str(trade.trade_id),
+                        "symbol": order.symbol,
+                        "side": order.side.value,
+                        "quantity": float(execution_result.quantity or 0.0),
+                        "price": float(execution_result.price or 0.0),
+                    }
+                )
 
             except Exception as e:
                 logger.warning(f"标的 {symbol} 模拟成交失败: {e}")
@@ -196,7 +169,7 @@ class SimulationSettler:
             logger.warning("Failed to trigger fund snapshot after settlement: %s", exc)
 
         return {
-            "user_id": user_id,
+            "user_id": normalized_user_id,
             "trades_count": len(executed_trades),
             "timestamp": datetime.now().isoformat(),
         }
@@ -242,7 +215,7 @@ class SimulationSettler:
         return results
 
     async def _get_strategy_signals_from_engine(
-        self, db: Session, user_id: int, strategy_id: str
+        self, db: AsyncSession, user_id: int, strategy_id: str
     ) -> dict[str, float]:
         """
         从 Engine 的 engine_signal_scores 表获取最新 Alpha 信号，
@@ -258,7 +231,7 @@ class SimulationSettler:
                 ORDER BY fusion_score DESC
                 LIMIT 20
             """)
-            rows = db.execute(sql).fetchall()
+            rows = (await db.execute(sql)).fetchall()
             if not rows:
                 logger.warning(
                     f"[SimSettle] engine_signal_scores 无可用信号，用户 {user_id} 跳过结算"
@@ -282,14 +255,24 @@ class SimulationSettler:
             )
             return {}
 
+    @staticmethod
+    def _floor_board_lot(shares: float, lot_size: int = 100) -> int:
+        try:
+            qty = int(float(shares))
+        except Exception:
+            return 0
+        if qty <= 0:
+            return 0
+        return (qty // lot_size) * lot_size
+
     async def _mock_get_strategy_signals(
         self, user_id: int, strategy_id: str
     ) -> dict[str, float]:
         """已废弃：仅供本地调试使用，生产环境请勿调用"""
         await asyncio.sleep(0.5)
         return {
-            "SH600519": 0.2,
-            "SZ000001": 0.1,
+            "600519.SH": 0.2,
+            "000001.SZ": 0.1,
         }
 
 

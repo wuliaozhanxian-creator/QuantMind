@@ -53,7 +53,7 @@ class TradeResponse(BaseModel):
             from datetime import timedelta
             shanghai_tz = timezone(timedelta(hours=8))
             aware_value = value.replace(tzinfo=shanghai_tz)
-
+            
         return aware_value.astimezone(timezone.utc).isoformat()
 
 
@@ -61,7 +61,7 @@ class TradeListQuery(BaseModel):
     """Trade list query"""
 
     tenant_id: str | None = None
-    user_id: str | None = None
+    user_id: int | None = None
     portfolio_id: int | None = None
     order_id: UUID4 | None = None
     symbol: str | None = None

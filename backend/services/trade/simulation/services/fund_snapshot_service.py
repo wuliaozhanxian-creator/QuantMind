@@ -20,6 +20,15 @@ from backend.services.trade.redis_client import RedisClient
 from backend.services.trade.simulation.models.fund_snapshot import (
     SimulationFundSnapshot,
 )
+from backend.services.trade.simulation.models.account_daily import (
+    SimulationAccountDaily,
+)
+from backend.services.trade.simulation.services.daily_snapshot_service import (
+    SimulationDailySnapshotService,
+)
+from backend.services.trade.simulation.services.projection_service import (
+    SimulationProjectionService,
+)
 from backend.shared.database_manager_v2 import get_session
 from backend.shared.trade_redis_keys import normalize_trade_user_id
 from backend.shared.trade_account_cache import write_trade_account_cache
@@ -67,7 +76,7 @@ async def _recalculate_account_market_value(account: dict) -> dict:
     用最新行情重算持仓市值，更新 account 的 market_value 和 total_asset。
     只处理多头仓位（long）；空头仓位的 market_value 来自 short_market_value 字段。
     """
-    market_url = os.getenv("MARKET_DATA_SERVICE_URL", "http://127.0.0.1:8003").rstrip("/")
+    market_url = os.getenv("MARKET_DATA_SERVICE_URL", "http://quantmind-stream:8003").rstrip("/")
     positions = dict(account.get("positions") or {})
     if not positions:
         return account
@@ -207,6 +216,7 @@ class SimulationFundSnapshotService:
 
         keys = list(redis.client.scan_iter(match="simulation:account:*", count=500))
         rows: list[dict[str, object]] = []
+        daily_payloads: dict[tuple[str, str], tuple[str, dict[str, object], dict[str, dict[str, float]]]] = {}
         deduped_accounts: dict[
             tuple[str, str],
             tuple[str, str, dict[str, object]],
@@ -293,10 +303,41 @@ class SimulationFundSnapshotService:
                     row["total_pnl"] = row["total_asset"] - row["initial_capital"]
             rows.append(row)
 
+            try:
+                async with get_session(read_only=True) as projection_session:
+                    projection = await SimulationProjectionService(
+                        projection_session
+                    ).load_projection(
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        latest_price_loader=lambda symbol: _fetch_latest_price(symbol, market_url=os.getenv("MARKET_DATA_SERVICE_URL", "http://quantmind-stream:8003").rstrip("/")),
+                    )
+                projection_positions = projection.positions or {}
+            except Exception as exc:
+                logger.debug(
+                    "Projection snapshot fallback to redis positions for %s/%s: %s",
+                    tenant_id,
+                    user_id,
+                    exc,
+                )
+                projection_positions = {}
+
+            account_id = SimulationProjectionService.build_account_id(tenant_id, user_id)
+            combined_account = dict(account)
+            combined_account.setdefault("initial_capital", float(row["initial_capital"] or 0.0))
+            combined_account.setdefault("total_pnl", float(row["total_pnl"] or 0.0))
+            combined_account.setdefault("today_pnl", float(row["today_pnl"] or 0.0))
+            daily_payloads[(tenant_id, user_id)] = (
+                account_id,
+                combined_account,
+                projection_positions or dict(account.get("positions") or {}),
+            )
+
         if not rows:
             return SnapshotUpsertResult(upserted_rows=0, scanned_accounts=len(keys))
 
         async with get_session(read_only=False) as session:
+            daily_snapshot_service = SimulationDailySnapshotService(session)
             for row in rows:
                 stmt = (
                     pg_insert(SimulationFundSnapshot)
@@ -317,6 +358,17 @@ class SimulationFundSnapshotService:
                     )
                 )
                 await session.execute(stmt)
+                payload = daily_payloads.get((str(row["tenant_id"]), str(row["user_id"])))
+                if payload:
+                    account_id, account_payload, positions_payload = payload
+                    await daily_snapshot_service.replace_daily_snapshot(
+                        tenant_id=str(row["tenant_id"]),
+                        user_id=str(row["user_id"]),
+                        account_id=account_id,
+                        snapshot_date=row["snapshot_date"],
+                        account_payload=account_payload,
+                        positions=positions_payload,
+                    )
 
         return SnapshotUpsertResult(upserted_rows=len(rows), scanned_accounts=len(keys))
 
@@ -335,6 +387,26 @@ class SimulationFundSnapshotService:
                     SimulationFundSnapshot.user_id == normalized_user_id,
                 )
                 .order_by(SimulationFundSnapshot.snapshot_date.desc())
+                .limit(max(1, min(days, 3650)))
+            )
+            result = await session.execute(stmt)
+            return list(result.scalars().all())
+
+    @staticmethod
+    async def list_user_daily_v2(
+        tenant_id: str,
+        user_id: str,
+        days: int = 30,
+    ) -> list[SimulationAccountDaily]:
+        normalized_user_id = normalize_trade_user_id(user_id) or str(user_id)
+        async with get_session(read_only=True) as session:
+            stmt = (
+                select(SimulationAccountDaily)
+                .where(
+                    SimulationAccountDaily.tenant_id == tenant_id,
+                    SimulationAccountDaily.user_id == normalized_user_id,
+                )
+                .order_by(SimulationAccountDaily.snapshot_date.desc())
                 .limit(max(1, min(days, 3650)))
             )
             result = await session.execute(stmt)

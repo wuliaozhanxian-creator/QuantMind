@@ -1,8 +1,3 @@
-"""
-Simulation Hosted Scheduler - 模拟盘托管调度器
-按 live_trade_config 配置自动触发调仓任务
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -12,7 +7,7 @@ import logging
 import math
 import os
 from dataclasses import dataclass
-from datetime import datetime, date
+from datetime import date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -20,18 +15,20 @@ import pandas as pd
 
 try:
     from exchange_calendars import get_calendar
-except ImportError:
+except ImportError:  # pragma: no cover - optional in local/unit test env
     get_calendar = None
 
 from backend.services.trade.redis_client import RedisClient
 from backend.services.trade.services.manual_execution_service import (
     manual_execution_service,
 )
+from backend.services.trade.simulation.services.rebalance_job_service import (
+    SimulationRebalanceJobService,
+)
 
 logger = logging.getLogger(__name__)
 
 _SH_TZ = ZoneInfo("Asia/Shanghai")
-
 _DEFAULT_LIVE_TRADE_CONFIG: dict[str, Any] = {
     "rebalance_days": 3,
     "schedule_type": "interval",
@@ -43,6 +40,7 @@ _DEFAULT_LIVE_TRADE_CONFIG: dict[str, Any] = {
     "order_type": "MARKET",
     "max_price_deviation": 0.02,
     "max_orders_per_cycle": 20,
+    "trigger_window_seconds": 90,
 }
 
 
@@ -76,6 +74,9 @@ def _normalize_live_trade_config(value: Any) -> dict[str, Any]:
     merged["rebalance_days"] = max(1, _to_int(merged.get("rebalance_days"), 3))
     merged["max_orders_per_cycle"] = max(
         1, _to_int(merged.get("max_orders_per_cycle"), 20)
+    )
+    merged["trigger_window_seconds"] = max(
+        30, _to_int(merged.get("trigger_window_seconds"), 90)
     )
     return merged
 
@@ -142,16 +143,59 @@ def _is_enabled_session(now_hhmm: str, live_trade_config: dict[str, Any]) -> boo
     return False
 
 
-def _resolve_phase(now_hhmm: str, live_trade_config: dict[str, Any]) -> str:
+def _matches_trigger_window(
+    local_now: datetime,
+    target_hhmm: str,
+    *,
+    window_seconds: int,
+) -> bool:
+    target_text = str(target_hhmm or "").strip()
+    if len(target_text) != 5 or ":" not in target_text:
+        return False
+    try:
+        hour = int(target_text[:2])
+        minute = int(target_text[3:5])
+    except Exception:
+        return False
+
+    target_dt = local_now.replace(
+        hour=hour,
+        minute=minute,
+        second=0,
+        microsecond=0,
+    )
+    delta_seconds = (local_now - target_dt).total_seconds()
+    return 0 <= delta_seconds <= max(1, int(window_seconds))
+
+
+def _resolve_phase(local_now: datetime, live_trade_config: dict[str, Any]) -> str:
     sell_time = str(live_trade_config.get("sell_time") or "14:45")
     buy_time = str(live_trade_config.get("buy_time") or "14:50")
+    window_seconds = max(30, _to_int(live_trade_config.get("trigger_window_seconds"), 90))
+    sell_hit = _matches_trigger_window(
+        local_now,
+        sell_time,
+        window_seconds=window_seconds,
+    )
+    buy_hit = _matches_trigger_window(
+        local_now,
+        buy_time,
+        window_seconds=window_seconds,
+    )
     if sell_time == buy_time:
-        return "ALL" if now_hhmm >= sell_time else "IDLE"
-    if now_hhmm < sell_time:
-        return "IDLE"
-    if sell_time <= now_hhmm < buy_time:
-        return "SELL" if bool(live_trade_config.get("sell_first", True)) else "BUY"
-    return "BUY"
+        return "ALL" if sell_hit else "IDLE"
+
+    if bool(live_trade_config.get("sell_first", True)):
+        if sell_hit:
+            return "SELL"
+        if buy_hit:
+            return "BUY"
+    else:
+        if buy_hit:
+            return "BUY"
+        if sell_hit:
+            return "SELL"
+    return "IDLE"
 
 
 def _should_trigger(
@@ -186,7 +230,7 @@ def _should_trigger(
                 False, "IDLE", trade_date, "interval_skip"
             )
 
-    phase = _resolve_phase(now_hhmm, live_trade_config)
+    phase = _resolve_phase(local_now, live_trade_config)
     if phase == "IDLE":
         return SimulationScheduleDecision(False, phase, trade_date, "before_window")
     return SimulationScheduleDecision(True, phase, trade_date, "matched")
@@ -243,9 +287,6 @@ class SimulationHostedScheduler:
         self._task = asyncio.create_task(
             self._run(), name="simulation-hosted-scheduler"
         )
-        logger.info(
-            "SimulationHostedScheduler started, interval=%ss", self.interval_seconds
-        )
 
     async def stop(self) -> None:
         self._stopped.set()
@@ -255,9 +296,11 @@ class SimulationHostedScheduler:
                 await self._task
             except asyncio.CancelledError:
                 pass
-        logger.info("SimulationHostedScheduler stopped")
 
     async def _run(self) -> None:
+        logger.info(
+            "simulation hosted scheduler started, interval=%ss", self.interval_seconds
+        )
         while not self._stopped.is_set():
             try:
                 await self.run_once()
@@ -265,7 +308,7 @@ class SimulationHostedScheduler:
                 raise
             except Exception as exc:
                 logger.error(
-                    "SimulationHostedScheduler loop failed: %s", exc, exc_info=True
+                    "simulation hosted scheduler loop failed: %s", exc, exc_info=True
                 )
 
             try:
@@ -281,6 +324,9 @@ class SimulationHostedScheduler:
 
         triggered = 0
         current = now or datetime.now(_SH_TZ)
+        await SimulationRebalanceJobService.expire_outdated_jobs(
+            now=current.astimezone(_SH_TZ).replace(microsecond=0, tzinfo=None)
+        )
         for raw_key in self.redis.client.scan_iter(
             match="trade:active_strategy:*", count=500
         ):
@@ -290,7 +336,7 @@ class SimulationHostedScheduler:
                     triggered += 1
             except Exception as exc:
                 logger.warning(
-                    "SimulationHostedScheduler skipped key=%s error=%s",
+                    "simulation hosted scheduler skipped key=%s error=%s",
                     raw_key,
                     exc,
                     exc_info=True,
@@ -351,14 +397,36 @@ class SimulationHostedScheduler:
             trade_date=decision.trade_date,
             phase=decision.phase,
         )
+        await SimulationRebalanceJobService.ensure_job(
+            job_id=task_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            strategy_id=strategy_id,
+            schedule_type=str(live_trade_config.get("schedule_type") or "interval"),
+            planned_run_at=now.astimezone(_SH_TZ).replace(microsecond=0),
+            window_seconds=max(
+                30, _to_int(live_trade_config.get("trigger_window_seconds"), 90)
+            ),
+            idempotency_key=lock_key,
+        )
+        await SimulationRebalanceJobService.mark_ready(task_id)
         try:
             if not self.redis.client.set(lock_key, task_id, ex=36 * 3600, nx=True):
+                await SimulationRebalanceJobService.mark_skipped(
+                    task_id,
+                    last_error="idempotency lock already exists for this execution window",
+                )
                 return False
         except Exception:
-            logger.warning("Failed to write simulation hosted lock: %s", lock_key)
+            logger.warning("failed to write simulation hosted lock: %s", lock_key)
+            await SimulationRebalanceJobService.mark_skipped(
+                task_id,
+                last_error="failed to acquire distributed execution lock",
+            )
             return False
 
         try:
+            await SimulationRebalanceJobService.mark_started(task_id)
             result = await manual_execution_service.create_hosted_task(
                 tenant_id=tenant_id,
                 user_id=user_id,
@@ -380,7 +448,7 @@ class SimulationHostedScheduler:
                 task_id=task_id,
             )
             logger.info(
-                "SimulationHostedScheduler task scheduled: tenant=%s user=%s strategy=%s phase=%s task=%s status=%s",
+                "simulation hosted task scheduled: tenant=%s user=%s strategy=%s phase=%s task=%s status=%s",
                 tenant_id,
                 user_id,
                 strategy_id,
@@ -388,20 +456,19 @@ class SimulationHostedScheduler:
                 task_id,
                 result.get("status") if isinstance(result, dict) else None,
             )
+            await SimulationRebalanceJobService.mark_finished(
+                task_id,
+                status="succeeded",
+            )
             return True
-        except Exception:
+        except Exception as exc:
+            await SimulationRebalanceJobService.mark_finished(
+                task_id,
+                status="failed",
+                last_error=str(exc),
+            )
             try:
                 self.redis.client.delete(lock_key)
             except Exception:
                 pass
             raise
-
-
-simulation_hosted_scheduler = None
-
-
-def get_simulation_hosted_scheduler(redis: RedisClient) -> SimulationHostedScheduler:
-    global simulation_hosted_scheduler
-    if simulation_hosted_scheduler is None:
-        simulation_hosted_scheduler = SimulationHostedScheduler(redis)
-    return simulation_hosted_scheduler

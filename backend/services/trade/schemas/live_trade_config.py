@@ -35,14 +35,14 @@ class ExecutionConfigSchema(BaseModel):
 
 
 class LiveTradeConfigSchema(BaseModel):
-    rebalance_days: int | None = Field(default=5)
+    rebalance_days: int | None = Field(default=3)
     schedule_type: ScheduleType = Field(default=ScheduleType.INTERVAL)
     trade_weekdays: list[TradeWeekday] = Field(default_factory=list)
     enabled_sessions: list[TradingSession] = Field(default_factory=lambda: [TradingSession.PM])
-    sell_time: str = Field(default="14:30")
-    buy_time: str = Field(default="14:45")
+    sell_time: str = Field(default="14:45")
+    buy_time: str = Field(default="14:50")
     sell_first: bool = Field(default=True)
-    order_type: LiveOrderType = Field(default=LiveOrderType.LIMIT)
+    order_type: LiveOrderType = Field(default=LiveOrderType.MARKET)
     max_price_deviation: float | None = Field(default=0.02, ge=0.0, le=0.05)
     max_orders_per_cycle: int = Field(default=20, ge=1, le=100)
 

@@ -5174,7 +5174,7 @@ ALTER SEQUENCE public.roles_id_seq OWNED BY public.roles.id;
 CREATE TABLE public.sim_orders (
     id character varying(64) NOT NULL,
     job_id character varying(64) NOT NULL,
-    user_id character varying(64) NOT NULL,
+    user_id bigint NOT NULL,
     tenant_id character varying(64) DEFAULT 'default'::character varying NOT NULL,
     symbol character varying(20) NOT NULL,
     side public.orderside NOT NULL,
@@ -5204,7 +5204,10 @@ CREATE TABLE public.sim_orders (
     remarks character varying(500),
     version integer DEFAULT 1,
     total_fee numeric(18,4) DEFAULT 0,
-    updated_at timestamp with time zone
+    updated_at timestamp with time zone,
+    trade_action character varying(32),
+    position_side character varying(16) DEFAULT 'long'::character varying,
+    is_margin_trade integer DEFAULT 0 NOT NULL
 );
 
 
@@ -5219,7 +5222,7 @@ CREATE TABLE public.sim_trades (
     trade_id uuid DEFAULT gen_random_uuid() NOT NULL,
     order_id uuid NOT NULL,
     tenant_id character varying(64) DEFAULT 'default'::character varying NOT NULL,
-    user_id integer NOT NULL,
+    user_id bigint NOT NULL,
     portfolio_id integer DEFAULT 0 NOT NULL,
     symbol character varying(20) NOT NULL,
     side public.orderside NOT NULL,
@@ -5234,7 +5237,10 @@ CREATE TABLE public.sim_trades (
     executed_at timestamp with time zone DEFAULT now() NOT NULL,
     price_source character varying(64),
     created_at timestamp with time zone DEFAULT now(),
-    updated_at timestamp with time zone DEFAULT now()
+    updated_at timestamp with time zone DEFAULT now(),
+    trade_action character varying(32),
+    position_side character varying(16) DEFAULT 'long'::character varying,
+    is_margin_trade integer DEFAULT 0 NOT NULL
 );
 
 
@@ -5293,6 +5299,7 @@ CREATE TABLE public.simulation_fund_snapshots (
     id integer NOT NULL,
     tenant_id character varying(50) NOT NULL,
     user_id character varying(50) NOT NULL,
+    account_id character varying(64),
     snapshot_date date NOT NULL,
     total_asset double precision NOT NULL DEFAULT 0.0,
     available_balance double precision NOT NULL DEFAULT 0.0,
@@ -5302,6 +5309,8 @@ CREATE TABLE public.simulation_fund_snapshots (
     total_pnl double precision NOT NULL DEFAULT 0.0,
     today_pnl double precision NOT NULL DEFAULT 0.0,
     source character varying(64) NOT NULL DEFAULT 'redis_simulation_account'::character varying,
+    data jsonb,
+    created_at timestamp without time zone NOT NULL DEFAULT now(),
     updated_at timestamp without time zone NOT NULL DEFAULT now()
 );
 
@@ -8613,7 +8622,7 @@ COPY public.roles (id, name, code, description, is_active, is_system, priority, 
 -- Data for Name: sim_orders; Type: TABLE DATA; Schema: public; Owner: quantmind
 --
 
-COPY public.sim_orders (id, job_id, user_id, tenant_id, symbol, side, order_type, quantity, price, status, filled_quantity, filled_price, commission, signal_time, submit_time, fill_time, created_at, order_id, portfolio_id, strategy_id, trading_mode, average_price, order_value, filled_value, submitted_at, filled_at, cancelled_at, execution_model, price_source, remarks, version, total_fee, updated_at) FROM stdin;
+COPY public.sim_orders (id, job_id, user_id, tenant_id, symbol, side, order_type, quantity, price, status, filled_quantity, filled_price, commission, signal_time, submit_time, fill_time, created_at, order_id, portfolio_id, strategy_id, trading_mode, average_price, order_value, filled_value, submitted_at, filled_at, cancelled_at, execution_model, price_source, remarks, version, total_fee, updated_at, trade_action, position_side, is_margin_trade) FROM stdin;
 \.
 
 
@@ -8621,7 +8630,7 @@ COPY public.sim_orders (id, job_id, user_id, tenant_id, symbol, side, order_type
 -- Data for Name: sim_trades; Type: TABLE DATA; Schema: public; Owner: quantmind
 --
 
-COPY public.sim_trades (id, trade_id, order_id, tenant_id, user_id, portfolio_id, symbol, side, trading_mode, quantity, price, trade_value, commission, stamp_duty, transfer_fee, total_fee, executed_at, price_source, created_at, updated_at) FROM stdin;
+COPY public.sim_trades (id, trade_id, order_id, tenant_id, user_id, portfolio_id, symbol, side, trading_mode, quantity, price, trade_value, commission, stamp_duty, transfer_fee, total_fee, executed_at, price_source, created_at, updated_at, trade_action, position_side, is_margin_trade) FROM stdin;
 \.
 
 
@@ -8637,7 +8646,7 @@ COPY public.simulation_daily_reports (id, job_id, date, total_asset, return_rate
 -- Data for Name: simulation_fund_snapshots; Type: TABLE DATA; Schema: public; Owner: quantmind
 --
 
-COPY public.simulation_fund_snapshots (id, tenant_id, user_id, snapshot_date, total_asset, available_balance, frozen_balance, market_value, initial_capital, total_pnl, today_pnl, source, updated_at) FROM stdin;
+COPY public.simulation_fund_snapshots (id, tenant_id, user_id, account_id, snapshot_date, total_asset, available_balance, frozen_balance, market_value, initial_capital, total_pnl, today_pnl, source, data, created_at, updated_at) FROM stdin;
 \.
 
 

@@ -1,352 +1,260 @@
-"""
-Sandbox Signal Consumer - 消费沙箱 Worker 产生的模拟盘信号，并转换为真实订单执行。
-
-运行在 trade 服务主进程中，作为后台异步任务启动。
-"""
-
 import asyncio
 import json
 import logging
-import math
-from datetime import datetime
-from typing import Any
+import time
+from typing import Any, Optional
 
-import httpx
-from sqlalchemy.ext.asyncio import AsyncSession
+import redis as redis_lib
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import TimeoutError as RedisTimeoutError
+from redis.sentinel import Sentinel
 
-from backend.services.trade.redis_client import redis_client
-from backend.services.trade.simulation.models.order import OrderSide, OrderType
+from backend.services.trade.redis_client import RedisClient
+from backend.services.trade.trade_config import settings
+from backend.services.trade.simulation.models.order import OrderStatus
 from backend.services.trade.simulation.schemas.order import SimOrderCreate
-from backend.services.trade.simulation.services.execution_engine import (
-    ExecutionResult,
-    SimulationExecutionEngine,
-)
+from backend.services.trade.simulation.services.execution_engine import SimulationExecutionEngine
 from backend.services.trade.simulation.services.order_service import SimOrderService
 from backend.services.trade.simulation.services.simulation_manager import SimulationAccountManager
-from backend.services.trade.trade_config import settings
 from backend.shared.database_manager_v2 import get_db_manager
 
 logger = logging.getLogger(__name__)
 
-_SIGNAL_QUEUE = "trade:simulation:signals"
-_BATCH_SIZE = 50
-_POLL_INTERVAL = 0.2
-
-
-def _active_strategy_key(tenant_id: str, user_id: str) -> str:
-    tenant = (tenant_id or "").strip() or "default"
-    return f"trade:active_strategy:{tenant}:{str(user_id).zfill(8)}"
-
 
 class SandboxSignalConsumer:
     """
-    消费沙箱信号并执行模拟盘订单。
-
-    支持的信号类型：
-    - order_target_percent: 按目标持仓比例自动计算下单量并执行
-    - order: 直接下单信号（包含具体数量和价格）
-    - log: 仅记录日志
+    沙箱信号消费者：从 Redis 队列 trade:simulation:signals 中提取策略信号并执行。
+    修复了 strategy_id 类型不匹配以及行情为 0 时的逻辑问题。
     """
 
-    def __init__(self):
-        self.is_running = False
-        self._http: httpx.AsyncClient | None = None
-        self._account_manager = SimulationAccountManager(redis_client)
-
-    async def _http_client(self) -> httpx.AsyncClient:
-        if self._http is None:
-            self._http = httpx.AsyncClient(timeout=5.0)
-        return self._http
+    def __init__(self, redis: RedisClient):
+        self.redis = redis
+        self.queue_name = "trade:simulation:signals"
+        self._blpop_timeout_seconds = 5
+        self._socket_timeout_margin_seconds = 2.0
+        self._listener_client: redis_lib.Redis | None = None
+        self._running = False
+        self._retry_delay_seconds = 1.0
+        self._max_retry_delay_seconds = 10.0
+        self._consecutive_redis_errors = 0
+        self._last_reconnect_at = 0.0
 
     async def start(self):
-        """启动信号消费循环"""
-        self.is_running = True
-        logger.info("[SandboxSignalConsumer] 已启动，监听队列: %s", _SIGNAL_QUEUE)
-        try:
-            while self.is_running:
-                await self._consume_batch()
-                await asyncio.sleep(_POLL_INTERVAL)
-        except asyncio.CancelledError:
-            logger.info("[SandboxSignalConsumer] 收到取消信号，正在停止...")
-        except Exception as e:
-            logger.error("[SandboxSignalConsumer] 运行异常: %s", e, exc_info=True)
-        finally:
-            self.is_running = False
-            if self._http:
-                await self._http.aclose()
-            logger.info("[SandboxSignalConsumer] 已停止。")
-
-    async def stop(self):
-        """停止信号消费"""
-        self.is_running = False
-
-    async def _consume_batch(self):
-        """批量消费信号"""
-        if not redis_client.client:
+        """启动后台消费循环"""
+        if not self.redis.client:
+            logger.error("[SandboxSignalConsumer] Redis 客户端未连接，启动失败")
             return
 
-        for _ in range(_BATCH_SIZE):
+        if not self._ensure_listener_client():
+            logger.error("[SandboxSignalConsumer] 专用 Redis 监听连接未就绪，启动失败")
+            return
+
+        self._running = True
+        logger.info("[SandboxSignalConsumer] 已启动，正在监听队列: %s", self.queue_name)
+
+        while self._running:
             try:
-                raw_sig = redis_client.client.lpop(_SIGNAL_QUEUE)
-                if not raw_sig:
-                    break
-                sig = json.loads(raw_sig)
-                await self._process_signal(sig)
-            except Exception as e:
-                logger.error("[SandboxSignalConsumer] 处理信号失败: %s", e)
+                if not self._listener_client and not self._ensure_listener_client():
+                    raise RedisConnectionError("listener redis client unavailable")
 
-    async def _process_signal(self, sig: dict[str, Any]):
-        """处理单个信号"""
-        sig_type = sig.get("type")
-        tenant_id = sig.get("tenant_id", "default")
-        user_id = str(sig.get("user_id", ""))
-        raw_strategy_id = sig.get("strategy_id", "unknown")
-        # 规范化 strategy_id：仅纯数字字符串转为 int，其余置 None
-        strategy_id: int | None = None
-        try:
-            if isinstance(raw_strategy_id, (int, float)):
-                strategy_id = int(raw_strategy_id)
-            elif isinstance(raw_strategy_id, str) and raw_strategy_id.isdigit():
-                strategy_id = int(raw_strategy_id)
-        except (ValueError, TypeError):
-            pass
-
-        if sig_type == "log":
-            logger.info("[Sandbox Log %s] %s", strategy_id, sig.get("message"))
-            return
-
-        if await self._is_observe_only(tenant_id, user_id):
-            logger.info(
-                "[SandboxSignalConsumer] 观察态跳过下单信号: tenant=%s user=%s strategy=%s type=%s",
-                tenant_id,
-                user_id,
-                strategy_id,
-                sig_type,
-            )
-            return
-
-        if sig_type == "order_target_percent":
-            await self._handle_order_target_percent(sig, tenant_id, user_id, strategy_id)
-        elif sig_type == "order":
-            await self._handle_direct_order(sig, tenant_id, user_id, strategy_id)
-        else:
-            logger.debug("[SandboxSignalConsumer] 未知信号类型: %s", sig_type)
-
-    async def _is_observe_only(self, tenant_id: str, user_id: str) -> bool:
-        if not redis_client.client:
-            return False
-        try:
-            raw = redis_client.client.get(_active_strategy_key(tenant_id, user_id))
-            if not raw:
-                return False
-            if isinstance(raw, bytes):
-                raw = raw.decode("utf-8")
-            data = json.loads(raw)
-            if not isinstance(data, dict):
-                return False
-            permission = str(data.get("trading_permission") or "").strip().lower()
-            if permission == "observe_only":
-                return True
-            execution_config = data.get("execution_config")
-            if isinstance(execution_config, dict):
-                if execution_config.get("auto_trade_enabled") is False:
-                    return True
-            return False
-        except Exception as exc:
-            logger.warning("[SandboxSignalConsumer] 读取交易权限失败: %s", exc)
-            return False
-
-    async def _handle_order_target_percent(
-        self, sig: dict[str, Any], tenant_id: str, user_id: str, strategy_id: int | None
-    ):
-        """
-        处理 order_target_percent 信号：
-        1. 读取当前账户状态（现金 + 持仓）
-        2. 计算目标持仓数量
-        3. 计算需要买卖的数量
-        4. 创建订单并执行
-        """
-        data = sig.get("data", {})
-        symbol = data.get("symbol")
-        target_percent = float(data.get("target_percent", 0))
-        run_id = sig.get("run_id", "")
-
-        if not symbol:
-            logger.warning("[SandboxSignalConsumer] 信号缺少 symbol")
-            return
-
-        user_id_int = int(user_id) if user_id.isdigit() else 0
-        if user_id_int <= 0:
-            logger.warning("[SandboxSignalConsumer] 无效的 user_id: %s", user_id)
-            return
-
-        # 获取账户状态
-        account = await self._account_manager.get_account(user_id_int, tenant_id=tenant_id)
-        if not account:
-            logger.warning("[SandboxSignalConsumer] 账户不存在: tenant=%s user=%s", tenant_id, user_id)
-            return
-
-        total_asset = float(account.get("total_asset", 0))
-        if total_asset <= 0:
-            logger.warning("[SandboxSignalConsumer] 总资产为 0，跳过下单")
-            return
-
-        # 获取当前持仓（先于价格查询，供回退使用）
-        positions = account.get("positions", {})
-        current_pos = positions.get(symbol.upper())
-        current_volume = int(float(current_pos.get("volume", 0))) if current_pos else 0
-
-        # 获取当前价格（优先行情API，回退到持仓成本价）
-        current_price = await self._get_current_price(symbol)
-        if current_price <= 0:
-            if current_pos:
-                fallback_price = float(current_pos.get("price") or current_pos.get("cost", 0))
-                if fallback_price > 0:
-                    current_price = fallback_price
-                    logger.info(
-                        "[SandboxSignalConsumer] 使用持仓价格回退 %s: %.2f",
-                        symbol, current_price,
-                    )
-        if current_price <= 0:
-            logger.warning("[SandboxSignalConsumer] 无法获取 %s 的价格，跳过下单", symbol)
-            return
-
-        # 计算目标持仓数量（A 股 100 股整数倍）
-        target_value = total_asset * target_percent
-        target_volume = int(target_value / current_price / 100) * 100
-
-        # 计算需要交易的量
-        delta = target_volume - current_volume
-        if abs(delta) < 100:
-            logger.debug(
-                "[SandboxSignalConsumer] %s 调仓量不足 100 股 (delta=%d)，跳过",
-                symbol, delta,
-            )
-            return
-
-        # 确定买卖方向
-        if delta > 0:
-            side = OrderSide.BUY
-            quantity = delta
-        else:
-            side = OrderSide.SELL
-            quantity = abs(delta)
-
-        logger.info(
-            "[SandboxSignalConsumer] %s %s: 当前=%d 目标=%d 交易=%d 价格=%.2f",
-            symbol, side.value, current_volume, target_volume, quantity, current_price,
-        )
-
-        # 创建并执行订单
-        await self._create_and_execute_order(
-            tenant_id=tenant_id,
-            user_id=user_id_int,
-            strategy_id=strategy_id,
-            symbol=symbol,
-            side=side,
-            quantity=quantity,
-            price=current_price,
-            run_id=run_id,
-        )
-
-    async def _handle_direct_order(
-        self, sig: dict[str, Any], tenant_id: str, user_id: str, strategy_id: int | None
-    ):
-        """处理直接下单信号"""
-        data = sig.get("data", {})
-        symbol = data.get("symbol")
-        quantity = int(data.get("quantity", 0))
-        price = float(data.get("price", 0))
-        side_str = data.get("side", "BUY")
-        run_id = sig.get("run_id", "")
-
-        if not symbol or quantity <= 0:
-            logger.warning("[SandboxSignalConsumer] 直接下单信号缺少必要参数")
-            return
-
-        user_id_int = int(user_id) if user_id.isdigit() else 0
-        if user_id_int <= 0:
-            return
-
-        side = OrderSide.BUY if side_str.upper() == "BUY" else OrderSide.SELL
-
-        await self._create_and_execute_order(
-            tenant_id=tenant_id,
-            user_id=user_id_int,
-            strategy_id=strategy_id,
-            symbol=symbol,
-            side=side,
-            quantity=quantity,
-            price=price if price > 0 else await self._get_current_price(symbol),
-            run_id=run_id,
-        )
-
-    async def _create_and_execute_order(
-        self,
-        tenant_id: str,
-        user_id: int,
-        strategy_id: int | None,
-        symbol: str,
-        side: OrderSide,
-        quantity: int,
-        price: float,
-        run_id: str,
-    ):
-        """创建订单并执行"""
-        db_manager = get_db_manager()
-        async with db_manager.session() as db:
-            order_service = SimOrderService(db)
-            exec_engine = SimulationExecutionEngine(db, self._account_manager)
-
-            # 创建订单
-            order_create = SimOrderCreate(
-                symbol=symbol,
-                side=side,
-                order_type=OrderType.MARKET,
-                quantity=quantity,
-                price=price,
-                strategy_id=strategy_id,
-                remarks=f"Sandbox signal: {run_id}",
-            )
-            order = await order_service.create_order(tenant_id, user_id, order_create)
-            logger.info("[SandboxSignalConsumer] 订单创建: order_id=%s", order.order_id)
-
-            # 提交订单
-            from backend.services.trade.simulation.models.order import OrderStatus
-            order.status = OrderStatus.SUBMITTED
-            order.submitted_at = datetime.now()
-            await db.commit()
-
-            # 执行订单
-            result = await exec_engine.execute_order(order)
-            if result.success:
-                trade = await exec_engine.apply_filled(order, result)
-                logger.info(
-                    "[SandboxSignalConsumer] 订单成交: %s %s %d@%.2f, commission=%.2f",
-                    symbol, side.value, result.quantity, result.price, result.commission,
+                # 使用专用连接做阻塞式获取，避免和共享 Redis socket_timeout 冲突。
+                result = await asyncio.to_thread(
+                    self._listener_client.blpop,
+                    self.queue_name,
+                    self._blpop_timeout_seconds,
                 )
-            else:
-                await exec_engine.mark_rejected(order, result.message)
-                logger.warning("[SandboxSignalConsumer] 订单被拒: %s - %s", symbol, result.message)
+                if not result:
+                    self._reset_retry_state()
+                    continue
 
-            await db.commit()
+                _, data_raw = result
+                signal = json.loads(data_raw)
+                await self._process_signal(signal)
+                self._reset_retry_state()
 
-    async def _get_current_price(self, symbol: str) -> float:
-        """获取当前市场价格"""
-        market_url = settings.MARKET_DATA_SERVICE_URL.rstrip("/")
-        endpoint = f"{market_url}/api/v1/quotes/{symbol}"
+            except (RedisTimeoutError, RedisConnectionError, OSError) as e:
+                await self._handle_redis_transport_error(e)
+            except Exception as e:
+                logger.error("[SandboxSignalConsumer] 循环处理出错: %s", e, exc_info=True)
+                await asyncio.sleep(1)
+
+    def stop(self):
+        """停止消费"""
+        self._running = False
+        self._close_listener_client()
+
+    def _reset_retry_state(self):
+        self._consecutive_redis_errors = 0
+        self._retry_delay_seconds = 1.0
+
+    def _build_listener_client(self) -> redis_lib.Redis:
+        socket_timeout = self._blpop_timeout_seconds + self._socket_timeout_margin_seconds
+        if settings.REDIS_SENTINEL_ENABLED:
+            sentinel_hosts = [tuple(host.split(":")) for host in settings.REDIS_SENTINEL_HOSTS.split(",")]
+            sentinel = Sentinel(
+                sentinel_hosts,
+                socket_timeout=socket_timeout,
+                password=settings.REDIS_PASSWORD,
+            )
+            return sentinel.master_for(
+                settings.REDIS_MASTER_NAME,
+                socket_timeout=socket_timeout,
+                socket_connect_timeout=5.0,
+                db=settings.REDIS_DB,
+                decode_responses=True,
+            )
+
+        return redis_lib.Redis(
+            host=settings.REDIS_HOST,
+            port=settings.REDIS_PORT,
+            db=settings.REDIS_DB,
+            password=settings.REDIS_PASSWORD,
+            decode_responses=True,
+            socket_timeout=socket_timeout,
+            socket_connect_timeout=5.0,
+        )
+
+    def _ensure_listener_client(self) -> bool:
+        if self._listener_client is not None:
+            return True
         try:
-            client = await self._http_client()
-            resp = await client.get(endpoint)
-            if resp.status_code == 200:
-                data = resp.json()
-                px = data.get("current_price") or data.get("last_price")
-                if px and float(px) > 0:
-                    return float(px)
-        except Exception as e:
-            logger.warning("获取 %s 行情失败: %s", symbol, e)
-        return 0.0
+            client = self._build_listener_client()
+            client.ping()
+            self._listener_client = client
+            return True
+        except Exception as exc:
+            logger.warning("[SandboxSignalConsumer] 初始化专用 Redis 监听连接失败: %s", exc)
+            self._listener_client = None
+            return False
 
+    def _close_listener_client(self):
+        client = self._listener_client
+        self._listener_client = None
+        if client is None:
+            return
+        try:
+            client.close()
+        except Exception:
+            logger.debug("[SandboxSignalConsumer] 关闭专用 Redis 监听连接时忽略异常", exc_info=True)
 
-# 单例
-sandbox_signal_consumer = SandboxSignalConsumer()
+    async def _handle_redis_transport_error(self, error: Exception):
+        """Redis 传输层异常时进行退避重连，避免日志刷屏。"""
+        self._consecutive_redis_errors += 1
+
+        if self._consecutive_redis_errors == 1 or self._consecutive_redis_errors % 5 == 0:
+            logger.warning(
+                "[SandboxSignalConsumer] Redis 监听异常(%s 次)，准备退避重连: %s",
+                self._consecutive_redis_errors,
+                error,
+            )
+        else:
+            logger.debug(
+                "[SandboxSignalConsumer] Redis 监听异常(%s 次): %s",
+                self._consecutive_redis_errors,
+                error,
+            )
+
+        await self._reconnect_redis_client()
+        await asyncio.sleep(self._retry_delay_seconds)
+        self._retry_delay_seconds = min(self._retry_delay_seconds * 2, self._max_retry_delay_seconds)
+
+    async def _reconnect_redis_client(self):
+        """重建专用监听 Redis 连接，避免长时间持有失效 socket。"""
+        now = time.monotonic()
+        if now - self._last_reconnect_at < 3:
+            return
+
+        self._last_reconnect_at = now
+        try:
+            self._close_listener_client()
+            listener_ready = await asyncio.to_thread(self._ensure_listener_client)
+            if listener_ready:
+                logger.info("[SandboxSignalConsumer] Redis 监听连接已重建，继续监听队列: %s", self.queue_name)
+            else:
+                logger.warning("[SandboxSignalConsumer] Redis 监听重连后仍未就绪，稍后继续重试")
+        except Exception as reconnect_error:
+            logger.warning("[SandboxSignalConsumer] Redis 监听重连失败: %s", reconnect_error, exc_info=True)
+
+    async def _process_signal(self, signal: dict):
+        """处理单个信号"""
+        sig_type = signal.get("type")
+        if sig_type == "order":
+            await self._handle_direct_order(signal)
+        elif sig_type == "order_target_percent":
+            await self._handle_order_target_percent(signal)
+        elif sig_type == "log":
+            # 简单的日志处理，目前仅打印
+            logger.info("[Sandbox Log] %s: %s", signal.get("run_id"), signal.get("message"))
+        else:
+            logger.warning("[SandboxSignalConsumer] 收到未知信号类型: %s", sig_type)
+
+    async def _handle_direct_order(self, signal: dict):
+        """处理直接下单信号"""
+        data = signal.get("data", {})
+        tenant_id = signal.get("tenant_id", "default")
+        user_id = self._to_int(signal.get("user_id"))
+        strategy_id = self._to_int(signal.get("strategy_id"))
+        
+        if user_id is None:
+            logger.error("[SandboxSignalConsumer] 信号缺失 user_id: %s", signal)
+            return
+
+        # 映射字段
+        order_data = SimOrderCreate(
+            symbol=data.get("symbol"),
+            side=data.get("side"),
+            order_type=data.get("order_type", "limit"),
+            quantity=float(data.get("quantity", 0)),
+            price=float(data.get("price")) if data.get("price") else None,
+            strategy_id=strategy_id,
+            remarks=f"Sandbox auto-order: {signal.get('run_id')}"
+        )
+
+        await self._create_and_execute_order(tenant_id, user_id, order_data)
+
+    async def _handle_order_target_percent(self, signal: dict):
+        """处理目标比例下单信号（目前简化为按照当前价格下单，真实逻辑应计算仓位差值）"""
+        # 注意：此处为保持链路通畅，暂不支持复杂的仓位计算，仅记录意图。
+        # 实际生产中应在此处查询 SimulationAccountManager 获取当前仓位。
+        logger.info("[SandboxSignalConsumer] 收到 order_target_percent 信号，暂不支持实时调仓计算: %s", signal)
+
+    async def _create_and_execute_order(self, tenant_id: str, user_id: int, data: SimOrderCreate):
+        """创建并执行模拟订单"""
+        db_manager = get_db_manager()
+        async with db_manager.get_master_session() as session:
+            try:
+                order_service = SimOrderService(session)
+                manager = SimulationAccountManager(self.redis)
+                engine = SimulationExecutionEngine(session, manager)
+
+                # 1. 创建订单记录
+                order = await order_service.create_order(
+                    tenant_id,
+                    user_id,
+                    data,
+                    trigger_source="sandbox_signal",
+                )
+                order.status = OrderStatus.SUBMITTED
+                await session.commit()
+
+                # 2. 执行撮合
+                result = await engine.execute_order(order)
+                if not result.success:
+                    await engine.mark_rejected(order, result.message)
+                    logger.warning("[SandboxSignalConsumer] 模拟成交失败: %s, OrderID: %s", result.message, order.order_id)
+                else:
+                    await engine.apply_filled(order, result)
+                    logger.info("[SandboxSignalConsumer] 模拟成交成功: %s %s @ %s", order.symbol, order.side, result.price)
+
+            except Exception as e:
+                logger.error("[SandboxSignalConsumer] 执行下单链路失败: %s", e, exc_info=True)
+
+    @staticmethod
+    def _to_int(val: Any) -> Optional[int]:
+        """类型转换辅助"""
+        if val is None or val == "":
+            return None
+        try:
+            return int(val)
+        except (ValueError, TypeError):
+            return None
