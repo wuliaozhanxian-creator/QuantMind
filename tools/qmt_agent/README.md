@@ -76,7 +76,7 @@
   - `runtime_status.dispatch_metrics` 会透出队列深度、丢弃数、最近等待时长和最近提交类型，便于桌面端/排障页观测
 - 当本机未安装 `xtquant` 时自动退化为 mock 模式，便于联调
 - 本地桌面 GUI：手动录入 Access Key / Secret Key、扫描 QMT 路径、手填资金账号
-- 桌面端新增“清理缓存”：会先记录清理前运行态；若 Agent 原本在运行，则先停止并断开 QMT，清理 `userdata_mini` 根目录下匹配 `queue_*_mutex` 规则的临时文件后再恢复运行；若原本未运行，则清理完成后保持停止状态
+- 桌面端新增“清理缓存”：会先记录清理前运行态；若 Agent 原本在运行，则先停止并断开 QMT，清理 `userdata_mini` 根目录下匹配 `queue_*_mutex`、`down_queue_*`、`*Cache*` 规则的临时文件后再恢复运行；若原本未运行，则清理完成后保持停止状态
 - 已调整交易/上报时段策略：
 - 交易时段为本机本地时间周一至周五 `09:00-11:30`、`13:00-15:00`
 - 非交易时段不再主动断开 QMT / bridge 连接，而是改为每 `30` 分钟低频上报一次账户快照与心跳
@@ -258,7 +258,7 @@ python tools/qmt_agent/build_windows_agent.py
 
 缓存维护补充：
 
-- 桌面端支持“清理缓存”，会先停止 Agent 运行进程并断开 QMT，再清理 `userdata_mini` 根目录下符合 `queue_*_mutex` 规则的临时文件；若清理前正在运行，则清理后恢复运行，否则保持停止状态。
+- 桌面端支持“清理缓存”，会先停止 Agent 运行进程并断开 QMT，再清理 `userdata_mini` 根目录下符合 `queue_*_mutex`、`down_queue_*`、`*Cache*` 规则的临时文件；若清理前正在运行，则清理后恢复运行，否则保持停止状态。
 - 本地控制接口支持 `POST /cleanup_cache`；为兼容旧调用，也保留 `POST /stop_and_cleanup_cache`。其中 `/cleanup_cache` 会恢复清理前运行态，`/stop_and_cleanup_cache` 会在清理后保持停止状态；两者鉴权级别与 `start/stop/restart` 相同。
 
 通信时段补充：

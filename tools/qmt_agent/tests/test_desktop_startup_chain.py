@@ -198,6 +198,9 @@ def test_cleanup_cache_restores_previous_running_state(monkeypatch, tmp_path) ->
     qmt_path = tmp_path / "userdata_mini"
     qmt_path.mkdir()
     (qmt_path / "queue_test_mutex").write_text("x", encoding="utf-8")
+    (qmt_path / "down_queue_176943234").write_text("x", encoding="utf-8")
+    (qmt_path / "miniqmtShmQuoteCache").write_text("x", encoding="utf-8")
+    (qmt_path / "keep_me.txt").write_text("x", encoding="utf-8")
     monkeypatch.setattr(
         desktop_app,
         "build_agent_config",
@@ -218,6 +221,10 @@ def test_cleanup_cache_restores_previous_running_state(monkeypatch, tmp_path) ->
     assert "恢复 Agent 运行" in result["message"]
     assert stop_calls == [True]
     assert len(start_calls) == 1
+    assert not (qmt_path / "queue_test_mutex").exists()
+    assert not (qmt_path / "down_queue_176943234").exists()
+    assert not (qmt_path / "miniqmtShmQuoteCache").exists()
+    assert (qmt_path / "keep_me.txt").exists()
 
 
 def test_stop_and_cleanup_cache_keeps_runtime_stopped(monkeypatch, tmp_path) -> None:
@@ -226,6 +233,8 @@ def test_stop_and_cleanup_cache_keeps_runtime_stopped(monkeypatch, tmp_path) -> 
     qmt_path = tmp_path / "userdata_mini"
     qmt_path.mkdir()
     (qmt_path / "queue_test_mutex").write_text("x", encoding="utf-8")
+    (qmt_path / "down_queue_176943235_mutex").write_text("x", encoding="utf-8")
+    (qmt_path / "miniqmtShmStockListCacheHK").write_text("x", encoding="utf-8")
     monkeypatch.setattr(
         desktop_app,
         "build_agent_config",
@@ -245,6 +254,9 @@ def test_stop_and_cleanup_cache_keeps_runtime_stopped(monkeypatch, tmp_path) -> 
     assert "保持停止状态" in result["message"]
     assert stop_calls == [True]
     assert start_calls == []
+    assert not (qmt_path / "queue_test_mutex").exists()
+    assert not (qmt_path / "down_queue_176943235_mutex").exists()
+    assert not (qmt_path / "miniqmtShmStockListCacheHK").exists()
 
 
 def test_cleanup_cache_failure_attempts_to_restore_runtime(monkeypatch, tmp_path) -> None:

@@ -151,7 +151,7 @@ python tools/qmt_agent/build_windows_agent.py
 3. 如果报 `xtquant` 相关错误，优先核对 `qmt_bin_path` 是否为 `bin.x64`。
 4. 如果 `bridge/session` 401，检查 `access_key/secret_key` 是否包含空格或换行。
 5. 如果 WS 频繁断开，优先把 `ws_ping_interval_seconds` 调到 `60`，`ws_ping_timeout_seconds` 调到 `20-30`。
-6. 如果 `userdata_mini` 下积累了大量 `queue_*_mutex` 文件，可在桌面端点击“清理缓存”；程序会自动按“清理前运行态”恢复状态。也可调用本地接口 `POST /cleanup_cache`；兼容旧路径 `POST /stop_and_cleanup_cache`，该路径会在清理后保持停止状态。
+6. 如果 `userdata_mini` 下积累了大量 `queue_*_mutex`、`down_queue_*`、`*Cache*` 文件，可在桌面端点击“清理缓存”；程序会自动按“清理前运行态”恢复状态。也可调用本地接口 `POST /cleanup_cache`；兼容旧路径 `POST /stop_and_cleanup_cache`，该路径会在清理后保持停止状态。
 7. 如果时段外看到 Agent 显示未连接 QMT 或停止上报，这是预期行为；系统会在下一个允许时段自动恢复。
 
 ## 说明

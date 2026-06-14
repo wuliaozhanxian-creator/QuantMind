@@ -353,7 +353,16 @@ def scan_qmt_installations(seed_paths: Optional[list[str]] = None) -> dict[str, 
 
 def _looks_like_qmt_temp_file(name: str) -> bool:
     text = str(name or "").strip()
-    return bool(text) and "queue_" in text and text.endswith("_mutex")
+    if not text:
+        return False
+    lowered = text.lower()
+    if lowered.startswith("down_queue_"):
+        return True
+    if "queue_" in lowered and lowered.endswith("_mutex"):
+        return True
+    if "cache" in lowered:
+        return True
+    return False
 
 
 def _cleanup_qmt_temp_files(qmt_path: str | Path) -> dict[str, Any]:
