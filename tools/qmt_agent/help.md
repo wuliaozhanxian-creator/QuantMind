@@ -16,7 +16,8 @@ python tools/qmt_agent/build_windows_agent.py
 1. 先填必填字段：`api_base_url`、`server_url`、`access_key`、`secret_key`、`account_id`。
 2. 填 QMT 路径：`qmt_path` 指向 `userdata_mini`，`qmt_bin_path` 指向 `bin.x64`。
 3. 首次建议保留默认时序参数，跑通后再按网络质量微调。
-4. 当前版本内置通信时间限制：仅周一至周五 `09:00-17:00` 与 QMT 通信，时段外会自动暂停 QMT 数据获取和账户/心跳上报。
+4. 当前版本将交易时段限制为周一至周五 `09:00-11:30`、`13:00-15:00`；非交易时段会保持连接，但账户/心跳上报自动降为每 `30` 分钟一次。
+5. 当前内部结构已拆分为统一监督层（`runtime_supervisor.py`）、时段策略层（`schedule_policy.py`）和后台 worker 层（`runtime_workers.py`），CLI 与桌面壳共用同一套重启窗口与运行监督逻辑。
 
 ## 参数配置（qmt_agent_config.json）
 
@@ -31,7 +32,7 @@ python tools/qmt_agent/build_windows_agent.py
 | `account_id` | 是 | 无 | 资金账号，必须和 QMT 登录账号一致。 |
 | `tenant_id` | 否 | `default` | 多租户场景按平台分配值填写，单租户保留默认。 |
 | `user_id` | 否 | 空 | 建议填平台用户 ID，便于排障定位。 |
-| `client_version` | 否 | `1.3.0` | 建议保留安装包生成值；桌面包通常为 `x.y.z-desktop`。 |
+| `client_version` | 否 | `1.5.0` | 建议保留安装包生成值；桌面包通常为 `x.y.z-desktop`。 |
 | `client_fingerprint` | 否 | 主机名 | 建议保持唯一机器标识，不同机器不要重复。 |
 | `hostname` | 否 | 主机名 | 一般不改，空值会自动取本机主机名。 |
 
@@ -51,8 +52,8 @@ python tools/qmt_agent/build_windows_agent.py
 | 参数 | 默认值 | 最小值 | 如何配置 |
 |---|---|---|---|
 | `renew_before_seconds` | `300` | `30` | token 提前续期时间。网络抖动大可调到 `300-600`。 |
-| `heartbeat_interval_seconds` | `15` | `10` | 心跳上报周期。建议 `15-30`。 |
-| `account_report_interval_seconds` | `30` | `20` | 账户快照上报周期。建议 `30-60`。 |
+| `heartbeat_interval_seconds` | `15` | `10` | 交易时段心跳上报周期。建议 `15-30`；非交易时段自动降为 `1800`。 |
+| `account_report_interval_seconds` | `30` | `20` | 交易时段账户快照上报周期。建议 `30-60`；非交易时段自动降为 `1800`。 |
 | `reconnect_interval_seconds` | `5` | `3` | 断线重连间隔。建议 `3-10`。 |
 | `ws_ping_interval_seconds` | `60` | `20` | WS ping 周期。弱网建议 `60`。 |
 | `ws_ping_timeout_seconds` | `20` | `5` | WS ping 超时。弱网建议 `20-30`。 |
@@ -105,7 +106,7 @@ python tools/qmt_agent/build_windows_agent.py
   "account_type": "STOCK",
   "tenant_id": "default",
   "user_id": "10001",
-  "client_version": "1.3.0-desktop",
+  "client_version": "1.5.0-desktop",
   "client_fingerprint": "HOST-001",
   "hostname": "HOST-001",
   "qmt_path": "E:/MiniQMT/userdata_mini",
@@ -150,7 +151,7 @@ python tools/qmt_agent/build_windows_agent.py
 3. 如果报 `xtquant` 相关错误，优先核对 `qmt_bin_path` 是否为 `bin.x64`。
 4. 如果 `bridge/session` 401，检查 `access_key/secret_key` 是否包含空格或换行。
 5. 如果 WS 频繁断开，优先把 `ws_ping_interval_seconds` 调到 `60`，`ws_ping_timeout_seconds` 调到 `20-30`。
-6. 如果 `userdata_mini` 下积累了大量 `queue_*_mutex` 文件，可在桌面端点击“清理缓存”；程序会自动停止 Agent 运行进程、清理缓存并重新拉起。也可调用本地接口 `POST /cleanup_cache`（兼容旧路径 `POST /stop_and_cleanup_cache`）。
+6. 如果 `userdata_mini` 下积累了大量 `queue_*_mutex` 文件，可在桌面端点击“清理缓存”；程序会自动按“清理前运行态”恢复状态。也可调用本地接口 `POST /cleanup_cache`；兼容旧路径 `POST /stop_and_cleanup_cache`，该路径会在清理后保持停止状态。
 7. 如果时段外看到 Agent 显示未连接 QMT 或停止上报，这是预期行为；系统会在下一个允许时段自动恢复。
 
 ## 说明

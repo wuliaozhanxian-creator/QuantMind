@@ -32,6 +32,9 @@ STARTUP_CHAIN_FILES = [
     TOOL_ROOT / "_callback.py",
     TOOL_ROOT / "triage.py",
     TOOL_ROOT / "updater.py",
+    TOOL_ROOT / "schedule_policy.py",
+    TOOL_ROOT / "runtime_supervisor.py",
+    TOOL_ROOT / "runtime_workers.py",
 ]
 ZIP_PACKAGE_FILES = [
     "qmt_agent.py",
@@ -52,6 +55,9 @@ ZIP_PACKAGE_FILES = [
     "reporter.py",
     "triage.py",
     "updater.py",
+    "schedule_policy.py",
+    "runtime_supervisor.py",
+    "runtime_workers.py",
     "theme.qss",
 ]
 
@@ -64,9 +70,9 @@ def run(cmd: list[str]) -> None:
 def read_version() -> str:
     try:
         data = json.loads(VERSION_PATH.read_text(encoding="utf-8"))
-        return str(data.get("version") or "1.3.0")
+        return str(data.get("version") or "1.5.0")
     except Exception:
-        return "1.3.0"
+        return "1.5.0"
 
 
 def _sha256(path: Path) -> str:
@@ -105,6 +111,9 @@ def audit_startup_chain_imports() -> None:
         "_callback",
         "triage",
         "updater",
+        "schedule_policy",
+        "runtime_supervisor",
+        "runtime_workers",
     }
     allowed_external = {"PySide6", "requests", "websocket", "xtquant", "winreg"}
     unexpected: set[str] = set()
@@ -146,6 +155,9 @@ def smoke_test_desktop_chain() -> None:
             "_callback.py",
             "triage.py",
             "updater.py",
+            "schedule_policy.py",
+            "runtime_supervisor.py",
+            "runtime_workers.py",
             "__init__.py",
         ):
             shutil.copy2(TOOL_ROOT / filename, smoke_dir / filename)

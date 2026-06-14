@@ -11,7 +11,10 @@ This file is intentionally thin.  All logic lives in the sub-modules:
   reporter.py  – BridgeReporter
   _callback.py – QMT event callback factory
   client.py    – QMTClient
-  agent.py     – QMTAgent
+  agent.py     – QMTAgent façade
+  schedule_policy.py   – trading/offhours reporting policy
+  runtime_supervisor.py – shared crash-restart supervisor
+  runtime_workers.py   – background worker implementations
 """
 from __future__ import annotations
 
@@ -37,6 +40,7 @@ try:
         normalize_agent_config_data,
         validate_config_dict,
     )
+    from .runtime_supervisor import RestartPolicy, RuntimeSupervisor
 except ImportError:
     _MODULE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 
@@ -58,6 +62,7 @@ except ImportError:
     _auth_mod = _load_local_module("auth")  # noqa: F401
     _client_mod = _load_local_module("client")  # noqa: F401
     _config_mod = _load_local_module("config")
+    _runtime_supervisor_mod = _load_local_module("runtime_supervisor")
     QMTAgent = _agent_mod.QMTAgent  # type: ignore[attr-defined]
     AuthManager = _auth_mod.AuthManager  # type: ignore[attr-defined]  # noqa: F401
     QMTClient = _client_mod.QMTClient  # type: ignore[attr-defined]  # noqa: F401
@@ -65,6 +70,8 @@ except ImportError:
     load_config = _config_mod.load_config  # type: ignore[attr-defined]  # noqa: F401
     normalize_agent_config_data = _config_mod.normalize_agent_config_data  # type: ignore[attr-defined]  # noqa: F401
     validate_config_dict = _config_mod.validate_config_dict  # type: ignore[attr-defined]  # noqa: F401
+    RestartPolicy = _runtime_supervisor_mod.RestartPolicy  # type: ignore[attr-defined]
+    RuntimeSupervisor = _runtime_supervisor_mod.RuntimeSupervisor  # type: ignore[attr-defined]
 
 
 APP_NAME = "QuantMindQMTAgent"
@@ -127,7 +134,6 @@ def _supervised_run(
     restart_max_attempts_per_window: int,
 ) -> int:
     logger = logging.getLogger("qmt_agent")
-    restart_marks: list[float] = []
     agent_holder: dict[str, QMTAgent | None] = {"agent": None}
 
     def _handle_signal(_signum, _frame) -> None:
@@ -139,65 +145,22 @@ def _supervised_run(
     signal.signal(signal.SIGINT, _handle_signal)
     signal.signal(signal.SIGTERM, _handle_signal)
 
-    while not shutdown_event.is_set():
-        agent = QMTAgent(cfg)
-        agent_holder["agent"] = agent
-        run_started_at = time.time()
-        exit_reason: str | None = None
-        try:
-            agent.run_forever(external_stop_event=shutdown_event)
-            if not shutdown_event.is_set():
-                if agent.stop_event.is_set():
-                    exit_reason = "agent stop_event set unexpectedly"
-                else:
-                    exit_reason = "agent 主循环意外退出"
-        except Exception as exc:
-            if shutdown_event.is_set():
-                break
-            exit_reason = str(exc)
-            logger.exception("qmt agent crashed, will evaluate restart policy")
-        finally:
-            agent_holder["agent"] = None
-            agent.stop()
-
-        if shutdown_event.is_set():
-            break
-
-        if not exit_reason:
-            break
-
-        if disable_auto_restart:
-            logger.error("qmt agent exited and auto-restart is disabled: %s", exit_reason)
-            return 1
-
-        now = time.time()
-        restart_marks = [ts for ts in restart_marks if now - ts <= restart_window_seconds]
-        attempt = len(restart_marks) + 1
-        if attempt > restart_max_attempts_per_window:
-            logger.error(
-                "qmt agent restart attempts exceeded window limit (%s in %ss), last_error=%s",
-                restart_max_attempts_per_window,
-                restart_window_seconds,
-                exit_reason,
-            )
-            return 1
-
-        restart_marks.append(now)
-        run_duration = max(0, int(now - run_started_at))
-        restart_delay = min(restart_max_delay_seconds, restart_base_delay_seconds * (2 ** (attempt - 1)))
-        logger.warning(
-            "qmt agent exited unexpectedly after %ss (attempt %s/%s), restarting in %ss, reason=%s",
-            run_duration,
-            attempt,
-            restart_max_attempts_per_window,
-            restart_delay,
-            exit_reason,
-        )
-
-        if shutdown_event.wait(restart_delay):
-            break
-
-    return 0
+    supervisor = RuntimeSupervisor(
+        agent_factory=lambda: QMTAgent(cfg),
+        stop_event=shutdown_event,
+        policy=RestartPolicy(
+            auto_restart_on_crash=not disable_auto_restart,
+            restart_base_delay_seconds=restart_base_delay_seconds,
+            restart_max_delay_seconds=restart_max_delay_seconds,
+            restart_window_seconds=restart_window_seconds,
+            restart_max_attempts_per_window=restart_max_attempts_per_window,
+        ),
+        logger=logger,
+        service_name="qmt agent",
+        on_agent_created=lambda agent: agent_holder.__setitem__("agent", agent),
+        on_agent_cleared=lambda _agent: agent_holder.__setitem__("agent", None),
+    )
+    return supervisor.run()
 
 
 def main() -> int:

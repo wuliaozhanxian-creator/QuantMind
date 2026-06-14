@@ -21,6 +21,19 @@ try:
     from .client import QMTClient
     from .config import AgentConfig
     from .reporter import BridgeReporter
+    from .runtime_workers import (
+        AccountReporterWorker,
+        BridgeConnectionWorker,
+        HeartbeatWorker,
+        OrderDispatcher,
+        OrderLifecycleMonitor,
+        ReconnectWorker,
+        RuntimeHealthMonitor,
+        ScheduleWorker,
+        SessionWorker,
+        SmartExecutionWorker,
+    )
+    from .schedule_policy import SchedulePolicy
 except ImportError:
     _MODULE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 
@@ -42,10 +55,20 @@ except ImportError:
     QMTClient = _load_local_module("client").QMTClient  # type: ignore[attr-defined]
     AgentConfig = _load_local_module("config").AgentConfig  # type: ignore[attr-defined]
     BridgeReporter = _load_local_module("reporter").BridgeReporter  # type: ignore[attr-defined]
+    _runtime_workers_mod = _load_local_module("runtime_workers")
+    SessionWorker = _runtime_workers_mod.SessionWorker  # type: ignore[attr-defined]
+    HeartbeatWorker = _runtime_workers_mod.HeartbeatWorker  # type: ignore[attr-defined]
+    BridgeConnectionWorker = _runtime_workers_mod.BridgeConnectionWorker  # type: ignore[attr-defined]
+    AccountReporterWorker = _runtime_workers_mod.AccountReporterWorker  # type: ignore[attr-defined]
+    OrderLifecycleMonitor = _runtime_workers_mod.OrderLifecycleMonitor  # type: ignore[attr-defined]
+    SmartExecutionWorker = _runtime_workers_mod.SmartExecutionWorker  # type: ignore[attr-defined]
+    OrderDispatcher = _runtime_workers_mod.OrderDispatcher  # type: ignore[attr-defined]
+    ReconnectWorker = _runtime_workers_mod.ReconnectWorker  # type: ignore[attr-defined]
+    ScheduleWorker = _runtime_workers_mod.ScheduleWorker  # type: ignore[attr-defined]
+    RuntimeHealthMonitor = _runtime_workers_mod.RuntimeHealthMonitor  # type: ignore[attr-defined]
+    SchedulePolicy = _load_local_module("schedule_policy").SchedulePolicy  # type: ignore[attr-defined]
 
 logger = logging.getLogger("qmt_agent")
-
-_QMT_ACTIVE_WINDOW_LABEL = "周一至周五 09:00-17:00"
 
 class QMTAgent:
     def __init__(self, cfg: AgentConfig):
@@ -86,8 +109,11 @@ class QMTAgent:
         self._dispatch_last_submit_kind = ""
         self._watchdog_interval_seconds = max(3, min(10, int(self.cfg.reconnect_interval_seconds or 5)))
         self._schedule_lock = threading.RLock()
-        self._schedule_paused = False
-        self._schedule_message = f"QMT 通信已按时段策略暂停（{_QMT_ACTIVE_WINDOW_LABEL}）"
+        self.schedule_policy = SchedulePolicy()
+        self._schedule_mode = "unknown"
+        self._schedule_message = (
+            f"当前为非交易时段，保持连接并按 30 分钟低频上报（交易时段：{self.schedule_policy.trading_session_label}）"
+        )
         self._startup_grace_seconds = max(
             20,
             int(self.cfg.heartbeat_interval_seconds or 15) * 3,
@@ -97,61 +123,62 @@ class QMTAgent:
             max_workers=max(5, int(getattr(self.cfg, "dispatch_workers", 10) or 10)),
             thread_name_prefix="dispatch-worker"
         )
+        self._workers = {
+            "session": SessionWorker(self),
+            "heartbeat": HeartbeatWorker(self),
+            "bridge": BridgeConnectionWorker(self),
+            "account": AccountReporterWorker(self),
+            "lifecycle": OrderLifecycleMonitor(self),
+            "smart_execution": SmartExecutionWorker(self),
+            "dispatch": OrderDispatcher(self),
+            "reconnect": ReconnectWorker(self),
+            "schedule": ScheduleWorker(self),
+            "health": RuntimeHealthMonitor(self),
+        }
 
-    def _is_qmt_active_window(self, now: Optional[datetime] = None) -> bool:
-        current = now or datetime.now()
-        return current.weekday() < 5 and 9 <= current.hour < 17
+    def _get_schedule_policy(self) -> SchedulePolicy:
+        policy = getattr(self, "schedule_policy", None)
+        if policy is None:
+            policy = SchedulePolicy()
+            self.schedule_policy = policy
+        return policy
 
-    def _seconds_until_qmt_window_transition(self, now: Optional[datetime] = None) -> int:
-        current = now or datetime.now()
-        if self._is_qmt_active_window(current):
-            end_at = current.replace(hour=17, minute=0, second=0, microsecond=0)
-            return max(1, int((end_at - current).total_seconds()))
+    def _is_trading_session(self, now: Optional[datetime] = None) -> bool:
+        return self._get_schedule_policy().is_trading_session(now)
 
-        if current.weekday() < 5 and current.hour < 9:
-            start_at = current.replace(hour=9, minute=0, second=0, microsecond=0)
-            return max(1, int((start_at - current).total_seconds()))
+    def _current_reporting_mode(self, now: Optional[datetime] = None) -> str:
+        return self._get_schedule_policy().current_reporting_mode(now)
 
-        next_day = current + timedelta(days=1)
-        while next_day.weekday() >= 5:
-            next_day += timedelta(days=1)
-        start_at = next_day.replace(hour=9, minute=0, second=0, microsecond=0)
-        return max(1, int((start_at - current).total_seconds()))
+    def _seconds_until_schedule_transition(self, now: Optional[datetime] = None) -> int:
+        return self._get_schedule_policy().seconds_until_transition(now)
 
-    def _schedule_wait_seconds(self, active: bool) -> int:
-        transition = self._seconds_until_qmt_window_transition()
-        cap = 30 if active else 60
-        return max(1, min(cap, transition))
+    def _schedule_wait_seconds(self, trading_session: bool) -> int:
+        return self._get_schedule_policy().schedule_wait_seconds(trading_session)
 
-    def _ensure_qmt_schedule_state(self) -> bool:
-        active = self._is_qmt_active_window()
+    def _effective_report_interval_seconds(self, base_seconds: int) -> int:
+        return self._get_schedule_policy().effective_report_interval_seconds(base_seconds)
+
+    def _report_wait_seconds(self, base_seconds: int) -> int:
+        return self._get_schedule_policy().report_wait_seconds(base_seconds)
+
+    def _refresh_schedule_state(self) -> bool:
+        mode = self._current_reporting_mode()
         with self._schedule_lock:
-            was_paused = self._schedule_paused
-            self._schedule_paused = not active
+            previous_mode = self._schedule_mode
+            self._schedule_mode = mode
 
-        if active:
-            if was_paused:
-                logger.info("QMT 时段已恢复，重新允许与 QMT 通信")
-                with self._state_lock:
-                    if self.runtime_state == "paused_schedule":
-                        self.runtime_state = "starting"
-                    if self.last_error == self._schedule_message:
-                        self.last_error = None
-                if not self.qmt.is_connected():
-                    self.qmt.request_reconnect()
-            return True
-
-        if not was_paused:
-            logger.info("进入 QMT 非通信时段，暂停 QMT 通信与账户/心跳上报")
-        if self.qmt.is_connected():
-            self.qmt.close()
-        with self._state_lock:
-            self.runtime_state = "paused_schedule"
-            self.last_error = self._schedule_message
-        return False
+        if mode == previous_mode:
+            return mode == "trading"
+        if mode == "trading":
+            logger.info("进入交易时段，恢复高频账户/心跳上报: %s", self._get_schedule_policy().trading_session_label)
+            if not self.qmt.is_connected():
+                self.qmt.request_reconnect()
+        else:
+            logger.info("进入非交易时段，保持连接并切换为 30 分钟低频上报")
+        return mode == "trading"
 
     def _build_schedule_rejection(self, payload: dict[str, Any], *, action: str) -> dict[str, Any]:
-        message = f"{action}已拒绝：当前为非通信时段，仅允许 {_QMT_ACTIVE_WINDOW_LABEL} 与 QMT 通信"
+        message = f"{action}已拒绝：当前为非交易时段，仅允许 {self._get_schedule_policy().trading_session_label} 提交交易请求"
         return {
             "client_order_id": str(payload.get("client_order_id") or "").strip(),
             "exchange_order_id": None,
@@ -415,7 +442,7 @@ class QMTAgent:
     def _process_order_message(self, payload: dict[str, Any]) -> None:
         logger.debug("on_message received complete payload: %s", json.dumps(payload, ensure_ascii=False))
         logger.info("received order client_order_id=%s", payload.get("client_order_id"))
-        if not self._ensure_qmt_schedule_state():
+        if not self._refresh_schedule_state():
             self.reporter.report_execution(self._build_schedule_rejection(payload, action="下单"))
             return
 
@@ -510,8 +537,8 @@ class QMTAgent:
                     }
 
     def _process_cancel_message(self, payload: dict[str, Any]) -> None:
-        if not self._ensure_qmt_schedule_state():
-            logger.info("cancel skipped due to inactive QMT schedule: client_order_id=%s", payload.get("client_order_id"))
+        if not self._refresh_schedule_state():
+            logger.info("cancel skipped due to non-trading session: client_order_id=%s", payload.get("client_order_id"))
             return
         client_order_id = str(payload.get("client_order_id") or "").strip()
         provided_exchange_order_id = str(payload.get("exchange_order_id") or "").strip()
@@ -567,232 +594,22 @@ class QMTAgent:
         logger.warning("bridge websocket closed: code=%s msg=%s", code, msg)
 
     def _refresh_loop(self) -> None:
-        while not self.stop_event.is_set():
-            try:
-                refreshed = self.auth.refresh_if_needed()
-                if refreshed:
-                    self._close_ws()
-            except Exception as exc:
-                with self._state_lock:
-                    self.last_error = f"session refresh failed: {exc}"
-                logger.warning("session refresh failed: %s, attempting re-bootstrap", exc)
-                try:
-                    self.auth.bootstrap()
-                    logger.info("session re-bootstrap succeeded")
-                except Exception as bootstrap_exc:
-                    with self._state_lock:
-                        self.last_error = f"session bootstrap failed: {bootstrap_exc}"
-                    logger.warning("session re-bootstrap failed: %s", bootstrap_exc)
-            self.stop_event.wait(1)
+        self._workers["session"].run()
 
     def _heartbeat_loop(self) -> None:
-        while not self.stop_event.is_set():
-            if not self._ensure_qmt_schedule_state():
-                self.stop_event.wait(self._schedule_wait_seconds(active=False))
-                continue
-            try:
-                self.reporter.report_heartbeat(
-                    {
-                        "account_id": self.cfg.account_id,
-                        "client_version": self.cfg.client_version,
-                        "hostname": self.cfg.hostname,
-                        "status": "running",
-                        "qmt_connected": self.qmt.is_connected(),
-                        "latency_ms": 0,
-                    }
-                )
-                with self._state_lock:
-                    self.last_heartbeat_at = time.time()
-            except Exception as exc:
-                with self._state_lock:
-                    self.last_error = f"heartbeat report failed: {exc}"
-                logger.warning("heartbeat report failed: %s", exc)
-            self.stop_event.wait(max(1, self.cfg.heartbeat_interval_seconds))
+        self._workers["heartbeat"].run()
 
     def _ws_app_ping_loop(self) -> None:
-        interval = max(10, int(self.cfg.ws_ping_interval_seconds or 20))
-        while not self.stop_event.is_set():
-            try:
-                with self._ws_lock:
-                    ws = self.ws
-                if ws is not None:
-                    ws.send(json.dumps({"type": "ping", "ts": time.time()}))
-            except Exception:
-                pass
-            self.stop_event.wait(interval)
+        self._workers["bridge"].run_ping_loop()
 
     def _account_loop(self) -> None:
-        interval = max(1, int(getattr(self.cfg, "account_report_interval_seconds", 30) or 30))
-        settle_window = max(3, min(10, interval // 2))
-        while not self.stop_event.is_set():
-            if not self._ensure_qmt_schedule_state():
-                self.stop_event.wait(self._schedule_wait_seconds(active=False))
-                continue
-            triggered = self._dirty_event.wait(timeout=interval)
-            self._dirty_event.clear()
-
-            max_settle_window = max(interval, settle_window * 3)
-            if triggered and not self._wait_for_snapshot_settle(settle_window, max_wait_seconds=max_settle_window):
-                continue
-
-            try:
-                snapshot = self.qmt.snapshot(prefer_fresh=True)
-                self.reporter.report_account(snapshot)
-                with self._state_lock:
-                    self.last_account_report_at = time.time()
-            except Exception as exc:
-                with self._state_lock:
-                    self.last_error = f"account report failed: {exc}"
-                logger.warning("account report failed: %s", exc)
-                if "QMT not connected" in str(exc):
-                    self.qmt.request_reconnect()
+        self._workers["account"].run()
 
     def _order_timeout_loop(self) -> None:
-        cancel_after_seconds = max(1, int(getattr(self.cfg, "reconcile_cancel_after_seconds", 60) or 60))
-        check_interval = min(10, max(3, cancel_after_seconds // 4))
-        while not self.stop_event.is_set():
-            if not self._ensure_qmt_schedule_state():
-                self.stop_event.wait(self._schedule_wait_seconds(active=False))
-                continue
-            now = time.time()
-            stale_orders: list[dict[str, Any]] = []
-            with self._pending_orders_lock:
-                pending_snapshot = list(self._pending_orders.values())
-            for order in pending_snapshot:
-                client_order_id = str(order.get("client_order_id") or "").strip()
-                exchange_order_id = str(order.get("exchange_order_id") or "").strip()
-                submitted_at = float(order.get("submitted_at") or 0.0)
-                if not client_order_id or not exchange_order_id or submitted_at <= 0:
-                    continue
-                if now - submitted_at < cancel_after_seconds:
-                    continue
-                if order.get("cancel_requested_at"):
-                    continue
-                stale_orders.append(order)
-
-            for order in stale_orders:
-                client_order_id = str(order.get("client_order_id") or "").strip()
-                exchange_order_id = str(order.get("exchange_order_id") or "").strip()
-                if not client_order_id or not exchange_order_id:
-                    continue
-                try:
-                    logger.info(
-                        "pending order timeout reached, issuing cancel client_order_id=%s exchange_order_id=%s age=%ss",
-                        client_order_id,
-                        exchange_order_id,
-                        int(now - float(order.get("submitted_at") or now)),
-                    )
-                    cancel_result = self.qmt.cancel_order(exchange_order_id)
-                    if cancel_result.get("accepted"):
-                        with self._pending_orders_lock:
-                            if client_order_id in self._pending_orders:
-                                self._pending_orders[client_order_id]["cancel_requested_at"] = now
-                                self._pending_orders[client_order_id]["last_status"] = "CANCEL_PENDING"
-                    else:
-                        logger.warning(
-                            "pending order cancel rejected client_order_id=%s exchange_order_id=%s code=%s",
-                            client_order_id,
-                            exchange_order_id,
-                            cancel_result.get("code"),
-                        )
-                except Exception as exc:
-                    logger.exception(
-                        "pending order cancel failed client_order_id=%s exchange_order_id=%s: %s",
-                        client_order_id,
-                        exchange_order_id,
-                        exc,
-                    )
-            self.stop_event.wait(check_interval)
+        self._workers["lifecycle"].run_timeout_loop()
 
     def _smart_execution_loop(self) -> None:
-        while not self.stop_event.is_set():
-            if not self._ensure_qmt_schedule_state():
-                self.stop_event.wait(self._schedule_wait_seconds(active=False))
-                continue
-            now = time.time()
-            with self._smart_orders_lock:
-                snapshot = {k: dict(v) for k, v in self._smart_orders.items()}
-
-            for client_order_id, so in snapshot.items():
-                if so["remaining_quantity"] <= 0:
-                    with self._smart_orders_lock:
-                        self._smart_orders.pop(client_order_id, None)
-                    continue
-
-                if so["state"] == "pending":
-                    if so["retries"] >= int(self.cfg.smart_max_retries):
-                        logger.warning("smart execution max retries reached for %s", client_order_id)
-                        original_qty = float(so.get("original_payload", {}).get("quantity") or 0)
-                        filled_qty = max(0.0, original_qty - so["remaining_quantity"])
-                        with self._smart_orders_lock:
-                            self._smart_orders.pop(client_order_id, None)
-                        try:
-                            self.reporter.report_execution({
-                                "client_order_id": client_order_id,
-                                "account_id": self.cfg.account_id,
-                                "symbol": so.get("original_payload", {}).get("symbol"),
-                                "side": so.get("original_payload", {}).get("side"),
-                                "status": "EXPIRED",
-                                "message": "max smart retries reached",
-                                "filled_quantity": filled_qty,
-                            })
-                        except Exception:
-                            pass
-                        continue
-
-                    payload = so["original_payload"].copy()
-                    symbol = payload.get("symbol")
-                    side = payload.get("side")
-                    price = self.qmt.get_level1_price(symbol, side)
-                    if price <= 0:
-                        logger.warning("smart order got 0.0 price for %s, will retry next tick", client_order_id)
-                        continue
-
-                    new_retry = so["retries"] + 1
-                    sub_client_id = f"{client_order_id}_{new_retry}"
-                    payload["client_order_id"] = sub_client_id
-                    payload["price"] = price
-                    payload["order_type"] = "LIMIT"
-                    payload["quantity"] = so["remaining_quantity"]
-
-                    try:
-                        logger.info("smart order %s submitting chunk %s at price %s", client_order_id, new_retry, price)
-                        self.qmt.submit_order_async(payload)
-                        with self._smart_orders_lock:
-                            if client_order_id in self._smart_orders:
-                                self._smart_orders[client_order_id]["retries"] = new_retry
-                                self._smart_orders[client_order_id]["current_sub_client_order_id"] = sub_client_id
-                                self._smart_orders[client_order_id]["state"] = "submitted"
-                                self._smart_orders[client_order_id]["last_action_ts"] = now
-                    except Exception as e:
-                        logger.error("smart order submit failed for %s: %s", client_order_id, e)
-
-                elif so["state"] == "submitted":
-                    timeout = int(self.cfg.smart_timeout_seconds)
-                    if now - so["last_action_ts"] > timeout:
-                        exchange_order_id = self.qmt.resolve_exchange_order_id("", so["current_sub_client_order_id"])
-                        if exchange_order_id:
-                            logger.info("smart order %s timeout, cancelling sub order: %s", client_order_id, exchange_order_id)
-                            self.qmt.cancel_order_async(exchange_order_id, so["current_sub_client_order_id"])
-                            with self._smart_orders_lock:
-                                if client_order_id in self._smart_orders:
-                                    self._smart_orders[client_order_id]["state"] = "cancelling"
-                                    self._smart_orders[client_order_id]["last_action_ts"] = now
-                        else:
-                            if now - so["last_action_ts"] > timeout + 5:
-                                logger.warning("smart order %s sub order not found in QMT after timeout, resetting", client_order_id)
-                                with self._smart_orders_lock:
-                                    if client_order_id in self._smart_orders:
-                                        self._smart_orders[client_order_id]["state"] = "pending"
-
-                elif so["state"] == "cancelling":
-                    if now - so["last_action_ts"] > 15:
-                        logger.warning("smart order %s stuck cancelling, forcing pending", client_order_id)
-                        with self._smart_orders_lock:
-                            if client_order_id in self._smart_orders:
-                                self._smart_orders[client_order_id]["state"] = "pending"
-
-            self.stop_event.wait(1.0)
+        self._workers["smart_execution"].run()
 
     def _close_ws(self) -> None:
         with self._ws_lock:
@@ -804,27 +621,7 @@ class QMTAgent:
                 pass
 
     def _run_ws_forever(self) -> None:
-        while not self.stop_event.is_set():
-            try:
-                headers = self.auth.authorization_header()
-                ws = websocket.WebSocketApp(
-                    self.cfg.server_url,
-                    header=[f"{k}: {v}" for k, v in headers.items()],
-                    on_open=self.on_open,
-                    on_message=self.on_message,
-                    on_error=self.on_error,
-                    on_close=self.on_close,
-                )
-                with self._ws_lock:
-                    self.ws = ws
-                websocket.setdefaulttimeout(30)
-                ws.run_forever()
-            except Exception as exc:
-                logger.warning("websocket loop failed: %s", exc)
-
-            if self.stop_event.is_set():
-                break
-            time.sleep(max(1, self.cfg.reconnect_interval_seconds))
+        self._workers["bridge"].run_ws_forever()
 
     def _thread_target_guard(self, name: str, target: Any) -> Any:
         def _runner(*args: Any, **kwargs: Any) -> Any:
@@ -866,8 +663,14 @@ class QMTAgent:
         return f"{label}({int(age_seconds)}s)"
 
     def _runtime_health_snapshot(self) -> dict[str, Any]:
+        schedule_policy = self._get_schedule_policy()
+        with self._schedule_lock:
+            schedule_mode = self._schedule_mode if self._schedule_mode in {"trading", "offhours"} else self._current_reporting_mode()
         heartbeat_interval = max(1, int(self.cfg.heartbeat_interval_seconds or 15))
         account_interval = max(1, int(getattr(self.cfg, "account_report_interval_seconds", 30) or 30))
+        if schedule_mode != "trading":
+            heartbeat_interval = max(heartbeat_interval, int(schedule_policy.offhours_report_interval_seconds))
+            account_interval = max(account_interval, int(schedule_policy.offhours_report_interval_seconds))
         heartbeat_age = self._age_seconds(self.last_heartbeat_at)
         account_age = self._age_seconds(self.last_account_report_at)
         startup_age = self._age_seconds(self.last_start_at)
@@ -890,10 +693,9 @@ class QMTAgent:
         ]
         dead_threads = [name for name in critical_threads if not thread_states.get(name, False)]
         reasons: list[str] = []
-        schedule_paused = bool(getattr(self, "_schedule_paused", False))
-        if (not schedule_paused) and (not in_startup_grace) and heartbeat_age > heartbeat_interval * 2:
+        if (not in_startup_grace) and heartbeat_age > heartbeat_interval * 2:
             reasons.append(self._format_age_reason("heartbeat_stale", heartbeat_age))
-        if (not schedule_paused) and (not in_startup_grace) and account_age > account_interval * 2:
+        if (not in_startup_grace) and account_age > account_interval * 2:
             reasons.append(self._format_age_reason("account_stale", account_age))
         if dead_threads:
             reasons.append(f"thread_dead({','.join(dead_threads)})")
@@ -903,9 +705,7 @@ class QMTAgent:
             reasons.append(f"dispatch_queue_busy({queue_size}/{queue_maxsize})")
         if int(dispatch_metrics.get("dropped") or 0) > 0:
             reasons.append(f"dispatch_queue_dropped({int(dispatch_metrics.get('dropped') or 0)})")
-        if schedule_paused and not reasons:
-            health = "paused"
-        elif not reasons:
+        if not reasons:
             health = "healthy"
         elif dead_threads:
             health = "degraded"
@@ -923,23 +723,15 @@ class QMTAgent:
             "startup_age_seconds": None if not math.isfinite(startup_age) else int(startup_age),
             "startup_grace_seconds": int(self._startup_grace_seconds),
             "in_startup_grace": bool(in_startup_grace),
-            "schedule_paused": schedule_paused,
-            "schedule_window_label": _QMT_ACTIVE_WINDOW_LABEL,
+            "schedule_mode": schedule_mode,
+            "schedule_window_label": schedule_policy.trading_session_label,
+            "offhours_report_interval_seconds": int(schedule_policy.offhours_report_interval_seconds),
             "worker_threads": thread_states,
             "dispatch_metrics": dispatch_metrics,
         }
 
     def _order_dispatch_loop(self) -> None:
-        dispatch_queue = self._dispatch_queue
-        submit_interval_seconds = float(self._dispatch_submit_interval_ms) / 1000.0
-        while not self.stop_event.is_set():
-            try:
-                priority, seq, item = dispatch_queue.get(timeout=1.0)
-            except queue.Empty:
-                continue
-            self._dispatch_executor.submit(self._dispatch_task_wrapper, priority, seq, item)
-            if submit_interval_seconds > 0 and not self.stop_event.is_set():
-                self.stop_event.wait(submit_interval_seconds)
+        self._workers["dispatch"].run()
 
     def _dispatch_task_wrapper(self, priority: int, seq: int, item: dict[str, Any]) -> None:
         started_at = time.time()
@@ -987,35 +779,13 @@ class QMTAgent:
                 self._spawn_background_thread(name, target)
 
     def _qmt_reconnect_loop(self, stop_event: threading.Event) -> None:
-        self.qmt.reconnect_if_needed(stop_event, allow_connect=self._is_qmt_active_window)
+        self._workers["reconnect"].run(stop_event)
 
     def _qmt_schedule_loop(self) -> None:
-        while not self.stop_event.is_set():
-            active = self._ensure_qmt_schedule_state()
-            self.stop_event.wait(self._schedule_wait_seconds(active=active))
+        self._workers["schedule"].run()
 
     def _watchdog_loop(self) -> None:
-        while not self.stop_event.is_set():
-            try:
-                self._ensure_background_threads()
-                health = self._runtime_health_snapshot()
-                reason = str(health.get("health_reason") or "")
-                if reason:
-                    with self._state_lock:
-                        self.runtime_state = "degraded" if health.get("health") != "healthy" else self.runtime_state
-                        self.last_error = reason
-                    logger.warning("runtime watchdog detected issue: %s", reason)
-                    if (
-                        ("heartbeat_stale" in reason or "account_stale" in reason)
-                        and not bool(health.get("in_startup_grace"))
-                        and not bool(health.get("schedule_paused"))
-                    ):
-                        self.qmt.request_reconnect()
-            except Exception as exc:
-                with self._state_lock:
-                    self.last_error = f"watchdog failed: {exc}"
-                logger.exception("runtime watchdog failed")
-            self.stop_event.wait(self._watchdog_interval_seconds)
+        self._workers["health"].run()
 
     def start(self) -> None:
         self.stop_event.clear()
@@ -1025,46 +795,44 @@ class QMTAgent:
             self.last_error = None
             self.last_start_at = time.time()
         self.auth.bootstrap()
-        if self._ensure_qmt_schedule_state():
-            if not self.qmt.connect():
-                logger.warning("QMT initial connection failed, heartbeat will report disconnected state")
-                with self._state_lock:
-                    self.runtime_state = "degraded"
-                    self.last_error = "QMT initial connection failed"
-            else:
-                with self._state_lock:
-                    self.runtime_state = "starting"
-
-            bootstrap_snapshot = None
-            try:
-                bootstrap_snapshot = self.qmt.snapshot(prefer_fresh=True)
-            except Exception as exc:
-                logger.warning("initial account snapshot unavailable: %s", exc)
-            if bootstrap_snapshot is not None:
-                try:
-                    self.reporter.report_account(bootstrap_snapshot)
-                    with self._state_lock:
-                        self.last_account_report_at = time.time()
-                except Exception as exc:
-                    logger.warning("initial account report failed: %s", exc)
-            try:
-                self.reporter.report_heartbeat(
-                    {
-                        "account_id": self.cfg.account_id,
-                        "client_version": self.cfg.client_version,
-                        "hostname": self.cfg.hostname,
-                        "status": "running",
-                        "qmt_connected": self.qmt.is_connected(),
-                        "latency_ms": 0,
-                    }
-                )
-                with self._state_lock:
-                    self.last_heartbeat_at = time.time()
-            except Exception as exc:
-                logger.warning("initial heartbeat report failed: %s", exc)
-            self._run_startup_reconcile()
+        self._refresh_schedule_state()
+        if not self.qmt.connect():
+            logger.warning("QMT initial connection failed, heartbeat will report disconnected state")
+            with self._state_lock:
+                self.runtime_state = "degraded"
+                self.last_error = "QMT initial connection failed"
         else:
-            logger.info("当前处于非通信时段，启动时跳过 QMT 连接、账户快照和心跳上报")
+            with self._state_lock:
+                self.runtime_state = "starting"
+
+        bootstrap_snapshot = None
+        try:
+            bootstrap_snapshot = self.qmt.snapshot(prefer_fresh=True)
+        except Exception as exc:
+            logger.warning("initial account snapshot unavailable: %s", exc)
+        if bootstrap_snapshot is not None:
+            try:
+                self.reporter.report_account(bootstrap_snapshot)
+                with self._state_lock:
+                    self.last_account_report_at = time.time()
+            except Exception as exc:
+                logger.warning("initial account report failed: %s", exc)
+        try:
+            self.reporter.report_heartbeat(
+                {
+                    "account_id": self.cfg.account_id,
+                    "client_version": self.cfg.client_version,
+                    "hostname": self.cfg.hostname,
+                    "status": "running",
+                    "qmt_connected": self.qmt.is_connected(),
+                    "latency_ms": 0,
+                }
+            )
+            with self._state_lock:
+                self.last_heartbeat_at = time.time()
+        except Exception as exc:
+            logger.warning("initial heartbeat report failed: %s", exc)
+        self._run_startup_reconcile()
 
         self._spawn_background_thread("bridge-refresh", self._refresh_loop)
         self._spawn_background_thread("bridge-heartbeat", self._heartbeat_loop)
@@ -1120,8 +888,10 @@ class QMTAgent:
                 "client_fingerprint": self.cfg.client_fingerprint,
                 "client_version": self.cfg.client_version,
                 "account_id": self.cfg.account_id,
-                "qmt_schedule_active": not bool(health.get("schedule_paused")),
+                "qmt_schedule_active": health.get("schedule_mode") == "trading",
+                "qmt_schedule_mode": health.get("schedule_mode"),
                 "qmt_schedule_window": health.get("schedule_window_label"),
+                "offhours_report_interval_seconds": health.get("offhours_report_interval_seconds"),
                 "worker_threads": thread_states,
                 "dispatch_metrics": health.get("dispatch_metrics"),
             }

@@ -26,12 +26,22 @@
   - QMT Agent 在客户服务端独立安装、独立启动、独立长期运行；
   - 关闭 Electron 前端不应影响已运行的 QMT Agent 交易链路。
 
+## 当前模块结构
+
+- 入口层：`qmt_agent.py`、`desktop_app.py`
+- 运行编排层：`runtime_supervisor.py`
+- 策略层：`schedule_policy.py`
+- 运行 worker 层：`runtime_workers.py`
+- 基础设施层：`agent.py`、`client.py`、`auth.py`、`reporter.py`
+
+当前版本已将 CLI 与桌面壳的崩溃自动重启策略收敛到统一 `runtime_supervisor.py`，并把交易/非交易时段与低频上报规则收敛到 `schedule_policy.py`；`agent.py` 继续保留外部 façade，但后台循环已经转由独立 worker 组件承载。
+
 ## 版本管理规则
 
 - 版本源唯一文件：[`version.json`](/Users/qusong/git/quantmind/tools/qmt_agent/version.json)
 - 每次有代码变更并产出新安装包时，必须递增 `version`（至少补丁号）。
 - Windows 打包脚本会自动使用 `version.json` 生成 `client_version`（`{version}-desktop`），避免硬编码版本漂移。
-- 当前版本锁定：`1.3.0`（桌面壳默认回退值、Updater 回退值、打包脚本回退值已统一为 `1.3.0`）。
+- 当前版本锁定：`1.5.0`（桌面壳默认回退值、Updater 回退值、打包脚本回退值已统一为 `1.5.0`）。
 
 ## 功能
 
@@ -66,8 +76,11 @@
   - `runtime_status.dispatch_metrics` 会透出队列深度、丢弃数、最近等待时长和最近提交类型，便于桌面端/排障页观测
 - 当本机未安装 `xtquant` 时自动退化为 mock 模式，便于联调
 - 本地桌面 GUI：手动录入 Access Key / Secret Key、扫描 QMT 路径、手填资金账号
-- 桌面端新增“清理缓存”：会先停止 Agent 运行进程并断开 QMT，再清理 `userdata_mini` 根目录下匹配 `queue_*_mutex` 规则的临时文件，最后自动重新拉起 Agent
-- 已增加 QMT 通信时段门控：仅在本机本地时间的周一至周五 `09:00-17:00` 与 QMT 通信；时段外自动断开 QMT，并暂停账户快照与心跳上报
+- 桌面端新增“清理缓存”：会先记录清理前运行态；若 Agent 原本在运行，则先停止并断开 QMT，清理 `userdata_mini` 根目录下匹配 `queue_*_mutex` 规则的临时文件后再恢复运行；若原本未运行，则清理完成后保持停止状态
+- 已调整交易/上报时段策略：
+- 交易时段为本机本地时间周一至周五 `09:00-11:30`、`13:00-15:00`
+- 非交易时段不再主动断开 QMT / bridge 连接，而是改为每 `30` 分钟低频上报一次账户快照与心跳
+- 非交易时段仍拒绝新下单/撤单请求，避免休市阶段误触发交易
 - 总览页会显示 Agent 状态、QMT 连接、云端桥接、运行健康、最近心跳、最近账户快照、版本、主机名和客户端指纹
 - 桌面壳“云端连接”仅根据真实 bridge 连接状态显示，不再把“测试云端连接成功”误当作持续在线；当运行健康异常时会同步显示为异常态
 - 总览页额外展示最近启动时间、工作线程存活状态、心跳/账户上报年龄与最后错误，便于排查“只发首包后停止”这类问题
@@ -117,7 +130,7 @@
 
 - 新增接入范围：`updater.py` 已纳入 QMT Agent 启动链审计、启动链烟测文件拷贝、独立部署 zip 打包文件清单。
 - 目的：避免桌面壳运行时出现“源码存在 updater，但打包产物缺失 updater”导致的导入失败或更新检查不可用问题。
-- 版本口径：`version.json` 与相关回退值统一锁定到 `1.3.0`，保证桌面壳、CLI、Updater 对外上报版本一致。
+- 版本口径：`version.json` 与相关回退值统一锁定到 `1.5.0`，保证桌面壳、CLI、Updater 对外上报版本一致。
 
 ## 稳定性修复（2026-03-14）
 
@@ -223,8 +236,8 @@ python tools/qmt_agent/build_windows_agent.py
 - `enable_short_trading`: 是否启用融券做空通道，默认 `false`
 - `short_check_cache_ttl_sec`: 可融券额度查询缓存 TTL（秒），默认 `30`
 - `session_id`: MiniQMT 会话号，填 `0` 时会按 `account_id + hostname + qmt_path` 生成稳定会话号
-- `heartbeat_interval_seconds`: 心跳上报周期，默认 `15`
-- `account_report_interval_seconds`: 账户快照上报周期，默认 `30`
+- `heartbeat_interval_seconds`: 交易时段心跳上报周期，默认 `15`；非交易时段会自动放宽到 `1800`
+- `account_report_interval_seconds`: 交易时段账户快照上报周期，默认 `30`；非交易时段会自动放宽到 `1800`
 - `reconnect_interval_seconds`: WebSocket / QMT 失败后的重试间隔，默认 `5`
 - `ws_ping_interval_seconds`: WebSocket ping 周期，默认 `20`
 - `ws_ping_timeout_seconds`: WebSocket ping 超时，默认 `10`
@@ -245,17 +258,17 @@ python tools/qmt_agent/build_windows_agent.py
 
 缓存维护补充：
 
-- 桌面端支持“清理缓存”，会先停止 Agent 运行进程并断开 QMT，再清理 `userdata_mini` 根目录下符合 `queue_*_mutex` 规则的临时文件，完成后自动重新拉起 Agent。
-- 本地控制接口支持 `POST /cleanup_cache`；为兼容旧调用，也保留 `POST /stop_and_cleanup_cache`，鉴权级别与 `start/stop/restart` 相同。
+- 桌面端支持“清理缓存”，会先停止 Agent 运行进程并断开 QMT，再清理 `userdata_mini` 根目录下符合 `queue_*_mutex` 规则的临时文件；若清理前正在运行，则清理后恢复运行，否则保持停止状态。
+- 本地控制接口支持 `POST /cleanup_cache`；为兼容旧调用，也保留 `POST /stop_and_cleanup_cache`。其中 `/cleanup_cache` 会恢复清理前运行态，`/stop_and_cleanup_cache` 会在清理后保持停止状态；两者鉴权级别与 `start/stop/restart` 相同。
 
 通信时段补充：
 
-- 当前版本内置 QMT 通信时间限制：仅允许周一至周五 `09:00-17:00` 与 QMT 通信。
-- 时段外行为：
-- 自动断开现有 QMT 连接，停止从 QMT 拉取账户/持仓数据。
-- 暂停 `bridge/account` 与 `bridge/heartbeat` 上报，降低空闲时段资源占用。
-- 若云端仍下发订单，Agent 会直接拒绝，并返回“当前为非通信时段”的原因。
-- 到达允许时段后，Agent 会自动恢复 QMT 通信并重新进入正常运行状态。
+- 当前版本将“交易请求允许时段”调整为周一至周五 `09:00-11:30`、`13:00-15:00`。
+- 非交易时段行为：
+- 保持 QMT 本地连接与云端 bridge 连接，不再主动断开。
+- `bridge/account` 与 `bridge/heartbeat` 改为每 `30` 分钟低频上报一次，确保前端仍能看到最新 Agent 状态与最近账户数据。
+- 若云端仍下发下单或撤单请求，Agent 会直接拒绝，并返回“当前为非交易时段”的原因。
+- 到达交易时段后，Agent 会自动恢复为配置中的高频心跳/账户快照上报周期。
 
 补充：桌面壳现在会优先复用已有本地实例。若后台实例已存在，用户再次打开程序时会把窗口切回前台，而不是再启动第二个实例抢占本地端口。
 
@@ -292,7 +305,7 @@ python tools/qmt_agent/build_windows_agent.py
   "qmt_path": "E:/迅投极速交易终端 睿智融科版/userdata_mini",
   "qmt_bin_path": "E:/迅投极速交易终端 睿智融科版/bin.x64",
   "client_fingerprint": "HOSTNAME",
-  "client_version": "1.3.0-desktop"
+  "client_version": "1.5.0-desktop"
 }
 ```
 

@@ -47,6 +47,11 @@ except ImportError:
     from triage import classify_runtime_fault
 
 try:
+    from .runtime_supervisor import RestartPolicy, RuntimeSupervisor
+except ImportError:
+    from runtime_supervisor import RestartPolicy, RuntimeSupervisor
+
+try:
     from .updater import UpdateChecker, UpdateCheckResult, get_update_checker
 except ImportError:
     from updater import UpdateChecker, UpdateCheckResult, get_update_checker
@@ -68,16 +73,16 @@ logger = logging.getLogger("qmt_agent.desktop")
 def load_version_info() -> dict[str, Any]:
     version_file = Path(__file__).resolve().parent / "version.json"
     if not version_file.exists():
-        return {"version": "1.3.0", "product_name": "QuantMind QMT Agent"}
+        return {"version": "1.5.0", "product_name": "QuantMind QMT Agent"}
     try:
         data = json.loads(version_file.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {"version": "1.3.0"}
+        return data if isinstance(data, dict) else {"version": "1.5.0"}
     except Exception:
-        return {"version": "1.3.0"}
+        return {"version": "1.5.0"}
 
 
 VERSION_INFO = load_version_info()
-APP_VERSION = str(VERSION_INFO.get("version") or "1.3.0")
+APP_VERSION = str(VERSION_INFO.get("version") or "1.5.0")
 
 
 def app_data_dir() -> Path:
@@ -395,11 +400,11 @@ class DesktopRuntime:
         self._lock = threading.RLock()
         self.agent: Optional[QMTAgent] = None
         self.thread: Optional[threading.Thread] = None
+        self._stop_event = threading.Event()
         self._desired_running = False
         self._supervisor_state = "stopped"
         self._supervisor_config: dict[str, Any] = {}
-        self._supervisor_policy: dict[str, Any] = {}
-        self._restart_marks: list[float] = []
+        self._supervisor_policy = RestartPolicy()
         self._restart_count = 0
         self.last_error: Optional[str] = None
         self.last_test_result: dict[str, Any] = {}
@@ -419,6 +424,10 @@ class DesktopRuntime:
             },
         )
         self.error_history = self.error_history[:20]
+
+    def _is_running(self) -> bool:
+        with self._lock:
+            return bool(self._desired_running and self.thread and self.thread.is_alive())
 
     def _notify(self) -> None:
         try:
@@ -459,121 +468,38 @@ class DesktopRuntime:
             return default
         return bool(value)
 
-    def _extract_supervisor_policy(self, data: dict[str, Any]) -> dict[str, Any]:
+    def _extract_supervisor_policy(self, data: dict[str, Any]) -> RestartPolicy:
         base_delay = self._coerce_int(data.get("restart_base_delay_seconds"), 3, 1, 300)
         max_delay = self._coerce_int(data.get("restart_max_delay_seconds"), 60, base_delay, 1800)
-        return {
-            "auto_restart_on_crash": self._coerce_bool(data.get("auto_restart_on_crash"), True),
-            "restart_base_delay_seconds": base_delay,
-            "restart_max_delay_seconds": max_delay,
-            "restart_window_seconds": self._coerce_int(data.get("restart_window_seconds"), 600, 30, 3600),
-            "restart_max_attempts_per_window": self._coerce_int(
+        return RestartPolicy(
+            auto_restart_on_crash=self._coerce_bool(data.get("auto_restart_on_crash"), True),
+            restart_base_delay_seconds=base_delay,
+            restart_max_delay_seconds=max_delay,
+            restart_window_seconds=self._coerce_int(data.get("restart_window_seconds"), 600, 30, 3600),
+            restart_max_attempts_per_window=self._coerce_int(
                 data.get("restart_max_attempts_per_window"), 20, 1, 200
             ),
-        }
-
-    def _next_restart_delay(self, policy: dict[str, Any]) -> int | None:
-        now = time.time()
-        window_seconds = int(policy.get("restart_window_seconds") or 600)
-        max_attempts = int(policy.get("restart_max_attempts_per_window") or 20)
-        self._restart_marks = [ts for ts in self._restart_marks if now - ts <= window_seconds]
-        attempt = len(self._restart_marks) + 1
-        if attempt > max_attempts:
-            return None
-        self._restart_marks.append(now)
-        base_delay = int(policy.get("restart_base_delay_seconds") or 3)
-        max_delay = int(policy.get("restart_max_delay_seconds") or 60)
-        return min(max_delay, base_delay * (2 ** (attempt - 1)))
+        )
 
     def _run_agent_supervisor(self) -> None:
-        while True:
-            with self._lock:
-                if not self._desired_running:
-                    self._supervisor_state = "stopped"
-                    break
-                cfg_data = dict(self._supervisor_config)
-                policy = dict(self._supervisor_policy)
-                self._supervisor_state = "running"
+        with self._lock:
+            cfg_data = dict(self._supervisor_config)
+            policy = self._supervisor_policy
+            self._supervisor_state = "running"
 
-            cfg = build_agent_config(cfg_data)
-            agent = QMTAgent(cfg)
-            with self._lock:
-                self.agent = agent
-
-            crashed = False
-            crash_reason = ""
-            run_started_at = time.time()
-            try:
-                agent.start()
-                while True:
-                    with self._lock:
-                        still_desired = self._desired_running
-                    if not still_desired:
-                        break
-                    if agent.stop_event.wait(0.2):
-                        break
-            except Exception as exc:
-                crashed = True
-                crash_reason = str(exc)
-                self._record_error(f"Agent 崩溃: {exc}")
-                logger.exception("desktop runtime failed")
-            finally:
-                try:
-                    agent.stop()
-                except Exception:
-                    pass
-                with self._lock:
-                    if self.agent is agent:
-                        self.agent = None
-                self._notify()
-
-            with self._lock:
-                still_desired = self._desired_running
-                policy = dict(self._supervisor_policy)
-
-            if not still_desired:
-                with self._lock:
-                    self._supervisor_state = "stopped"
-                break
-
-            auto_restart = bool(policy.get("auto_restart_on_crash", True))
-            if not crashed and not auto_restart:
-                self._record_error("Agent 已停止，且自动重启已关闭")
-                with self._lock:
-                    self._desired_running = False
-                    self._supervisor_state = "stopped"
-                break
-
-            if not crashed:
-                crash_reason = "Agent 主循环意外退出"
-                self._record_error(crash_reason)
-
-            if not auto_restart:
-                with self._lock:
-                    self._desired_running = False
-                    self._supervisor_state = "stopped"
-                break
-
-            restart_delay = self._next_restart_delay(policy)
-            if restart_delay is None:
-                with self._lock:
-                    self._desired_running = False
-                    self._supervisor_state = "stopped"
-                self._record_error(
-                    f"自动重启超过窗口限制（{policy.get('restart_max_attempts_per_window')} 次/{policy.get('restart_window_seconds')} 秒），已停止"
-                )
-                break
-
-            run_seconds = max(0, int(time.time() - run_started_at))
-            with self._lock:
-                self._restart_count += 1
-                self._supervisor_state = "restarting"
-            self._record_error(
-                f"Agent 异常退出（运行 {run_seconds}s，原因: {crash_reason}），{restart_delay}s 后自动重启"
-            )
-            self._notify()
-            if self._wait_for_stop(restart_delay):
-                break
+        supervisor = RuntimeSupervisor(
+            agent_factory=lambda: QMTAgent(build_agent_config(cfg_data)),
+            stop_event=self._stop_event,
+            policy=policy,
+            logger=logger,
+            service_name="desktop runtime",
+            should_run=lambda: self._desired_running,
+            on_agent_created=self._on_supervised_agent_created,
+            on_agent_cleared=self._on_supervised_agent_cleared,
+            on_run_failure=self._on_supervised_run_failure,
+            on_restart_scheduled=self._on_supervised_restart_scheduled,
+        )
+        supervisor.run()
 
         with self._lock:
             if threading.current_thread() is self.thread:
@@ -582,14 +508,29 @@ class DesktopRuntime:
                 self._supervisor_state = "stopped"
         self._notify()
 
-    def _wait_for_stop(self, seconds: int) -> bool:
-        deadline = time.time() + max(0, int(seconds))
-        while time.time() < deadline:
-            with self._lock:
-                if not self._desired_running:
-                    return True
-            time.sleep(0.2)
-        return False
+    def _on_supervised_agent_created(self, agent: QMTAgent) -> None:
+        with self._lock:
+            self.agent = agent
+            self._supervisor_state = "running"
+        self._notify()
+
+    def _on_supervised_agent_cleared(self, agent: QMTAgent) -> None:
+        with self._lock:
+            if self.agent is agent:
+                self.agent = None
+        self._notify()
+
+    def _on_supervised_run_failure(self, message: str) -> None:
+        self._record_error(f"Agent 崩溃: {message}")
+
+    def _on_supervised_restart_scheduled(self, reason: str, restart_delay: int, run_seconds: int) -> None:
+        with self._lock:
+            self._restart_count += 1
+            self._supervisor_state = "restarting"
+        self._record_error(
+            f"Agent 异常退出（运行 {run_seconds}s，原因: {reason}），{restart_delay}s 后自动重启"
+        )
+        self._notify()
 
     def start(self, data: dict[str, Any]) -> dict[str, Any]:
         errors = validate_config_dict(data)
@@ -606,10 +547,10 @@ class DesktopRuntime:
         with self._lock:
             if self._desired_running and self.thread and self.thread.is_alive():
                 return {"ok": True, "message": "Agent 已在运行"}
+            self._stop_event = threading.Event()
             self._desired_running = True
             self._supervisor_policy = policy
             self._supervisor_config = normalized
-            self._restart_marks = []
             self._restart_count = 0
             self._supervisor_state = "running"
             self.thread = threading.Thread(target=self._run_agent_supervisor, name="qmt-agent-desktop", daemon=True)
@@ -625,6 +566,7 @@ class DesktopRuntime:
             self._supervisor_state = "stopped"
             thread = self.thread
             agent = self.agent
+            self._stop_event.set()
         if agent is not None:
             agent.stop()
         if thread is not None and thread.is_alive() and thread is not threading.current_thread():
@@ -636,8 +578,9 @@ class DesktopRuntime:
         self._notify()
         return {"ok": True, "message": "Agent 已停止"}
 
-    def cleanup_cache(self, data: dict[str, Any]) -> dict[str, Any]:
-        stop_result = self.stop()
+    def _cleanup_cache_impl(self, data: dict[str, Any], *, restore_running_state: bool) -> dict[str, Any]:
+        was_running = self._is_running()
+        stop_result = self.stop() if was_running else {"ok": True, "message": "Agent 原本未运行"}
         cfg = build_agent_config(data)
         qmt_path = Path(str(cfg.qmt_path or "").strip())
         if not str(cfg.qmt_path or "").strip():
@@ -647,21 +590,32 @@ class DesktopRuntime:
 
         cleanup = _cleanup_qmt_temp_files(qmt_path)
         if cleanup["failed"] > 0:
+            restore_result: dict[str, Any] | None = None
+            if restore_running_state and was_running:
+                time.sleep(0.5)
+                restore_result = self.start(data)
             message = (
                 f"缓存清理完成但存在失败项：扫描 {cleanup['scanned']} 个文件，"
                 f"删除 {cleanup['removed']} 个，失败 {cleanup['failed']} 个"
             )
+            if restore_result and restore_result.get("ok"):
+                message += "；Agent 已恢复运行"
+            elif restore_result is not None:
+                message += f"；Agent 恢复失败：{restore_result.get('message') or '未知错误'}"
             return {
                 "ok": False,
                 "message": message,
                 "qmt_path": str(qmt_path),
                 "cleanup": cleanup,
                 "stop": stop_result,
+                "restore": restore_result,
             }
 
-        time.sleep(0.5)
-        restart_result = self.start(data)
-        if not restart_result.get("ok"):
+        restart_result: dict[str, Any] | None = None
+        if restore_running_state and was_running:
+            time.sleep(0.5)
+            restart_result = self.start(data)
+        if restart_result is not None and not restart_result.get("ok"):
             return {
                 "ok": False,
                 "message": (
@@ -673,10 +627,16 @@ class DesktopRuntime:
                 "restart": restart_result,
             }
 
-        message = (
-            f"缓存清理完成并已重新拉起 Agent：扫描 {cleanup['scanned']} 个文件，"
-            f"删除 {cleanup['removed']} 个，失败 {cleanup['failed']} 个"
-        )
+        if restore_running_state and was_running:
+            message = (
+                f"缓存清理完成并已恢复 Agent 运行：扫描 {cleanup['scanned']} 个文件，"
+                f"删除 {cleanup['removed']} 个，失败 {cleanup['failed']} 个"
+            )
+        else:
+            message = (
+                f"缓存清理完成并保持停止状态：扫描 {cleanup['scanned']} 个文件，"
+                f"删除 {cleanup['removed']} 个，失败 {cleanup['failed']} 个"
+            )
         return {
             "ok": True,
             "message": message,
@@ -684,10 +644,14 @@ class DesktopRuntime:
             "cleanup": cleanup,
             "stop": stop_result,
             "restart": restart_result,
+            "was_running": was_running,
         }
 
+    def cleanup_cache(self, data: dict[str, Any]) -> dict[str, Any]:
+        return self._cleanup_cache_impl(data, restore_running_state=True)
+
     def stop_and_cleanup_cache(self, data: dict[str, Any]) -> dict[str, Any]:
-        return self.cleanup_cache(data)
+        return self._cleanup_cache_impl(data, restore_running_state=False)
 
     def restart(self, data: dict[str, Any]) -> dict[str, Any]:
         self.stop()
@@ -758,7 +722,13 @@ class DesktopRuntime:
             agent_status = self.agent.get_runtime_status() if self.agent is not None else {}
             supervisor_state = self._supervisor_state
             restart_count = self._restart_count
-            policy = dict(getattr(self, "_supervisor_policy", {}))
+            policy = {
+                "auto_restart_on_crash": bool(self._supervisor_policy.auto_restart_on_crash),
+                "restart_base_delay_seconds": int(self._supervisor_policy.restart_base_delay_seconds),
+                "restart_max_delay_seconds": int(self._supervisor_policy.restart_max_delay_seconds),
+                "restart_window_seconds": int(self._supervisor_policy.restart_window_seconds),
+                "restart_max_attempts_per_window": int(self._supervisor_policy.restart_max_attempts_per_window),
+            }
         return {
             "desktop_ready": True,
             "app_name": str(VERSION_INFO.get("product_name") or "QuantMind QMT Agent"),
@@ -958,7 +928,7 @@ class LocalAPIHandler(BaseHTTPRequestHandler):
         if self.path == "/stop_and_cleanup_cache":
             if not self._require_auth(sensitive=True):
                 return
-            self._send(app.runtime.cleanup_cache(app.current_config_snapshot()))
+            self._send(app.runtime.stop_and_cleanup_cache(app.current_config_snapshot()))
             return
         if self.path == "/restart":
             if not self._require_auth(sensitive=True):
