@@ -1,6 +1,6 @@
 #define MyAppName "QuantMind QMT Agent"
 #define MyAppDisplayName "QuantMind QMT 交易助手"
-#define MyAppVersion "0.3.0"
+#define MyAppVersion "1.5.0"
 #define MyAppPublisher "QuantMind"
 #define MyAppExeName "QuantMindQMTAgent.exe"
 #define MyAppId "com.quantmind.qmt-agent"
@@ -25,7 +25,7 @@ SetupIconFile=icon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 
 [Languages]
-Name: "schinese"; MessagesFile: "..\..\dist\ChineseSimplified.isl"
+Name: "schinese"; MessagesFile: "ChineseSimplified.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [CustomMessages]

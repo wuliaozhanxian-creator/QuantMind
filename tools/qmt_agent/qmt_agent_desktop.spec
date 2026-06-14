@@ -22,6 +22,9 @@ datas = [
     (str(tool_root / "reporter.py"), "."),
     (str(tool_root / "triage.py"), "."),
     (str(tool_root / "updater.py"), "."),
+    (str(tool_root / "runtime_supervisor.py"), "."),
+    (str(tool_root / "schedule_policy.py"), "."),
+    (str(tool_root / "runtime_workers.py"), "."),
 ] + pyside6_datas
 
 hiddenimports = [
