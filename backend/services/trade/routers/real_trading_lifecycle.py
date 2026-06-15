@@ -114,6 +114,53 @@ def _prepare_native_simulation_bootstrap(
         }
 
 
+def _build_next_scheduled_execution(
+    *,
+    current_mode: str,
+    active_data: dict[str, Any] | None,
+    active_live_trade_config: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if str(current_mode or "").upper() != "SIMULATION":
+        return None
+    if not isinstance(active_live_trade_config, dict) or not active_live_trade_config:
+        return None
+    try:
+        from backend.services.trade.services.simulation_hosted_scheduler import (
+            _normalize_live_trade_config,
+            _next_scheduled_trigger,
+            _parse_started_at,
+        )
+
+        normalized_cfg = _normalize_live_trade_config(active_live_trade_config)
+        started_day = _parse_started_at(
+            (active_data or {}).get("started_at")
+            if isinstance(active_data, dict)
+            else None
+        )
+        next_trigger = _next_scheduled_trigger(
+            now=datetime.now(timezone.utc),
+            live_trade_config=normalized_cfg,
+            started_day=started_day,
+        )
+        if next_trigger is None:
+            return None
+        return {
+            "schedule_type": str(normalized_cfg.get("schedule_type") or "interval"),
+            "phase": next_trigger.phase,
+            "trade_date": next_trigger.trade_date,
+            "target_at": next_trigger.target_at.isoformat(),
+            "window_start_at": next_trigger.window_start_at.isoformat(),
+            "window_end_at": next_trigger.window_end_at.isoformat(),
+            "reason": next_trigger.reason,
+        }
+    except Exception:
+        logger.warning(
+            "failed to build next simulation scheduled execution",
+            exc_info=True,
+        )
+        return None
+
+
 async def _build_signal_source_status(
     _redis_client, tenant_id: str, user_id: str
 ) -> tuple[str | None, dict]:
@@ -641,6 +688,7 @@ async def get_status(
     current_mode = "REAL"
     active_exec_config = None
     active_live_trade_config = None
+    active_data: dict[str, Any] = {}
     requested_mode = str(trading_mode or "").strip().upper()
     if requested_mode not in {"REAL", "SHADOW", "SIMULATION"}:
         requested_mode = ""
@@ -728,13 +776,16 @@ async def get_status(
         resolved_tenant_id,
         resolved_user_id,
     )
+    next_scheduled_execution = _build_next_scheduled_execution(
+        current_mode=current_mode,
+        active_data=active_data,
+        active_live_trade_config=active_live_trade_config,
+    )
     latest_hosted_task = await manual_execution_service.get_latest_hosted_task(
         tenant_id=resolved_tenant_id,
         user_id=resolved_user_id,
         active_runtime_id=(
-            active_data.get("run_id")
-            if "active_data" in locals() and isinstance(active_data, dict)
-            else None
+            active_data.get("run_id") if isinstance(active_data, dict) else None
         ),
     )
 
@@ -769,6 +820,7 @@ async def get_status(
             "latest_hosted_task": latest_hosted_task,
             "latest_signal_run_id": latest_signal_run_id,
             "signal_source_status": signal_source_status,
+            "next_scheduled_execution": next_scheduled_execution,
         }
 
     if current_mode == "SIMULATION" and strategy_info:
@@ -841,6 +893,7 @@ async def get_status(
                 "latest_hosted_task": latest_hosted_task,
                 "latest_signal_run_id": latest_signal_run_id,
                 "signal_source_status": signal_source_status,
+                "next_scheduled_execution": next_scheduled_execution,
             }
 
         return {
@@ -866,6 +919,7 @@ async def get_status(
             "latest_hosted_task": latest_hosted_task,
             "latest_signal_run_id": latest_signal_run_id,
             "signal_source_status": signal_source_status,
+            "next_scheduled_execution": next_scheduled_execution,
         }
 
     if status is None:
@@ -887,6 +941,7 @@ async def get_status(
             "latest_hosted_task": latest_hosted_task,
             "latest_signal_run_id": latest_signal_run_id,
             "signal_source_status": signal_source_status,
+            "next_scheduled_execution": next_scheduled_execution,
         }
 
     if "error" in status:
@@ -909,6 +964,7 @@ async def get_status(
             "latest_hosted_task": latest_hosted_task,
             "latest_signal_run_id": latest_signal_run_id,
             "signal_source_status": signal_source_status,
+            "next_scheduled_execution": next_scheduled_execution,
         }
 
     state = "running" if status.get("available_replicas", 0) > 0 else "starting"
@@ -929,6 +985,7 @@ async def get_status(
         "latest_hosted_task": latest_hosted_task,
         "latest_signal_run_id": latest_signal_run_id,
         "signal_source_status": signal_source_status,
+        "next_scheduled_execution": next_scheduled_execution,
     }
 
 

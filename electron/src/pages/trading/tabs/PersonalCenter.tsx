@@ -14,9 +14,32 @@ interface PersonalCenterProps {
     tradingMode: 'real' | 'simulation';
 }
 
+const formatDateTime = (raw?: string | null) => {
+    if (!raw) return '-';
+    const value = new Date(raw);
+    if (Number.isNaN(value.getTime())) return raw;
+    return value.toLocaleString();
+};
+
+const formatPhaseLabel = (value?: string | null) => {
+    const phase = String(value || '').trim().toUpperCase();
+    if (phase === 'ALL') return '同窗先卖后买';
+    if (phase === 'SELL') return '卖出窗口';
+    if (phase === 'BUY') return '买入窗口';
+    return value || '-';
+};
+
 const PersonalCenter: React.FC<PersonalCenterProps> = ({ tenantId, userId, status, tradingMode }) => {
     const isRunning = status?.status === 'running';
     const activeStrategy = status?.strategy;
+    const nextScheduledExecution = status?.next_scheduled_execution || null;
+    const nextExecutionTargetText = nextScheduledExecution?.target_at
+        ? formatDateTime(nextScheduledExecution.target_at)
+        : '待进入下一调仓日';
+    const nextExecutionWindowText = nextScheduledExecution?.window_start_at && nextScheduledExecution?.window_end_at
+        ? `${formatDateTime(nextScheduledExecution.window_start_at)} ~ ${formatDateTime(nextScheduledExecution.window_end_at)}`
+        : '等待后端返回';
+    const nextExecutionPhaseText = formatPhaseLabel(nextScheduledExecution?.phase);
     
     // ... (现有状态)
     const [isSyncing, setIsSyncing] = useState(false);
@@ -410,6 +433,17 @@ const PersonalCenter: React.FC<PersonalCenterProps> = ({ tenantId, userId, statu
                                     <div className="text-xs text-gray-500 leading-relaxed">
                                         当前统计基准固定为 <span className="font-bold text-gray-700">¥{configuredInitialCash.toLocaleString()}</span>。
                                         如需重新开始，请点击下方重置按钮。重置将清空所有持仓并恢复初始现金。
+                                    </div>
+                                    <div className="mt-2 rounded-lg border border-amber-100 bg-amber-50/70 px-3 py-2">
+                                        <div className="text-[10px] font-black text-amber-700 uppercase tracking-widest mb-1">
+                                            下次计划调度
+                                        </div>
+                                        <div className="text-sm font-bold text-gray-800">
+                                            {nextExecutionTargetText}
+                                        </div>
+                                        <div className="mt-1 text-[11px] text-gray-600 leading-relaxed">
+                                            {nextExecutionPhaseText} · {nextExecutionWindowText}
+                                        </div>
                                     </div>
                                 </div>
                                 <div className="grid grid-cols-2 gap-2 mt-2">

@@ -68,6 +68,9 @@ fetch(`${apiGatewayBase}/api/v1/api-keys/init`, { method: 'POST' });
 - `StrategyManagement.tsx` 顶部“影子模式”已改为开关样式的 `role="switch"` 控件，保留原逻辑但让控制条更紧凑，不再像传统 checkbox。
 - `StrategyManagement.tsx` 的“核心决策结果”卡已收敛为“默认模型最新推理”，只展示当前默认模型最近一次可用于托管的完成推理批次；空态改为“暂无可用推理批次”，并回显信号来源诊断。
 - `StrategyManagement.tsx` 的默认模型最新推理卡在 `run_id` 变化时会短暂显示 `NEW` 标签，帮助识别刚刷新出来的新推理批次。
+- `StrategyManagement.tsx` 与 `PersonalCenter.tsx` 已接入 `/api/v1/real-trading/status.next_scheduled_execution`（2026-06-15）：
+  - 策略管理页将“下一次计划执行”收敛为单一展示位，只保留在“自动托管就绪度”卡片里；
+  - 个人中心的“模拟盘运行状态”也会同步显示下次调度时间，便于快速确认任务是否会按设定时间执行。
 - `ManualTaskPage.tsx` 已重构为 5 步引导式执行向导：
   - 第 1 步选择模型；
   - 第 2 步只加载当前模型下的 `completed` 推理批次，并支持查看信号排序；

@@ -1414,11 +1414,18 @@ async def get_simulation_account(
     )
     if projection_account is not None:
         positions = projection_positions
-        market_value = round(
-            float(projection_account.long_market_value or 0.0)
-            - float(projection_account.short_market_value or 0.0),
-            2,
-        )
+        if projection_positions:
+            _, _, market_value = (
+                SimulationProjectionService.summarize_position_market_value(
+                    projection_positions
+                )
+            )
+        else:
+            market_value = round(
+                float(projection_account.long_market_value or 0.0)
+                - float(projection_account.short_market_value or 0.0),
+                2,
+            )
         valuation_source = (
             "simulation_position_lots_projection"
             if projection_positions

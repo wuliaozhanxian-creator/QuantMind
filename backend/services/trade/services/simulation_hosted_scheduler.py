@@ -7,7 +7,7 @@ import logging
 import math
 import os
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -49,6 +49,16 @@ class SimulationScheduleDecision:
     should_trigger: bool
     phase: str
     trade_date: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class SimulationNextTrigger:
+    phase: str
+    trade_date: str
+    target_at: datetime
+    window_start_at: datetime
+    window_end_at: datetime
     reason: str
 
 
@@ -234,6 +244,97 @@ def _should_trigger(
     if phase == "IDLE":
         return SimulationScheduleDecision(False, phase, trade_date, "before_window")
     return SimulationScheduleDecision(True, phase, trade_date, "matched")
+
+
+def _is_time_in_enabled_session(target_hhmm: str, live_trade_config: dict[str, Any]) -> bool:
+    return _is_enabled_session(str(target_hhmm or "").strip(), live_trade_config)
+
+
+def _build_candidate_trigger_datetimes(
+    *,
+    current_day: date,
+    live_trade_config: dict[str, Any],
+) -> list[tuple[datetime, str]]:
+    sell_time = str(live_trade_config.get("sell_time") or "14:45")
+    buy_time = str(live_trade_config.get("buy_time") or "14:50")
+    candidates: list[tuple[datetime, str]] = []
+
+    def _append_candidate(target_hhmm: str, phase: str) -> None:
+        if not _is_time_in_enabled_session(target_hhmm, live_trade_config):
+            return
+        try:
+            hour = int(target_hhmm[:2])
+            minute = int(target_hhmm[3:5])
+        except Exception:
+            return
+        candidates.append(
+            (
+                datetime(
+                    current_day.year,
+                    current_day.month,
+                    current_day.day,
+                    hour,
+                    minute,
+                    tzinfo=_SH_TZ,
+                ),
+                phase,
+            )
+        )
+
+    if sell_time == buy_time:
+        _append_candidate(sell_time, "ALL")
+    else:
+        if bool(live_trade_config.get("sell_first", True)):
+            _append_candidate(sell_time, "SELL")
+            _append_candidate(buy_time, "BUY")
+        else:
+            _append_candidate(buy_time, "BUY")
+            _append_candidate(sell_time, "SELL")
+    candidates.sort(key=lambda item: item[0])
+    return candidates
+
+
+def _next_scheduled_trigger(
+    *,
+    now: datetime,
+    live_trade_config: dict[str, Any],
+    started_day: date | None,
+    horizon_days: int = 30,
+) -> SimulationNextTrigger | None:
+    local_now = now.astimezone(_SH_TZ)
+    normalized_config = _normalize_live_trade_config(live_trade_config)
+    window_seconds = max(
+        30, _to_int(normalized_config.get("trigger_window_seconds"), 90)
+    )
+
+    for offset in range(max(1, int(horizon_days or 30)) + 1):
+        candidate_day = local_now.date() + timedelta(days=offset)
+        if not _is_trading_day(candidate_day):
+            continue
+
+        for target_at, phase in _build_candidate_trigger_datetimes(
+            current_day=candidate_day,
+            live_trade_config=normalized_config,
+        ):
+            if target_at < local_now:
+                continue
+            probe = _should_trigger(
+                now=target_at,
+                live_trade_config=normalized_config,
+                started_day=started_day,
+            )
+            if not probe.should_trigger:
+                continue
+            window_end_at = target_at + timedelta(seconds=window_seconds)
+            return SimulationNextTrigger(
+                phase=phase,
+                trade_date=candidate_day.isoformat(),
+                target_at=target_at,
+                window_start_at=target_at,
+                window_end_at=window_end_at,
+                reason="future_window",
+            )
+    return None
 
 
 def _task_id(

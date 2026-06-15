@@ -72,7 +72,6 @@ export interface QlibStrategyParams {
 
   // 其它 Mixin 参数
   dynamic_position?: boolean | string;
-  market_state_symbol?: string;
 }
 
 /** Qlib回测配置 */

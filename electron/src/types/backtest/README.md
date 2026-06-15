@@ -8,6 +8,7 @@
 
 ## 近期更新
 - QlibStrategyParams 增加 `min_score`/`max_weight`，用于 WeightedStrategy 遗传优化。
+- `qlib.ts` 去除了 `QlibStrategyParams.market_state_symbol` 的重复定义（2026-06-15），修复 TypeScript `Duplicate identifier` 报错。
 - `StrategyFile` 新增可选字段（2026-03-13）：
   - `execution_config`
   - `live_trade_config`

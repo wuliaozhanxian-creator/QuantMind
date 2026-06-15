@@ -8,6 +8,16 @@
 
 ## 重构进展（2026-06-13，第三十四阶段代码债务清理）
 
+- `/api/v1/real-trading/status` 新增 `next_scheduled_execution`：
+  - 当运行中策略为 `SIMULATION` 且带有 `live_trade_config` 时，接口会直接返回下一次预计调度窗口的 `trade_date / phase / target_at / window_start_at / window_end_at`；
+  - 用于直接判断“下一次是否会按设定时间执行”，不再需要人工结合 `rebalance_days + started_at + 交易日历` 反推。
+- 模拟盘原生策略启动链路说明补齐：
+  - `SIMULATION` 下若命中 `STRATEGY_CONFIG` 且没有 `on_tick`，`/api/v1/real-trading/start` 会在沙箱启动成功后尝试触发一次 `simulation_native_bootstrap` 托管任务；
+  - 该 bootstrap 只负责“启动时立即引导一轮”，与 `SimulationHostedScheduler` 的定时调度是两条链路；若启动时已经错过配置时间窗，bootstrap 不会补跑当日定时窗口。
+- `/api/v1/simulation/account` 与 `SimulationProjectionService.build_cache_payload()` 修复“持仓明细与账户聚合脱节”问题：
+  - 当 `simulation_position_lots` 已能投影出持仓时，`market_value / long_market_value / short_market_value / total_asset` 统一按持仓明细实时重算；
+  - 不再盲信 `simulation_accounts.long_market_value / short_market_value` 这类可能滞后的聚合字段，避免出现“持仓数量 > 0，但持仓市值为 0、浮盈亏非 0”的脏展示。
+
 - `SimulationExecutionEngine` 方法签名中 `SimOrder` 类型统一改为 `Any`，消除旧类型在运行态方法上的硬依赖，保持向后兼容。
 - `SimulationSettler.run_daily_settlement` 的 `user_id` 参数类型从 `int` 放宽为 `str | int`，与账本层统一口径。
 - `margin_interest_scanner` 清理了重复的 `redis_client` import。

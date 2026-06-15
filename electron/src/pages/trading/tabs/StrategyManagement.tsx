@@ -14,6 +14,15 @@ const formatDateTime = (raw?: string | null) => {
     return value.toLocaleString();
 };
 
+const formatPhaseLabel = (value?: string | null) => {
+    const phase = String(value || '').trim().toUpperCase();
+    if (phase === 'ALL') return '同窗先卖后买';
+    if (phase === 'SELL') return '卖出窗口';
+    if (phase === 'BUY') return '买入窗口';
+    if (phase === 'IDLE') return '等待窗口';
+    return value || '-';
+};
+
 const shortenTextId = (raw?: string | null, head = 10, tail = 6) => {
     const value = String(raw || '').trim();
     if (!value) return '-';
@@ -445,6 +454,7 @@ const StrategyManagement: React.FC<StrategyManagementProps> = ({
     const hostedSignalCount = Number(latestHostedTask?.signal_count ?? latestHostedTaskPreviewSummary.signal_count ?? (hostedSuccessCount + hostedFailedCount + hostedSkippedCount));
     const hostedProgress = Number(latestHostedTask?.progress ?? latestHostedTaskSummary.progress ?? 0);
     const signalSource = status?.signal_source_status;
+    const nextScheduledExecution = status?.next_scheduled_execution || null;
     const signalSourcePresentation = useMemo(
         () => resolveSignalSourcePresentation(signalSource),
         [signalSource],
@@ -502,6 +512,13 @@ const StrategyManagement: React.FC<StrategyManagementProps> = ({
     const maxOrdersText = typeof activeLiveTradeConfig?.max_orders_per_cycle === 'number'
         ? `${activeLiveTradeConfig.max_orders_per_cycle} 单/轮`
         : '启动后显示';
+    const nextExecutionTargetText = nextScheduledExecution?.target_at
+        ? formatDateTime(nextScheduledExecution.target_at)
+        : '待进入下一调仓日';
+    const nextExecutionWindowText = nextScheduledExecution?.window_start_at && nextScheduledExecution?.window_end_at
+        ? `${formatDateTime(nextScheduledExecution.window_start_at)} ~ ${formatDateTime(nextScheduledExecution.window_end_at)}`
+        : '等待后端返回';
+    const nextExecutionPhaseText = formatPhaseLabel(nextScheduledExecution?.phase);
 
     const monitorItemMap = useMemo(() => new Map(monitorChecks.map((item) => [item.key, item])), [monitorChecks]);
 
@@ -1086,6 +1103,15 @@ const StrategyManagement: React.FC<StrategyManagementProps> = ({
                                     <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">托管运行状态</div>
                                     <div className="font-bold text-slate-700 text-xs truncate">
                                         {hostedRunStatusLabel}
+                                    </div>
+                                </div>
+                                <div className="rounded-xl bg-slate-50/70 p-3 border border-slate-100/50 shadow-sm sm:col-span-2">
+                                    <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">下一次计划执行</div>
+                                    <div className="font-bold text-slate-800 text-xs">
+                                        {nextExecutionTargetText}
+                                    </div>
+                                    <div className="mt-1 text-[11px] text-slate-500 leading-relaxed">
+                                        {nextExecutionPhaseText} · {nextExecutionWindowText}
                                     </div>
                                 </div>
                             </div>

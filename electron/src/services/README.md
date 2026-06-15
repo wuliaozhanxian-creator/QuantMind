@@ -130,6 +130,9 @@
 - **模拟盘资金口径**: `getSimulationDailySnapshots` 读取后端 `simulation_fund_snapshots`（数据库日快照），用于“当前现金/资金历史”等表数据口径展示；`getSimulationAccount` 仍用于读取 Redis 实时态账户结构（持仓、市值等）。
 - **身份对齐修复（2026-03-09）**: 为避免 `Forbidden user_id override`（403），`realTradingService` 的实盘控制面请求（`preflight/start/stop/status/logs/account`）不再强制透传前端 `user_id/tenant_id`，统一由 JWT 身份解析执行主体。
 - **统一账户选择（2026-04）**: 新增 `getRuntimeAccount(userId, tenantId, runtimeMode)`，页面侧只需传入后端运行态即可由服务层统一路由到实盘/模拟账户接口；账户展示与模式判断已迁移到 `pages/trading/utils/accountAdapter.ts`，不再由各页面自行拼接双轨口径。
+- `realTradingService.getStatus()` 新增 `next_scheduled_execution`（2026-06-15）：
+  - 当运行中策略为 `SIMULATION` 时，前端可直接读取下一次计划调度的 `target_at / window_start_at / window_end_at / phase`；
+  - 不再需要手工结合 `rebalance_days + started_at + 交易日历` 推算“下次是否会按设定时间执行”。
 - **实盘未绑定降级（2026-04-11）**:
   - `realTradingService.getAccount()` 现在会先查询 `GET /api/v1/internal/strategy/bridge/binding/status`；
   - 若当前用户未绑定 QMT 实盘账号，或已绑定但尚未上报账户快照，则直接返回“空实盘口径”对象，不再继续请求 `/api/v1/real-trading/account` 触发反复 `404`；

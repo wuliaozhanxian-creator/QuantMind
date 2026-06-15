@@ -47,25 +47,32 @@ class SimulationProjectionService:
         )
         if snapshot_dt.tzinfo is not None:
             snapshot_dt = snapshot_dt.astimezone().replace(tzinfo=None)
-        market_value = round(
-            float(account.long_market_value or 0.0)
-            - float(account.short_market_value or 0.0),
-            2,
+        long_market_value = float(getattr(account, "long_market_value", 0.0) or 0.0)
+        short_market_value = float(
+            getattr(account, "short_market_value", 0.0) or 0.0
         )
+        if positions:
+            long_market_value, short_market_value, market_value = (
+                SimulationProjectionService.summarize_position_market_value(positions)
+            )
+        else:
+            market_value = round(long_market_value - short_market_value, 2)
         snapshot_at = snapshot_dt.isoformat()
         account_version = int(snapshot_dt.timestamp() * 1000)
         initial_equity = float(account.initial_equity or 0.0)
+        cash = float(account.cash or 0.0)
+        total_asset = round(cash + market_value, 2)
         payload = {
             "account_version": account_version,
             "snapshot_at": snapshot_at,
-            "cash": float(account.cash or 0.0),
+            "cash": cash,
             "available_cash": float(getattr(account, "available_cash", 0.0) or 0.0),
             "frozen_cash": float(getattr(account, "frozen_cash", 0.0) or 0.0),
             "market_value": market_value,
-            "long_market_value": float(getattr(account, "long_market_value", 0.0) or 0.0),
-            "short_market_value": float(getattr(account, "short_market_value", 0.0) or 0.0),
-            "total_asset": float(getattr(account, "total_asset", 0.0) or 0.0),
-            "equity": float(getattr(account, "equity", None) or getattr(account, "total_asset", 0.0) or 0.0),
+            "long_market_value": long_market_value,
+            "short_market_value": short_market_value,
+            "total_asset": total_asset,
+            "equity": total_asset,
             "liabilities": float(getattr(account, "liabilities", 0.0) or 0.0),
             "maintenance_margin_ratio": float(getattr(account, "maintenance_margin_ratio", 0.0) or 0.0),
             "initial_equity": initial_equity,
@@ -81,6 +88,28 @@ class SimulationProjectionService:
             "rebuilt_at": snapshot_at,
         }
         return payload
+
+    @staticmethod
+    def summarize_position_market_value(
+        positions: dict[str, dict[str, float]] | None,
+    ) -> tuple[float, float, float]:
+        long_market_value = 0.0
+        short_market_value = 0.0
+        for pos in (positions or {}).values():
+            if not isinstance(pos, dict):
+                continue
+            market_value = float(pos.get("market_value") or 0.0)
+            side = str(pos.get("side") or "long").strip().lower()
+            if side == "short":
+                short_market_value += market_value
+            else:
+                long_market_value += market_value
+        net_market_value = round(long_market_value - short_market_value, 2)
+        return (
+            round(long_market_value, 2),
+            round(short_market_value, 2),
+            net_market_value,
+        )
 
     async def load_projection(
         self,

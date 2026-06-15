@@ -144,6 +144,15 @@ export interface RealTradingStatus {
         execution_window_start?: string;
         execution_window_end?: string;
     } | null;
+    next_scheduled_execution?: {
+        schedule_type?: 'interval' | 'weekly' | string;
+        phase?: 'SELL' | 'BUY' | 'ALL' | 'IDLE' | string;
+        trade_date?: string;
+        target_at?: string;
+        window_start_at?: string;
+        window_end_at?: string;
+        reason?: string;
+    } | null;
     trading_permission?: TradingPermission;
     signal_readiness?: SignalReadiness | null;
 }
