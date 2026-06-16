@@ -171,6 +171,10 @@
 - 投研候选收益口径修复（2026-05-11）：
   - `GET /api/v1/research/universe` 的 `nextDayReturn/day3Return` 改为基于 `stock_daily_latest.close` 计算未来 1/3 交易日收益，避免误用当日涨跌字段导致收益展示失真；
   - 为避免窗口函数全表扫描，收益计算仅在当前分页候选 `symbol + data_trade_date` 的受限时间窗内执行，保持前端 30 秒超时约束内可返回。
+- 投研收益缓存与交易日口径收紧（2026-06-17）：
+  - `routers/research_service.py` 现强制以 `stock_daily_latest` 为唯一收益口径源，`return_1d/3d/5d/10d/20d/60d` 统一返回百分比点，禁止在接口层使用比例小数再二次放大；
+  - 研究页命中 Redis 的 `sdl:{trade_date}:*` 行情缓存后，会先校验收益口径；若发现未来收益整体落在异常小数区间，视为脏缓存并丢弃，随后回源 `stock_daily_latest` 重建；
+  - 指定 `data_trade_date` 缺行情时不再回退到最新交易日，避免 6 月 10 日/11 日这类历史批次串日后展示错值。
 - 投研候选池进一步提速（2026-05-11）：
   - 新增短 TTL 热点缓存（按 `tenant_id + user_id + run_id + limit` 维度缓存 90 秒），重复刷新同一批次时可直接命中，减少数据库压力。
   - `stock_daily_latest` 热点查询新增本地短缓存（120 秒）：覆盖 `POST /api/v1/research/symbols/features?lite=true` 与 `GET /api/v1/research/kline/{symbol}` 的高频读取场景，按 `symbol/trade_date` 相关键复用，降低行情表重复访问。

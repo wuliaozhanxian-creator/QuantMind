@@ -2,6 +2,7 @@ import os
 import sys
 import types
 from contextlib import asynccontextmanager
+from datetime import date
 
 import pytest
 
@@ -146,12 +147,9 @@ def test_format_candidate_record_normalizes_amount_wanyuan_to_yi():
 
 @pytest.mark.asyncio
 async def test_do_get_overview_uses_run_date_market_snapshot(monkeypatch):
-    captured = {"sql": ""}
-
     class _FakeSession:
         async def execute(self, statement, params=None):
-            sql = str(statement)
-            if "COUNT(*) AS total_count" in sql:
+            if "COUNT(*) AS total_count" in str(statement):
                 return _FakeResult(
                     [
                         {
@@ -168,8 +166,6 @@ async def test_do_get_overview_uses_run_date_market_snapshot(monkeypatch):
                         }
                     ]
                 )
-
-            captured["sql"] = sql
             return _FakeResult(
                 [
                     {
@@ -187,8 +183,8 @@ async def test_do_get_overview_uses_run_date_market_snapshot(monkeypatch):
                         "float_mv": 500000000.0,
                         "listed_days": 800,
                         "close_price": 12.37,
-                        "return_1d": -0.0196443007,
-                        "return_3d": -0.0434,
+                        "return_1d": -1.96443007,
+                        "return_3d": -4.34,
                         "concept_tags": ["玻纤"],
                         "index_tags": ["中证1000"],
                         "risk_flags": [],
@@ -218,9 +214,43 @@ async def test_do_get_overview_uses_run_date_market_snapshot(monkeypatch):
     assert item["latestChange"] == pytest.approx(10.0)
     assert item["nextDayReturn"] == pytest.approx(-1.96443007)
     assert item["day3Return"] == pytest.approx(-4.34)
-    assert "sdl_run.trade_date = snap.data_trade_date" in captured["sql"]
-    assert "LEAD(sdl.close, 1)" in captured["sql"]
-    assert "LEAD(sdl.close, 3)" in captured["sql"]
+    assert "(sdl_run.close_next_1d / NULLIF(sdl_run.close, 0) - 1) * 100" in research._research_service._SDL_SELECT_BY_RUN_DATE  # noqa: SLF001
+    assert "(sdl_run.close_next_3d / NULLIF(sdl_run.close, 0) - 1) * 100" in research._research_service._SDL_SELECT_BY_RUN_DATE  # noqa: SLF001
+
+
+def test_invalid_sdl_symbols_cache_detects_decimal_returns():
+    trade_date = date(2026, 6, 11)
+    symbol_map = {
+        f"SH600{i:03d}": {"return_1d": 0.02, "return_3d": 0.08}
+        for i in range(25)
+    }
+
+    assert research._research_service._is_invalid_sdl_symbols_cache(trade_date, symbol_map) is True  # noqa: SLF001
+
+
+@pytest.mark.asyncio
+async def test_load_sdl_day_map_does_not_fallback_trade_date(monkeypatch):
+    calls = {"count": 0}
+    research_service = research._research_service  # noqa: SLF001
+
+    class _FakeMarketSession:
+        async def execute(self, statement, params=None):
+            calls["count"] += 1
+            return _FakeResult([])
+
+    @asynccontextmanager
+    async def _fake_market_session():
+        yield _FakeMarketSession()
+
+    monkeypatch.setattr(research_service, "_load_sdl_from_remote_redis", lambda trade_date: {})
+    monkeypatch.setattr(research_service, "_redis_get_json", lambda key: None)
+    monkeypatch.setattr(research_service, "_redis_set_json", lambda key, value, ttl_seconds: None)
+    monkeypatch.setattr(research_service, "get_market_session", _fake_market_session)
+
+    result = await research_service._load_sdl_day_map(None, date(2026, 6, 11))  # noqa: SLF001
+
+    assert result == {}
+    assert calls["count"] == 1
 
 
 @pytest.mark.asyncio
@@ -229,11 +259,11 @@ async def test_get_research_universe_uses_short_ttl_cache(monkeypatch):
     research_service = research._research_service  # noqa: SLF001
     research_service._UNIVERSE_CACHE.clear()  # noqa: SLF001
 
-    async def _fake_do_get_overview(*args, **kwargs):
+    async def _fake_do_get_universe_with_sdl_redis(*args, **kwargs):
         calls["count"] += 1
         return {"items": [{"runId": "run_demo"}], "summary": {"total": 1}}
 
-    monkeypatch.setattr(research_service, "_do_get_overview", _fake_do_get_overview)
+    monkeypatch.setattr(research_service, "_do_get_universe_with_sdl_redis", _fake_do_get_universe_with_sdl_redis)
 
     payload_1 = await research_service.get_research_universe("default", "u1", "run_demo", 1000)
     payload_2 = await research_service.get_research_universe("default", "u1", "run_demo", 1000)
@@ -251,16 +281,32 @@ async def test_get_stock_kline_uses_sdl_cache(monkeypatch):
     class _FakeSession:
         async def execute(self, statement, params=None):
             calls["count"] += 1
-            return [
-                ("2026-05-09", 10.0, 10.5, 9.8, 10.2, 1000000.0, 1.0),
-                ("2026-05-08", 9.9, 10.1, 9.7, 10.0, 900000.0, 1.0),
-            ]
+            return _FakeResult(
+                [
+                    {
+                        "trade_date": "2026-05-09",
+                        "open": 10.0,
+                        "high": 10.5,
+                        "low": 9.8,
+                        "close": 10.2,
+                        "volume": 1000000.0,
+                    },
+                    {
+                        "trade_date": "2026-05-08",
+                        "open": 9.9,
+                        "high": 10.1,
+                        "low": 9.7,
+                        "close": 10.0,
+                        "volume": 900000.0,
+                    },
+                ]
+            )
 
     @asynccontextmanager
-    async def _fake_get_session(read_only=True):
+    async def _fake_market_session():
         yield _FakeSession()
 
-    monkeypatch.setattr(research_service, "get_session", _fake_get_session)
+    monkeypatch.setattr(research_service, "get_market_session", _fake_market_session)
 
     payload_1 = await research_service.get_stock_kline("sh600000", 2)
     payload_2 = await research_service.get_stock_kline("SH600000", 2)

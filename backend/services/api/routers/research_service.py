@@ -89,6 +89,60 @@ def _sdl_redis_key(trade_date: date) -> str:
     return f"qm:research:sdl:{trade_date.isoformat()}:v2"
 
 
+def _delete_remote_sdl_keys(redis_client: Any, keys: list[str]) -> None:
+    if not keys:
+        return
+    try:
+        batch_size = 500
+        for i in range(0, len(keys), batch_size):
+            redis_client.delete(*keys[i:i + batch_size])
+    except Exception:
+        return
+
+
+def _safe_float(value: Any) -> float | None:
+    try:
+        if value is None:
+            return None
+        numeric = float(value)
+        if math.isfinite(numeric):
+            return numeric
+        return None
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_invalid_sdl_symbols_cache(trade_date: date, symbol_map: dict[str, dict[str, Any]]) -> bool:
+    if not symbol_map:
+        return False
+
+    today = datetime.now().date()
+    rows = list(symbol_map.values())
+    total_count = len(rows)
+
+    return_1d_values = [_safe_float(row.get("return_1d")) for row in rows]
+    return_1d_values = [value for value in return_1d_values if value is not None]
+    if len(return_1d_values) >= 20:
+        max_abs_return_1d = max(abs(value) for value in return_1d_values)
+        if 0 < max_abs_return_1d <= 0.5:
+            return True
+
+    return_3d_values = [_safe_float(row.get("return_3d")) for row in rows]
+    return_3d_values = [value for value in return_3d_values if value is not None]
+    if len(return_3d_values) >= 20:
+        max_abs_return_3d = max(abs(value) for value in return_3d_values)
+        if 0 < max_abs_return_3d <= 1.0:
+            return True
+
+    if trade_date <= today and total_count >= 20:
+        return_1d_coverage = len(return_1d_values) / total_count
+        return_3d_coverage = len(return_3d_values) / total_count
+        if trade_date <= today and return_1d_coverage >= 0.8 and return_3d_coverage <= 0.2:
+            return True
+
+    return False
+
+
 def _load_sdl_from_remote_redis(trade_date: date) -> dict[str, dict[str, Any]]:
     """从远程 Redis 加载 sdl:日期:股票代码 格式的缓存（使用 pipeline 批量读取）"""
     try:
@@ -151,6 +205,9 @@ def _load_sdl_from_remote_redis(trade_date: date) -> dict[str, dict[str, Any]]:
                     "volume_trend_3d": float(data.get("volume_trend_3d", 0) or 0) if data.get("volume_trend_3d") else None,
                     "consecutive_limit_up_days": int(float(data.get("consecutive_limit_up_days", 0) or 0)),
                 }
+        if _is_invalid_sdl_symbols_cache(trade_date, symbol_map):
+            _delete_remote_sdl_keys(redis, keys)
+            return {}
         return symbol_map
     except Exception as e:
         import logging
@@ -172,7 +229,8 @@ async def _load_sdl_day_map(session, trade_date: date) -> dict[str, dict[str, An
     cached = _redis_get_json(cache_key)
     if cached and "symbols" in cached and isinstance(cached["symbols"], dict):
         symbols = cached["symbols"]
-        return symbols if isinstance(symbols, dict) else {}
+        if isinstance(symbols, dict) and not _is_invalid_sdl_symbols_cache(trade_date, symbols):
+            return symbols
 
     sql = f"""
         SELECT
@@ -257,8 +315,6 @@ async def _load_sdl_day_map(session, trade_date: date) -> dict[str, dict[str, An
         WHERE trade_date = :trade_date
           AND volume > 0
     """
-    used_trade_date = trade_date
-    fallback_used = False
     # asyncpg 需要 date 对象，不能传字符串
     if isinstance(trade_date, str):
         trade_date_param = datetime.strptime(trade_date, "%Y-%m-%d").date()
@@ -267,22 +323,12 @@ async def _load_sdl_day_map(session, trade_date: date) -> dict[str, dict[str, An
     async with get_market_session() as m_session:
         res = await m_session.execute(text(sql), {"trade_date": trade_date_param})
         rows = res.mappings().all()
-        if not rows:
-            fallback_date_res = await m_session.execute(
-                text(f"SELECT MAX(trade_date) FROM {_SDL_TABLE}")
-            )
-            fallback_date = fallback_date_res.scalar()
-            if fallback_date is not None:
-                fallback_used = True
-                used_trade_date = fallback_date
-                res = await m_session.execute(text(sql), {"trade_date": fallback_date})
-                rows = res.mappings().all()
 
     symbol_map: dict[str, dict[str, Any]] = {}
     for row in rows:
         payload = dict(row)
-        payload["_sdl_trade_date"] = used_trade_date.isoformat() if isinstance(used_trade_date, date) else None
-        payload["_sdl_fallback"] = fallback_used
+        payload["_sdl_trade_date"] = trade_date_param.isoformat() if isinstance(trade_date_param, date) else None
+        payload["_sdl_fallback"] = False
         symbol = StockCodeUtil.to_prefix(str(payload.get("symbol") or ""))
         if symbol:
             symbol_map[symbol] = payload
@@ -291,8 +337,8 @@ async def _load_sdl_day_map(session, trade_date: date) -> dict[str, dict[str, An
         cache_key,
         {
             "trade_date": trade_date.isoformat(),
-            "used_trade_date": used_trade_date.isoformat() if isinstance(used_trade_date, date) else None,
-            "fallback_used": fallback_used,
+            "used_trade_date": trade_date_param.isoformat() if isinstance(trade_date_param, date) else None,
+            "fallback_used": False,
             "symbols": symbol_map,
             "created_at": datetime.now().isoformat(),
         },
@@ -354,27 +400,27 @@ _SDL_SELECT_BY_RUN_DATE = """
     COALESCE(sdl_run.pct_change, 0) AS latest_change_pct,
     CASE
         WHEN NULLIF(sdl_run.close, 0) IS NULL OR sdl_run.close_next_1d IS NULL THEN NULL
-        ELSE sdl_run.close_next_1d / NULLIF(sdl_run.close, 0) - 1
+        ELSE (sdl_run.close_next_1d / NULLIF(sdl_run.close, 0) - 1) * 100
     END AS return_1d,
     CASE
         WHEN NULLIF(sdl_run.close, 0) IS NULL OR sdl_run.close_next_3d IS NULL THEN NULL
-        ELSE sdl_run.close_next_3d / NULLIF(sdl_run.close, 0) - 1
+        ELSE (sdl_run.close_next_3d / NULLIF(sdl_run.close, 0) - 1) * 100
     END AS return_3d,
     CASE
         WHEN NULLIF(sdl_run.close, 0) IS NULL OR sdl_run.close_next_5d IS NULL THEN NULL
-        ELSE sdl_run.close_next_5d / NULLIF(sdl_run.close, 0) - 1
+        ELSE (sdl_run.close_next_5d / NULLIF(sdl_run.close, 0) - 1) * 100
     END AS return_5d,
     CASE
         WHEN NULLIF(sdl_run.close, 0) IS NULL OR sdl_run.close_next_10d IS NULL THEN NULL
-        ELSE sdl_run.close_next_10d / NULLIF(sdl_run.close, 0) - 1
+        ELSE (sdl_run.close_next_10d / NULLIF(sdl_run.close, 0) - 1) * 100
     END AS return_10d,
     CASE
         WHEN NULLIF(sdl_run.close, 0) IS NULL OR sdl_run.close_next_20d IS NULL THEN NULL
-        ELSE sdl_run.close_next_20d / NULLIF(sdl_run.close, 0) - 1
+        ELSE (sdl_run.close_next_20d / NULLIF(sdl_run.close, 0) - 1) * 100
     END AS return_20d,
     CASE
         WHEN NULLIF(sdl_run.close, 0) IS NULL OR sdl_run.close_next_60d IS NULL THEN NULL
-        ELSE sdl_run.close_next_60d / NULLIF(sdl_run.close, 0) - 1
+        ELSE (sdl_run.close_next_60d / NULLIF(sdl_run.close, 0) - 1) * 100
     END AS return_60d,
     COALESCE(sdl_run.ma5, 0) AS ma5,
     COALESCE(sdl_run.ma10, 0) AS ma10,
@@ -1221,7 +1267,7 @@ async def get_symbols_features(tid: str, uid: str, symbols: list[str], lite: boo
 
 async def get_stock_kline(symbol: str, days: int) -> dict[str, Any]:
     """构建 K 线：直接从远程 PostgreSQL stock_daily_latest 查询"""
-    normalized_symbol = StockCodeUtil.to_prefix(symbol).lower()  # 转为小写匹配数据库格式
+    normalized_symbol = StockCodeUtil.to_prefix(symbol)
     cache_key = f"sdl-kline:{normalized_symbol}:{days}"
     cached = _get_local_cache(_SDL_CACHE, cache_key, _SDL_CACHE_TTL_SECONDS)
     if cached is not None:
