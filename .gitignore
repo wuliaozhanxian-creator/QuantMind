@@ -87,6 +87,7 @@ db.tar.gz
 *.bin
 *.parquet
 *.csv
+!backend/services/trade/data/corporate_actions.csv
 !backend/tests/**/*.csv
 !data/examples/**/*.csv
 data/backtest_results/

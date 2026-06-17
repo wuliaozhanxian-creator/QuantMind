@@ -1315,3 +1315,34 @@ pytest -q backend/services/tests
   - `total_pnl`：`total_asset - initial_equity`。
 - 当实时仓位来自 `sim_trades` 聚合时，会尝试从 Redis 持仓对象回填 `cost_price`（含 Prefix/Suffix + `::long` 兼容），避免浮盈长期为 0。
 - 当实时仓位回退到 Redis 且无成交历史时，若发现 `initial_equity` 缺失或与 `cash + 持仓成本` 明显偏离，接口会自动按种子持仓成本纠正基线，使 `total_pnl` 与 `floating_pnl` 保持同一口径。
+
+## 公司行为 CSV 维护格式（2026-06-17）
+
+- 默认维护文件：
+  - `backend/services/trade/data/corporate_actions.csv`
+- 原始公司行为 CSV 导入预览：
+  - `python backend/services/trade/scripts/import_simulation_corporate_actions.py --dry-run`
+- 确认预览结果后可正式写入：
+  - `python backend/services/trade/scripts/import_simulation_corporate_actions.py --replace-existing`
+- 服务器宿主机日常更新建议直接使用一条同步脚本：
+  - `bash backend/services/trade/scripts/run_corporate_actions_sync.sh`
+  - 该脚本会自动：
+    - 加载项目根目录 `.env`
+    - 把宿主机不可解析的 `quantmind-postgresql` 自动改连 `127.0.0.1:5432`
+    - 执行公司行为导入（`--replace-existing`）
+    - 执行到期公司行为应用
+    - 输出 `applied/pending` 状态汇总
+- 当前已确认支持的一类上游原始格式为：
+  - 表头：`symbol,code,date,type,bonus,allotment`
+  - 示例：`sh600857.SH,600857.SH,2026-06-01,1,0.45,0.0`
+- 当前已确认的映射规则：
+  - `type=1` 且 `bonus>0`：映射为模拟盘 `dividend`
+  - `date`：映射到 `ex_date`
+  - `bonus`：语义为“每 10 股派现金额”，导入时必须转换为 `cash_dividend_per_share = bonus / 10`
+  - `symbol/code`：统一通过 `StockCodeUtil` 转成 Prefix 口径（如 `SH600857`）
+- 当前明确跳过的记录：
+  - `type!=1`
+  - `bonus<=0`
+  - `allotment>0`（尚未确认上游配股字段口径前，不直接映射到 `rights_issue`）
+- 这样做的原因是模拟盘内部公司行为服务按“每股现金分红”计算：
+  - 若把上游 `bonus` 直接当 `cash_dividend_per_share`，会把分红放大 10 倍，导致 `cash/equity/total_asset` 全部失真
