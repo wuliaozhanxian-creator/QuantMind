@@ -1,7 +1,7 @@
 """
 Simulation end-of-day settlement service.
 
-Runs after market close (default 15:05 Asia/Shanghai) and performs:
+Runs after overnight daily-data refresh (default 03:05 Asia/Shanghai) and performs:
 1. Re-mark all accounts to latest close prices via projection service
 2. Write daily account/position snapshots
 3. Capture fund snapshots
@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select, func
@@ -40,30 +40,34 @@ logger = logging.getLogger(__name__)
 
 _TZ = ZoneInfo("Asia/Shanghai")
 _TRIGGER_TIME = time(
-    *map(int, (os.getenv("SIM_EOD_TRIGGER_TIME", "15:05") or "15:05").split(":"))
+    *map(int, (os.getenv("SIM_EOD_TRIGGER_TIME", "03:05") or "03:05").split(":"))
 )
 _INTERVAL_SEC = 60
 
 
-async def _should_run_eod() -> bool:
-    now = datetime.now(_TZ)
-    today = now.date()
+def _resolve_target_trade_date(now: datetime | None = None) -> date:
+    current = now or datetime.now(_TZ)
+    if _TRIGGER_TIME.hour < 12:
+        return current.date() - timedelta(days=1)
+    return current.date()
+
+
+async def _should_run_eod(trade_date: date) -> bool:
     try:
         return await calendar_service.is_trading_day(
             market="SSE",
-            trade_date=today,
+            trade_date=trade_date,
             tenant_id="default",
             user_id="0",
         )
     except Exception:
-        from datetime import timedelta
-        return today.weekday() < 5
+        return trade_date.weekday() < 5
 
 
-def _past_trigger_window() -> bool:
-    now = datetime.now(_TZ)
-    trigger_dt = datetime.combine(now.date(), _TRIGGER_TIME, tzinfo=_TZ)
-    return now >= trigger_dt
+def _past_trigger_window(now: datetime | None = None) -> bool:
+    current = now or datetime.now(_TZ)
+    trigger_dt = datetime.combine(current.date(), _TRIGGER_TIME, tzinfo=_TZ)
+    return current >= trigger_dt
 
 
 async def run_simulation_eod_worker() -> None:
@@ -75,17 +79,17 @@ async def run_simulation_eod_worker() -> None:
     while True:
         try:
             now = datetime.now(_TZ)
-            today = now.date()
+            target_trade_date = _resolve_target_trade_date(now)
 
             if (
-                last_run_date != today
-                and _past_trigger_window()
-                and await _should_run_eod()
+                last_run_date != target_trade_date
+                and _past_trigger_window(now)
+                and await _should_run_eod(target_trade_date)
             ):
-                result = await _execute_eod(today)
+                result = await _execute_eod(target_trade_date)
                 if result:
-                    last_run_date = today
-                    logger.info("Simulation EOD completed for %s", today)
+                    last_run_date = target_trade_date
+                    logger.info("Simulation EOD completed for %s", target_trade_date)
         except asyncio.CancelledError:
             logger.info("Simulation EOD worker cancelled")
             raise
@@ -196,7 +200,10 @@ async def _execute_eod(trade_date: date) -> bool:
             )
 
         try:
-            await SimulationFundSnapshotService.capture_all(redis_client)
+            await SimulationFundSnapshotService.capture_all(
+                redis_client,
+                snapshot_date=trade_date,
+            )
         except Exception as exc:
             logger.warning("EOD fund snapshot capture failed: %s", exc)
 
@@ -254,9 +261,8 @@ async def _load_close_price(session, symbol: str) -> float:
         row = result.fetchone()
         if not row:
             continue
-        hfq_close = float(row[0] or 0.0)
-        adj_factor = float(row[1] or 1.0)
-        if hfq_close <= 0:
+        close_price = float(row[0] or 0.0)
+        if close_price <= 0:
             continue
-        return hfq_close / adj_factor if adj_factor > 0 else hfq_close
+        return close_price
     return 0.0

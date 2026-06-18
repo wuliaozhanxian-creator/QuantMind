@@ -439,9 +439,9 @@ class SimulationExecutionEngine:
                     )
                     row = result.fetchone()
                 if row:
-                    hfq_close = float(row[0])
-                    adj_factor = float(row[1] or 1.0)
-                    price = hfq_close / adj_factor if adj_factor > 0 else hfq_close
+                    price = float(row[0] or 0.0)
+                    if price <= 0:
+                        price = 0.0
                     logger.info(
                         "Fallback to DB nominal price for %s: %s", raw_symbol, price
                     )
@@ -470,9 +470,9 @@ class SimulationExecutionEngine:
                     )
                     legacy_row = legacy_result.fetchone()
                 if legacy_row:
-                    hfq_close = float(legacy_row[0])
-                    adj_factor = float(legacy_row[1] or 1.0)
-                    price = hfq_close / adj_factor if adj_factor > 0 else hfq_close
+                    price = float(legacy_row[0] or 0.0)
+                    if price <= 0:
+                        price = 0.0
                     logger.info(
                         "Fallback to DB legacy nominal price for %s: %s",
                         raw_symbol,

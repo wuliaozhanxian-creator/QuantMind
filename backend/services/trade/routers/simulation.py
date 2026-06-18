@@ -1,7 +1,10 @@
 import asyncio
-from datetime import date, datetime
+import os
+import time
+from datetime import date, datetime, time as dt_time
 from decimal import Decimal
 from typing import Any, List, Optional
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status, File, UploadFile
 from pydantic import BaseModel
@@ -59,8 +62,44 @@ from sqlalchemy import select, text
 from backend.shared.auth import get_internal_call_secret
 
 logger = logging.getLogger(__name__)
+_SIMULATION_TZ = ZoneInfo("Asia/Shanghai")
+SIMULATION_ACCOUNT_PRICE_TIMEOUT_SECONDS = float(
+    os.getenv("SIMULATION_ACCOUNT_PRICE_TIMEOUT_SECONDS", "2.0")
+)
+SIMULATION_ACCOUNT_MARKET_QUOTE_TIMEOUT_SECONDS = float(
+    os.getenv("SIMULATION_ACCOUNT_MARKET_QUOTE_TIMEOUT_SECONDS", "0.2")
+)
+SIMULATION_DAILY_REPRICE_READY_TIME = dt_time(
+    *map(
+        int,
+        (
+            os.getenv("SIMULATION_DAILY_REPRICE_READY_TIME", "03:05")
+            or "03:05"
+        ).split(":"),
+    )
+)
+SIMULATION_REDIS_PREFERRED_START_TIME = dt_time(
+    *map(
+        int,
+        (
+            os.getenv("SIMULATION_REDIS_PREFERRED_START_TIME", "09:30")
+            or "09:30"
+        ).split(":"),
+    )
+)
+SIMULATION_ACCOUNT_CACHE_TTL_SECONDS = float(os.getenv("SIMULATION_ACCOUNT_CACHE_TTL_SECONDS", "5"))
+_simulation_account_cache: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
 
 router = APIRouter()
+
+
+def _should_prefer_redis_account_snapshot(now: datetime | None = None) -> bool:
+    local_now = now.astimezone(_SIMULATION_TZ) if now else datetime.now(_SIMULATION_TZ)
+    current_time = local_now.time()
+    return (
+        current_time < SIMULATION_DAILY_REPRICE_READY_TIME
+        or current_time >= SIMULATION_REDIS_PREFERRED_START_TIME
+    )
 
 
 async def _get_latest_price(symbol: str) -> float:
@@ -81,7 +120,9 @@ async def _get_latest_price(symbol: str) -> float:
 
     # Level 1: 实时行情
     try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
+        async with httpx.AsyncClient(
+            timeout=SIMULATION_ACCOUNT_MARKET_QUOTE_TIMEOUT_SECONDS
+        ) as client:
             headers = {"X-Internal-Call": get_internal_call_secret()}
             for candidate in [raw_symbol, prefix_symbol, suffix_symbol]:
                 if not candidate:
@@ -118,17 +159,81 @@ async def _get_latest_price(symbol: str) -> float:
                     result = await session.execute(query, {"symbol": suffix_symbol})
                     row = result.fetchone()
                 if row:
-                    hfq_close = float(row[0])
-                    adj_factor = float(row[1] or 1.0)
-                    # 计算名义价格 (除权价)
-                    price = hfq_close / adj_factor if adj_factor > 0 else hfq_close
+                    price = float(row[0] or 0.0)
                     logger.info(
-                        f"Fallback to DB nominal price for {raw_symbol}: {price} (Hfq: {hfq_close}, Adj: {adj_factor})"
+                        f"Fallback to DB stock_daily_latest price for {raw_symbol}: {price}"
                     )
         except Exception as e:
             logger.error(f"Database fallback failed for {raw_symbol}: {e}")
 
     return price
+
+
+async def _load_latest_close_map(symbols: list[str]) -> dict[str, float]:
+    normalized_symbols = sorted(
+        {
+            str(symbol or "").strip().upper()
+            for symbol in (symbols or [])
+            if str(symbol or "").strip()
+        }
+    )
+    if not normalized_symbols:
+        return {}
+
+    try:
+        db_manager = get_db_manager()
+        query = text(
+            """
+            SELECT DISTINCT ON (symbol) symbol, close
+            FROM stock_daily_latest
+            WHERE symbol = ANY(:symbols)
+            ORDER BY symbol, trade_date DESC
+            """
+        )
+        async with db_manager.get_master_session() as session:
+            result = await session.execute(query, {"symbols": normalized_symbols})
+            return {
+                str(row[0]).strip().upper(): float(row[1] or 0.0)
+                for row in result.fetchall()
+                if row and row[0]
+            }
+    except Exception as exc:
+        logger.warning("Failed to batch load latest close map: %s", exc)
+        return {}
+
+
+def _repair_cost_fallback_positions(
+    positions: dict[str, dict[str, float]] | None,
+    latest_close_map: dict[str, float] | None,
+) -> tuple[dict[str, dict[str, float]], int]:
+    if not isinstance(positions, dict) or not positions:
+        return {}, 0
+
+    repaired: dict[str, dict[str, float]] = {}
+    repaired_count = 0
+    for key, pos in positions.items():
+        if not isinstance(pos, dict):
+            continue
+        cloned = dict(pos)
+        symbol = str(cloned.get("symbol") or key or "").strip().upper()
+        price = float(cloned.get("price") or cloned.get("last_price") or 0.0)
+        cost_price = float(cloned.get("cost_price") or 0.0)
+        volume = float(cloned.get("volume") or 0.0)
+        latest_close = float((latest_close_map or {}).get(symbol) or 0.0)
+        if (
+            symbol
+            and latest_close > 0
+            and volume > 0
+            and price > 0
+            and cost_price > 0
+            and abs(price - cost_price) < 1e-6
+        ):
+            cloned["price"] = round(latest_close, 4)
+            cloned["last_price"] = round(latest_close, 4)
+            cloned["market_value"] = round(latest_close * volume, 2)
+            repaired_count += 1
+        repaired[key] = cloned
+    return repaired, repaired_count
 
 
 async def _resolve_symbol_by_name(name: str) -> Optional[str]:
@@ -1283,29 +1388,43 @@ async def get_simulation_account(
     Get current simulation account state.
     如果账户不存在，返回空账户（total_asset=0），不自动初始化。
     """
+    cache_enabled = isinstance(redis, RedisClient) and SIMULATION_ACCOUNT_CACHE_TTL_SECONDS > 0
+    cache_key = (auth.tenant_id, str(auth.user_id))
+    now = time.monotonic()
+    if cache_enabled:
+        cached = _simulation_account_cache.get(cache_key)
+        if cached and now - cached[0] < SIMULATION_ACCOUNT_CACHE_TTL_SECONDS:
+            return cached[1]
+
     manager = SimulationAccountManager(redis)
     account = await manager.get_account(auth.user_id, tenant_id=auth.tenant_id)
+    prefer_redis_snapshot = (
+        _should_prefer_redis_account_snapshot()
+        and _is_cache_payload_structurally_valid(account)
+    )
 
     projection_account = None
     projection_positions: dict[str, dict[str, float]] = {}
-    try:
-        async with get_session(read_only=True) as session:
-            projection = await SimulationProjectionService(session).load_projection(
-                tenant_id=auth.tenant_id,
-                user_id=auth.user_id,
-                latest_price_loader=_get_latest_price,
+    if not prefer_redis_snapshot:
+        try:
+            async with get_session(read_only=True) as session:
+                projection = await SimulationProjectionService(session).load_projection(
+                    tenant_id=auth.tenant_id,
+                    user_id=auth.user_id,
+                    latest_price_loader=_get_latest_price,
+                    price_timeout_seconds=SIMULATION_ACCOUNT_PRICE_TIMEOUT_SECONDS,
+                )
+                projection_account = projection.account
+                projection_positions = projection.positions
+        except Exception as exc:
+            logger.warning(
+                "Failed to load simulation projection for tenant=%s user=%s: %s",
+                auth.tenant_id,
+                auth.user_id,
+                exc,
             )
-            projection_account = projection.account
-            projection_positions = projection.positions
-    except Exception as exc:
-        logger.warning(
-            "Failed to load simulation projection for tenant=%s user=%s: %s",
-            auth.tenant_id,
-            auth.user_id,
-            exc,
-        )
 
-    if projection_account is None:
+    if projection_account is None and not prefer_redis_snapshot:
         normalized_user_id = normalize_trade_user_id(auth.user_id) or str(auth.user_id)
         inferred_initial_equity = float(
             (account or {}).get("initial_equity")
@@ -1327,6 +1446,7 @@ async def get_simulation_account(
                         tenant_id=auth.tenant_id,
                         user_id=auth.user_id,
                         latest_price_loader=_get_latest_price,
+                        price_timeout_seconds=SIMULATION_ACCOUNT_PRICE_TIMEOUT_SECONDS,
                     )
                     projection_account = projection.account
                     projection_positions = projection.positions
@@ -1370,7 +1490,7 @@ async def get_simulation_account(
 
     if not account:
         # 不再自动初始化，返回空账户标记
-        return {
+        payload = {
             "success": True,
             "data": {
                 "cash": 0.0,
@@ -1380,6 +1500,9 @@ async def get_simulation_account(
                 "account_not_initialized": True,
             },
         }
+        if cache_enabled:
+            _simulation_account_cache[cache_key] = (now, payload)
+        return payload
 
     # 从 settings 中读取初始资金与重置锚点；若账户本身带有显式基线，后续会优先使用账户口径。
     settings = await manager.get_settings(
@@ -1408,16 +1531,46 @@ async def get_simulation_account(
     market_value = 0.0
     positions: dict[str, dict[str, float]] = {}
     used_redis_positions_fallback = False
-    valuation_source = "redis_positions_fallback"
+    valuation_source = (
+        "redis_account_snapshot_window"
+        if prefer_redis_snapshot
+        else "redis_positions_fallback"
+    )
     redis_positions_map = (
         account.get("positions") if isinstance(account.get("positions"), dict) else {}
     )
     if projection_account is not None:
         positions = projection_positions
+        fallback_symbols = [
+            str(pos.get("symbol") or "").strip().upper()
+            for pos in positions.values()
+            if isinstance(pos, dict)
+            and float(pos.get("price") or pos.get("last_price") or 0.0) > 0
+            and float(pos.get("cost_price") or 0.0) > 0
+            and abs(
+                float(pos.get("price") or pos.get("last_price") or 0.0)
+                - float(pos.get("cost_price") or 0.0)
+            )
+            < 1e-6
+        ]
+        if fallback_symbols:
+            latest_close_map = await _load_latest_close_map(fallback_symbols)
+            repaired_positions, repaired_count = _repair_cost_fallback_positions(
+                positions,
+                latest_close_map,
+            )
+            if repaired_count > 0:
+                logger.info(
+                    "Repaired %s simulation position(s) from cost fallback for tenant=%s user=%s",
+                    repaired_count,
+                    auth.tenant_id,
+                    auth.user_id,
+                )
+                positions = repaired_positions
         if projection_positions:
             _, _, market_value = (
                 SimulationProjectionService.summarize_position_market_value(
-                    projection_positions
+                    positions
                 )
             )
         else:
@@ -1609,7 +1762,9 @@ async def get_simulation_account(
         "month_open_equity": initial_equity,
     }
 
-    return {"success": True, "data": account}
+    payload = {"success": True, "data": account}
+    _simulation_account_cache[cache_key] = (now, payload)
+    return payload
 
 
 @router.get("/admin/account-audit", response_model=SimulationAccountAuditResponse)

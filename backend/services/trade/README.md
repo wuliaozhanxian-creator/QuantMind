@@ -2,6 +2,20 @@
 
 交易核心服务（订单、成交、持仓、模拟盘、风控）。
 
+## 重构进展（2026-06-18，模拟盘估值口径修复）
+
+- 修复模拟盘读取 `stock_daily_latest` 最新价时重复除以 `adj_factor` 的问题：
+  - `simulation/account`、公司行为估值、日终结算、撮合兜底价格、保证金监控 统一直接使用 `stock_daily_latest.close`
+  - 不再把已入库的统一价格口径再次做 `/ adj_factor`，避免持仓市值被错误压缩
+- 修复 `/api/v1/simulation/account` 的批量估值超时问题：
+  - 原先 `0.35s` 批量价格超时会让大量仓位退回成本价估值，导致接口返回值与账户投影/日快照明显偏离
+  - 现改为更短的单次行情探测超时，并给整批价格加载更充足的回退窗口，优先回落到 `stock_daily_latest.close`
+- 调整模拟盘日切口径：
+  - 凌晨前默认优先使用 Redis 模拟账户缓存，不再用 `stock_daily_latest` 强行重算当前净值
+  - 凌晨默认 `03:05` 后再执行基于 `stock_daily_latest` 的统一重估与日快照回写
+  - 对应环境变量：`SIMULATION_DAILY_REPRICE_READY_TIME`、`SIMULATION_REDIS_PREFERRED_START_TIME`、`SIM_EOD_TRIGGER_TIME`
+- 新增回归测试，覆盖 `stock_daily_latest.close` 估值读取路径，防止后续再次引入相同问题。
+
 ## 重构设计文档
 
 - 模拟交易模块全面重构设计：`docs/simulation_trading_rearchitecture_2026-06.md`
@@ -14,6 +28,7 @@
 - 模拟盘原生策略启动链路说明补齐：
   - `SIMULATION` 下若命中 `STRATEGY_CONFIG` 且没有 `on_tick`，`/api/v1/real-trading/start` 会在沙箱启动成功后尝试触发一次 `simulation_native_bootstrap` 托管任务；
   - 该 bootstrap 只负责“启动时立即引导一轮”，与 `SimulationHostedScheduler` 的定时调度是两条链路；若启动时已经错过配置时间窗，bootstrap 不会补跑当日定时窗口。
+
 - `/api/v1/simulation/account` 与 `SimulationProjectionService.build_cache_payload()` 修复“持仓明细与账户聚合脱节”问题：
   - 当 `simulation_position_lots` 已能投影出持仓时，`market_value / long_market_value / short_market_value / total_asset` 统一按持仓明细实时重算；
   - 不再盲信 `simulation_accounts.long_market_value / short_market_value` 这类可能滞后的聚合字段，避免出现“持仓数量 > 0，但持仓市值为 0、浮盈亏非 0”的脏展示。
@@ -457,6 +472,36 @@
 - 同时补上了“自动参与失败”的显式审计痕迹：
   - 当账户现金不足无法参与配股时，不再静默跳过
   - 会写入 `RIGHTS_SUBSCRIPTION_SKIPPED` 的零金额现金流水，并在公司行为 `note` 中记录 `applied/skipped` 账户摘要，便于后续排障与审计
+
+## 公司行为 CSV 维护格式（2026-06-17）
+
+- 新增原始公司行为 CSV 导入脚本：
+  - 默认读取固定文件：`backend/services/trade/data/corporate_actions.csv`
+  - `python backend/services/trade/scripts/import_simulation_corporate_actions.py --dry-run`
+  - 确认预览结果后可去掉 `--dry-run` 正式写入 `simulation_corporate_actions`
+  - 若需要覆盖同 `symbol + action_type + ex_date + source` 的旧导入记录，可追加 `--replace-existing`
+- 服务器宿主机日常更新建议直接使用一条同步脚本：
+  - `bash backend/services/trade/scripts/run_corporate_actions_sync.sh`
+  - 该脚本会自动：
+    - 加载项目根目录 `.env`
+    - 把宿主机不可解析的 `quantmind-postgresql` 自动改连 `127.0.0.1:5432`
+    - 执行公司行为导入（`--replace-existing`）
+    - 执行到期公司行为应用
+    - 输出 `applied/pending` 状态汇总
+- 当前已确认支持的一类上游原始格式为：
+  - 表头：`symbol,code,date,type,bonus,allotment`
+  - 示例：`sh600857.SH,600857.SH,2026-06-01,1,0.45,0.0`
+- 当前已确认的映射规则：
+  - `type=1` 且 `bonus>0`：映射为模拟盘 `dividend`
+  - `date`：映射到 `ex_date`
+  - `bonus`：语义为“每 10 股派现金额”，导入时必须转换为 `cash_dividend_per_share = bonus / 10`
+  - `symbol/code`：统一通过 `StockCodeUtil` 转成 Prefix 口径（如 `SH600857`）
+- 当前明确跳过的记录：
+  - `type!=1`
+  - `bonus<=0`
+  - `allotment>0`（尚未确认上游配股字段口径前，不直接映射到 `rights_issue`）
+- 这样做的原因是模拟盘内部公司行为服务按“每股现金分红”计算：
+  - 若把上游 `bonus` 直接当 `cash_dividend_per_share`，会把分红放大 10 倍，导致 `cash/equity/total_asset` 全部失真
 
 ## 重构进展（2026-06-13，第三十三阶段快照审计追溯接口）
 
@@ -1315,34 +1360,3 @@ pytest -q backend/services/tests
   - `total_pnl`：`total_asset - initial_equity`。
 - 当实时仓位来自 `sim_trades` 聚合时，会尝试从 Redis 持仓对象回填 `cost_price`（含 Prefix/Suffix + `::long` 兼容），避免浮盈长期为 0。
 - 当实时仓位回退到 Redis 且无成交历史时，若发现 `initial_equity` 缺失或与 `cash + 持仓成本` 明显偏离，接口会自动按种子持仓成本纠正基线，使 `total_pnl` 与 `floating_pnl` 保持同一口径。
-
-## 公司行为 CSV 维护格式（2026-06-17）
-
-- 默认维护文件：
-  - `backend/services/trade/data/corporate_actions.csv`
-- 原始公司行为 CSV 导入预览：
-  - `python backend/services/trade/scripts/import_simulation_corporate_actions.py --dry-run`
-- 确认预览结果后可正式写入：
-  - `python backend/services/trade/scripts/import_simulation_corporate_actions.py --replace-existing`
-- 服务器宿主机日常更新建议直接使用一条同步脚本：
-  - `bash backend/services/trade/scripts/run_corporate_actions_sync.sh`
-  - 该脚本会自动：
-    - 加载项目根目录 `.env`
-    - 把宿主机不可解析的 `quantmind-postgresql` 自动改连 `127.0.0.1:5432`
-    - 执行公司行为导入（`--replace-existing`）
-    - 执行到期公司行为应用
-    - 输出 `applied/pending` 状态汇总
-- 当前已确认支持的一类上游原始格式为：
-  - 表头：`symbol,code,date,type,bonus,allotment`
-  - 示例：`sh600857.SH,600857.SH,2026-06-01,1,0.45,0.0`
-- 当前已确认的映射规则：
-  - `type=1` 且 `bonus>0`：映射为模拟盘 `dividend`
-  - `date`：映射到 `ex_date`
-  - `bonus`：语义为“每 10 股派现金额”，导入时必须转换为 `cash_dividend_per_share = bonus / 10`
-  - `symbol/code`：统一通过 `StockCodeUtil` 转成 Prefix 口径（如 `SH600857`）
-- 当前明确跳过的记录：
-  - `type!=1`
-  - `bonus<=0`
-  - `allotment>0`（尚未确认上游配股字段口径前，不直接映射到 `rights_issue`）
-- 这样做的原因是模拟盘内部公司行为服务按“每股现金分红”计算：
-  - 若把上游 `bonus` 直接当 `cash_dividend_per_share`，会把分红放大 10 倍，导致 `cash/equity/total_asset` 全部失真

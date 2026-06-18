@@ -325,11 +325,10 @@ class SimulationCorporateActionService:
             row = result.fetchone()
             if not row:
                 continue
-            hfq_close = float(row[0] or 0.0)
-            adj_factor = float(row[1] or 1.0)
-            if hfq_close <= 0:
+            close_price = float(row[0] or 0.0)
+            if close_price <= 0:
                 continue
-            return hfq_close / adj_factor if adj_factor > 0 else hfq_close
+            return close_price
         return 0.0
 
 

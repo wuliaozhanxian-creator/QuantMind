@@ -9,7 +9,7 @@ import json
 import logging
 import os
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 import httpx
@@ -179,6 +179,7 @@ class SimulationFundSnapshotService:
         user_id: str,
         account: dict[str, object],
         prev_total_asset: Decimal | None = None,
+        snapshot_date: date | None = None,
     ) -> dict[str, object]:
         total_asset = _to_decimal(account.get("total_asset"))
         available_balance = _to_decimal(account.get("cash") or account.get("available_balance"))
@@ -198,7 +199,7 @@ class SimulationFundSnapshotService:
         return {
             "tenant_id": tenant_id,
             "user_id": user_id,
-            "snapshot_date": _local_today(),
+            "snapshot_date": snapshot_date or _local_today(),
             "total_asset": total_asset,
             "available_balance": available_balance,
             "frozen_balance": frozen_balance,
@@ -210,7 +211,11 @@ class SimulationFundSnapshotService:
         }
 
     @classmethod
-    async def capture_all(cls, redis: RedisClient) -> SnapshotUpsertResult:
+    async def capture_all(
+        cls,
+        redis: RedisClient,
+        snapshot_date: date | None = None,
+    ) -> SnapshotUpsertResult:
         if not redis.client:
             return SnapshotUpsertResult(upserted_rows=0, scanned_accounts=0)
 
@@ -272,8 +277,10 @@ class SimulationFundSnapshotService:
             # 查询昨日快照 total_asset 用于计算 today_pnl
             prev_total_asset: Decimal | None = None
             try:
-                from datetime import date, timedelta
-                yesterday = _local_today() - timedelta(days=1)
+                from datetime import timedelta
+
+                effective_snapshot_date = snapshot_date or _local_today()
+                yesterday = effective_snapshot_date - timedelta(days=1)
                 async with get_session(read_only=True) as s:
                     q = await s.execute(
                         select(SimulationFundSnapshot.total_asset).where(
@@ -288,7 +295,13 @@ class SimulationFundSnapshotService:
             except Exception as exc:
                 logger.debug("Could not fetch yesterday snapshot for %s/%s: %s", tenant_id, user_id, exc)
 
-            row = cls._build_row(tenant_id, user_id, account, prev_total_asset=prev_total_asset)
+            row = cls._build_row(
+                tenant_id,
+                user_id,
+                account,
+                prev_total_asset=prev_total_asset,
+                snapshot_date=snapshot_date,
+            )
             if row["initial_capital"] == 0:
                 row["initial_capital"] = cls._read_settings_initial_cash(
                     redis,
