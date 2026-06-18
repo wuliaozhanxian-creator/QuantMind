@@ -6,7 +6,14 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from sqlalchemy import create_engine as sa_create_engine
+from sqlalchemy import text as sa_text
+from sqlalchemy.orm import sessionmaker as sa_sessionmaker
+
 from backend.services.engine.qlib_app.celery_config import celery_app
+from backend.services.engine.services.model_inference_persistence import (
+    model_inference_persistence,
+)
 from backend.services.engine.services.pipeline_service import PipelineService
 from backend.services.engine.services.strategy_loop_persistence import (
     StrategyLoopPersistence,
@@ -23,6 +30,105 @@ _INFERENCE_LOCK_TTL_SEC = 1800  # 30 分钟
 
 def _run_async(coro: Any) -> Any:
     return asyncio.run(coro)
+
+
+def _get_sync_db_session():
+    sync_db_url = str(os.getenv("DATABASE_URL", "")).strip()
+    if "+asyncpg" in sync_db_url:
+        sync_db_url = sync_db_url.replace("+asyncpg", "+psycopg2")
+    if not sync_db_url or "postgresql" not in sync_db_url:
+        sync_db_url = "postgresql+psycopg2://postgres:quantmind2026@quantmind-postgresql:5432/quantmind"
+
+    sync_engine = sa_create_engine(sync_db_url, pool_pre_ping=True)
+    session_factory = sa_sessionmaker(bind=sync_engine)
+    return session_factory()
+
+
+def _ensure_dispatch_log_table(db) -> None:
+    db.execute(
+        sa_text(
+            """
+            CREATE TABLE IF NOT EXISTS qm_model_inference_dispatch_logs (
+              id BIGSERIAL PRIMARY KEY,
+              trigger_source TEXT NOT NULL,
+              tenant_id TEXT NOT NULL,
+              user_id TEXT NOT NULL,
+              strategy_id TEXT,
+              model_id TEXT,
+              data_trade_date DATE,
+              prediction_trade_date DATE,
+              status TEXT NOT NULL,
+              reason_code TEXT,
+              reason_detail TEXT,
+              run_id TEXT,
+              created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            """
+        )
+    )
+    db.execute(
+        sa_text(
+            """
+            CREATE INDEX IF NOT EXISTS idx_qm_inf_dispatch_owner_created
+              ON qm_model_inference_dispatch_logs (tenant_id, user_id, created_at DESC);
+            """
+        )
+    )
+    db.execute(
+        sa_text(
+            """
+            CREATE INDEX IF NOT EXISTS idx_qm_inf_dispatch_status_created
+              ON qm_model_inference_dispatch_logs (status, created_at DESC);
+            """
+        )
+    )
+    db.commit()
+
+
+def _write_dispatch_log(
+    db,
+    *,
+    trigger_source: str,
+    tenant_id: str,
+    user_id: str,
+    strategy_id: str | None,
+    model_id: str | None,
+    data_trade_date: str,
+    prediction_trade_date: str,
+    status: str,
+    reason_code: str | None = None,
+    reason_detail: str | None = None,
+    run_id: str | None = None,
+) -> None:
+    db.execute(
+        sa_text(
+            """
+            INSERT INTO qm_model_inference_dispatch_logs (
+              trigger_source, tenant_id, user_id, strategy_id, model_id,
+              data_trade_date, prediction_trade_date,
+              status, reason_code, reason_detail, run_id, created_at
+            ) VALUES (
+              :trigger_source, :tenant_id, :user_id, :strategy_id, :model_id,
+              :data_trade_date, :prediction_trade_date,
+              :status, :reason_code, :reason_detail, :run_id, NOW()
+            )
+            """
+        ),
+        {
+            "trigger_source": trigger_source,
+            "tenant_id": str(tenant_id or "default"),
+            "user_id": str(user_id or ""),
+            "strategy_id": strategy_id,
+            "model_id": model_id,
+            "data_trade_date": data_trade_date,
+            "prediction_trade_date": prediction_trade_date,
+            "status": status,
+            "reason_code": reason_code,
+            "reason_detail": reason_detail,
+            "run_id": run_id,
+        },
+    )
+    db.commit()
 
 
 def _try_acquire_strategy_lock(strategy_id: str, trade_date: str, owner: str) -> bool:
@@ -101,138 +207,40 @@ def run_pipeline_run(self, run_id: str) -> dict[str, Any]:
 )
 def auto_inference_if_needed() -> dict[str, Any]:
     """
-    Celery Beat 定时任务：交易日 00:00 自动扫描并执行所有活跃策略的推理。
+    Celery Beat 定时任务：交易日 04:00 扫描到期的自动推理任务并分发。
 
     逻辑：
-    1. 获取所有处于 'running' 状态且绑定了策略的投资组合。
-    2. 针对每个策略：
-        a. 检查是否已完成推理。
-        b. 尝试获取策略级分布式锁。
-        c. 执行推理脚本。
+    1. 先确认当前自然日是否为交易日，非交易日直接跳过。
+    2. 获取所有处于 'running' 状态且绑定了策略的投资组合。
+    3. 获取 `next_run_at` 已到的用户自动推理设置。
+    4. 将每个待执行项拆分为独立 Celery 子任务入队。
     """
     from zoneinfo import ZoneInfo
-    from sqlalchemy import create_engine as sa_create_engine
-    from sqlalchemy import text as sa_text
-    from sqlalchemy.orm import sessionmaker as sa_sessionmaker
     import exchange_calendars as xcals
-    from backend.services.engine.inference.router_service import InferenceRouterService
 
     now_local = datetime.now(ZoneInfo("Asia/Shanghai"))
     cal = xcals.get_calendar("XSHG")
 
-    # 确定特征日期 (data_trade_date) 和预测日期 (prediction_trade_date)
-    # 如果开盘前运行，T 是上一个交易日，T+1 是今日
-    # 如果开盘后运行，T 是今日，T+1 是下一个交易日
-    if now_local.time() < datetime.strptime("09:30", "%H:%M").time():
-        data_trade_date_obj = cal.previous_session(now_local.date()).date()
-    else:
-        data_trade_date_obj = now_local.date()
-
-    data_trade_date = data_trade_date_obj.isoformat()
-    prediction_trade_date = cal.next_session(data_trade_date_obj).date().isoformat()
-
-    # 0. 排除非交易日
+    # 0. 先确认今天是否为交易日，节假日/周末直接跳过，避免“回看上一交易日”误触发
     try:
-        if not cal.is_session(data_trade_date):
-            logger.info("[AutoInference] 非交易日，跳过。date=%s", data_trade_date)
+        trigger_date = now_local.date()
+        if not cal.is_session(trigger_date):
+            logger.info("[AutoInference] 今日非交易日，跳过。date=%s", trigger_date)
             return {"status": "skipped", "reason": "not_a_trading_day"}
     except Exception as e:
         logger.warning("[AutoInference] 日历检查异常: %s", e)
 
-    # 1. 数据库准备
-    sync_db_url = str(os.getenv("DATABASE_URL", "")).strip()
-    if "+asyncpg" in sync_db_url:
-        sync_db_url = sync_db_url.replace("+asyncpg", "+psycopg2")
-    if not sync_db_url or "postgresql" not in sync_db_url:
-        # 降级
-        sync_db_url = "postgresql+psycopg2://postgres:quantmind2026@quantmind-postgresql:5432/quantmind"
+    # 确定特征日期 (data_trade_date) 和预测日期 (prediction_trade_date)
+    # 04:00 运行时，使用上一交易日数据，生成当日可消费批次。
+    data_trade_date_obj = cal.previous_session(now_local.date()).date()
+    data_trade_date = data_trade_date_obj.isoformat()
+    prediction_trade_date = now_local.date().isoformat()
 
-    sync_engine = sa_create_engine(sync_db_url, pool_pre_ping=True)
-    SessionLimit = sa_sessionmaker(bind=sync_engine)
-    db = SessionLimit()
+    db = _get_sync_db_session()
 
     # 2. 扫描活跃策略 + 用户自动推理设置
     try:
-        # 调度留痕表（自动任务可观测性）
-        db.execute(
-            sa_text(
-                """
-                CREATE TABLE IF NOT EXISTS qm_model_inference_dispatch_logs (
-                  id BIGSERIAL PRIMARY KEY,
-                  trigger_source TEXT NOT NULL,
-                  tenant_id TEXT NOT NULL,
-                  user_id TEXT NOT NULL,
-                  strategy_id TEXT,
-                  model_id TEXT,
-                  data_trade_date DATE,
-                  prediction_trade_date DATE,
-                  status TEXT NOT NULL,
-                  reason_code TEXT,
-                  reason_detail TEXT,
-                  run_id TEXT,
-                  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                );
-                """
-            )
-        )
-        db.execute(
-            sa_text(
-                """
-                CREATE INDEX IF NOT EXISTS idx_qm_inf_dispatch_owner_created
-                  ON qm_model_inference_dispatch_logs (tenant_id, user_id, created_at DESC);
-                """
-            )
-        )
-        db.execute(
-            sa_text(
-                """
-                CREATE INDEX IF NOT EXISTS idx_qm_inf_dispatch_status_created
-                  ON qm_model_inference_dispatch_logs (status, created_at DESC);
-                """
-            )
-        )
-        db.commit()
-
-        def _write_dispatch_log(
-            *,
-            tenant_id: str,
-            user_id: str,
-            strategy_id: str | None,
-            model_id: str | None,
-            status: str,
-            reason_code: str | None = None,
-            reason_detail: str | None = None,
-            run_id: str | None = None,
-        ) -> None:
-            db.execute(
-                sa_text(
-                    """
-                    INSERT INTO qm_model_inference_dispatch_logs (
-                      trigger_source, tenant_id, user_id, strategy_id, model_id,
-                      data_trade_date, prediction_trade_date,
-                      status, reason_code, reason_detail, run_id, created_at
-                    ) VALUES (
-                      :trigger_source, :tenant_id, :user_id, :strategy_id, :model_id,
-                      :data_trade_date, :prediction_trade_date,
-                      :status, :reason_code, :reason_detail, :run_id, NOW()
-                    )
-                    """
-                ),
-                {
-                    "trigger_source": "celery_auto_inference_if_needed",
-                    "tenant_id": str(tenant_id or "default"),
-                    "user_id": str(user_id or ""),
-                    "strategy_id": strategy_id,
-                    "model_id": model_id,
-                    "data_trade_date": data_trade_date,
-                    "prediction_trade_date": prediction_trade_date,
-                    "status": status,
-                    "reason_code": reason_code,
-                    "reason_detail": reason_detail,
-                    "run_id": run_id,
-                },
-            )
-            db.commit()
+        _ensure_dispatch_log_table(db)
 
         # 查询所有活跃且绑定了策略的组合
         active_portfolios = db.execute(
@@ -242,13 +250,16 @@ def auto_inference_if_needed() -> dict[str, Any]:
             )
         ).all()
 
-        # 查询用户手动开启的自动推理设置（enabled=True）
+        # 查询已到期的用户自动推理设置（enabled=True 且 next_run_at 已到）
         auto_inference_settings = db.execute(
             sa_text(
-                "SELECT tenant_id, user_id, model_id, schedule_time "
+                "SELECT tenant_id, user_id, model_id, schedule_time, next_run_at "
                 "FROM qm_model_inference_settings "
-                "WHERE enabled = TRUE"
+                "WHERE enabled = TRUE "
+                "  AND (next_run_at IS NULL OR next_run_at <= :now_local)"
             )
+            ,
+            {"now_local": now_local},
         ).all()
 
         # 总是包含一个系统级别的虚拟任务（全局默认模型）
@@ -297,133 +308,229 @@ def auto_inference_if_needed() -> dict[str, Any]:
         tasks = unique_tasks
 
         logger.info(
-            "[AutoInference] 发现需检查的任务总数: %d (活跃策略=%d, 自动推理设置=%d)",
+            "[AutoInference] 发现待分发任务总数: %d (活跃策略=%d, 自动推理设置=%d)",
             len(tasks),
             len(active_portfolios),
             len(auto_inference_settings),
         )
 
-        results = []
-        redis = None
-        try:
-            from backend.shared.redis_sentinel_client import get_redis_sentinel_client
+        dispatched = []
 
-            redis = get_redis_sentinel_client()
-        except:
-            pass
-
-        router_service = InferenceRouterService()
-
-        # 3. 依次执行
+        # 3. 逐条分发为独立 Celery 子任务
         for task in tasks:
-            tid = task["tenant_id"]
-            uid = task["user_id"]
-            sid = task.get("strategy_id")
-            mid = task.get("model_id")
-
-            # 检查当日是否已完成 (DB 记录)
-            # 对于全局任务，检查 source='inference_script'，对于策略，检查 strategy_id
-            exists = db.execute(
-                sa_text(
-                    "SELECT 1 FROM engine_feature_runs "
-                    "WHERE trade_date = :d AND status = 'signal_ready' "
-                    "AND tenant_id = :tid AND user_id = :uid LIMIT 1"
-                ),
-                {"d": prediction_trade_date, "tid": tid, "uid": uid},
-            ).first()
-
-            if exists:
-                _write_dispatch_log(
-                    tenant_id=tid,
-                    user_id=uid,
-                    strategy_id=sid,
-                    model_id=mid,
-                    status="skipped",
-                    reason_code="ALREADY_DONE",
-                    reason_detail="engine_feature_runs already has signal_ready record for target trade date",
-                )
-                continue
-
-            # 尝试获取锁
-            lock_scope = f"{tid}:{uid}:{sid or mid or 'default'}"
-            if not _try_acquire_strategy_lock(
-                lock_scope, prediction_trade_date, "celery_auto"
-            ):
-                logger.info("[AutoInference] 任务锁冲突，跳过: tid=%s uid=%s", tid, uid)
-                _write_dispatch_log(
-                    tenant_id=tid,
-                    user_id=uid,
-                    strategy_id=sid,
-                    model_id=mid,
-                    status="skipped",
-                    reason_code="LOCK_HELD",
-                    reason_detail=f"lock scope conflict: {lock_scope}",
-                )
-                continue
-
-            try:
-                logger.info(
-                    "[AutoInference] 正在执行任务: tenant=%s user=%s strategy=%s model=%s",
-                    tid,
-                    uid,
-                    sid,
-                    mid,
-                )
-                exec_res = router_service.run_daily_inference_script(
-                    date=data_trade_date,
-                    tenant_id=tid,
-                    user_id=uid,
-                    strategy_id=None if sid == "global" else sid,
-                    model_id=mid,
-                    redis_client=redis,
-                )
-                results.append(
-                    {
-                        "tenant_id": tid,
-                        "user_id": uid,
-                        "success": exec_res.success,
-                        "run_id": exec_res.run_id,
-                    }
-                )
-                _write_dispatch_log(
-                    tenant_id=tid,
-                    user_id=uid,
-                    strategy_id=sid,
-                    model_id=mid,
-                    status="success" if exec_res.success else "failed",
-                    reason_code=None if exec_res.success else "EXECUTION_FAILED",
-                    reason_detail=None if exec_res.success else str(getattr(exec_res, "message", "") or ""),
-                    run_id=getattr(exec_res, "run_id", None),
-                )
-            except Exception as task_exc:
-                _write_dispatch_log(
-                    tenant_id=tid,
-                    user_id=uid,
-                    strategy_id=sid,
-                    model_id=mid,
-                    status="failed",
-                    reason_code="EXCEPTION",
-                    reason_detail=str(task_exc),
-                    run_id=None,
-                )
-                raise
-            finally:
-                # 释放锁
-                try:
-                    lock_key = f"{_INFERENCE_LOCK_KEY_PREFIX}:{lock_scope}:{prediction_trade_date}"
-                    redis.delete(lock_key)
-                except:
-                    pass
+            child = run_auto_inference_task.apply_async(
+                kwargs={
+                    "tenant_id": str(task["tenant_id"]),
+                    "user_id": str(task["user_id"]),
+                    "strategy_id": task.get("strategy_id"),
+                    "model_id": task.get("model_id"),
+                    "data_trade_date": data_trade_date,
+                    "prediction_trade_date": prediction_trade_date,
+                    "trigger_source": "celery_auto_inference_if_needed",
+                }
+            )
+            _write_dispatch_log(
+                db,
+                trigger_source="celery_auto_inference_if_needed",
+                tenant_id=str(task["tenant_id"]),
+                user_id=str(task["user_id"]),
+                strategy_id=task.get("strategy_id"),
+                model_id=task.get("model_id"),
+                data_trade_date=data_trade_date,
+                prediction_trade_date=prediction_trade_date,
+                status="dispatched",
+                reason_code="QUEUED",
+                reason_detail=f"celery_task_id={child.id}",
+                run_id=None,
+            )
+            dispatched.append(
+                {
+                    "tenant_id": str(task["tenant_id"]),
+                    "user_id": str(task["user_id"]),
+                    "strategy_id": task.get("strategy_id"),
+                    "model_id": task.get("model_id"),
+                    "celery_task_id": child.id,
+                }
+            )
 
         return {
             "status": "completed",
             "date": prediction_trade_date,
-            "processed_count": len(results),
-            "details": results,
+            "dispatched_count": len(dispatched),
+            "details": dispatched,
         }
     except Exception as e:
         logger.exception("[AutoInference] 扫描/执行任务异常: %s", e)
         return {"status": "failed", "error": str(e)}
+    finally:
+        db.close()
+
+
+@celery_app.task(
+    bind=True,
+    name="engine.tasks.run_auto_inference_task",
+    max_retries=1,
+    default_retry_delay=60,
+)
+def run_auto_inference_task(
+    self,
+    *,
+    tenant_id: str,
+    user_id: str,
+    strategy_id: str | None,
+    model_id: str | None,
+    data_trade_date: str,
+    prediction_trade_date: str,
+    trigger_source: str = "celery_auto_inference_if_needed",
+) -> dict[str, Any]:
+    from backend.services.engine.inference.router_service import InferenceRouterService
+
+    db = _get_sync_db_session()
+    _ensure_dispatch_log_table(db)
+    redis = None
+    try:
+        exists = db.execute(
+            sa_text(
+                "SELECT 1 FROM engine_feature_runs "
+                "WHERE trade_date = :d AND status = 'signal_ready' "
+                "AND tenant_id = :tid AND user_id = :uid LIMIT 1"
+            ),
+            {"d": prediction_trade_date, "tid": tenant_id, "uid": user_id},
+        ).first()
+        if exists:
+            _write_dispatch_log(
+                db,
+                trigger_source=trigger_source,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                strategy_id=strategy_id,
+                model_id=model_id,
+                data_trade_date=data_trade_date,
+                prediction_trade_date=prediction_trade_date,
+                status="skipped",
+                reason_code="ALREADY_DONE",
+                reason_detail="engine_feature_runs already has signal_ready record for target trade date",
+            )
+            return {"status": "skipped", "reason": "already_done", "task_id": self.request.id}
+
+        lock_scope = f"{tenant_id}:{user_id}:{strategy_id or model_id or 'default'}"
+        if not _try_acquire_strategy_lock(lock_scope, prediction_trade_date, f"celery_auto:{self.request.id}"):
+            _write_dispatch_log(
+                db,
+                trigger_source=trigger_source,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                strategy_id=strategy_id,
+                model_id=model_id,
+                data_trade_date=data_trade_date,
+                prediction_trade_date=prediction_trade_date,
+                status="skipped",
+                reason_code="LOCK_HELD",
+                reason_detail=f"lock scope conflict: {lock_scope}",
+            )
+            return {"status": "skipped", "reason": "lock_held", "task_id": self.request.id}
+
+        try:
+            _write_dispatch_log(
+                db,
+                trigger_source=trigger_source,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                strategy_id=strategy_id,
+                model_id=model_id,
+                data_trade_date=data_trade_date,
+                prediction_trade_date=prediction_trade_date,
+                status="running",
+                reason_code="STARTED",
+                reason_detail=f"celery_task_id={self.request.id}",
+            )
+            try:
+                redis = get_redis_sentinel_client()
+            except Exception:
+                redis = None
+
+            router_service = InferenceRouterService()
+            exec_res = router_service.run_daily_inference_script(
+                date=data_trade_date,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                strategy_id=None if strategy_id == "global" else strategy_id,
+                model_id=model_id,
+                redis_client=redis,
+            )
+            result_payload = {
+                "success": bool(exec_res.success),
+                "run_id": str(getattr(exec_res, "run_id", "") or ""),
+                "status": "completed" if exec_res.success else "failed",
+                "model_id": model_id,
+                "active_model_id": getattr(exec_res, "active_model_id", None),
+                "effective_model_id": getattr(exec_res, "effective_model_id", None),
+                "model_source": getattr(exec_res, "model_source", None),
+                "active_data_source": getattr(exec_res, "active_data_source", None),
+                "data_trade_date": data_trade_date,
+                "prediction_trade_date": prediction_trade_date,
+                "signals_count": int(getattr(exec_res, "signals_count", 0) or 0),
+                "duration_ms": int(getattr(exec_res, "duration_ms", 0) or 0),
+                "fallback_used": bool(getattr(exec_res, "fallback_used", False)),
+                "fallback_reason": getattr(exec_res, "fallback_reason", "") or "",
+                "failure_stage": getattr(exec_res, "failure_stage", "") or "",
+                "error_message": getattr(exec_res, "error", "") or "",
+                "stdout": getattr(exec_res, "stdout", "") or "",
+                "stderr": getattr(exec_res, "stderr", "") or "",
+            }
+            if model_id:
+                _run_async(
+                    model_inference_persistence.record_run_to_settings(
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        model_id=model_id,
+                        run_payload=result_payload,
+                    )
+                )
+            _write_dispatch_log(
+                db,
+                trigger_source=trigger_source,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                strategy_id=strategy_id,
+                model_id=model_id,
+                data_trade_date=data_trade_date,
+                prediction_trade_date=prediction_trade_date,
+                status="success" if exec_res.success else "failed",
+                reason_code=None if exec_res.success else "EXECUTION_FAILED",
+                reason_detail=None if exec_res.success else str(getattr(exec_res, "message", "") or ""),
+                run_id=getattr(exec_res, "run_id", None),
+            )
+            return {
+                "status": "success" if exec_res.success else "failed",
+                "task_id": self.request.id,
+                "run_id": getattr(exec_res, "run_id", None),
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+                "model_id": model_id,
+            }
+        finally:
+            if redis is not None:
+                try:
+                    lock_key = f"{_INFERENCE_LOCK_KEY_PREFIX}:{lock_scope}:{prediction_trade_date}"
+                    redis.delete(lock_key)
+                except Exception:
+                    pass
+    except Exception as exc:
+        _write_dispatch_log(
+            db,
+            trigger_source=trigger_source,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            strategy_id=strategy_id,
+            model_id=model_id,
+            data_trade_date=data_trade_date,
+            prediction_trade_date=prediction_trade_date,
+            status="failed",
+            reason_code="EXCEPTION",
+            reason_detail=str(exc),
+        )
+        raise
     finally:
         db.close()
 
@@ -490,6 +597,10 @@ def run_strategy_backtest_loop(
             backtest_period=request.backtest_period,
             initial_capital=request.initial_capital,
             risk_tolerance=request.risk_tolerance,
+            start_date=start_date.strftime("%Y-%m-%d"),
+            end_date=end_date.strftime("%Y-%m-%d"),
+            user_id=request_payload.get("_owner_user_id", "default"),
+            tenant_id=request_payload.get("_owner_tenant_id", "default"),
         )
         strategy_request = StrategyRequest(
             prompt=request.prompt,
@@ -612,6 +723,67 @@ def sync_stock_daily_latest_task(
         "success": True,
         "message": "数据同步任务已废弃，数据由官方服务器统一推送",
         "deprecated": True,
+    }
+
+
+@celery_app.task(name="engine.tasks.sync_market_data_daily_task")
+def sync_market_data_daily_task(
+    target_date: str | None = None,
+    max_symbols: int = 0,
+    apply: bool = True,
+) -> dict[str, Any]:
+    """
+    Celery 任务：执行每日数据同步 (容器内运行，使用容器 Python 3.10)。
+    流程: 源 PG->parquet->stock_daily_latest->stock_strategy_latest->index_ohlcv_daily->回填连板->收益率->qlib_data
+    """
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    root = Path(os.getcwd())
+    scripts = root / "scripts" / "data" / "maintenance"
+    processing = root / "scripts" / "data" / "processing"
+
+    steps = [
+        ("Step 1: 源 PG -> parquet", [sys.executable, str(scripts / "sync_parquets_from_remote_pg.py")]),
+        ("Step 2: parquet -> stock_daily_latest", [sys.executable, str(scripts / "sync_stock_daily_latest_from_parquet.py")]),
+        ("Step 3: stock_daily_latest -> stock_strategy_latest", [sys.executable, str(scripts / "sync_strategy_latest_from_stock_daily.py")]),
+        ("Step 4: qlib features -> index_ohlcv_daily", [sys.executable, str(scripts / "sync_index_ohlcv_from_qlib_features.py")]),
+        ("Step 5: 回填连板字段", [sys.executable, str(scripts / "backfill_consecutive_limit_up_days.py"), "--apply"]),
+        ("Step 6: 回填收益率", [sys.executable, str(processing / "backfill_return_fields.py"), "--recent-days", "10"]),
+        ("Step 7: parquet -> qlib_data", [sys.executable, str(scripts / "sync_qlib_from_fundamental_parquet.py")]),
+    ]
+
+    results = []
+
+    for label, cmd in steps:
+        logger.info("[DataSync] %s", label)
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=900, cwd=str(root))
+        except subprocess.TimeoutExpired:
+            logger.error("[DataSync] %s 超时", label)
+            results.append({"step": label, "success": False, "error": "timeout"})
+            break
+        except Exception as e:
+            logger.exception("[DataSync] %s 异常: %s", label, e)
+            results.append({"step": label, "success": False, "error": str(e)})
+            break
+
+        ok = r.returncode == 0
+        if not ok:
+            logger.error("[DataSync] %s 失败 exit=%s stderr=%s", label, r.returncode, r.stderr[-500:])
+        else:
+            logger.info("[DataSync] %s 完成", label)
+        results.append({"step": label, "success": ok, "rc": r.returncode})
+
+        if not ok:
+            break
+
+    all_ok = all(r["success"] for r in results)
+    return {
+        "success": all_ok,
+        "message": "所有步骤完成" if all_ok else f"在 '{results[-1]['step']}' 失败",
+        "steps": results,
     }
 
 

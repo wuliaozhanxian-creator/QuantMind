@@ -2,6 +2,11 @@
 
 本服务是 QuantMind 的核心计算中枢，整合了 AI 策略生成、模型推理、高性能 Qlib 回测及深度投研分析功能。
 
+## 修复记录（2026-06-02，策略列表模式隔离）
+
+- `/api/v1/strategies` 新增 `trading_mode=REAL|SHADOW|SIMULATION` 查询参数透传到 trade 状态接口。
+- 策略列表的 `runtime_state/effective_status/today_return/today_pnl` 会按当前交易模式回填，避免仪表盘从模拟盘切到实盘时仍显示模拟盘运行态。
+
 ## 修复记录（2026-03-27，自动推理任务稳定性）
 - 修复 `InferenceScriptRunner._query_dimension_readiness` 的 `SessionLocal` 未定义异常，消除
   `NameError: name 'SessionLocal' is not defined`。
@@ -14,12 +19,46 @@
   `Task ... got Future ... attached to a different loop` 的模型解析失败。
 - 影响：自动推理链路在解析用户默认模型、策略绑定模型和系统兜底模型时，不再依赖 `asyncio.run()`。
 
+## 修复记录（2026-04-16，自动推理与自动托管来源收口）
+- `engine.tasks.auto_inference_if_needed` 已从“扫描活跃策略并按 `strategy_binding` 优先解析”改为“扫描 `qm_model_inference_settings` 中已开启且到达 `next_run_at` 的当前默认模型配置”。
+- 调度执行时不再传入 `strategy_id`，统一按用户默认模型链路解析，确保自动推理产出的 `model_source` 稳定为 `user_default`（或用户将系统模型设为默认时的默认模型来源），避免被 `strategy_binding` 批次覆盖后触发交易侧自动托管拒绝。
+- 自动推理 Celery 结果现在会同步回写：
+  - `qm_model_inference_runs`
+  - `qm_model_inference_settings.last_run_json / next_run_at`
+- 影响：
+  - 前端“自动推理”区域的上次执行信息与 Celery 实际执行结果口径一致；
+  - 自动托管消费链路与自动推理生成链路已对齐，不再因策略绑定批次覆盖最新版本而误判 `mismatch`。
+
+## 修复记录（2026-04-16，自动推理切换为凌晨排队批次）
+- 自动推理默认 `schedule_time` 已调整为 `00:00`，语义改为“交易日当天 00:00 起进入任务队列，08:00 前等待 146 维数据更新完成后触发推理”。
+- 历史遗留的默认配置若仍是旧值 `09:30` 或 `15:30`，会在读取设置时自动迁移到 `00:00`，避免老用户继续沿用旧批次口径。
+- Celery Beat 扫描窗口已调整为“交易日当天 00:00-08:00 前”，确保：
+  - 凌晨开始按队列轮询；
+  - 若 146 维数据尚未更新，则自动顺延到下一次 Beat 扫描；
+  - 若首次执行失败，可在 08:00 前继续自动补跑，而不是直接跳到下一个交易日。
+- 自动批次失败时，`qm_model_inference_settings.next_run_at` 会推进到下一次 Beat 扫描时间，成功后才推进到下一交易日的凌晨计划时间。
+
+## 修复记录（2026-06-18，自动推理统一到 04:00 排队）
+- 用户态自动推理默认 `schedule_time` 已统一切换到 `04:00`；历史遗留的 `00:00 / 09:30 / 15:30` 会在读取或执行设置时自动迁移到 `04:00`。
+- `engine.tasks.auto_inference_if_needed` 现在会先校验“当天是否为交易日”；若命中周末或交易所节假日，则直接跳过，不再因为“回看上一交易日”而误触发。
+- Celery 自动推理扫描已收敛为只消费 `enabled = true` 且 `next_run_at <= 当前时间` 的记录，不再把所有开启状态的模型无差别执行一遍。
+- 自动推理执行成功/失败后，会同步回写 `qm_model_inference_settings.last_run_json / next_run_at`，确保前端“自动调度”面板展示与 Celery 实际执行口径一致。
+
+## 修复记录（2026-06-18，自动推理改为扫描 + 分发队列）
+- `engine.tasks.auto_inference_if_needed` 现在只负责扫描到期任务，并将每条自动推理记录分发为独立的 Celery 子任务 `engine.tasks.run_auto_inference_task`。
+- 每条子任务会单独执行“已完成检查、分布式锁、推理执行、settings 回写、dispatch log 留痕”，避免单个慢任务阻塞整批扫描。
+- `qm_model_inference_dispatch_logs` 现在会额外记录 `dispatched / running / success / failed / skipped` 多阶段状态，且 `dispatched` 阶段会写入子任务 `celery_task_id`，便于后续排查真正的排队执行轨迹。
+
 ## 模型训练闭环契约（2026-04-04）
 - 训练编排器 `LocalDockerOrchestrator._build_config_yaml` 已支持透传以下配置块：
   - `model.early_stopping_rounds`
   - `label.target_horizon_days/target_mode/label_formula/effective_trade_date/training_window`
-  - `context.initial_capital/benchmark/commission_rate/slippage/deal_price`
-- 训练标签口径已在 `2026-06-07` 明确收敛：当前训练脚本真实执行的是后复权可交易收益率 `adj_close(T+N) / adj_open(T+1) - 1`；`target_mode=classification` 与自定义 `label_formula` 仅保留元数据兼容，不参与训练分支。
+  - `explain.enable_shap/shap_split/shap_sample_rows`（默认 `true/valid/30000`）
+  - `context.initial_capital/commission_rate/slippage/deal_price`
+  - 训练上下文 `deal_price` 默认值已从 `close` 调整为 `open`（2026-04-28），与回测默认口径保持一致。
+  - 训练标签口径已在 `2026-06-07` 明确收敛：当前训练脚本真实执行的是后复权可交易收益率 `adj_close(T+N) / adj_open(T+1) - 1`；`target_mode=classification` 与自定义 `label_formula` 仅保留元数据兼容，不参与训练分支。
+  - 训练上下文 `benchmark` 已于 `2026-05-22` 废弃；该字段不参与模型训练，前端不再暴露，后端训练配置也不再写入，避免残留无效元数据。
+  - `docker/training/train.py` 现在会在落盘 `metadata.json` / `result.json` 以及回调前统一清洗 `NaN/Inf`，防止训练已完成但回调因 JSON 非法浮点失败。
 - 训练链路阻断修复（2026-04-04）：
   - `docker/training/train.py` 已恢复完整训练主流程（调用 `train_model`，并回写 `model/metrics/metadata/result`），消除未定义变量导致的运行时失败；
   - `train.py` 新增 `data.source_mode + data.local_dir` 的本地快照读取能力，`LOCAL` 模式优先读取挂载目录，缺失时回退 COS；
@@ -27,24 +66,44 @@
   - 本地 Docker 训练编排器新增容器日志实时推送：运行中 stdout/stderr 增量写入回测 Redis Stream（默认 `quantmind-backtest-redis`），并同步维护任务状态快照（`pending/provisioning/running/waiting_callback/completed/failed`）；
   - 日志流可通过环境变量覆盖：`TRAINING_LOG_STREAM_ENABLED`、`TRAINING_LOG_REDIS_HOST/PORT/PASSWORD/DB`、`TRAINING_LOG_STREAM_PREFIX`、`TRAINING_LOG_STREAM_MAXLEN`、`TRAINING_LOG_STATE_TTL_SECONDS`；
   - `LocalDockerOrchestrator` 不再硬编码镜像 ID，优先读取 `TRAINING_IMAGE`；
+  - `LocalDockerOrchestrator` 的宿主项目根目录默认值与当前线上部署保持一致，默认为 `/home/ubuntu/quantmind`；若部署到其他目录，需显式设置 `HOST_PROJECT_PATH` 或 `TRAINING_HOST_PROJECT_PATH`；
   - 训练产物目录统一对齐用户模型注册路径：`models/users/{tenant_id}/{user_id}/{model_id}`。
 - **模型训练数据泄漏防护 (2026-04-06)**:
   - **结构性泄漏防护**: `admin_training.py` 现强制要求在 `train/val` 和 `val/test` 分片之间保留不少于 `target_horizon_days` (预测跨度 $H$) 的交易日间隔。若检测到重叠（例如 $H=3$ 但间隔为 0），系统将阻断任务提交并提示合规建议。
   - **特征前瞻风险预警**: 修改了 `model_training_feature_catalog_v1.json`，针对标注为“当日值”的高频波动率特征（如 `vol_realized_rv`）增加了 **Look-ahead Bias** 风险提示。
   - **特征工程建议**: 强烈建议在回测或训练配置中使用 `Ref(feature_key, 1)` 处理高频当日指标，确保信号生成时仅使用历史已实现数据。
 - 训练回调地址统一切换为用户态路径：`/api/v1/models/training-runs/{run_id}/complete`（admin 路径保留兼容别名）。
+- `TrainingRunLogStream` 会在写入任务状态时同步维护用户态 Redis 视图：
+  - 用户任务索引：`qm:training:user:{tenant_id}:{user_id}:runs`
+  - 用户任务摘要：`qm:training:user:{tenant_id}:{user_id}:run:{run_id}`
+  - API 层 `GET /api/v1/models/training-runs` 直接读取该视图返回当前用户的训练任务列表。
 - 回调结果要求结构化返回：`metrics/artifacts/summary/metadata/error`；后端会在入库前校验关键字段并对不完整结果降级为失败，避免“作业成功但结果不可消费”。
 - 训练容器回收修复（2026-04-06）：`LocalDockerOrchestrator` 在容器退出后不再固定等待整段 `TRAINING_CALLBACK_TIMEOUT_SECONDS` 才删除容器，而是按 `TRAINING_CALLBACK_CHECK_INTERVAL_SECONDS`（默认 2 秒）轮询任务状态；一旦回调将状态更新为 `completed/failed`，立即执行容器清理（`force=True, v=True`），避免训练面板长期堆积 `Exited` 容器。
 - 训练预测产物修复（2026-04-06）：`docker/training/train.py` 生成的 `pred.pkl` 已从“仅验证集预测”调整为“覆盖 train/valid/test 全窗口预测”，并新增 `split` 字段标记分段；`metadata.json` 追加 `pred_coverage_start/pred_coverage_end/pred_rows`，用于回测覆盖面校验。
+- 服务器挂载修复（2026-06-05）：生产环境若 `models/`、`db/` 使用 CFS/NFS 子挂载，`quantmind-engine` 必须在 `docker-compose.server.yml` 中显式追加
+  `/home/ubuntu/quantmind/models:/app/models` 与 `/home/ubuntu/quantmind/db:/app/db`；
+  仅挂载父目录 `.:/app` 时，容器内可能看不到子挂载的真实内容，导致新训练模型的 `pred.pkl/pred.parquet` 在宿主机存在但回测读取报 `pred_path_not_found`。
+- 训练链路 CVM 化（2026-05-06）：
+  - 新增 `CVMTrainingOrchestrator`，`TRAINING_ORCHESTRATOR_MODE=auto/cvm/local` 可切换编排模式；
+  - `auto` 模式在 `CTRAIN_IMAGE_ID/CTRAIN_VPC_ID/CTRAIN_SUBNET_ID` 配置齐全时自动走 CVM；
+  - CVM 训练运行镜像固定为 `quantmind-ml-runtime:latest`，并要求该镜像已预热进系统镜像；避免复用服务端遗留的 `TRAINING_IMAGE` 环境值导致训练机拉取错误 tag；
+  - 训练 CVM 会在启动时挂载共享 CFS 到 `/home/ubuntu/quantmind/models`，与服务端共用同一套训练 workspace；
+  - 训练实例规格已固定为 `MA9.2XLARGE64`，不再通过 `CTRAIN_INSTANCE_TYPE` 切换，避免因环境变量漂移导致训练机被降配；
+  - CVM 训练任务若在 `TRAINING_CVM_JOB_TIMEOUT_SECONDS`（默认 1800 秒，即 30 分钟）内仍未完成回调，会自动标记为 `failed` 并终止实例，释放提交锁；
+  - 新起训练 CVM 时会统一将宿主机和训练容器对齐到 `Asia/Shanghai`，并注入 `TZ=Asia/Shanghai`，确保训练日志与服务器时间口径一致；
+  - 本地 Docker 路径的 CPU 绑定改为 `TRAINING_CPUSET_CPUS` 可选配置，默认不传 `cpuset_cpus`。
+  - CVM 回调默认优先读取 `QUANTMIND_API_PUBLIC_BASE_URL`，用于把训练完成回调打到公网可达的 `quantmind-api`，避免在 CVM 上误用仅限集群内网解析的 `quantmind-api:8000`。
+  - CVM 训练脚本会把日志同步写入共享工作区 `training.log`，编排器会持续回收该文件并回灌 Redis Stream，因此训练历史页可恢复接近本地 Docker 的实时日志体验。
+- 训练历史用户视图修复（2026-05-06）：
+  - `TrainingRunLogStream.list_user_runs()` 已统一将 Redis `zrevrange` 返回的 `run_id` 解码为字符串，避免 bytes 直接拼接导致 summary key 错位，从而出现“索引总数有值但列表项为空”的问题。
+  - `TrainingRunLogStream.update_state()` 会保护终态 `completed/failed` 不被后续销毁日志降级，避免训练列表把已完成任务误显示成 `destroying_server`。
 
 ## AI-IDE 临时镜像验证闭环（2026-04-10）
-- AI-IDE 执行器仍由 `quantmind-engine` 承载，挂载路径为 `/api/v1/ai-ide/execute`；真实运行默认使用 `AI_IDE_RUNNER_IMAGE`，未配置时回退到 `quantmind-ml-runtime:latest`。
-- 前端可在“运行镜像（高级）”中显式填写临时 tag，后端会先执行 smoke 校验，再启动真实容器；未通过 smoke 时会直接阻断正式执行并在日志区回传失败阶段。
-- 新增镜像 smoke 接口：`POST /api/v1/ai-ide/execute/smoke-image`，用于在正式运行前单独验证：
-  - 镜像是否存在/可拉取
-  - `python` 及关键依赖是否可导入
-  - stdout/stderr 是否能稳定流式回传
-- Smoke 容器默认采用更严格的沙箱参数：`--rm`、只读文件系统、`network_mode=none`、内存/CPU 限制、`cap_drop=["ALL"]`、`no-new-privileges`。
+- `strategy_id/model_id/tenant_id` 会随执行请求透传给 Qlib 回测服务，方便模型库按策略绑定或显式模型解析 pred.pkl。
+- AI-IDE 的回测执行入口已切换为 Celery worker 路径：执行请求会提交到 `qlib_app.tasks.run_backtest_async`，由 `quantmind-celery-worker` 实际执行，再把状态与结果回传给前端日志流。
+- 镜像是否存在/可拉取
+- `python` 及关键依赖是否可导入
+- stdout/stderr 是否能稳定流式回传
 - 相关运行时环境变量：
   - `AI_IDE_RUNNER_IMAGE`
   - `AI_IDE_SMOKE_IMPORTS`
@@ -68,6 +127,12 @@
 ## 模型推理中心闭环（2026-04-04）
 - 用户态推理链路已从前端 mock 切换为真实后端执行：前置检查、手动推理、历史查询、结果明细和自动推理设置均由 `quantmind-api` 统一收口。
 - 训练 / 推理 / 实盘 runner 当前统一使用 `quantmind-ml-runtime:latest` 运行镜像。
+- 生产部署现支持显式镜像变量收口：
+  - `RUNTIME_IMAGE`：统一 runtime 镜像（`quantmind-api / quantmind-engine / celery-worker / celery-beat / strategy runner / training runner / AI-IDE runner`）
+  - `TRADE_IMAGE`：`quantmind-trade`
+  - `STREAM_IMAGE`：`quantmind-stream`
+- `deploy_live.sh` 会为每次部署生成独立 tag，并在重建共享 runtime 镜像时一并重建 `quantmind-api + quantmind-engine + celery-worker + celery-beat`，避免运行中的容器继续引用匿名旧镜像。
+- 部署脚本默认远端目录为 `/home/ubuntu/quantmind`，并与训练编排器、`docker-compose.server.yml` 以及 AI-IDE 执行器默认 `HOST_PROJECT_PATH` 保持一致。
 - 推理执行仍复用 `InferenceRouterService` / `InferenceScriptRunner`，并通过 `model_inference_persistence` 持久化到：
   - `qm_model_inference_runs`
   - `qm_model_inference_settings`
@@ -81,13 +146,14 @@
 `quantmind-engine` 使用 Celery 处理耗时的异步回测和复杂的参数优化任务。Worker 进程必须独立于主 API 服务启动。
 当前已统一为 Celery 异步执行：`/api/v1/pipeline/*`、`/api/v1/qlib/backtest?async_mode=true`、`/api/v1/strategy-backtest-loop/*`。
 API 进程仅负责入队或同步请求处理，不再保留 `BackgroundTasks` / `create_task` / 线程池式后台执行路径。
-“明日信号生成”支持三种触发方式：管理员手动触发 `POST /api/v1/admin/models/run-inference`、策略激活后按当前 `tenant_id + user_id(8位)` 异步触发一次推理、以及 Celery Beat 08:55 自动兜底 `engine.tasks.auto_inference_if_needed`。
-生产部署必须同时运行 `celery-worker` 与 `celery-beat`；仅启动 worker 不会触发 08:55 自动推理。
+“明日信号生成”支持三种触发方式：管理员手动触发 `POST /api/v1/admin/models/run-inference`、策略激活后按当前 `tenant_id + user_id(8位)` 异步触发一次推理、以及 Celery Beat 定时扫描 `engine.tasks.auto_inference_if_needed`。
+生产部署必须同时运行 `celery-worker` 与 `celery-beat`；仅启动 worker 不会触发“交易日当天 00:00-08:00 前”的自动推理扫描。
 如需因硬件压力临时暂停自动推理，可在运行环境设置 `AUTO_INFERENCE_ENABLED=false`（仅关闭 Beat 定时调度，不影响手动触发）。
 推理链路已升级为“多用户模型解析 + 系统兜底”：
 - 解析优先级：`显式 model_id > 策略绑定 > 用户默认 > model_qlib > alpha158`
 - 用户模型目录：`models/users/{tenant_id}/{user_id}/{model_id}`
 - 系统兜底目录：`model_qlib / alpha158`
+- 其中 Celery 自动推理只消费 `qm_model_inference_settings.enabled=true` 且 `next_run_at` 到期、并且仍对应“当前默认模型”的配置；执行时不带 `strategy_id`，确保产出默认模型来源批次供自动托管消费。
 四条入口统一输出：`fallback_used/fallback_reason/active_model_id/effective_model_id/model_source/active_data_source`；
 `pipeline` 会将这些字段同时保存在 `inference_result` 和 `result_json` 顶层。
 
@@ -150,7 +216,7 @@ python -m celery -A backend.services.engine.qlib_app.celery_config:celery_app \
 - 正确处理方式：
 
 ```bash
-cd /home/quantmind
+cd /home/ubuntu/quantmind
 docker compose up -d engine-worker
 ```
 
@@ -186,6 +252,9 @@ python -m celery -A backend.services.engine.qlib_app.celery_config:celery_app fl
 ### 3. 实盘决策支持 (Actionable Insights)
 - **调仓指令生成器**：自动对比回测理想持仓与当前状态，生成可执行的**篮子订单 (Basket Orders)**。
 - **实时进度反馈**：通过 Redis/WebSocket 实现秒级进度推送，包含当前处理的交易日期。
+- **基本面对齐与硬过滤 (2026-05-09)**：
+  - **统一对齐器**：集成 `FundamentalAligner`，支持从 `db/custom/fundamental_aligned.parquet` 读取预计算的基本面快照（PE, ROE, 市值, ST）。
+  - **参数化配置**：策略支持直接在 `kwargs` 中配置 `pe_max`, `mc_min`, `mc_max`, `exclude_st` 参数，系统自动执行对齐过滤，无需编写额外代码。
 
 ## 🛠 架构组件
 - **qlib_app**: 深度定制的本地化 Qlib 运行环境。
@@ -266,6 +335,6 @@ python -m celery -A backend.services.engine.qlib_app.celery_config:celery_app fl
 - P3 错误契约：统一错误结构 `error.code/error.message/error.request_id`，并兼容保留 `detail` 字段。
 - P3 日志基线：统一访问日志字段 `service/request_id/tenant_id/user_id/method/path/status/duration_ms`。
 - P3 指标基线：新增 `/metrics`（Prometheus），统一暴露 `quantmind_service_health_status{service="quantmind-engine"}` 与 `quantmind_service_degraded{service="quantmind-engine"}`。
-- P3 健康语义：`/health` 在关键启动阶段异常（如初始化或 warmup 超时）时返回 `status=degraded`，与指标语义一致。
-- P3 本地联调默认值：根 `.env` 可设置 `AI_STRATEGY_WARMUP=false`，避免开发/CI 场景因预热超时把服务误判为 `degraded`。
+- P3 健康语义：`/health` 在关键启动阶段异常（如初始化或向量预热失败）时返回 `status=degraded`，与指标语义一致。
+- P3 启动预热：AI Strategy 向量解析器和字段检索在启动阶段强制预热，失败会直接阻断服务启动，不再依赖 `AI_STRATEGY_WARMUP=false` 的跳过模式。
 - P3 FastAPI 兼容：回测历史接口查询参数已改用 `pattern=`，避免 `regex=` 在新版本 FastAPI/Pydantic 下触发弃用告警。

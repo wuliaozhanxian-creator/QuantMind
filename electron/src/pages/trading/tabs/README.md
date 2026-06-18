@@ -19,6 +19,13 @@ fetch(`${apiGatewayBase}/api/v1/api-keys/init`, { method: 'POST' });
 
 ## 近期更新
 
+- `StrategyManagement.tsx` 已将“启动按钮”门禁按交易模式拆分：`SIMULATION` 仅要求已选择策略即可启动，不再受 `is_verified` 限制；`REAL/SHADOW` 仍保持“需已验证策略”门禁。对应按钮文案也已对齐，模拟盘下固定显示“开启实时模拟”。
+- `SettingsCenter.tsx` 的凭证说明已更新为“默认展示最近一次生成/重置后的私钥”；对历史未缓存密钥，会明确提示需重置一次完成缓存，后续无需每次使用前重置。
+- `SettingsCenter.tsx` 的“接入凭证”区域新增“当前实盘连接使用”提示，直接展示当前 `access_key + key 名称`；该默认 Key 由后端 `is_default_for_qmt` 口径统一标记，用于和“个人中心 > 其他设置”做一一对齐，避免误判两处 Secret Key 不一致。
+- `RealTradingPage.tsx` 已移除左侧“个人中心”标签页入口，交易工作区收敛为“策略管理 / 手动任务 / 持仓监控 / 交易记录 / 设置”。
+- `RealTradingPage.tsx` 左下角的“帮助文档 / 推荐”信息条已改成固定高度的双列对齐布局，并收紧文案行高，避免在不同窗口宽度下出现文字基线错位。
+- `RealTradingPage.tsx` 左下角交易模式开关的“实盘 / 模拟”文字已加大并加深颜色，提升小尺寸胶囊开关的可读性。
+- `SettingsCenter.tsx` 新增首屏加载动画：在凭证初始化和在线状态首轮拉取期间，会显示骨架卡片，避免数据未返回时出现空白/闪烁。
 - `StrategyManagement.tsx` 里的“手动执行调试”已改名为“手动任务”，并迁移为左侧功能菜单中的独立页面；原页内 Drawer 仅保留兼容代码，不再作为主入口。
 - 实盘策略管理的策略选择下拉已从原生 `<select>` 改为 `antd Select`，弹层圆角、阴影和高亮态已统一到项目视觉语言。
 - `SettingsCenter.tsx` 已移除底部“独立部署说明”说明卡，避免与底部导航区域发生遮挡。
@@ -30,12 +37,13 @@ fetch(`${apiGatewayBase}/api/v1/api-keys/init`, { method: 'POST' });
 - 当柜台上报 `last_price=0` 或 `cost_price=0` 时，前端会回退使用 `market_value / volume` 推导现价，并在成本缺失时以推导现价作为临时成本，避免“现价为 0、盈亏金额=持仓市值”的误导展示。
 - `PositionOverview.tsx` 的持仓明细表格已启用横向滚动和最小宽度，列标题及金额列默认不换行，避免窗口较窄时“万”换行和列挤压。
 - `PersonalCenter.tsx` 的模拟盘初始金额修改/重置提示已收敛为“已保存并重置，资金快照已更新”，与后端即时采集行为保持一致。
+- 2026-06-03 更新：模拟盘重置成功后会触发 `refreshOrchestrator.requestAll()` 与账户/交易/策略刷新事件，确保仪表盘交易记录、资金概览和智能图表立即重拉清理后的数据。
 - `PersonalCenter.tsx` 的按钮提交态文案已同步为“保存并重置中... / 重置并采集中...”，避免用户误解当前操作仅是单纯改配置。
 - `PersonalCenter.tsx` 在保存/重置成功后会短暂显示“今日快照已更新”，用于明确告诉用户历史资金口径已写入当日快照。
-- `PersonalCenter.tsx` 在模拟盘重置成功后会触发全局模块刷新，并通知账户、交易记录、策略状态重新拉取，确保实时交易记录和智能图表立即展示清理后的数据。
 - `StrategyStatus.tsx` 与 `PositionMonitor.tsx` 的持仓分布/持仓明细已收敛到共享组件 `../components/PositionOverview.tsx`，避免两套页面分别维护图表和表格逻辑。
 - `StrategyStatus.tsx` 的持仓分布已切换为真实账户快照驱动，不再使用固定 `10W+` / mock 饼图数据。
 - `StrategyStatus.tsx`、`PersonalCenter.tsx` 与 `RealTradingPage.tsx` 现在统一通过运行态选择账户来源，不再在页面内分别判断“实盘优先 / 模拟兜底”；统一选择逻辑抽到了 `trading/utils/accountAdapter.ts` 与 `realTradingService.getRuntimeAccount()`。
+- `StrategyManagement.tsx` 的监控面板在 `SIMULATION` 下不再额外发起 `REAL` 的 `/preflight` 与 `/trading-precheck` 请求，避免把 QMT Agent 实盘检查混入模拟盘监控结果与服务端日志。
 - `trading/utils/accountAdapter.ts` 已按 `/account` 规范化字段统一顶部账户条语义：
   - 金额字段优先使用 `daily_pnl / total_pnl / floating_pnl`；
   - 收益率优先使用 `daily_return_ratio / total_return_ratio`，其次回退 `*_pct`；若与 `pnl + baseline` 推导结果明显冲突，则统一回退到推导值；
@@ -54,23 +62,34 @@ fetch(`${apiGatewayBase}/api/v1/api-keys/init`, { method: 'POST' });
 - `TopBar.tsx` 的“部署通道”改为读取 `/real-trading/status.orchestration_mode` 动态显示 `Docker/Kubernetes`；若后端暂未返回该字段，则以 `容器` 兜底，避免误导性写死 `K8s`。
 - `RealTradingPage.tsx` 的启动前自检新增二次确认步骤：`REAL/SHADOW/SIMULATION` 在自检通过后不会自动调用启动接口，需用户点击底部“确认并启动…”按钮后才真正拉起运行容器/沙箱。
 - `RealTradingPage.tsx` 的交易记录页已改为透传当前 `tradingMode`，不再硬编码 `real`，避免影子/模拟场景下因模式错筛导致“数据库有数据但列表为空”。
+- `RealTradingPage.tsx` 的账户轮询周期已从 `3s` 调整为 `30s`，避免前端频繁请求与后端快照任务重复拉取行情；交易事件仍会通过 WebSocket 主动触发即时刷新。
 - `StrategyManagement.tsx` 的运行态徽标也已跟随同一套语义色，便于和顶部概览一致识别。
 - `StrategyManagement.tsx` 的 `QMT Agent` 状态文案已细分为 `已上报 / 已过期 / 未上报 / 检测异常`，并在过期场景显示心跳与账户快照秒数（例如 `已过期（账户1038s，心跳1036s）`），避免将“过期”误显示为“未上报”。
+- `StrategyManagement.tsx` 的 `QMT Agent` 状态已新增“已暂停”语义：当后端因通信时段策略主动暂停（非交易日或超过 `09:00-17:00` 窗口）时，前端显示 `已按计划暂停（周一至周五 09:00-17:00）`，右侧徽标显示 `已暂停`，不再误标为红色“异常”。
 - `StrategyManagement.tsx` 已新增“当前生效推理批次”状态卡，直接展示 `/api/v1/models/inference/latest` 返回的 `run_id / prediction_trade_date / status / updated_at`，并标注当前模型是否与最新生效批次匹配，便于在实盘页确认正在消费的推理结果。
 - `StrategyManagement.tsx` 已新增“最新任务汇报”卡，直接消费 `/api/v1/real-trading/status.latest_hosted_task / latest_signal_run_id / signal_source_status`，展示最近一轮托管任务的 `task_id / run_id / 状态 / 触发上下文 / 完成度 / 成功失败跳过统计`，并可直接在控制台内查看任务日志流；无任务时会展示最新信号状态与未触发原因。
+- `StrategyManagement.tsx` 与 `PersonalCenter.tsx` 已接入 `/api/v1/real-trading/status.next_scheduled_execution`（2026-06-15）：
+  - 策略管理页将“下一次计划执行”收敛为单一展示位，并已从“自动托管就绪度”卡片迁移到“最新任务汇报”底部，与“执行窗口”并列展示以节省空间；
+  - 个人中心的“模拟盘运行状态”也会同步显示下次调度时间，便于快速确认任务是否会按设定时间执行。
 - `StrategyManagement.tsx` 的“默认模型推理反馈与诊断”已按状态来源拆分文案：`missing / window_pending / expired / fallback / mismatch / ready`，避免把“窗口未到”“已过期”“兜底拦截”都混成“未检测到最新完成推理”。
+- `StrategyManagement.tsx` 的 `mismatch` 文案已进一步收敛为“仅接受生产批次”：若默认模型最新完成推理来自调试链路、策略绑定模型或系统回退，自动托管会拒绝消费；当前仅接受 `user_default / explicit_system_model` 来源。
 - `StrategyManagement.tsx` 的“最新任务汇报”视觉已调整为浅色风格，任务状态卡、统计卡与操作按钮统一改为浅底+浅边框，避免与深色日志流区域混淆。
 - `StrategyManagement.tsx` 的日志流框也已切换为浅色样式，保持与任务汇报卡一致的浅色视觉层级。
 - `StrategyManagement.tsx` 的“链路质量看板”和“自动化状态”已改成“上方总览 + 下方指标网格”的一致结构，减少纵向空洞与卡片层级跳变，让两张卡在同一行内更协调。
 - `StrategyManagement.tsx` 的“链路质量看板”左侧状态已改为纯色圆点图标，字段名统一为 `Redis Signal / PostgreSQL / Data Feed / WebSocket` 这类标准大小写命名，并收紧字距与行距，避免状态文案挤占换行。
+- `StrategyManagement.tsx` 的“行情检测 / Data Feed”在后端返回 `非交易时段` 时，不再被前端统一压成 `已就绪`；页面会直接显示 `非交易时段`，便于区分“链路可达但当前休市”与“正在实时供数”。
 - `StrategyManagement.tsx` 的“环境监控”指标行已改为左侧信息、右侧状态的双栏布局，`正常/异常/未获取` 状态徽标在小卡片中线居中对齐。
-- `StrategyManagement.tsx` 的“自动托管就绪度”结论卡已把状态徽标限制在标题行，说明正文独占整行宽度；包含截止日期的文案会把 `截止日期=...` 单独下沉到第二行，并保护“可执行窗口”短语不被拆行。
+- `StrategyManagement.tsx` 的“自动托管就绪度”结论说明已下调字号并收紧行高，避免“当前默认模型最新推理结果已超过可执行窗口...”这类长文案在卡片中过于醒目。
+- `StrategyManagement.tsx` 的“自动托管就绪度”结论说明会保护“可执行窗口”短语不被拆行，避免出现“可 / 执行窗口”的断裂换行。
+- `StrategyManagement.tsx` 的“自动托管就绪度”结论卡已把状态徽标限制在标题行，说明正文独占整行宽度；包含截止日期的文案会把 `截止日期=...` 单独下沉到第二行，提升小卡片内的换行稳定性。
 - `StrategyManagement.tsx` 顶部“影子模式”已改为开关样式的 `role="switch"` 控件，保留原逻辑但让控制条更紧凑，不再像传统 checkbox。
-- `StrategyManagement.tsx` 的“核心决策结果”卡已收敛为“默认模型最新推理”，只展示当前默认模型最近一次可用于托管的完成推理批次；空态改为“暂无可用推理批次”，并回显信号来源诊断。
-- `StrategyManagement.tsx` 的默认模型最新推理卡在 `run_id` 变化时会短暂显示 `NEW` 标签，帮助识别刚刷新出来的新推理批次。
-- `StrategyManagement.tsx` 与 `PersonalCenter.tsx` 已接入 `/api/v1/real-trading/status.next_scheduled_execution`（2026-06-15）：
-  - 策略管理页将“下一次计划执行”收敛为单一展示位，只保留在“自动托管就绪度”卡片里；
-  - 个人中心的“模拟盘运行状态”也会同步显示下次调度时间，便于快速确认任务是否会按设定时间执行。
+- `StrategyManagement.tsx` 的“核心决策结果”卡已收敛为“默认模型生产批次”，只展示当前默认模型最近一次可被自动托管消费的完成推理；空态改为“暂无可用生产批次”，并回显信号来源诊断。
+- `StrategyManagement.tsx` 的默认模型生产批次卡在 `run_id` 变化时会短暂显示 `NEW` 标签，帮助识别刚刷新出来的新推理批次。
+- 实盘页卡片内已补充“自动托管只消费生产批次，不消费调试批次”的固定说明，与模型管理页“生成生产批次 / 生成调试批次”按钮语义保持一致。
+- `StrategyManagement.tsx` 已将“自动化状态 + 默认模型生产批次”按“主卡 + 辅卡”重构：主卡升级为“自动托管就绪度”（只保留是否可执行、阻塞原因与默认模型/运行态）；辅卡改为“生产批次摘要”（固定展示关键字段），以减少重复信息与卡片占高。
+- `StrategyManagement.tsx` 的“生产批次摘要”卡已将右上角 `?` 改为可点击展开的“消费规则说明”，避免仅依赖悬浮提示；“自动托管就绪度”底部按钮已改为固定跳转“模型管理”页（`/model-registry`）。
+- `StrategyManagement.tsx` 的“生产批次摘要”卡已取消“展开/收起详情”交互，改为固定在摘要下方展示 `模型 ID + 目标日期`，减少操作路径并保持卡片高度稳定。
+- `StrategyManagement.tsx` 的“自动托管就绪度”卡已移除重复的“建议动作”小卡，仅在主诊断区保留“下一步”提示，避免同屏文案重复。
 - `ManualTaskPage.tsx` 已重构为 5 步引导式执行向导：
   - 第 1 步选择模型；
   - 第 2 步只加载当前模型下的 `completed` 推理批次，并支持查看信号排序；
@@ -79,6 +98,7 @@ fetch(`${apiGatewayBase}/api/v1/api-keys/init`, { method: 'POST' });
   - 第 5 步确认后再调用 `/real-trading/manual-executions` 创建正式任务，并继续展示任务级日志流。
 - 当前引导式执行首版只支持 `REAL`，不在该页面内触发新推理。
 - “提交完成”在页面中明确解释为“已完成派发尝试”，不等价于柜台最终成交；用户需要继续到订单/成交历史页确认最终受理与成交状态。
+- 2026-06-04 更新：`ManualTaskPage.tsx` 不再将正式手动任务描述为“提交到执行队列/排队中”；任务创建成功提示改为“执行任务已创建，正在验证交易链路”，`queued` 阶段展示为“待执行”，明确该阶段代表持久化任务等待 worker 校验，并非 QMT 柜台排队。
 - 实盘策略管理引导增强（2026-03-13）：
   - `StrategyManagement.tsx` 不再在页内直接编辑零散风控参数，改为在点击“启动实盘/开启影子运行/开启实时模拟”后拉起执行参数向导；
   - 向导统一采集 `execution_config + live_trade_config`，包含调仓周期、执行时段、买卖时间点、委托方式和风险保护；

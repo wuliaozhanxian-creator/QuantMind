@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Play, Square, CheckCircle, Activity, Cpu, FileText, RefreshCw, AlertCircle, Settings2, Clock3, TerminalSquare } from 'lucide-react';
 import { Input, Select, message } from 'antd';
-import { strategyManagementService } from '../../../services/strategyManagementService';
-import { modelTrainingService, UserModelRecord, LatestInferenceRunInfo } from '../../../services/modelTrainingService';
+import { useNavigate } from 'react-router-dom';
+import type { UserModelRecord, LatestInferenceRunInfo } from '../../../services/modelTrainingService';
 import type { RealTradingStatus, PreflightCheckItem } from '../../../services/realTradingService';
 import { websocketService, WebSocketStatus } from '../../../services/websocketService';
 import { StrategyFile } from '../../../types/backtest/strategy';
@@ -97,7 +97,7 @@ const resolveSignalSourcePresentation = (
                 label: '缺少批次',
                 badgeTone: 'bg-amber-50 text-amber-700 border-amber-200',
                 stateText: '未就绪',
-                message: signalSource?.message || '当前默认模型尚无最新完成推理结果',
+                message: signalSource?.message || '未检测到当前用户默认模型的最新完成推理',
             };
         case 'window_pending':
             return {
@@ -135,11 +135,6 @@ const resolveSignalSourcePresentation = (
                 message: signalSource?.message || '默认模型状态已获取',
             };
     }
-};
-
-const loadRealTradingService = async () => {
-    const module = await import('../../../services/realTradingService');
-    return module.realTradingService;
 };
 
 const renderSignalSourceMessage = (message: string) => {
@@ -207,6 +202,7 @@ const StrategyManagement: React.FC<StrategyManagementProps> = ({
     activeExecutionConfig,
     activeLiveTradeConfig,
 }) => {
+    const navigate = useNavigate();
     const [strategies, setStrategies] = useState<StrategyFile[]>([]);
     const [selectedStrategyId, setSelectedStrategyId] = useState<string>('');
     const [isShadowMode, setIsShadowMode] = useState(false);
@@ -226,7 +222,6 @@ const StrategyManagement: React.FC<StrategyManagementProps> = ({
     const hostedLogsRef = useRef<string[]>([]);
     const latestInferenceRunIdRef = useRef<string | null>(null);
     const latestInferenceNewTimerRef = useRef<number | null>(null);
-    const monitorFetchInFlightRef = useRef(false);
 
     const strategyOptions = useMemo(
         () => strategies.map((strategy) => ({
@@ -251,6 +246,7 @@ const StrategyManagement: React.FC<StrategyManagementProps> = ({
         setLoading(true);
         setError(null);
         try {
+            const { strategyManagementService } = await import('../../../services/strategyManagementService');
             const list = await strategyManagementService.loadStrategies(userId);
             setStrategies(list);
         } catch (e) {
@@ -263,6 +259,7 @@ const StrategyManagement: React.FC<StrategyManagementProps> = ({
 
     const loadDefaultModel = useCallback(async () => {
         try {
+            const { modelTrainingService } = await import('../../../services/modelTrainingService');
             const model = await modelTrainingService.getDefaultModel();
             setDefaultModel(model || null);
         } catch (e) {
@@ -277,6 +274,7 @@ const StrategyManagement: React.FC<StrategyManagementProps> = ({
     const loadLatestInferenceRun = useCallback(async () => {
         setLatestInferenceRunLoading(true);
         try {
+            const { modelTrainingService } = await import('../../../services/modelTrainingService');
             const latest = await modelTrainingService.getLatestInferenceRun(effectiveModelId);
             setLatestInferenceRun(latest || null);
         } catch (e) {
@@ -342,6 +340,10 @@ const StrategyManagement: React.FC<StrategyManagementProps> = ({
         };
     }, [latestInferenceRun?.run_id]);
 
+    const handleOpenModelRegistry = useCallback(() => {
+        navigate('/model-registry');
+    }, [navigate]);
+
     useEffect(() => {
         const currentMode = tradingMode === 'simulation' ? 'SIMULATION' : 'REAL';
         let cancelled = false;
@@ -373,12 +375,8 @@ const StrategyManagement: React.FC<StrategyManagementProps> = ({
         };
 
         const loadMonitor = async () => {
-            if (monitorFetchInFlightRef.current) {
-                return;
-            }
-            monitorFetchInFlightRef.current = true;
             try {
-                const realTradingService = await loadRealTradingService();
+                const { realTradingService } = await import('../../../services/realTradingService');
                 const [preflightResult, tradingPrecheckResult] = await Promise.allSettled([
                     realTradingService.preflight(currentMode, userId, tenantId),
                     realTradingService.getTradingPrecheck(currentMode),
@@ -405,13 +403,11 @@ const StrategyManagement: React.FC<StrategyManagementProps> = ({
                 console.warn('Failed to load strategy monitor snapshot', e);
                 setMonitorChecks([]);
                 setMonitorCheckedAt(null);
-            } finally {
-                monitorFetchInFlightRef.current = false;
             }
         };
 
         loadMonitor();
-        const timer = setInterval(loadMonitor, 30000);
+        const timer = setInterval(loadMonitor, 15000);
         return () => {
             cancelled = true;
             clearInterval(timer);
@@ -472,7 +468,7 @@ const StrategyManagement: React.FC<StrategyManagementProps> = ({
         : (status?.status === 'starting' ? '启动中' : '静态就绪');
     const batchSummaryRunId = latestInferenceRun?.run_id || '';
     const batchSummaryHasData = Boolean(batchSummaryRunId);
-
+    
     const runtimeModeLabel = runtimeStatus === 'running'
         ? (runtimeMode === 'SHADOW'
             ? '影子运行中'
@@ -521,7 +517,7 @@ const StrategyManagement: React.FC<StrategyManagementProps> = ({
     const nextExecutionPhaseText = formatPhaseLabel(nextScheduledExecution?.phase);
 
     const monitorItemMap = useMemo(() => new Map(monitorChecks.map((item) => [item.key, item])), [monitorChecks]);
-
+    
     const getMonitorItem = useCallback(
         (key: string): PreflightCheckItem | undefined => monitorItemMap.get(key),
         [monitorItemMap],
@@ -549,15 +545,69 @@ const StrategyManagement: React.FC<StrategyManagementProps> = ({
         return item?.ok;
     }, [pickMonitorItem]);
 
-    const getQmtAgentDisplayMessage = useCallback((item?: PreflightCheckItem, fallback = '未获取'): string => {
-        if (!item) return fallback;
-        if (item.ok) return '已上报';
+    const getQmtAgentStatusMeta = useCallback((item?: PreflightCheckItem) => {
+        if (!item) {
+            return {
+                value: '未获取',
+                badge: '未获取',
+                ok: undefined as boolean | undefined,
+            };
+        }
+        if (item.ok) {
+            return {
+                value: '已上报',
+                badge: '正常',
+                ok: true as boolean | undefined,
+            };
+        }
         const messageStr = String(item.message || '');
-        if (messageStr.includes('过期') || messageStr.includes('stale')) return '已过期';
-        if (messageStr.includes('检测失败') || messageStr.includes('异常')) return '检测异常';
-        if (messageStr.includes('未检测到')) return '未上报';
-        return '未上报';
+        const normalized = messageStr.toLowerCase();
+        const isSchedulePaused = (
+            messageStr.includes('非通信时段')
+            || messageStr.includes('已按时段策略暂停')
+            || normalized.includes('paused_schedule')
+            || normalized.includes('runtime_health=paused')
+            || normalized.includes('schedule_paused')
+        );
+        if (isSchedulePaused) {
+            return {
+                value: '已按计划暂停',
+                badge: '已暂停',
+                ok: undefined as boolean | undefined,
+            };
+        }
+        if (messageStr.includes('过期') || normalized.includes('stale')) {
+            return {
+                value: '已过期',
+                badge: '异常',
+                ok: false as boolean | undefined,
+            };
+        }
+        if (messageStr.includes('检测失败') || messageStr.includes('异常')) {
+            return {
+                value: '检测异常',
+                badge: '异常',
+                ok: false as boolean | undefined,
+            };
+        }
+        if (messageStr.includes('未检测到')) {
+            return {
+                value: '未上报',
+                badge: '异常',
+                ok: false as boolean | undefined,
+            };
+        }
+        return {
+            value: '未上报',
+            badge: '异常',
+            ok: false as boolean | undefined,
+        };
     }, []);
+
+    const getQmtAgentDisplayMessage = useCallback((item?: PreflightCheckItem, fallback = '未获取'): string => {
+        const meta = getQmtAgentStatusMeta(item);
+        return meta.value || fallback;
+    }, [getQmtAgentStatusMeta]);
 
     const getEnvDisplayMessage = useCallback((keyOrKeys: string | string[], fallback: string): string => {
         const item = pickMonitorItem(keyOrKeys);
@@ -574,6 +624,30 @@ const StrategyManagement: React.FC<StrategyManagementProps> = ({
             case WebSocketStatus.ERROR: return { label: '异常', ok: false };
             default: return { label: '已断开', ok: false };
         }
+    }, []);
+
+    const getDataFeedDisplayMessage = useCallback((value: string, ok?: boolean): string => {
+        if (!value || value === '未获取') return '未获取';
+        const lower = value.toLowerCase();
+        // 非交易时段属于预期状态，优先保留后端语义，不要被“已就绪”压平
+        if (lower.includes('非交易时间') || lower.includes('非交易时段')) {
+            return '非交易时段';
+        }
+        if (ok) return '已就绪';
+
+        // 包含各类连接失败/拒绝/超时等关键词归类为“数据库错误”
+        if (lower.includes('error') || lower.includes('fail') || lower.includes('refused') || lower.includes('timeout') || lower.includes('exception')) {
+            return '数据库错误';
+        }
+        // 包含“未发现”、“缺少”、“empty”等关键词归类为“缺少行情数据”
+        if (lower.includes('未发现') || lower.includes('缺少') || lower.includes('no available') || lower.includes('empty') || lower.includes('not found')) {
+            return '缺少行情数据';
+        }
+        // 包含“不新鲜”、“延迟”、“stale”等
+        if (lower.includes('不新鲜') || lower.includes('延迟') || lower.includes('stale') || lower.includes('freshness')) {
+            return '数据延迟';
+        }
+        return value.length > 15 ? value.slice(0, 15) + '...' : value;
     }, []);
 
     const wsStatusText = formatWebSocketStatus(websocketStatus);
@@ -609,44 +683,61 @@ const StrategyManagement: React.FC<StrategyManagementProps> = ({
     const realtimeCheckKey: string = 'stream_series_freshness';
     const dataFeedCheckKey: string = 'stream_series_freshness';
 
+    // 环境监控检查项定义（带 keyRef 用于动态过滤）
     const envChecksAll = isGlobalSim
         ? [
-            { label: '推理模型', keyRef: 'inference_database_ready', value: getEnvDisplayMessage('inference_database_ready', '未获取'), ok: getCheckTone('inference_database_ready'), title: getCheckMessage('inference_database_ready') },
-            { label: '沙箱进程池', keyRef: 'simulation_sandbox_pool', value: getEnvDisplayMessage('simulation_sandbox_pool', '未获取'), ok: getCheckTone('simulation_sandbox_pool'), title: getCheckMessage('simulation_sandbox_pool') },
-            { label: '实时行情', keyRef: realtimeCheckKey, value: getEnvDisplayMessage(realtimeCheckKey, '未获取'), ok: getCheckTone(realtimeCheckKey), title: getCheckMessage(realtimeCheckKey) },
+            { keyRef: 'inference_database_ready', label: '推理模型', value: getEnvDisplayMessage('inference_database_ready', '未获取'), ok: getCheckTone('inference_database_ready'), title: getCheckMessage('inference_database_ready') },
+            { keyRef: 'simulation_sandbox_pool', label: '沙箱进程池', value: getEnvDisplayMessage('simulation_sandbox_pool', '未获取'), ok: getCheckTone('simulation_sandbox_pool'), title: getCheckMessage('simulation_sandbox_pool') },
+            { keyRef: realtimeCheckKey, label: '实时行情', value: getEnvDisplayMessage(realtimeCheckKey, '未获取'), ok: getCheckTone(realtimeCheckKey), title: getCheckMessage(realtimeCheckKey) },
         ]
         : [
-            { label: 'Runner 镜像', keyRef: 'strategy_runner_image', value: getEnvDisplayMessage('strategy_runner_image', '未获取'), ok: getCheckTone('strategy_runner_image'), title: getCheckMessage('strategy_runner_image') },
-            { label: '运行容器状态', keyRef: 'orchestration', value: status?.k8s_status ? `Ready ${status.k8s_status.ready_replicas}/${status.k8s_status.replicas}` : getEnvDisplayMessage('orchestration', '未获取'), ok: status?.status === 'running' || getCheckTone('orchestration'), title: getCheckMessage('orchestration') },
-            { label: 'QMT Agent', keyRef: 'qmt_agent_online', value: getEnvDisplayMessage('qmt_agent_online', '未获取'), ok: getCheckTone('qmt_agent_online'), title: getCheckMessage('qmt_agent_online') },
+            { keyRef: 'strategy_runner_image', label: 'Runner 镜像', value: getEnvDisplayMessage('strategy_runner_image', '未获取'), ok: getCheckTone('strategy_runner_image'), title: getCheckMessage('strategy_runner_image') },
+            { keyRef: 'orchestration', label: '运行容器状态', value: status?.k8s_status ? `Ready ${status.k8s_status.ready_replicas}/${status.k8s_status.replicas}` : getEnvDisplayMessage('orchestration', '未获取'), ok: status?.status === 'running' || getCheckTone('orchestration'), title: getCheckMessage('orchestration') },
+            (() => {
+                const item = pickMonitorItem('qmt_agent_online');
+                const meta = getQmtAgentStatusMeta(item);
+                return {
+                    keyRef: 'qmt_agent_online',
+                    label: 'QMT Agent',
+                    value: meta.ok === undefined && meta.badge === '已暂停'
+                        ? `${meta.value}（周一至周五 09:00-17:00）`
+                        : meta.value,
+                    ok: meta.ok,
+                    statusLabel: meta.badge,
+                    title: getCheckMessage('qmt_agent_online'),
+                };
+            })(),
         ];
-    // 仅展示后端实际返回的检查项（后端精简后自动隐藏已移除的项）
+
+    // 仅展示后端实际返回的检查项
     const envChecks = envChecksAll.filter((item) => pickMonitorItem(item.keyRef) !== undefined);
 
+    // 链路质量检查项定义（带 keyRef 用于动态过滤）
     const connectionChecksAll = isGlobalSim
         ? [
-            { label: 'Redis Signal', keyRef: 'redis', value: getCheckMessage('redis'), ok: getCheckTone('redis') },
-            { label: 'PostgreSQL', keyRef: 'db', value: getCheckMessage('db'), ok: getCheckTone('db') },
-            { label: 'Data Feed', keyRef: dataFeedCheckKey, value: getCheckMessage(dataFeedCheckKey), ok: getCheckTone(dataFeedCheckKey) },
-            { label: 'WebSocket', keyRef: 'websocket', value: wsStatusText.label, ok: wsStatusText.ok },
-        ].map(toConnectionCheck)
+            { keyRef: 'redis', label: 'Redis Signal', value: getCheckMessage('redis'), ok: getCheckTone('redis') },
+            { keyRef: 'db', label: 'PostgreSQL', value: getCheckMessage('db'), ok: getCheckTone('db') },
+            { keyRef: 'stream_series_freshness', label: '行情检测', value: getDataFeedDisplayMessage(getCheckMessage(dataFeedCheckKey), getCheckTone(dataFeedCheckKey)), ok: getCheckTone(dataFeedCheckKey) },
+            { keyRef: 'websocket', label: 'WebSocket', value: wsStatusText.label, ok: wsStatusText.ok },
+        ]
         : [
-            { label: 'Redis Signal', keyRef: 'redis', value: getCheckMessage('redis'), ok: getCheckTone('redis') },
-            { label: 'PostgreSQL', keyRef: 'db', value: getCheckMessage('db'), ok: getCheckTone('db') },
-            { label: 'Data Feed', keyRef: dataFeedCheckKey, value: getCheckMessage(dataFeedCheckKey), ok: getCheckTone(dataFeedCheckKey) },
-            { label: 'WebSocket', keyRef: 'websocket', value: wsStatusText.label, ok: wsStatusText.ok },
-        ].map(toConnectionCheck);
-    const connectionChecks = connectionChecksAll.filter((item: any) => {
-        if (item.keyRef === 'websocket') return true; // WebSocket 状态独立管理，始终展示
-        return pickMonitorItem(item.keyRef) !== undefined;
-    });
+            { keyRef: 'redis', label: 'Redis Signal', value: getCheckMessage('redis'), ok: getCheckTone('redis') },
+            { keyRef: 'db', label: 'PostgreSQL', value: getCheckMessage('db'), ok: getCheckTone('db') },
+            { keyRef: 'stream_series_freshness', label: '行情检测', value: getDataFeedDisplayMessage(getCheckMessage(dataFeedCheckKey), getCheckTone(dataFeedCheckKey)), ok: getCheckTone(dataFeedCheckKey) },
+            { keyRef: 'websocket', label: 'WebSocket', value: wsStatusText.label, ok: wsStatusText.ok },
+        ];
+
+    // 仅展示后端实际返回的检查项（WebSocket 除外，因为是前端状态）
+    const connectionChecks = connectionChecksAll
+        .filter((item) => item.keyRef === 'websocket' || pickMonitorItem(item.keyRef) !== undefined)
+        .map((item) => toConnectionCheck({ label: item.label, value: item.value, ok: item.ok }));
     const connectionAttentionCount = connectionChecks.filter((item) => item.level !== 'green').length;
     const connectionHealthyCount = connectionChecks.length - connectionAttentionCount;
 
     const loadHostedLogs = useCallback(async (taskId: string, reset = false) => {
         if (!taskId) return;
         try {
-            const realTradingService = await loadRealTradingService();
+            const { realTradingService } = await import('../../../services/realTradingService');
             const result = await realTradingService.getManualExecutionLogs(
                 taskId,
                 reset ? '0-0' : hostedCursorRef.current,
@@ -927,7 +1018,7 @@ const StrategyManagement: React.FC<StrategyManagementProps> = ({
                                     <span className="text-[11px] text-slate-300 text-center px-2">
                                         {latestInferenceRunLoading
                                             ? '请等待默认模型批次查询完成'
-                                            : (signalSourceMessage || '当前默认模型尚无推理结果可被自动托管消费')}
+                                            : (signalSourceMessage || '当前默认模型未返回可被自动托管消费的推理结果')}
                                     </span>
                                 </div>
                             )}
@@ -953,9 +1044,11 @@ const StrategyManagement: React.FC<StrategyManagementProps> = ({
                                             </div>
                                         </div>
                                         <div className="shrink-0 self-center">
-                                            <span className={`text-[11px] font-black flex items-center gap-1.5 leading-none ${item.ok ? 'text-green-600' : (item.ok === false ? 'text-rose-600' : 'text-gray-500')}`}>
+                                            <span className={`text-[10px] font-black flex items-center gap-1.5 leading-none ${item.ok ? 'text-green-600' : (item.ok === false ? 'text-rose-600' : 'text-gray-500')}`}>
                                                 <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${item.ok ? 'bg-green-500' : (item.ok === false ? 'bg-rose-500' : 'bg-gray-400')}`}></div>
-                                                {item.ok ? '正常' : (item.ok === false ? '异常' : '未获取')}
+                                                {'statusLabel' in item && typeof item.statusLabel === 'string'
+                                                    ? item.statusLabel
+                                                    : (item.ok ? '正常' : (item.ok === false ? '异常' : '未获取'))}
                                             </span>
                                         </div>
                                     </div>
@@ -990,10 +1083,10 @@ const StrategyManagement: React.FC<StrategyManagementProps> = ({
                                 <div className="flex items-center justify-between gap-4">
                                     <div className="min-w-0">
                                         <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">链路总览</div>
-                                        <div className="text-sm font-bold text-slate-700">
+                                        <div className="text-sm font-bold text-slate-700 leading-tight">
                                             {connectionAttentionCount === 0
                                                 ? '当前核心链路均处于可用状态'
-                                                : `当前有 ${connectionAttentionCount} 项链路需要优先关注`}
+                                                : `当前有 ${connectionAttentionCount} 项需关注`}
                                         </div>
                                     </div>
                                     <div className="text-right shrink-0">
@@ -1009,7 +1102,7 @@ const StrategyManagement: React.FC<StrategyManagementProps> = ({
                                 {connectionChecks.map((item) => (
                                     <div
                                         key={item.label}
-                                        className={`rounded-xl p-3 border shadow-sm ${
+                                        className={`rounded-2xl p-4 border shadow-sm flex flex-col justify-between ${
                                             item.level === 'red'
                                                 ? 'bg-rose-50/70 border-rose-100'
                                                 : item.level === 'yellow'
@@ -1017,23 +1110,23 @@ const StrategyManagement: React.FC<StrategyManagementProps> = ({
                                                     : 'bg-emerald-50/70 border-emerald-100'
                                         }`}
                                     >
-                                        <div className="flex items-center justify-between gap-2 mb-2">
-                                            <span className="min-w-0 text-[11px] font-black text-slate-400 tracking-[0.12em] leading-none whitespace-nowrap truncate">
+                                        <div className="flex items-center justify-between gap-2 mb-3">
+                                            <span className="min-w-0 text-[10px] font-black text-slate-400 tracking-[0.1em] leading-none whitespace-nowrap truncate uppercase">
                                                 {item.label}
                                             </span>
                                             <span
-                                                className={`shrink-0 w-3 h-3 rounded-full border ${
+                                                className={`shrink-0 w-2.5 h-2.5 rounded-full border ${
                                                     item.level === 'red'
-                                                        ? 'bg-rose-500 border-rose-300 shadow-[0_0_0_4px_rgba(244,63,94,0.10)]'
+                                                        ? 'bg-rose-500 border-rose-300 shadow-[0_0_0_3px_rgba(244,63,94,0.10)]'
                                                         : item.level === 'yellow'
-                                                            ? 'bg-amber-400 border-amber-300 shadow-[0_0_0_4px_rgba(251,191,36,0.14)]'
-                                                            : 'bg-emerald-500 border-emerald-300 shadow-[0_0_0_4px_rgba(16,185,129,0.10)]'
+                                                            ? 'bg-amber-400 border-amber-300 shadow-[0_0_0_3px_rgba(251,191,36,0.14)]'
+                                                            : 'bg-emerald-500 border-emerald-300 shadow-[0_0_0_3px_rgba(16,185,129,0.10)]'
                                                 }`}
                                                 title={item.level === 'red' ? '红灯' : item.level === 'yellow' ? '黄灯' : '绿灯'}
                                                 aria-label={item.level === 'red' ? '红灯' : item.level === 'yellow' ? '黄灯' : '绿灯'}
                                             />
                                         </div>
-                                        <div className={`text-xs font-bold leading-tight ${
+                                        <div className={`text-[11px] font-bold leading-tight ${
                                             item.level === 'red'
                                                 ? 'text-rose-700'
                                                 : item.level === 'yellow'
@@ -1105,16 +1198,14 @@ const StrategyManagement: React.FC<StrategyManagementProps> = ({
                                         {hostedRunStatusLabel}
                                     </div>
                                 </div>
-                                <div className="rounded-xl bg-slate-50/70 p-3 border border-slate-100/50 shadow-sm sm:col-span-2">
-                                    <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">下一次计划执行</div>
-                                    <div className="font-bold text-slate-800 text-xs">
-                                        {nextExecutionTargetText}
-                                    </div>
-                                    <div className="mt-1 text-[11px] text-slate-500 leading-relaxed">
-                                        {nextExecutionPhaseText} · {nextExecutionWindowText}
-                                    </div>
-                                </div>
                             </div>
+                            <button
+                                type="button"
+                                onClick={handleOpenModelRegistry}
+                                className="w-full py-2.5 rounded-xl bg-blue-50 text-blue-700 text-[11px] font-black hover:bg-blue-100 transition-all border border-blue-100 shadow-sm"
+                            >
+                                前往模型管理
+                            </button>
                         </div>
                     </div>
 
@@ -1187,40 +1278,23 @@ const StrategyManagement: React.FC<StrategyManagementProps> = ({
 
                                     <div className="grid grid-cols-2 gap-2">
                                         <div className="rounded-xl bg-slate-50 p-3 border border-slate-100 shadow-sm">
-                                            <div className="text-[10px] font-black text-slate-400 uppercase mb-1">目标跨度</div>
-                                            <div className="font-bold text-slate-700 text-xs truncate">
-                                                {latestHostedTaskPreviewSummary.target_horizon_days ? `${latestHostedTaskPreviewSummary.target_horizon_days} 个交易日` : '-'}
-                                            </div>
-                                        </div>
-                                        <div className="rounded-xl bg-slate-50 p-3 border border-slate-100 shadow-sm">
                                             <div className="text-[10px] font-black text-slate-400 uppercase mb-1">执行窗口</div>
-                                            <div
-                                                className="font-bold text-slate-700 text-[11px] leading-tight truncate"
-                                                title={`${latestHostedRequest.execution_window?.start || '-'} ~ ${latestHostedRequest.execution_window?.end || '-'}`}
-                                            >
+                                            <div className="font-bold text-slate-700 text-xs truncate">
                                                 {latestHostedRequest.execution_window?.start || '-'} ~ {latestHostedRequest.execution_window?.end || '-'}
                                             </div>
                                         </div>
-                                    </div>
-
-                                    <div className="flex items-center gap-2">
-                                        <button
-                                            type="button"
-                                            onClick={() => setHostedLogsVisible(!hostedLogsVisible)}
-                                            className="flex-1 py-2.5 rounded-xl bg-slate-50 text-slate-800 text-[11px] font-black hover:bg-slate-100 transition-all flex items-center justify-center gap-2 border border-slate-200 shadow-sm"
-                                        >
-                                            <TerminalSquare size={14} />
-                                            {hostedLogsVisible ? '收起任务日志' : '查看任务日志'}
-                                        </button>
-                                        {onOpenManualTask && (
-                                            <button
-                                                type="button"
-                                                onClick={onOpenManualTask}
-                                                className="flex-1 py-2.5 rounded-xl bg-blue-50 text-blue-700 text-[11px] font-black hover:bg-blue-100 transition-all flex items-center justify-center gap-2 border border-blue-100 shadow-sm"
+                                        <div className="rounded-xl bg-slate-50 p-3 border border-slate-100 shadow-sm">
+                                            <div className="text-[10px] font-black text-slate-400 uppercase mb-1">下次计划</div>
+                                            <div className="font-bold text-slate-800 text-xs truncate">
+                                                {nextExecutionTargetText}
+                                            </div>
+                                            <div
+                                                className="mt-1 text-[11px] text-slate-500 leading-tight truncate"
+                                                title={`${nextExecutionPhaseText} · ${nextExecutionWindowText}`}
                                             >
-                                                <Activity size={14} /> 查看详情
-                                            </button>
-                                        )}
+                                                {nextExecutionPhaseText} · {nextExecutionWindowText}
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             )}

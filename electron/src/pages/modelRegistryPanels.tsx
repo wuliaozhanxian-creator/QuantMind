@@ -4,9 +4,9 @@ import { clsx } from 'clsx';
 import dayjs from 'dayjs';
 import {
   Layers, Star, RefreshCw, Search, Code, Calendar, Layers2,
-  History, Archive, Brain, CheckCircle2, Clock, XCircle, Trash2,
+  History, Archive, Brain, CheckCircle2, Clock, XCircle,
   ChevronRight, Play, Cpu, TrendingUp, Download, ChevronDown,
-  ChevronUp, Shield, Zap, Activity, ListFilter, BarChart3, Info, AlertCircle,
+  ChevronUp, Shield, Zap, Activity, ListFilter, BarChart3, Info, AlertCircle, Trash2,
 } from 'lucide-react';
 import {
   UserModelRecord,
@@ -16,6 +16,7 @@ import {
   InferenceRankingResult,
   AutoInferenceSettings,
   LatestInferenceRunInfo,
+  InferenceDispatchLogRecord,
   ModelShapSummaryResponse,
   ModelShapSummaryItem, modelTrainingService,
 } from '../services/modelTrainingService';
@@ -709,6 +710,8 @@ export const InferenceCenterPanel: React.FC<{
   onToggleAuto: (enabled: boolean) => void;
   latestInferenceRun: LatestInferenceRunInfo | null;
   latestInferenceRunLoading: boolean;
+  dispatchLogs: InferenceDispatchLogRecord[];
+  dispatchLogsLoading: boolean;
   precheck: InferencePrecheckResult | null;
   precheckLoading: boolean;
   onRefreshPrecheck: () => void;
@@ -722,7 +725,7 @@ export const InferenceCenterPanel: React.FC<{
 }> = ({
   model, inferenceDate, onDateChange, targetDate, targetDateLoading, horizonDays,
   running, onRun, onRunAsDefault, isDefault, lastRun, history, historyLoading, onViewRanking,
-  autoSettings, autoSaving, onToggleAuto, latestInferenceRun, latestInferenceRunLoading, precheck, precheckLoading, onRefreshPrecheck,
+  autoSettings, autoSaving, onToggleAuto, latestInferenceRun, latestInferenceRunLoading, dispatchLogs, dispatchLogsLoading, precheck, precheckLoading, onRefreshPrecheck,
   historyRunIdFilter, onHistoryRunIdFilterChange, historyStatusFilter, onHistoryStatusFilterChange, historyDateFilter, onHistoryDateFilterChange,
   onDeleteHistory,
 }) => {
@@ -732,8 +735,25 @@ export const InferenceCenterPanel: React.FC<{
     : modelIdToDisplayName(latestInferenceRun?.model_id);
 
   const [currentPage, setCurrentPage] = useState(1);
+  const [dispatchOpen, setDispatchOpen] = useState(false);
   const pageSize = 5;
   const paginatedHistory = history.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const dispatchStatusTone = (status: string) => {
+    switch (status) {
+      case 'success':
+        return 'bg-emerald-500';
+      case 'failed':
+        return 'bg-rose-500';
+      case 'running':
+        return 'bg-blue-500';
+      case 'dispatched':
+        return 'bg-amber-500';
+      case 'skipped':
+        return 'bg-slate-400';
+      default:
+        return 'bg-slate-300';
+    }
+  };
 
   return (
     <div className="pt-0 pb-10">
@@ -921,10 +941,74 @@ export const InferenceCenterPanel: React.FC<{
                 <RefreshCw size={14} className={clsx("text-blue-500", autoSettings?.enabled && "animate-spin-slow")} />
                 <div>
                   <Text className="text-[11px] font-bold text-slate-700 block leading-tight">自动调度</Text>
-                  <Text className="text-[9px] text-slate-400">次日 00:00 起进入任务队列</Text>
+                  <Text className="text-[9px] text-slate-400">交易日 04:00 起进入任务队列</Text>
                 </div>
               </div>
               <Switch size="small" checked={autoSettings?.enabled} loading={autoSaving} onChange={onToggleAuto} className={autoSettings?.enabled ? 'bg-blue-600' : ''} />
+           </div>
+
+           <div className="glass-panel rounded-2xl p-4 border border-slate-100/50">
+             <button
+               type="button"
+               onClick={() => setDispatchOpen((prev) => !prev)}
+               className="w-full flex items-center justify-between text-left"
+             >
+               <div className="flex items-center gap-2 text-slate-400">
+                 <Activity size={14} />
+                 <Text className="text-[10px] font-black uppercase tracking-widest">调度记录</Text>
+               </div>
+               <div className="flex items-center gap-2">
+                 <Text className="text-[9px] text-slate-300">最近 6 条</Text>
+                 {dispatchOpen ? (
+                   <ChevronUp size={14} className="text-slate-300" />
+                 ) : (
+                   <ChevronDown size={14} className="text-slate-300" />
+                 )}
+               </div>
+             </button>
+             {dispatchOpen ? (
+               <div className="space-y-2 mt-3">
+                 {dispatchLogsLoading ? (
+                   <div className="text-center py-5"><Spin size="small" /></div>
+                 ) : dispatchLogs.length === 0 ? (
+                   <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={<span className="text-[9px]">暂无调度记录</span>} />
+                 ) : (
+                   dispatchLogs.slice(0, 6).map((item) => (
+                     <div key={item.id} className="rounded-xl border border-slate-100/60 bg-slate-50/40 p-2.5">
+                       <div className="flex items-center justify-between gap-2">
+                         <div className="flex items-center gap-2 min-w-0">
+                           <div className={clsx('w-1.5 h-1.5 rounded-full shrink-0', dispatchStatusTone(item.status))} />
+                           <Text className="text-[10px] font-black text-slate-700 uppercase truncate">{item.status}</Text>
+                           {item.reason_code && (
+                             <Tag className="m-0 border-0 bg-white text-[8px] font-black text-slate-400 px-1.5">
+                               {item.reason_code}
+                             </Tag>
+                           )}
+                         </div>
+                         <Text className="text-[8px] text-slate-300 font-mono shrink-0">
+                           {dayjs(item.created_at).isValid() ? dayjs(item.created_at).format('HH:mm:ss') : '—'}
+                         </Text>
+                       </div>
+                       <div className="mt-1.5 space-y-1">
+                         <Text className="text-[9px] text-slate-500 block">
+                           目标日 {item.prediction_trade_date || '—'} · 数据日 {item.data_trade_date || '—'}
+                         </Text>
+                         {item.run_id ? (
+                           <Text className="text-[9px] font-mono text-slate-400 block truncate">
+                             run_id: {item.run_id}
+                           </Text>
+                         ) : null}
+                         {item.reason_detail ? (
+                           <Text className="text-[9px] text-slate-400 block leading-relaxed break-all">
+                             {item.reason_detail}
+                           </Text>
+                         ) : null}
+                       </div>
+                     </div>
+                   ))
+                 )}
+               </div>
+             ) : null}
            </div>
 
            {/* 历史记录卡片：通过 flex-1 撑满高度，与左侧对齐 */}
@@ -951,7 +1035,7 @@ export const InferenceCenterPanel: React.FC<{
                 {historyLoading ? <div className="text-center py-6"><Spin size="small" /></div> : 
                  history.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={<span className="text-[9px]">暂无记录</span>} /> :
                  paginatedHistory.map(run => (
-                  <div key={run.run_id} className="group flex items-center justify-between p-2.5 rounded-xl bg-slate-50/40 border border-slate-100/30 hover:bg-white hover:border-blue-100 transition-all cursor-pointer" onClick={() => onViewRanking(run.run_id)}>
+                  <div key={run.run_id} className="group flex items-center justify-between p-2.5 rounded-xl bg-slate-50/40 border border-slate-100/30 hover:bg-white hover:border-blue-100 transition-all cursor-pointer relative" onClick={() => onViewRanking(run.run_id)}>
                     <div className="flex flex-col min-w-0">
                       <div className="flex items-center gap-2 mb-0.5">
                         <div className={clsx("w-1.5 h-1.5 rounded-full shrink-0", run.status === 'completed' ? 'bg-emerald-500' : run.status === 'running' ? 'bg-blue-500' : 'bg-rose-500')} />

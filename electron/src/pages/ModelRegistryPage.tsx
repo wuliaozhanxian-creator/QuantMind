@@ -24,6 +24,7 @@ import {
   InferenceRankingResult,
   AutoInferenceSettings,
   LatestInferenceRunInfo,
+  InferenceDispatchLogRecord,
   ModelShapSummaryResponse,
 } from '../services/modelTrainingService';
 import {
@@ -89,6 +90,8 @@ export const ModelRegistryPage: React.FC = () => {
   const [autoSaving, setAutoSaving] = useState(false);
   const [latestInferenceRun, setLatestInferenceRun] = useState<LatestInferenceRunInfo | null>(null);
   const [latestInferenceRunLoading, setLatestInferenceRunLoading] = useState(false);
+  const [dispatchLogs, setDispatchLogs] = useState<InferenceDispatchLogRecord[]>([]);
+  const [dispatchLogsLoading, setDispatchLogsLoading] = useState(false);
   const [rankingOpen, setRankingOpen] = useState(false);
   const [rankingResult, setRankingResult] = useState<InferenceRankingResult | null>(null);
   const [rankingLoading, setRankingLoading] = useState(false);
@@ -174,6 +177,7 @@ export const ModelRegistryPage: React.FC = () => {
     setInferencePrecheck(null);
     setAutoSettings(null);
     setLatestInferenceRun(null);
+    setDispatchLogs([]);
     setHistoryRunIdFilter('');
     setHistoryStatusFilter('all');
     setHistoryDateFilter(null);
@@ -311,14 +315,27 @@ export const ModelRegistryPage: React.FC = () => {
     }
   }, []);
 
+  const loadInferenceDispatchLogs = useCallback(async (modelId: string) => {
+    setDispatchLogsLoading(true);
+    try {
+      const resp = await modelTrainingService.listInferenceDispatchLogs(modelId, 20);
+      setDispatchLogs(resp.items);
+    } catch {
+      setDispatchLogs([]);
+    } finally {
+      setDispatchLogsLoading(false);
+    }
+  }, []);
+
   const refreshInferencePanel = useCallback(async (modelId: string) => {
     const currentDate = inferenceDate ? inferenceDate.format('YYYY-MM-DD') : undefined;
     await Promise.all([
       loadPrecheck(modelId, currentDate),
       loadAutoSettings(modelId),
       loadLatestInferenceRun(modelId),
+      loadInferenceDispatchLogs(modelId),
     ]);
-  }, [inferenceDate, loadAutoSettings, loadLatestInferenceRun, loadPrecheck]);
+  }, [inferenceDate, loadAutoSettings, loadInferenceDispatchLogs, loadLatestInferenceRun, loadPrecheck]);
 
   useEffect(() => {
     if (selectedModel && mainTab === 'inference') {
@@ -366,7 +383,7 @@ export const ModelRegistryPage: React.FC = () => {
     if (!selectedModel) return;
     Modal.confirm({
       title: '归档模型',
-      content: `确定归档 "${selectedModel.model_id}"？归档后不再参与推理，但数据不会删除。`,
+      content: `确定归档 "${modelDisplayName(selectedModel)}"？归档后不再参与推理，数据会定期清理。`,
       okText: '确认归档', okButtonProps: { danger: true },
       cancelText: '取消',
       onOk: async () => {
@@ -495,7 +512,9 @@ export const ModelRegistryPage: React.FC = () => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `ranking_${rankingResult.target_date || 'result'}_${rankingResult.summary?.run_id || 'run'}.csv`;
+      const signalDate = rankingResult.target_date || 'signalDate';
+      const featureDate = rankingResult.inference_date || rankingResult.summary?.inference_date || 'featureDate';
+      a.download = `ranking_signal-${signalDate}_feature-${featureDate}_${rankingResult.summary?.run_id || 'run'}.csv`;
       a.style.display = 'none';
       document.body.appendChild(a);
       a.click();
@@ -766,6 +785,8 @@ export const ModelRegistryPage: React.FC = () => {
                             onToggleAuto={handleToggleAuto}
                             latestInferenceRun={latestInferenceRun}
                             latestInferenceRunLoading={latestInferenceRunLoading}
+                            dispatchLogs={dispatchLogs}
+                            dispatchLogsLoading={dispatchLogsLoading}
                             precheck={inferencePrecheck}
                             precheckLoading={inferencePrecheckLoading}
                             onRefreshPrecheck={() => {
@@ -922,7 +943,7 @@ export const ModelRegistryPage: React.FC = () => {
               </span>
               {rankingResult && (
                 <span className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-widest truncate">
-                  目标交易日：{rankingResult.target_date}
+                  信号日：{rankingResult.target_date} · 特征日：{rankingResult.inference_date || rankingResult.summary?.inference_date || '—'}
                 </span>
               )}
             </div>
@@ -1016,6 +1037,22 @@ export const ModelRegistryPage: React.FC = () => {
                             <Text className="text-[10px] text-slate-400 font-black uppercase block">数据源</Text>
                             <Text className="text-xs font-black text-slate-800 font-mono break-all">
                               {rankingResult.summary.active_data_source || '—'}
+                            </Text>
+                          </div>
+                          <div className="rounded-xl border border-slate-100 bg-white p-3">
+                            <Text className="text-[10px] text-slate-400 font-black uppercase block">一致性预检</Text>
+                            <Text className="text-xs font-black text-slate-800">
+                              {(rankingResult.summary?.result_json as any)?.precheck_passed === true
+                                ? '通过'
+                                : (rankingResult.summary?.result_json as any)?.precheck_passed === false
+                                  ? '失败'
+                                  : '—'}
+                            </Text>
+                          </div>
+                          <div className="rounded-xl border border-slate-100 bg-white p-3">
+                            <Text className="text-[10px] text-slate-400 font-black uppercase block">不一致类型</Text>
+                            <Text className="text-xs font-black text-rose-600 break-all">
+                              {(rankingResult.summary?.result_json as any)?.mismatch_type || '—'}
                             </Text>
                           </div>
                           <div className="rounded-xl border border-slate-100 bg-white p-3 sm:col-span-2">

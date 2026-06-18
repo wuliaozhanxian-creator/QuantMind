@@ -124,6 +124,12 @@ def parse_args() -> argparse.Namespace:
         help="Source parquet path",
     )
     parser.add_argument("--batch-size", type=int, default=2000, help="Upsert batch size")
+    parser.add_argument(
+        "--refresh-days",
+        type=int,
+        default=0,
+        help="Also re-sync rows whose trade_date falls within the recent N calendar days",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Preview only")
     return parser.parse_args()
 
@@ -157,7 +163,11 @@ def ensure_raw_columns(engine) -> None:
             conn.execute(text(f"ALTER TABLE public.stock_daily_latest ADD COLUMN IF NOT EXISTS {col} {col_type}"))
 
 
-def load_incremental_frame(parquet_path: Path, local_max_date: pd.Timestamp | None) -> pd.DataFrame:
+def load_incremental_frame(
+    parquet_path: Path,
+    local_max_date: pd.Timestamp | None,
+    refresh_since: pd.Timestamp | None = None,
+) -> pd.DataFrame:
     frame = pd.read_parquet(parquet_path)
     frame["trade_date"] = pd.to_datetime(frame["trade_date"])
 
@@ -187,8 +197,13 @@ def load_incremental_frame(parquet_path: Path, local_max_date: pd.Timestamp | No
     if "amount" in frame.columns and "raw_amount" not in frame.columns:
         frame["raw_amount"] = pd.to_numeric(frame["amount"], errors="coerce")
 
-    if local_max_date is not None:
-        frame = frame[frame["trade_date"] > local_max_date].copy()
+    if local_max_date is not None or refresh_since is not None:
+        mask = pd.Series(False, index=frame.index)
+        if local_max_date is not None:
+            mask = mask | (frame["trade_date"] > local_max_date)
+        if refresh_since is not None:
+            mask = mask | (frame["trade_date"] >= refresh_since)
+        frame = frame[mask].copy()
     return frame.sort_values(["trade_date", "symbol"]).reset_index(drop=True)
 
 
@@ -291,7 +306,12 @@ def main() -> None:
         local_max.date() if local_max is not None else None,
     )
 
-    incoming = load_incremental_frame(parquet_path, local_max)
+    refresh_since = None
+    if args.refresh_days and args.refresh_days > 0:
+        refresh_since = pd.Timestamp.today().normalize() - pd.Timedelta(days=int(args.refresh_days))
+        LOGGER.info("recent refresh enabled: refresh_days=%s refresh_since=%s", args.refresh_days, refresh_since.date())
+
+    incoming = load_incremental_frame(parquet_path, local_max, refresh_since=refresh_since)
     if incoming.empty:
         LOGGER.info("No parquet rows newer than local max trade_date")
         return

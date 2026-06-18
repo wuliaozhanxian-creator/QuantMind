@@ -18,6 +18,26 @@ export interface ModelTrainingRunStatus {
   isCompleted: boolean;
 }
 
+export interface TrainingRunSummary {
+  run_id: string;
+  tenant_id: string;
+  user_id: string;
+  status: string;
+  progress: number;
+  container_id?: string;
+  updated_at?: string;
+  last_line?: string;
+}
+
+export interface TrainingRunListResponse {
+  tenant_id: string;
+  user_id: string;
+  page: number;
+  page_size: number;
+  total: number;
+  items: TrainingRunSummary[];
+}
+
 export interface UserModelRecord {
   tenant_id: string;
   user_id: string;
@@ -72,14 +92,14 @@ export interface InferenceRunRecord {
   calendar_adjusted?: boolean;
   data_trade_date?: string;
   prediction_trade_date?: string;
+  model_switch_used?: boolean;
+  execution_mode?: 'independent_model' | 'system_chain' | string;
   fallback_used?: boolean;
   fallback_reason?: string;
-  execution_mode?: string;
-  model_switch_used?: boolean;
-  model_switch_reason?: string;
   failure_stage?: string;
   active_model_id?: string;
   effective_model_id?: string;
+  model_switch_reason?: string;
   model_source?: string;
   active_data_source?: string;
   stdout?: string;
@@ -140,6 +160,7 @@ export interface AutoInferenceSettings {
   schedule_time?: string;
   last_run?: InferenceRunRecord;
   next_run?: string;
+  next_run_at?: string;
   updated_at?: string;
 }
 
@@ -152,6 +173,22 @@ export interface LatestInferenceRunInfo {
   status?: string;
   updated_at?: string;
   matched_model?: boolean | null;
+}
+
+export interface InferenceDispatchLogRecord {
+  id: number;
+  trigger_source: string;
+  tenant_id: string;
+  user_id: string;
+  strategy_id?: string;
+  model_id?: string;
+  data_trade_date?: string;
+  prediction_trade_date?: string;
+  status: 'dispatched' | 'running' | 'success' | 'failed' | 'skipped' | string;
+  reason_code?: string;
+  reason_detail?: string;
+  run_id?: string;
+  created_at: string;
 }
 
 export interface StrategyModelBinding {
@@ -211,15 +248,11 @@ class ModelTrainingService {
 
   constructor() {
     this.client = axios.create({
-      timeout: 30000,
+      baseURL: this.baseURL,
+      timeout: 3600000, // 增加到 3600s (1小时) 以彻底解决极端推理耗时问题
       headers: {
         'Content-Type': 'application/json',
       },
-    });
-
-    this.client.interceptors.request.use((config) => {
-      config.baseURL = String((import.meta as any).env?.VITE_USER_API_URL || SERVICE_ENDPOINTS.USER_SERVICE);
-      return config;
     });
 
     this.client.interceptors.request.use((config) => {
@@ -263,6 +296,13 @@ class ModelTrainingService {
 
   async getTrainingRun(runId: string): Promise<ModelTrainingRunStatus> {
     const resp = await this.client.get<ModelTrainingRunStatus>(`/models/training-runs/${runId}`);
+    return resp.data;
+  }
+
+  async listTrainingRuns(page = 1, pageSize = 20): Promise<TrainingRunListResponse> {
+    const resp = await this.client.get<TrainingRunListResponse>('/models/training-runs', {
+      params: { page, page_size: pageSize },
+    });
     return resp.data;
   }
 
@@ -414,9 +454,6 @@ class ModelTrainingService {
       prediction_trade_date: raw?.prediction_trade_date ? String(raw.prediction_trade_date) : undefined,
       fallback_used: typeof raw?.fallback_used === 'boolean' ? raw.fallback_used : undefined,
       fallback_reason: raw?.fallback_reason ? String(raw.fallback_reason) : undefined,
-      execution_mode: raw?.execution_mode ? String(raw.execution_mode) : (raw?.result_json?.execution_mode ? String(raw.result_json.execution_mode) : undefined),
-      model_switch_used: typeof raw?.model_switch_used === 'boolean' ? raw.model_switch_used : (typeof raw?.result_json?.model_switch_used === 'boolean' ? raw.result_json.model_switch_used : undefined),
-      model_switch_reason: raw?.model_switch_reason ? String(raw.model_switch_reason) : (raw?.result_json?.model_switch_reason ? String(raw.result_json.model_switch_reason) : undefined),
       failure_stage: raw?.failure_stage ? String(raw.failure_stage) : undefined,
       active_model_id: raw?.active_model_id ? String(raw.active_model_id) : undefined,
       effective_model_id: raw?.effective_model_id ? String(raw.effective_model_id) : undefined,
@@ -430,9 +467,16 @@ class ModelTrainingService {
     };
   }
 
-  async runModelInference(modelId: string, inferenceDate: string): Promise<InferenceExecutionResult> {
+  async runModelInference(
+    modelId: string | null,
+    inferenceDate: string,
+    options?: {
+      useDefaultModel?: boolean;
+    },
+  ): Promise<InferenceExecutionResult> {
     const resp = await this.client.post<InferenceExecutionResult>('/models/inference/run', {
       model_id: modelId,
+      use_default_model: Boolean(options?.useDefaultModel),
       inference_date: inferenceDate,
     });
     const data = resp.data as any;
@@ -511,20 +555,10 @@ class ModelTrainingService {
     };
   }
 
-  async deleteInferenceRun(runId: string): Promise<boolean> {
-    try {
-      await this.client.delete(`/models/inference/runs/${runId}`);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
   async deleteInferenceHistory(runId: string): Promise<{ deleted: boolean; run_id: string }> {
     const resp = await this.client.delete<{ deleted: boolean; run_id: string }>(`/models/inference/runs/${runId}`);
     return resp.data;
   }
-
 
   async getAutoInferenceSettings(modelId: string): Promise<AutoInferenceSettings> {
     const resp = await this.client.get<AutoInferenceSettings>(`/models/inference/settings/${modelId}`);
@@ -535,6 +569,7 @@ class ModelTrainingService {
       schedule_time: data?.schedule_time ? String(data.schedule_time) : undefined,
       last_run: data?.last_run_json ? this.normalizeInferenceRun(data.last_run_json) : data?.last_run ? this.normalizeInferenceRun(data.last_run) : undefined,
       next_run: data?.next_run ? String(data.next_run) : data?.next_run_at ? String(data.next_run_at) : undefined,
+      next_run_at: data?.next_run_at ? String(data.next_run_at) : undefined,
       updated_at: data?.updated_at ? String(data.updated_at) : undefined,
     };
   }
@@ -556,6 +591,32 @@ class ModelTrainingService {
     };
   }
 
+  async listInferenceDispatchLogs(
+    modelId: string,
+    limit = 20,
+  ): Promise<{ items: InferenceDispatchLogRecord[]; total: number }> {
+    const resp = await this.client.get<{ items: InferenceDispatchLogRecord[]; total: number }>(
+      '/models/inference/dispatch-logs',
+      { params: { model_id: modelId, limit } },
+    );
+    const items = (resp.data.items ?? []).map((item: any) => ({
+      id: Number(item?.id ?? 0),
+      trigger_source: String(item?.trigger_source ?? ''),
+      tenant_id: String(item?.tenant_id ?? ''),
+      user_id: String(item?.user_id ?? ''),
+      strategy_id: item?.strategy_id ? String(item.strategy_id) : undefined,
+      model_id: item?.model_id ? String(item.model_id) : undefined,
+      data_trade_date: item?.data_trade_date ? String(item.data_trade_date) : undefined,
+      prediction_trade_date: item?.prediction_trade_date ? String(item.prediction_trade_date) : undefined,
+      status: String(item?.status ?? ''),
+      reason_code: item?.reason_code ? String(item.reason_code) : undefined,
+      reason_detail: item?.reason_detail ? String(item.reason_detail) : undefined,
+      run_id: item?.run_id ? String(item.run_id) : undefined,
+      created_at: String(item?.created_at ?? ''),
+    }));
+    return { items, total: Number(resp.data.total ?? items.length) };
+  }
+
   async saveAutoInferenceSettings(modelId: string, settings: AutoInferenceSettings): Promise<AutoInferenceSettings> {
     const resp = await this.client.put<AutoInferenceSettings>(`/models/inference/settings/${modelId}`, {
       enabled: settings.enabled,
@@ -568,6 +629,7 @@ class ModelTrainingService {
       schedule_time: data?.schedule_time ? String(data.schedule_time) : undefined,
       last_run: data?.last_run_json ? this.normalizeInferenceRun(data.last_run_json) : data?.last_run ? this.normalizeInferenceRun(data.last_run) : undefined,
       next_run: data?.next_run ? String(data.next_run) : data?.next_run_at ? String(data.next_run_at) : undefined,
+      next_run_at: data?.next_run_at ? String(data.next_run_at) : undefined,
       updated_at: data?.updated_at ? String(data.updated_at) : undefined,
     };
   }

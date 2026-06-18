@@ -31,6 +31,7 @@ npm run check:platform
 - Strategy templates include `STRATEGY_CONFIG`, and `strategy_content` is sent when provided.
 - `react-window` is pinned to v1 for `FixedSizeList` usage in the backtest history UI.
 - 品牌图标仅保留给安装包与安装器资源，前端页面当前不再直接展示 logo 图形。
+- Ant Design 已升级到 `antd@6.3.7`，`@ant-design/icons` 已升级到 `6.2.2`；若自定义样式依赖组件内部 DOM 结构、`dropdownRender`/`overlayClassName` 等旧 API，请按 v6 迁移文档复查。
 - 模型训练页（`/model-training`）提交到 `POST /api/v1/admin/models/run-training` 时已对齐后端契约：
   - 请求字段使用 `features/train_start/train_end/valid_start/valid_end/test_start/test_end/lgb_params/num_boost_round`；
   - 不再注入硬编码基础字段（如 `open/high/low/close/volume/amount`），仅提交用户在特征字典中勾选的字段；
@@ -232,6 +233,15 @@ npm run check:platform
   - 容器项目目录：`/app/quantmind/...`
 - 如需手动输入根目录，请使用容器路径（例如 `/app/host` 或 `/app/quantmind`）。
 
+## 投研平台模块结构说明（2026-05-11）
+
+- 在不改变页面 UI/交互的前提下，投研模块已做结构下沉：
+  - `ResearchPlatformPage.tsx` 保持页面壳与渲染职责；
+  - 类型定义迁移至 `src/features/research/types.ts`；
+  - 筛选默认值与样式常量迁移至 `src/features/research/constants.ts`；
+  - 数值/代码格式化工具迁移至 `src/features/research/utils/formatters.ts`。
+- 目标是降低页面单文件复杂度，后续新增筛选器或扩展指标时优先在 `features/research` 下演进。
+
 ## 认证刷新重试策略
 
 - 前端对 401 触发的令牌刷新最多自动重试 2 次，连续失败会清空本地令牌并停止重复弹错；30 秒后重试计数自动归零。
@@ -260,3 +270,9 @@ npm run check:platform
 - 智能解析调用 `/strategy/parse-text` 可能触发 AI Strategy 预热与 LLM 推理，前端请求超时已提升到 120s。
 - 若在“风格选择”点击下一步时未检测到股票池文件，前端会自动保存当前股票池并再触发生成流程。
 - 仓位管理启用“动态仓位调整”后，市场环境检测设置不再展示，策略总仓位占比滑条会锁定。
+
+## 模型推理页调度记录（2026-06-18）
+
+- 模型推理页右侧“自动调度”下方新增“调度记录”折叠卡片，默认收起；展开后展示当前模型最近 6 条自动推理流水。
+- 数据来源为用户态接口 `GET /api/v1/models/inference/dispatch-logs?model_id=...`，会回显 `dispatched / running / success / failed / skipped` 事件、目标交易日、数据交易日、`run_id` 与失败原因。
+- 该卡片用于直接确认“04:00 是否已入队、是否开始执行、是否成功落批次”，无需再手动翻 `celery-worker` 日志。

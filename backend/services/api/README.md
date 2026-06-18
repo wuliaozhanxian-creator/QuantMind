@@ -8,6 +8,17 @@
 - 数据库配置来源：仅项目根目录 `.env`（服务目录 `.env` 不再维护 `DATABASE_URL`）。
 - 启动初始化：`quantmind-api` 启动时仅加载统一配置与数据库连接，不再在服务启动阶段自动建表或播种管理员数据；Schema 迁移与 bootstrap 需在发布流程中显式执行。
 
+## 用户权益口径更新（2026-06-06）
+- 社区预览版（`community_free`）的月度推理限额已恢复并强制收敛为 `10` 次。
+- `user_app/services/usage_service.py` 与 `backend/shared/quota_manager.py` 已在运行时对 `community_free/free` 做兜底纠偏，避免历史错误套餐配置继续显示或放行 `100` 次推理。
+- `user_app/scripts/sync_plans.py` 已补充 `community_free` 标准套餐定义，后续同步套餐配置时会保持 `训练 3 次 / 推理 10 次` 的一致口径。
+
+## 投研候选池更新（2026-05-15）
+- `GET /api/v1/research/universe` 的 `limit` 上限已恢复到 `10000`，满足前端全量候选池筛选需求。
+- 新增 `stock_daily_latest`（2026 年）Redis 日级缓存路径：按 `trade_date` 将当日全量快照写入 `qm:research:sdl:{trade_date}:v1`，默认 TTL 36 小时（可通过 `RESEARCH_SDL_REDIS_TTL_SECONDS` 调整）。
+- `research_service.get_research_universe` 已新增 Redis 快路径：当批次 `data_trade_date` 属于 2026 年且缓存可用时，直接用 Redis 快照补齐候选特征，减少高并发下重复联表压力。
+- 股票索引接口 `GET /api/v1/stocks/index` 现统一从数据库 `stock_daily_latest` 最新交易日读取，不再依赖本地 JSON 或硬编码股票数量；前端策略向导与回测页共用同一数据源。
+
 ## 模块边界（P1）
 - `api` 仅负责统一入口与横切能力：鉴权、限流、审计、路由聚合、服务代理。
 - `api` 自有业务域：`/api/v1/auth/*`、`/api/v1/users/*`、`/api/v1/profiles/*`、`/api/v1/admin/*`、`/api/v1/inquiry`、`/api/v1/files|execute|ai|config/*`（AI-IDE 代理）。
@@ -20,6 +31,7 @@
 - 当前测试范围仅包含聊天、会话、历史消息与健康检查；不接入 cron jobs、模型、技能、工具、工作空间等管理能力。
 - 当前测试阶段不配置上游访问密钥，若后续 CoPaw 增加鉴权，统一在网关适配层补充，不由前端直连处理。
 - 官网联系表单 `POST /api/v1/inquiry` 已直连 `quantmind-api`，提交内容会落到 `data/inquiries.json`，无需额外部署 website-server。
+- 官网订阅支付链路 `GET /api/v1/subscription/plans`、`POST /api/v1/subscription/orders`、`GET /api/v1/subscription/orders/{order_no}`、`GET /api/v1/subscription/my-subscription`、`POST /api/v1/subscription/alipay-notify` 已统一由 `quantmind-api` 承载；官网前端不再依赖 `website/server` 处理生产支付请求。
 - 管理员仪表盘 `GET /api/v1/admin/dashboard/metrics` 现会聚合 `quantmind-api`、`quantmind-trade`、`quantmind-engine`、`quantmind-stream` 的真实 `/health` 状态生成 `health_score`，并结合 API 启动时间计算 `uptime_days`；如探测全部失败则降级为 `0` 分和 `degraded` 状态。
 - 禁止范围：`api` 不直接承载计算引擎、交易撮合与行情推送实现。
 - 管理端模型管理已继续拆分：`routers/admin/model_management.py` 仅保留模型 CRUD 和推理链路入口，通用扫描/校验/运维逻辑迁入 `routers/admin/model_management_utils.py` 与 `routers/admin/model_management_ops.py`。
@@ -64,6 +76,7 @@
 - 网关到引擎转发补充内部鉴别头：当 `strategy` 请求已鉴权时，自动注入 `X-Internal-Call`（值来自 `INTERNAL_CALL_SECRET`），与引擎侧内部鉴权中间件保持一致。
 - 长耗时代理超时分级：`/api/v1/strategy/generate*` 默认使用更长读超时（`ENGINE_PROXY_LLM_TIMEOUT_SECONDS`，默认 `600s`），其余引擎接口仍使用 `ENGINE_PROXY_TIMEOUT_SECONDS`（默认 `120s`），避免 LLM 生成在网关层被提前截断。
 - 引擎代理上游默认地址调整为 `http://127.0.0.1:8001`（替代 `localhost`），并在 `localhost` 连接失败时自动回退重试 IPv4 地址，降低本地解析异常导致的 `503 engine upstream unavailable` 概率。
+- 引擎代理连接重试增强（2026-05-14）：`engine_proxy` 新增可配置重试参数 `ENGINE_PROXY_CONNECT_RETRIES`（默认 5）、`ENGINE_PROXY_RETRY_BASE_DELAY_SECONDS`（默认 1.0）、`ENGINE_PROXY_RETRY_MAX_DELAY_SECONDS`（默认 4.0），用于覆盖引擎容器短暂重启窗口，降低 `/api/v1/strategies`、`/api/v1/stocks/*` 短时 `503` 概率。
 
 ## 管理端模型推理更新（2026-02-27）
 - 管理后台手动推理接口 `POST /api/v1/admin/models/run-inference` 新增 `model_file` 参数（默认 `model.bin`）。
@@ -115,18 +128,19 @@
   - 显式切分字段（可选）：`valid_start/valid_end/test_start/test_end`；
   - 可解释性字段（可选）：`explain(enable_shap/shap_split/shap_sample_rows)`，默认开启 SHAP 汇总；
   - 产物要求（可选）：`required_artifacts`（默认 `model.bin/pred.pkl/metadata.json/result.json`）。
-- 当传入显式切分字段时，后端会强制校验时间顺序：
-  `train_start <= train_end < valid_start <= valid_end < test_start <= test_end`。
-- `run-training` 返回体新增 `payload`（规范化后的最终配置），便于前端与运维审计。
 - `run-training` 的标签口径已在 `2026-06-07` 收敛：
   - `target_mode` 当前仅接受 `return`；
   - `label_formula` 继续作为元数据展示字段保留，但不驱动训练分支；
   - 实际训练标签以 `docker/training/train.py` 为准：后复权、`T+1` 开盘买入、`T+N` 收盘卖出，即 `adj_close(T+N) / adj_open(T+1) - 1`。
+- 当传入显式切分字段时，后端会强制校验时间顺序：
+  `train_start <= train_end < valid_start <= valid_end < test_start <= test_end`。
+- `run-training` 返回体新增 `payload`（规范化后的最终配置），便于前端与运维审计。
 - 训练回调 `POST /api/v1/admin/models/training-runs/{run_id}/complete` 已改为日志追加模式，不再覆盖已有 Batch 轮询日志。
 - 训练状态新增显式过渡态 `waiting_callback`（前端可直接展示），用于区分“Batch 已结束”与“最终回调未到”。
 - 编排器超时兜底：`waiting_callback` 超过 `BATCH_WAITING_CALLBACK_TIMEOUT_SECONDS`（默认 600 秒）会自动转 `failed` 并记录超时原因。
 - `run-training` 现增加特征白名单校验：`features` 必须属于当前生效特征字典（优先 `qm_feature_set_*`，不可用时回退 `config/features/model_training_feature_catalog_v1.json`），非法字段返回 `422`。
 - `GET /api/v1/models/inference/latest` 现可读取交易侧当前生效推理批次（Redis `qm:signal:latest:{tenant_id}:{user_id}`），用于前端回显最新 `run_id` 并与当前模型做匹配检查。
+- `GET /api/v1/models/inference/latest` 在传入 `model_id` 时，会优先返回该模型最新 `completed` 推理批次（仍保留 `latest_key` 回显），避免 Redis 消费指针短时滞后导致“生产批次摘要”显示旧 run。
 - 训练页前端请求已按后端契约统一，不再提交旧字段 `selectedFeatures/timePeriods/params`，避免字段口径不一致导致训练任务使用默认参数或空特征。
 - 训练状态查询 `GET /api/v1/models/training-runs/{run_id}`（及 admin 同名接口）已支持合并回测 Redis 实时日志快照：容器运行期的增量日志与进度优先从 Redis 读取，避免仅依赖 DB 尾日志导致“进度卡住”。
 
@@ -150,6 +164,9 @@
 - `overview` 模型列表显示口径修复（2026-05-01）：
   - `models[].name` 优先读取 `qm_user_models.metadata_json.display_name/model_name`，用于前端“研究模型”下拉与标题展示真实模型名称；
   - 当元数据缺失时，才回退到 `model_id` 的人类可读格式。
+ - `runs` 批次列表口径修复（2026-05-03）：
+  - `GET /api/v1/research/runs?model_id=...` 直接读取 `qm_model_inference_runs`，并返回 `inferenceDate=data_trade_date`、`targetDate=prediction_trade_date`，避免把预测生效日误展示为推理基准日；
+  - 同时回传 `status/lastUpdatedAt`，用于前端批次卡片展示。
 - `overview` 数值单位口径修复（2026-05-01）：
   - 候选明细 `marketCap` 统一按“亿元”返回，修复 `total_mv` 误按“万元”换算导致前端总市值筛选误杀的问题；
   - 候选明细 `amount` 统一按“亿元”返回，并兼容输入已是“亿元”或“元”两种来源口径。
@@ -164,6 +181,30 @@
 - 投研候选池查询性能修复（2026-05-02）：
   - `stock_daily_latest` 联表条件改为直接使用 `sdl.symbol = 转换后的快照 symbol`，避免 `UPPER(sdl.symbol)` 使 `symbol/trade_date` 索引失效；
   - 修复 `GET /api/v1/research/universe?run_id=...` 在 2600+ 候选批次上耗时数分钟、导致前端 30 秒超时的问题。
+- 投研候选池字段映射修复（2026-05-02）：
+  - `GET /api/v1/research/universe` 的最新涨跌幅改为读取生产库真实字段 `stock_daily_latest.pct_change`，避免误用不存在的 `change_pct` 触发 500；
+  - 候选明细继续从 `stock_daily_latest.stock_name/industry` 回填股票简称与行业，避免轻量查询结果只显示代码；
+  - 联表统一限定 `stock_daily_latest` 中每只股票自己的最新交易日，并兼容裸代码、前缀码和后缀码，避免多交易日重复命中或行情字段为空。
+- 投研候选池默认行情字段恢复（2026-05-02）：
+  - `GET /api/v1/research/overview` 与 `GET /api/v1/research/universe` 默认从 `stock_daily_latest` 读取前端表格字段，字段口径以 `docs/stock_daily_latest_维护文档.md` 为准；
+  - 已补充返回 `ma5/ma10/maGap5/maGap10/maGap20/rsi/rsi14/atr/macdHist/volRatio5/volRatio20/return1d/return3d/nextDayReturn/day3Return/pb/totalMv/floatMv/listedDays/mainFlow/instOwnership/profitGrowth/volumeTrend3d/conceptTags/indexTags`；
+  - 前端投研表格不应自行从缺省值推断这些指标，后端 BFF 负责把 `stock_daily_latest` 的 snake_case 字段映射为前端 camelCase 字段。
+- `POST /api/v1/research/symbols/features` 同样不再读取 `qm_research_candidate_snapshot` 中不存在的 `stock_name/industry/pe/roe` 等旧字段，统一由 `stock_daily_latest` 回填，避免保存自选/研究池后刷新特征时报 500。
+- `POST /api/v1/research/symbols/features` 新增 `lite=true` 轻量模式（2026-05-08）：仅从 `stock_daily_latest` 最新交易日读取核心字段（`symbol/stock_name/close/pe_ttm/total_mv`），用于大规模股票池初始化场景，避免不必要的用户快照联表查询。
+- `POST /api/v1/research/symbols/features` 全量模式性能修复（2026-05-14）：`sdl_latest` 改为先按请求 symbol 集合过滤、再做 `DISTINCT ON`，避免先扫全表再过滤导致单只股票请求也出现 30s+ 超时。
+- `POST /api/v1/research/symbols/features?lite=true` 的 Redis 日缓存新增质量校验：如果缓存中的 `pe/total_mv` 几乎全为 0，会自动判定为脏缓存并回源重建，避免前端股票池在大批量场景下稳定显示 `0.00`。
+- `GET /api/v1/research/universe` 大批量查询性能修复（2026-05-14）：移除对 `stock_daily_latest` 的日期区间窗口扫描（`LAG/LEAD`）路径，改为对分页结果按 `symbol+data_trade_date` 直接点查行情行，并使用 `stock_daily_latest.return_1d/return_3d` 字段，显著降低 `limit=10000` 场景下超时概率。
+- `GET /api/v1/research/universe` 收益字段口径回归修复（2026-05-15）：`routers/research_service.py` 的 `return_1d/return_3d` 已恢复为直读 `stock_daily_latest.return_1d/return_3d`，移除运行时 `LEAD(close)` 推导路径，避免大批量请求触发窗口计算导致超时抖动。
+- `GET /api/v1/research/universe` 量能趋势口径回归修复（2026-05-15）：`volume_trend_3d` 已改为直读 `stock_daily_latest.volume_trend_3d`，移除运行时 `LAG(volume)` 窗口计算，进一步降低高并发下查询抖动与超时风险。
+- `GET /api/v1/research/universe` 当日涨跌幅口径修复（2026-05-15）：`latest_change_pct` 已改为直读 `stock_daily_latest.pct_change`，移除 SQL 层 `*100` 重复放大；最终百分比显示仍由服务层自适应换算逻辑统一处理，避免 `+1000%` 级异常展示。
+- `GET /api/v1/research/universe` 百分比口径收敛（2026-05-15）：已移除服务层 `latest_change` 的启发式 `*100` 放大逻辑，统一按数据库百分比点直读直返；`return_1d/return_3d/return_5d/return_10d/return_20d/return_60d` 不再做运行时自适应换算，链路只接受 `stock_daily_latest` 中的百分比点口径。
+- `GET /api/v1/research/universe` Redis 日快照兜底增强（2026-06-16）：`qm:research:sdl:{trade_date}:v2` 现新增“旧交易日 3 日收益覆盖率”校验；若缓存对应交易日已过去至少 5 个自然日，但 `return_3d` 仍几乎全空，会自动删除该 key 并回源 `stock_daily_latest` 重建，避免数据库已回填而前端继续命中旧缓存。
+- `GET /api/v1/research/universe` Redis 日快照口径巡检增强（2026-06-17）：若 `qm:research:sdl:{trade_date}:v2` 中 `return_1d/return_3d` 近乎全落在 `[-1, 1]`，会被判定为“比例小数口径脏缓存”并自动删除重建，修复数据库已是百分比点、但接口仍命中旧缓存导致页面显示 `+0.02%` 这类缩小 100 倍的问题。
+- `GET /api/v1/research/universe` 返回数量治理（2026-05-15）：接口 `limit` 已收敛为 `1~1000`（默认 `500`），避免单请求拉取超大候选集导致网关 504 与数据库抖动。
+- `GET /api/v1/research/kline/{symbol}` 价格展示口径修复（2026-05-15）：K 线 `open/high/low/close` 改为直接返回 `stock_daily_latest` 当前价格值，不再按 `adj_factor` 再次换算，修复图表价格被缩小至 1.x 的问题。
+- `routers/research_service.py` 复权计算清理（2026-05-15）：`closePrice`、`ma5`、`ma10` 与 `kline` 全部改为直读数据库字段值，移除服务层 `adj_factor` 参与的任何价格换算，避免重复复权导致展示异常。
+- 投研简称兜底回归修复（2026-05-14）：`routers/research_service.py` 在 `stock_daily_latest.stock_name` 为空时，会重新从 `data/stocks/stocks_index.json` 读取 `symbol/code -> name` 映射补齐 `overview/universe/symbols/features` 返回的 `name`，避免旧批次或历史交易日行情缺少简称时前端表格只显示代码。
+- 投研个股详情 K 线价格口径修复（2026-05-14）：`GET /api/v1/research/kline/{symbol}` 返回前会将 `stock_daily_latest` 中存储的后复权 OHLC 按 `price / adj_factor` 转回前端展示使用的名义价，修复详情弹窗 K 线明显高于实际成交价的问题；成交量维持原始股数口径不变。
 - 投研模块结构重构（2026-05-11，接口不变）：
   - `routers/research.py` 已收敛为薄路由，仅负责参数接收与鉴权上下文透传；
   - 查询与序列化逻辑迁移至 `routers/research_service.py`；
@@ -171,23 +212,16 @@
 - 投研候选收益口径修复（2026-05-11）：
   - `GET /api/v1/research/universe` 的 `nextDayReturn/day3Return` 改为基于 `stock_daily_latest.close` 计算未来 1/3 交易日收益，避免误用当日涨跌字段导致收益展示失真；
   - 为避免窗口函数全表扫描，收益计算仅在当前分页候选 `symbol + data_trade_date` 的受限时间窗内执行，保持前端 30 秒超时约束内可返回。
-- 投研收益缓存与交易日口径收紧（2026-06-17）：
-  - `routers/research_service.py` 现强制以 `stock_daily_latest` 为唯一收益口径源，`return_1d/3d/5d/10d/20d/60d` 统一返回百分比点，禁止在接口层使用比例小数再二次放大；
-  - 研究页命中 Redis 的 `sdl:{trade_date}:*` 行情缓存后，会先校验收益口径；若发现未来收益整体落在异常小数区间，视为脏缓存并丢弃，随后回源 `stock_daily_latest` 重建；
-  - 指定 `data_trade_date` 缺行情时不再回退到最新交易日，避免 6 月 10 日/11 日这类历史批次串日后展示错值。
 - 投研候选池进一步提速（2026-05-11）：
   - 新增短 TTL 热点缓存（按 `tenant_id + user_id + run_id + limit` 维度缓存 90 秒），重复刷新同一批次时可直接命中，减少数据库压力。
   - `stock_daily_latest` 热点查询新增本地短缓存（120 秒）：覆盖 `POST /api/v1/research/symbols/features?lite=true` 与 `GET /api/v1/research/kline/{symbol}` 的高频读取场景，按 `symbol/trade_date` 相关键复用，降低行情表重复访问。
-- 投研口径与元数据兜底修复（2026-05-24）：
-  - `routers/research_service.py::_format_candidate_record` 的成交额换算从固定“元->亿（/1e8）”改为自适应兼容元/万元/亿三种来源，避免源数据为“万元”时前端显示大量 `0.00亿`。
-  - 候选简称兜底增强：当 `stock_daily_latest.stock_name` 为空时，从 `data/stocks/stocks_index.json` 回退补齐，且按文件 `mtime` 自动刷新本地缓存。
-  - 候选行业兜底增强：当 `stock_daily_latest.industry` 为空时，从 `stocks_index.json` 回退补齐，优先级为 `csrc1_industry` > `sw_l1_industry`，降低行业筛选全空风险。
 
 ## 用户态模型训练闭环（2026-04-04）
 
 - 新增用户态训练主入口（登录态可访问）：
   - `GET /api/v1/models/feature-catalog`
   - `POST /api/v1/models/run-training`
+  - `GET /api/v1/models/training-runs`
   - `GET /api/v1/models/training-runs/{run_id}`
   - `POST /api/v1/models/training-runs/{run_id}/complete`（内部回调别名）
 - `GET /api/v1/models/feature-catalog` 与 `GET /api/v1/admin/models/feature-catalog` 返回体新增可选字段 `data_coverage`：
@@ -196,6 +230,7 @@
   - 结果会按 `FEATURE_COVERAGE_CACHE_TTL_SEC`（默认 300 秒）做内存缓存，降低重复扫描开销。
 - 兼容策略：原 `admin` 命名空间训练路由继续保留，内部复用同一训练逻辑，避免历史调用中断。
 - 训练任务查询已收敛为严格隔离：按 `tenant_id + user_id + run_id` 过滤；同租户不同用户不可互查任务日志与结果。
+- 训练任务列表已改为读取 Redis 用户视图索引，按 `tenant_id + user_id` 聚合返回当前用户的训练任务摘要；底层视图键由训练日志流维护，避免前端扫全局任务。
 - `run-training` 请求契约新增并落盘字段：
   - `target_horizon_days`、`target_mode`
   - `label_formula`、`effective_trade_date`、`training_window`
@@ -206,6 +241,14 @@
   - `feature_categories`、`generated_at`
 - 训练编排器 `config.yaml` 已新增 `label/context/early_stopping_rounds` 配置，并将回调地址切换到用户态路径 `/api/v1/models/training-runs/{run_id}/complete`。
 - 训练容器回收优化（2026-04-06）：在 `POST /api/v1/models/training-runs/{run_id}/complete` 回调落库后，API 侧会立即按容器名 `qm-train-{run_id}` 执行强制清理（`force + remove volumes`），避免训练完成后容器长期停留 `Exited`。
+- 训练执行编排支持 CVM（2026-05-06）：
+  - `submit_training_job(...)` 新增编排器选择：`TRAINING_ORCHESTRATOR_MODE=auto/cvm/local`；
+  - `auto` 模式下，若 `CTRAIN_IMAGE_ID/CTRAIN_VPC_ID/CTRAIN_SUBNET_ID` 配置完整，则训练任务会走 CVM 编排；
+  - 新起训练 CVM 时会统一将宿主机和训练容器对齐到 `Asia/Shanghai`，并注入 `TZ=Asia/Shanghai`，确保训练日志与服务器时间口径一致；
+  - CVM 回调地址优先使用 `QUANTMIND_API_PUBLIC_BASE_URL`，避免训练机误把回调打到仅限集群内网解析的 `quantmind-api:8000`；
+  - CVM 训练任务若在 `TRAINING_CVM_JOB_TIMEOUT_SECONDS`（默认 1800 秒）内仍未完成回调，会自动失败并释放实例，避免卡死任务长期占用全局训练位；
+  - 训练状态扩展为：`creating_server/mounting_cfs/starting_container/training/callback_done/destroying_server`，前端查询接口会透传这些中间状态。
+  - CVM 训练脚本会把日志同步写入共享工作区 `training.log`，API 侧通过训练日志流持续回收该文件并回灌 Redis，因此前端训练页可以继续实时显示云端训练日志。
 - 回调结果已统一规范化并校验为结构化契约：
   - `metrics(train/val/test -> rmse/auc)`
   - `artifacts(name + 可选 url/key)`
@@ -228,7 +271,11 @@
   - `PUT /api/v1/models/inference/settings/{model_id}`
 - 推理前会先执行 precheck，校验模型目录、模型文件、`metadata.json`、推理数据目录、脚本文件、特征维度与当日数据覆盖情况；硬门禁失败会直接阻断执行。
 - 推理结果统一落库到 `qm_model_inference_runs`，自动推理配置统一落库到 `qm_model_inference_settings`，支持按 `run_id / 日期 / 状态` 查询历史与追踪失败阶段。
+- 新增 `GET /api/v1/models/inference/dispatch-logs?model_id=...`，返回当前用户在该模型下最近的自动推理调度流水（`dispatched / running / success / failed / skipped`），用于推理页直接查看 04:00 自动排队轨迹。
 - 推理结果返回体保留 `fallback_used`、`fallback_reason`、`active_model_id`、`effective_model_id`、`model_source`、`active_data_source`、`stdout`、`stderr`、`failure_stage` 等字段，便于前端追踪实际执行链路。
+- 用户态显式模型推理已启用“严格同模型”：
+  - 若 `requested_model_id != effective_model_id`，接口返回 `409`，禁止静默模型切换；
+  - 推理脚本链路已禁用 alpha158 自动兜底，主模型失败即返回失败。
 - 自动推理配置已服务端持久化；前端只负责读写和展示，不再依赖 `localStorage` 保存正式配置。
 - `POST /api/v1/models/inference/run` 现会先完成用户态模型解析，再将 `resolved_model` 透传给引擎执行器，避免后台线程里再次发起异步 DB 解析导致 500。
 - 管理员手动推理入口 `POST /api/v1/admin/models/run-inference` 也同步采用同样的 `resolved_model` 透传方式，避免 `run_in_executor` + `asyncio.run()` 的事件循环冲突。
@@ -319,9 +366,8 @@
 - 新增网关本地股票搜索接口：`GET /api/v1/stocks/search`（`q`、`limit`）。
 - 新增完整股票索引接口：`GET /api/v1/stocks/index`，供前端独立打包后统一拉取股票列表。
 - 新增索引状态接口：`GET /api/v1/stocks/search/status`。
-- 搜索数据源由服务器本地 JSON 索引提供（默认路径 `data/stocks/stocks_index.json`，可由 `STOCK_INDEX_JSON_PATH` 覆盖），避免前端直连第三方服务导致的 CORS 问题。
-- 新增索引构建脚本：`backend/services/api/scripts/build_stock_index.py`，优先从 `stocks` 表抽取，若不存在则自动回退 `symbols` 表生成 JSON。
-- 生产部署建议：每日收盘后执行一次构建脚本，确保新增/更名股票能被搜索命中。
+- 搜索数据源现统一由数据库 `stock_daily_latest` 最新交易日实时生成，接口内按 `symbol/name` 返回完整索引，避免前端依赖本地 JSON、文件路径或硬编码总量。
+- `backend/services/api/scripts/build_stock_index.py` 作为旧版索引导出脚本仍保留兼容，但不再是线上搜索接口的主数据源。
 
 示例命令：
 ```bash
@@ -360,17 +406,13 @@ python backend/services/api/scripts/build_stock_index.py
 - 测试阶段不配置上游访问密钥；如 CoPaw 后续增加鉴权，统一在 `copaw_proxy.py` 适配，不由前端承担。
 - 相关环境变量：`COPAW_BASE_URL`、`COPAW_CHANNEL`（默认 `console`）、`COPAW_TIMEOUT_SECONDS`（默认 `60`）、`COPAW_SHARED_FILES_DIR`（默认 `/copaw-shared`）、`COPAW_SHARED_VISIBLE_DIR`（默认 `/app/working`）、`OPENCLAW_MAX_FILE_SIZE_BYTES`（默认 `52428800`）。
 
-## 管理端数据管理（2026-03-20）
+## 管理端数据管理（2026-03-20，2026-05-06 更新）
 
 - 新增管理员数据概览接口：`GET /api/v1/admin/models/data-status`。
-- `POST /api/v1/admin/models/sync-market-data-daily` 已废弃（统一由官方服务器推送，不再走 Baostock 手动补数）。
-- 新增管理员官方增量同步接口：`POST /api/v1/admin/models/sync-official-data-update`。
-  - 入参：`api_base_url`、`access_key`、`secret_key`、可选 `version`、`dry_run`。
-  - 执行脚本：`backend/scripts/sync_official_data_update.py`。
-  - 同步范围：`db/feature_snapshots`、`db/qlib_data`、`docs/stock_daily_latest_维护文档.md` 与 `db_deltas/stock_daily_latest*.parquet`（upsert）。
+- 新增管理员手动数据补充接口：`POST /api/v1/admin/models/sync-market-data-daily`（触发 `scripts/data/maintenance/run_daily_pg_parquet_and_qlib_sync.sh`，依次执行源 PG -> parquet、parquet -> `stock_daily_latest`、qlib features -> `index_ohlcv_daily`、回填连板、回填 `return_1d/return_3d`、parquet -> `db/qlib_data`）。
 - 接口用于统一查看当前数据状态，返回两部分：
   - `qlib_data`：`db/qlib_data` 的日历范围、标的数量（SH/SZ/BJ）、特征目录数量、最新交易日覆盖统计（`at_target_count/older_count/invalid_count`）。
-  - `market_data_daily`：数据库侧最新交易日、最新更新时间、当日行数、`feature_*` 列数量。
+  - `feature_snapshots`：`db/feature_snapshots` 的最新交易日、目标交易日行数、最新交易日行数、最新更新时间、特征列数量、快照目录与文件数。
 - 覆盖统计新增样本明细：`qlib_data.topn_samples`，包含 `older_samples` 与 `invalid_samples`（默认 Top20，可通过 `ADMIN_DATA_STATUS_SAMPLE_SIZE` 调整）。
 - 该接口为“数据管理”页面提供后端数据源，便于运营快速判断“增量补数是否完成、数据是否新鲜、覆盖是否充足”。
 
@@ -388,6 +430,36 @@ python backend/services/api/scripts/build_stock_index.py
   - 查询优先命中用户级覆盖，再命中租户级覆盖，最后回退到全局默认。
 - 迁移脚本：
   - `backend/db/migrations/20260407_add_trading_calendar_center.sql`
+
+## COS 增量数据更新签名下载（2026-05-04）
+
+- 新增订阅态数据更新接口：
+  - `GET /api/v1/data-updates/latest`
+  - `GET /api/v1/data-updates/{version}`
+- 客户端必须通过 Header 提供双密钥：
+  - `X-Access-Key: qm_live_xxx`
+  - `X-Secret-Key: sk_xxx`
+- 服务端校验顺序：
+  - `api_keys.access_key` 存在、启用且未过期；
+  - `X-Secret-Key` 必须匹配 `api_keys.secret_hash`；
+  - API Key 权限需包含 `data_access` 或 `data_sync`；
+  - 当前用户有效订阅套餐需包含 `features.data_access=true`。
+- COS 清单约定：
+  - 默认读取 `DATA_UPDATE_LATEST_MANIFEST_KEY`，默认值为 `data-updates/latest.json`；
+  - `latest.json` 至少包含 `version`，可选 `manifest_key`；
+  - 版本清单默认路径为 `data-updates/{version}/manifest.json`；
+  - `manifest.json` 的 `files` 每项必须包含 `name`、`cos_key`、`size`、`sha256`、`target`、`kind`。
+- 返回内容只包含短时效 COS signed URL，下载流量不经过 `quantmind-api`。默认有效期 `900` 秒，可通过 `DATA_UPDATE_SIGNED_URL_EXPIRE_SECONDS` 覆盖。
+- 新增审计表 `data_update_download_logs`，记录 `user_id`、`tenant_id`、`api_key_id`、`version`、`file_count`、`ip`、`user_agent`、`created_at`。
+- 相关环境变量：
+  - `DATA_UPDATE_COS_PREFIX=data-updates`
+  - `DATA_UPDATE_SIGNED_URL_EXPIRE_SECONDS=900`
+  - `DATA_UPDATE_LATEST_MANIFEST_KEY=data-updates/latest.json`
+
+## 研究页 ROE 口径修复（2026-05-10）
+
+- 修复 `GET /api/v1/research/universe` 明细映射中 `roe` 的重复百分比换算问题。
+- 当前返回口径与 `stock_daily_latest.roe` 保持一致（示例：数据库 `0.890572` 返回 `0.8906`，前端显示 `0.9%`），避免错误显示为 `89.1%`。
 
 ## 模型推理交易日历接入（2026-04-07）
 
@@ -409,3 +481,51 @@ pytest -q backend/services/tests
 ```
 
 - `routers/admin/model_management_ops.py` = 模型目录扫描、特征字典、数据状态、同步与推理前置检查
+
+## 投研概念/指数标签修复（2026-05-17）
+
+- 修复 `GET /api/v1/research/universe` 的 Redis 快路径缺字段问题：`_load_sdl_day_map` 已补齐 `concept_tags/index_tags/is_csi500` 等标签字段，避免 2026 批次列表“指数/概念”大面积空白。
+- `routers/research_service.py` 已补充 `idx_zz500 -> is_csi500` 映射，并在 `index_tags` 中增加“中证500”。
+- `concept_tags` 聚合已补充 `concept_lithium`（显示为“锂电”），保证概念标签与因子字典一致。
+
+## 投研收益与成交额口径修复（2026-05-24）
+
+- 修复 `GET /api/v1/research/universe` / `GET /api/v1/research/overview` 在候选明细序列化阶段的收益率重复换算问题：
+  - `routers/research_service.py::_format_candidate_record` 对收益字段改为“百分比点直返”，不再做运行时自适应缩放。
+- 修复成交额展示口径漂移：
+  - 候选明细 `amount` 从“固定按元转亿（除 `1e8`）”改为自适应兼容元/万元/亿三种来源：
+    - 元：除 `1e8`；
+    - 万元：除 `1e4`；
+    - 已是亿：直返；
+  - 解决源数据为万元时前端列表普遍显示 `0.00亿` 的问题。
+
+## 投研行业兜底与元数据扩展（2026-05-24）
+
+- `routers/research_service.py` 新增行业兜底逻辑：当 `stock_daily_latest.industry` 为空时，从 `data/stocks/stocks_index.json` 回退读取行业字段，优先级为：
+  - `csrc1_industry`
+  - `sw_l1_industry`
+- 现有股票简称兜底继续保留，并与行业兜底复用同一份本地元数据缓存（按文件 `mtime` 自动刷新）。
+- `data/stocks/stocks_index.json` 增补 `csrc1_industry` 字段（来源：`M2SSD/data/0_metadata/industry/csrc1/*.json`），用于前端投研列表在数据库行业缺失场景下稳定展示行业。
+
+## 投研 K 线接口空值容错修复（2026-05-24）
+
+- 修复 `GET /api/v1/research/kline/{symbol}` 在部分标的历史行情存在空值时返回 500 的问题。
+- `routers/research_service.py::get_stock_kline` 调整：
+  - SQL 查询对 `open/high/low/close/volume` 增加 `COALESCE(..., 0)`；
+  - Python 序列化阶段对 `volume` 采用安全兜底 `float(value or 0.0)`，避免 `NULL` 转换异常。
+- 增加回归测试：
+  - `backend/services/tests/test_research_router.py::test_get_stock_kline_handles_null_volume`
+  - 覆盖 `volume=NULL` 场景，确保接口稳定返回 `200` 与可渲染数据。
+
+## 投研 SDL 缓存切换到 Market Redis（2026-05-24）
+
+- `routers/research_service.py` 中 `qm:research:sdl:{trade_date}:v2` 缓存读写现强制只走 `REDIS_MARKET_HOST/REDIS_MARKET_PORT/REDIS_MARKET_PASSWORD`。
+- 目的：将企业版投研页面的日级 SDL 缓存与行情链路统一到 Market Redis，彻底禁止回退到 backtest/default Redis，避免口径污染。
+
+## 投研 SDL 脏缓存自动隔离（2026-05-24）
+
+- 研究页日级缓存 `qm:research:sdl:{trade_date}:v2` 增加质量校验，自动识别并隔离历史脏缓存：
+  - `return_1d` 大面积为比例小数（如 `0.01` 表示 1%）；
+  - `return_3d` 大面积为空。
+- 命中该特征时将自动删除该日缓存 key，并回源 `stock_daily_latest` 重建，避免前端出现“3日收益全空、次日收益异常缩小”。
+- `qm:research:sdl:*` 缓存读写已限定为 Market Redis，不再读取 backtest Redis 的历史 key。
