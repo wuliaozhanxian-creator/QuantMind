@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from backend.services.engine.inference.router_service import InferenceRouterService
 
 
@@ -25,12 +27,11 @@ class _FakeInferenceService:
         return fn(data)
 
 
-def test_router_primary_success_without_fallback(monkeypatch):
+def test_router_primary_success(monkeypatch):
     svc = _FakeInferenceService()
     svc._responses["model_qlib"] = lambda _data: {"status": "success", "model_id": "model_qlib", "predictions": [0.1]}
     router = InferenceRouterService(inference_service=svc)
     monkeypatch.setattr(router, "primary_model_id", "model_qlib")
-    monkeypatch.setattr(router, "fallback_model_id", "alpha158")
     monkeypatch.setattr(router, "primary_data_source", "db/qlib_data")
 
     data = {"feature_0": 1, "feature_1": 2, "feature_2": 3, "feature_3": 4}
@@ -41,52 +42,31 @@ def test_router_primary_success_without_fallback(monkeypatch):
     assert result["active_data_source"] == "db/qlib_data"
 
 
-def test_router_dimension_insufficient_triggers_fallback(monkeypatch):
-    svc = _FakeInferenceService()
-    svc._responses["alpha158"] = lambda _data: {"status": "success", "model_id": "alpha158", "predictions": [0.2]}
-    router = InferenceRouterService(inference_service=svc)
-    monkeypatch.setattr(router, "primary_model_id", "model_qlib")
-    monkeypatch.setattr(router, "fallback_model_id", "alpha158")
-    monkeypatch.setattr(router, "fallback_data_source", "db/Alpha158_bin")
-
-    # 仅 2 个特征，小于 model_qlib 期望 4 维
-    data = {"feature_0": 1, "feature_1": 2}
-    result = router.predict_with_fallback("model_qlib", data)
-    assert result["status"] == "success"
-    assert result["fallback_used"] is True
-    assert "维度门禁未通过" in result["fallback_reason"]
-    assert result["active_model_id"] == "alpha158"
-    assert result["active_data_source"] == "db/Alpha158_bin"
-
-
-def test_router_primary_and_fallback_both_fail(monkeypatch):
+def test_router_primary_failure_does_not_fallback(monkeypatch):
     svc = _FakeInferenceService()
     svc._responses["model_qlib"] = lambda _data: {"status": "error", "model_id": "model_qlib", "error": "primary broken"}
-    svc._responses["alpha158"] = lambda _data: {"status": "error", "model_id": "alpha158", "error": "fallback broken"}
     router = InferenceRouterService(inference_service=svc)
     monkeypatch.setattr(router, "primary_model_id", "model_qlib")
-    monkeypatch.setattr(router, "fallback_model_id", "alpha158")
 
     data = {"feature_0": 1, "feature_1": 2, "feature_2": 3, "feature_3": 4}
     result = router.predict_with_fallback("model_qlib", data)
     assert result["status"] == "error"
-    assert result["fallback_used"] is True
-    assert "主模型推理失败且兜底失败" in result["fallback_reason"]
+    assert result["fallback_used"] is False
+    assert result["active_model_id"] == "model_qlib"
 
 
-def test_router_non_primary_model_uses_matched_data_source(monkeypatch):
+def test_router_non_primary_model_uses_primary_data_source(monkeypatch):
     svc = _FakeInferenceService()
     svc._responses["alpha158"] = lambda _data: {"status": "success", "model_id": "alpha158", "predictions": [0.3]}
     router = InferenceRouterService(inference_service=svc)
     monkeypatch.setattr(router, "primary_model_id", "model_qlib")
-    monkeypatch.setattr(router, "fallback_model_id", "alpha158")
-    monkeypatch.setattr(router, "fallback_data_source", "db/Alpha158_bin")
+    monkeypatch.setattr(router, "primary_data_source", "db/qlib_data")
 
     result = router.predict_with_fallback("alpha158", {"open": 1, "high": 2, "low": 1, "close": 2})
     assert result["status"] == "success"
     assert result["fallback_used"] is False
     assert result["active_model_id"] == "alpha158"
-    assert result["active_data_source"] == "db/Alpha158_bin"
+    assert result["active_data_source"] == "db/qlib_data"
 
 
 def test_router_sync_resolution_path_uses_sync_model_registry(monkeypatch, tmp_path):
@@ -97,7 +77,6 @@ def test_router_sync_resolution_path_uses_sync_model_registry(monkeypatch, tmp_p
 
     router = InferenceRouterService(inference_service=svc)
     monkeypatch.setattr(router, "primary_model_id", "model_qlib")
-    monkeypatch.setattr(router, "fallback_model_id", "alpha158")
     monkeypatch.setattr(
         "backend.shared.model_registry.model_registry_service.resolve_effective_model_sync",
         lambda **_kwargs: {
@@ -122,3 +101,52 @@ def test_router_sync_resolution_path_uses_sync_model_registry(monkeypatch, tmp_p
     assert result["status"] == "success"
     assert result["fallback_used"] is False
     assert result["active_model_id"] == "user_model"
+
+
+@pytest.mark.anyio
+async def test_router_async_returns_error_when_no_model_resolved(monkeypatch):
+    svc = _FakeInferenceService()
+    router = InferenceRouterService(inference_service=svc)
+    monkeypatch.setattr(router, "primary_model_id", "model_qlib")
+
+    async def _raise(**_kwargs):
+        raise LookupError("未找到可用模型: no user model configured")
+
+    monkeypatch.setattr(router, "resolve_effective_model", _raise)
+
+    result = await router.predict_with_fallback_async(
+        "",
+        {"feature_0": 1},
+        tenant_id="default",
+        user_id="79311845",
+        trace_id="t1",
+    )
+    assert result["status"] == "error"
+    assert "未找到可用模型" in result["error"]
+    assert result["fallback_used"] is False
+    assert result["active_model_id"] == ""
+
+
+def test_router_sync_returns_error_when_no_model_resolved(monkeypatch):
+    svc = _FakeInferenceService()
+    router = InferenceRouterService(inference_service=svc)
+    monkeypatch.setattr(router, "primary_model_id", "model_qlib")
+
+    def _raise(**_kwargs):
+        raise LookupError("未找到可用模型: no user model configured")
+
+    monkeypatch.setattr(
+        "backend.shared.model_registry.model_registry_service.resolve_effective_model_sync",
+        _raise,
+    )
+
+    result = router.predict_with_fallback(
+        "",
+        {"feature_0": 1},
+        tenant_id="default",
+        user_id="79311845",
+    )
+    assert result["status"] == "error"
+    assert "未找到可用模型" in result["error"]
+    assert result["fallback_used"] is False
+    assert result["active_model_id"] == ""

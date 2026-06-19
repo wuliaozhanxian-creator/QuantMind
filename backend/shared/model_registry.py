@@ -892,20 +892,9 @@ class ModelRegistryService:
             )
 
         fallback_reason = "; ".join(reason_parts).strip()
-        if fallback_reason:
-            fallback_reason = f"{fallback_reason}; fallback to system model"
-        else:
-            fallback_reason = "no user model configured, fallback to system model"
-
-        return ResolvedModel(
-            effective_model_id=self.primary_model_id,
-            model_source="system_fallback",
-            fallback_used=True,
-            fallback_reason=fallback_reason,
-            storage_path=self.primary_model_dir,
-            model_file="model.lgb",
-            status="active",
-        )
+        if not fallback_reason:
+            fallback_reason = "no user model configured"
+        raise LookupError(f"未找到可用模型: {fallback_reason}")
 
     def _ensure_system_default_record_sync(self, *, tenant_id: str, user_id: str) -> None:
         tenant, user = self._normalize_owner(tenant_id=tenant_id, user_id=user_id)
@@ -1207,20 +1196,9 @@ class ModelRegistryService:
             ).to_dict()
 
         fallback_reason = "; ".join(reason_parts).strip()
-        if fallback_reason:
-            fallback_reason = f"{fallback_reason}; fallback to system model"
-        else:
-            fallback_reason = "no user model configured, fallback to system model"
-
-        return ResolvedModel(
-            effective_model_id=self.primary_model_id,
-            model_source="system_fallback",
-            fallback_used=True,
-            fallback_reason=fallback_reason,
-            storage_path=self.primary_model_dir,
-            model_file="model.lgb",
-            status="active",
-        ).to_dict()
+        if not fallback_reason:
+            fallback_reason = "no user model configured"
+        raise LookupError(f"未找到可用模型: {fallback_reason}")
 
     @staticmethod
     def build_model_id_from_run(run_id: str) -> str:

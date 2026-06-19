@@ -475,16 +475,13 @@ async def precheck_inference(
 
     runner = InferenceScriptRunner(MODELS_PRODUCTION)
     primary_script_exists = runner.check_script_exists()
-    fallback_script_exists = runner.check_fallback_script_exists()
-    inference_script_exists = primary_script_exists or fallback_script_exists
     checks.append(
         {
             "key": "inference_script",
-            "label": "推理脚本存在（主/兜底至少一套）",
-            "passed": inference_script_exists,
+            "label": "推理脚本存在",
+            "passed": primary_script_exists,
             "detail": (
-                f"primary={Path(runner.primary_model_dir) / runner.primary_script_name} exists={primary_script_exists}; "
-                f"fallback={Path(runner.fallback_model_dir) / runner.fallback_script_name} exists={fallback_script_exists}"
+                f"primary={Path(runner.primary_model_dir) / runner.primary_script_name} exists={primary_script_exists}"
             ),
         }
     )

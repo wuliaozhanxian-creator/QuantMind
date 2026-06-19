@@ -38,7 +38,7 @@ except ImportError:
 from .db import Base, DataFileRecord, ModelRecord, TrainingJobRecord  # noqa: F401 — ensure all models are registered in Base.metadata before create_all
 
 from .model_management_utils import *
-from .model_management_utils import _enrich_feature_catalog_with_data_coverage, _load_feature_catalog_from_db, _load_feature_catalog_from_file
+from .model_management_utils import _enrich_feature_catalog_with_data_coverage, _load_feature_catalog_from_db, _load_feature_catalog_from_file, _resolve_inference_dates_with_calendar, _INFERENCE_LOCK_KEY_PREFIX, _INFERENCE_LOCK_TTL_SEC
 
 @router.post("", response_model=ModelResponse)
 async def create_model(
@@ -165,11 +165,14 @@ async def run_inference(
     tenant_id = str(current_user.get("tenant_id", "default"))
     user_id = str(current_user.get("user_id", "admin"))
     router_service = InferenceRouterService()
-    resolved_model = await router_service.resolve_effective_model(
-        tenant_id=tenant_id,
-        user_id=user_id,
-        model_id=None,
-    )
+    try:
+        resolved_model = await router_service.resolve_effective_model(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            model_id=None,
+        )
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
     try:
         result = await asyncio.get_event_loop().run_in_executor(

@@ -198,42 +198,45 @@ async def _resolve_inference_trade_date_with_calendar(
 async def _resolve_requested_model(current_user: dict[str, Any], model_id: str):
     tenant_id, user_id = _owner_scope(current_user)
     requested_model_id = str(model_id or "").strip()
-    if not requested_model_id:
-        # 默认模型链路：不要回填 model_id，否则会被解析为 explicit_model_id。
-        resolved = await model_registry_service.resolve_effective_model(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            model_id=None,
-        )
-        requested_model_id = str(resolved.effective_model_id or "").strip()
+    try:
         if not requested_model_id:
-            raise HTTPException(status_code=404, detail="未找到默认模型")
-    else:
-        resolved = await model_registry_service.resolve_effective_model(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            model_id=requested_model_id,
-        )
-        effective_model_id = str(resolved.effective_model_id or "").strip()
-        # 严格模式：显式指定 model_id 时，禁止静默切换到其他模型链路
-        if effective_model_id and effective_model_id != requested_model_id:
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    f"模型切换已被禁止：requested_model_id={requested_model_id}, "
-                    f"effective_model_id={effective_model_id}"
-                ),
-            )
-        # 兼容保护：当显式传入的 model_id 恰好等于当前默认模型时，
-        # 仍按默认模型来源口径写入，避免自动托管误判为 explicit_model_id。
-        if str(resolved.model_source or "").strip() == "explicit_model_id":
-            default_model = await model_registry_service.get_default_model(
+            # 默认模型链路：不要回填 model_id，否则会被解析为 explicit_model_id。
+            resolved = await model_registry_service.resolve_effective_model(
                 tenant_id=tenant_id,
                 user_id=user_id,
+                model_id=None,
             )
-            default_model_id = str((default_model or {}).get("model_id") or "").strip()
-            if default_model_id and default_model_id == requested_model_id:
-                resolved.model_source = "user_default"
+            requested_model_id = str(resolved.effective_model_id or "").strip()
+            if not requested_model_id:
+                raise HTTPException(status_code=404, detail="未找到默认模型")
+        else:
+            resolved = await model_registry_service.resolve_effective_model(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                model_id=requested_model_id,
+            )
+            effective_model_id = str(resolved.effective_model_id or "").strip()
+            # 严格模式：显式指定 model_id 时，禁止静默切换到其他模型链路
+            if effective_model_id and effective_model_id != requested_model_id:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"模型切换已被禁止：requested_model_id={requested_model_id}, "
+                        f"effective_model_id={effective_model_id}"
+                    ),
+                )
+            # 兼容保护：当显式传入的 model_id 恰好等于当前默认模型时，
+            # 仍按默认模型来源口径写入，避免自动托管误判为 explicit_model_id。
+            if str(resolved.model_source or "").strip() == "explicit_model_id":
+                default_model = await model_registry_service.get_default_model(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                )
+                default_model_id = str((default_model or {}).get("model_id") or "").strip()
+                if default_model_id and default_model_id == requested_model_id:
+                    resolved.model_source = "user_default"
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
     if requested_model_id and resolved.fallback_used and resolved.model_source in {"user_default", "system_fallback"}:
         raise HTTPException(status_code=404, detail=f"模型不可用或未就绪: {requested_model_id}")
     if not resolved.storage_path:
@@ -257,11 +260,7 @@ def _choose_data_dir(effective_model_id: str, model_dir: Path | None = None) -> 
                 pass
 
     # 2. 环境变量 fallback
-    fallback_data_dir = os.getenv("QLIB_FALLBACK_DATA_PATH", "db/qlib_data")
     primary_data_dir = os.getenv("QLIB_PRIMARY_DATA_PATH", "db/qlib_data")
-    fallback_model_id = os.getenv("FALLBACK_MODEL_ID", "alpha158")
-    if str(effective_model_id or "").strip() == fallback_model_id:
-        return fallback_data_dir
     return primary_data_dir
 
 
