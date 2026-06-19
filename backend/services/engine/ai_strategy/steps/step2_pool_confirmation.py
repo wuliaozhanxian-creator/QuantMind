@@ -57,14 +57,17 @@ TOTAL_MV_PER_YI = float(os.getenv("AI_STRATEGY_TOTAL_MV_PER_YI", "100000000.0"))
 TOTAL_MV_TO_YI = 1.0 / 100000000.0  # 对外统一返回亿元口径，与投研接口一致
 
 
-def _tag_membership_sql(tag_code: str, *, negate: bool = False) -> str:
+def _tag_membership_sql(tag_code: str, *, negate: bool = False, symbol_ref: str | None = None) -> str:
     """生成判断 symbol 是否属于某标签的 EXISTS 谓词。
 
     tag_code 来自 stock_tag_utils 的受控别名表，作为字面量内联，无注入风险。
+    symbol_ref 默认指向 LATEST_TABLE（外层查询别名）；compat 子查询内部投影时
+    需传入子查询自身的表名以避免引用错位。
     """
+    ref = symbol_ref or f"{LATEST_TABLE}.symbol"
     base = (
         f"EXISTS(SELECT 1 FROM stock_tag st "
-        f"WHERE st.symbol = {LATEST_TABLE}.symbol AND st.tag_code = '{tag_code}')"
+        f"WHERE st.symbol = {ref} AND st.tag_code = '{tag_code}')"
     )
     return f"NOT {base}" if negate else base
 
@@ -114,6 +117,12 @@ def _build_compat_table_sql(table_name: str, columns: set[str]) -> str:
     for alias, target in alias_targets.items():
         if alias not in columns and target in columns:
             select_fields.append(f"{target} AS {alias}")
+
+    # v1.4.0 标签长表迁移后，idx_hs300/zz500/zz1000 不再是物理列。
+    # LLM 生成的 SQL 可能仍 SELECT/WHERE 引用这些列，compat 子查询通过 EXISTS 投影暴露它们。
+    for col, tag_code in (("idx_hs300", "hs300"), ("idx_zz500", "csi500"), ("idx_zz1000", "csi1000")):
+        if col not in {c.lower() for c in columns}:
+            select_fields.append(f"{_tag_membership_sql(tag_code, symbol_ref=f'{table_name}.symbol')} AS {col}")
 
     return f"(SELECT {', '.join(select_fields)} FROM {table_name})"
 

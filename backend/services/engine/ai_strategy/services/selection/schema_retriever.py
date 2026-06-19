@@ -76,6 +76,7 @@ STOCK_DAILY_SCHEMA: list[SchemaColumn] = [
     SchemaColumn("stock_daily", "total_mv", "总市值（亿元）"),
     SchemaColumn("stock_daily", "is_st", "是否 ST (1/0)"),
     SchemaColumn("stock_daily", "idx_hs300", "是否沪深300成分股 (1/0)"),
+    SchemaColumn("stock_daily", "idx_zz500", "是否中证500成分股 (1/0)"),
     SchemaColumn("stock_daily", "idx_zz1000", "是否中证1000成分股 (1/0)"),
 ]
 
@@ -155,16 +156,6 @@ STOCK_DAILY_LATEST_SCHEMA: list[SchemaColumn] = [
     SchemaColumn("stock_daily_latest", "ind_code_l1", "一级行业代码"),
     SchemaColumn("stock_daily_latest", "ind_code_l2", "二级行业代码"),
     SchemaColumn("stock_daily_latest", "label", "自动分类标签（0=周期,1=价值,2=成长,3=价值成长）"),
-    SchemaColumn("stock_daily_latest", "concept_ai", "是否AI概念股（0/1）"),
-    SchemaColumn("stock_daily_latest", "concept_chip", "是否芯片概念股（0/1）"),
-    SchemaColumn("stock_daily_latest", "concept_new_energy", "是否新能源概念股（0/1）"),
-    SchemaColumn("stock_daily_latest", "concept_pv", "是否光伏概念股（0/1）"),
-    SchemaColumn("stock_daily_latest", "concept_military", "是否军工概念股（0/1）"),
-    SchemaColumn("stock_daily_latest", "concept_medical", "是否医药概念股（0/1）"),
-    SchemaColumn("stock_daily_latest", "concept_fintech", "是否金融科技概念股（0/1）"),
-    SchemaColumn("stock_daily_latest", "concept_consumption", "是否大消费概念股（0/1）"),
-    SchemaColumn("stock_daily_latest", "concept_state_owned", "是否国资委背景（0/1）"),
-    SchemaColumn("stock_daily_latest", "concept_lithium", "是否锂电池概念股（0/1）"),
 
     # === 资金持仓流向 (7个) ===
     SchemaColumn("stock_daily_latest", "main_flow", "主力资金净流入（元）"),
@@ -175,12 +166,10 @@ STOCK_DAILY_LATEST_SCHEMA: list[SchemaColumn] = [
     SchemaColumn("stock_daily_latest", "b_volume", "外盘主动买入量（股）"),
     SchemaColumn("stock_daily_latest", "s_volume", "内盘主动卖出量（股）"),
 
-    # === 指数关联属性 (5个) ===
-    SchemaColumn("stock_daily_latest", "idx_all", "全A股集合（1）"),
+    # === 指数关联属性 (3个，v1.4.0 迁移至 stock_tag 长表，compat 子查询通过 EXISTS 投影) ===
     SchemaColumn("stock_daily_latest", "idx_hs300", "沪深300成分股（0/1）"),
+    SchemaColumn("stock_daily_latest", "idx_zz500", "中证500成分股（0/1）"),
     SchemaColumn("stock_daily_latest", "idx_zz1000", "中证1000成分股（0/1）"),
-    SchemaColumn("stock_daily_latest", "idx_margin", "融资融券标的（0/1）"),
-    SchemaColumn("stock_daily_latest", "idx_chinext", "创业板指成分股（0/1）"),
 
     # === 市场微结构 (3个) ===
     SchemaColumn("stock_daily_latest", "micro_effective_spread", "有效价差"),
