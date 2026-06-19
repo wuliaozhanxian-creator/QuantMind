@@ -62,9 +62,6 @@ def sync_factors_to_parquet():
             (features->>'ep_ttm')::float as ep_ttm,
             (features->>'listed_days')::int as listed_days,
             (features->>'turnover_rate')::float as turnover_rate,
-            (features->>'idx_hs300')::int as idx_hs300,
-            (features->>'idx_zz1000')::int as idx_zz1000,
-            (features->>'idx_chinext')::int as idx_chinext,
             -- 动量/技术指标
             (features->>'rsi_6')::float as rsi_6,
             (features->>'rsi_14')::float as rsi_14,

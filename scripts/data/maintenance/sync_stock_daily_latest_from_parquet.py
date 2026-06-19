@@ -41,22 +41,6 @@ INT_COLUMNS = {
     "limit_up_today",
     "limit_down_today",
     "micro_jump_flag",
-    "idx_all",
-    "idx_hs300",
-    "idx_zz500",
-    "idx_zz1000",
-    "idx_margin",
-    "idx_chinext",
-    "concept_ai",
-    "concept_chip",
-    "concept_new_energy",
-    "concept_pv",
-    "concept_military",
-    "concept_medical",
-    "concept_fintech",
-    "concept_consumption",
-    "concept_state_owned",
-    "concept_lithium",
 }
 
 INDEX_SYMBOLS = {

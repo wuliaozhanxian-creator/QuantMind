@@ -89,6 +89,31 @@ def _sdl_redis_key(trade_date: date) -> str:
     return f"qm:research:sdl:{trade_date.isoformat()}:v2"
 
 
+def _concept_tags_subquery(symbol_ref: str) -> str:
+    return f"""COALESCE((
+        SELECT to_jsonb(array_agg(td.tag_name ORDER BY td.sort_order, td.tag_name))
+        FROM stock_tag st
+        JOIN tag_dictionary td ON td.tag_code = st.tag_code AND td.is_active
+        WHERE st.symbol = {symbol_ref} AND td.tag_category IN ('concept', 'board')
+      ), '[]'::jsonb)"""
+
+
+def _index_tags_subquery(symbol_ref: str) -> str:
+    return f"""COALESCE((
+        SELECT to_jsonb(array_agg(td.tag_name ORDER BY td.sort_order, td.tag_name))
+        FROM stock_tag st
+        JOIN tag_dictionary td ON td.tag_code = st.tag_code AND td.is_active
+        WHERE st.symbol = {symbol_ref} AND td.tag_category = 'index'
+      ), '[]'::jsonb)"""
+
+
+def _is_index_member(symbol_ref: str, tag_code: str) -> str:
+    return (
+        f"EXISTS(SELECT 1 FROM stock_tag st "
+        f"WHERE st.symbol = {symbol_ref} AND st.tag_code = '{tag_code}')"
+    )
+
+
 def _delete_remote_sdl_keys(redis_client: Any, keys: list[str]) -> None:
     if not keys:
         return
@@ -248,9 +273,9 @@ async def _load_sdl_day_map(session, trade_date: date) -> dict[str, dict[str, An
             COALESCE(float_mv, 0) AS float_mv,
             COALESCE(listed_days, 0) AS listed_days,
             COALESCE(is_st, 0) <> 0 AS is_st,
-            COALESCE(idx_hs300, 0) <> 0 AS is_hs300,
-            COALESCE(idx_zz500, 0) <> 0 AS is_csi500,
-            COALESCE(idx_zz1000, 0) <> 0 AS is_csi1000,
+            {_is_index_member('symbol', 'hs300')} AS is_hs300,
+            {_is_index_member('symbol', 'csi500')} AS is_csi500,
+            {_is_index_member('symbol', 'csi1000')} AS is_csi1000,
             COALESCE(pct_change, 0) AS latest_change_pct,
             return_1d,
             return_3d,
@@ -274,42 +299,8 @@ async def _load_sdl_day_map(session, trade_date: date) -> dict[str, dict[str, An
             COALESCE(flow_net_amount, 0) AS flow_net_amount,
             COALESCE(inst_ownership, 0) AS inst_ownership,
             COALESCE(profit_growth, 0) AS profit_growth,
-            COALESCE(
-              (
-                SELECT to_jsonb(array_agg(tag))
-                FROM (
-                  SELECT tag
-                  FROM (
-                    VALUES
-                      ('AI', COALESCE(concept_ai, 0)),
-                      ('芯片', COALESCE(concept_chip, 0)),
-                      ('新能源', COALESCE(concept_new_energy, 0)),
-                      ('光伏', COALESCE(concept_pv, 0)),
-                      ('锂电', COALESCE(concept_lithium, 0)),
-                      ('军工', COALESCE(concept_military, 0)),
-                      ('医药', COALESCE(concept_medical, 0)),
-                      ('金融科技', COALESCE(concept_fintech, 0)),
-                      ('消费', COALESCE(concept_consumption, 0)),
-                      ('国企改革', COALESCE(concept_state_owned, 0))
-                  ) AS concept_scores(tag, score)
-                  WHERE score > 0
-                  ORDER BY score DESC
-                  LIMIT 3
-                ) ranked_tags
-              ),
-              '[]'::jsonb
-            ) AS concept_tags,
-            COALESCE(
-              to_jsonb(array_remove(ARRAY[
-                CASE WHEN COALESCE(idx_hs300, 0) <> 0 THEN '沪深300' END,
-                CASE WHEN COALESCE(idx_zz500, 0) <> 0 THEN '中证500' END,
-                CASE WHEN COALESCE(idx_zz1000, 0) <> 0 THEN '中证1000' END,
-                CASE WHEN COALESCE(idx_chinext, 0) <> 0 THEN '创业板指数' END,
-                CASE WHEN COALESCE(idx_margin, 0) <> 0 THEN '两融标的' END,
-                CASE WHEN COALESCE(idx_all, 0) <> 0 THEN '全市场' END
-              ]::text[], NULL)),
-              '[]'::jsonb
-            ) AS index_tags,
+            {_concept_tags_subquery('symbol')} AS concept_tags,
+            {_index_tags_subquery('symbol')} AS index_tags,
             COALESCE(consecutive_limit_up_days, 0) AS consecutive_limit_up_days_sdl
         FROM {_SDL_TABLE}
         WHERE trade_date = :trade_date
@@ -394,9 +385,9 @@ _SDL_SELECT_BY_RUN_DATE = """
     COALESCE(sdl_run.float_mv, 0) AS float_mv,
     COALESCE(sdl_run.listed_days, 0) AS listed_days,
     COALESCE(sdl_run.is_st, 0) <> 0 AS is_st,
-    COALESCE(sdl_run.idx_hs300, 0) <> 0 AS is_hs300,
-    COALESCE(sdl_run.idx_zz500, 0) <> 0 AS is_csi500,
-    COALESCE(sdl_run.idx_zz1000, 0) <> 0 AS is_csi1000,
+    {_is_index_member('sdl_run.symbol', 'hs300')} AS is_hs300,
+    {_is_index_member('sdl_run.symbol', 'csi500')} AS is_csi500,
+    {_is_index_member('sdl_run.symbol', 'csi1000')} AS is_csi1000,
     COALESCE(sdl_run.pct_change, 0) AS latest_change_pct,
     CASE
         WHEN NULLIF(sdl_run.close, 0) IS NULL OR sdl_run.close_next_1d IS NULL THEN NULL
@@ -438,42 +429,8 @@ _SDL_SELECT_BY_RUN_DATE = """
     COALESCE(sdl_run.flow_net_amount, 0) AS flow_net_amount,
     COALESCE(sdl_run.inst_ownership, 0) AS inst_ownership,
     COALESCE(sdl_run.profit_growth, 0) AS profit_growth,
-    COALESCE(
-      (
-        SELECT to_jsonb(array_agg(tag))
-        FROM (
-          SELECT tag
-          FROM (
-            VALUES
-              ('AI', COALESCE(sdl_run.concept_ai, 0)),
-              ('芯片', COALESCE(sdl_run.concept_chip, 0)),
-              ('新能源', COALESCE(concept_new_energy, 0)),
-              ('光伏', COALESCE(sdl_run.concept_pv, 0)),
-              ('锂电', COALESCE(sdl_run.concept_lithium, 0)),
-              ('军工', COALESCE(sdl_run.concept_military, 0)),
-              ('医药', COALESCE(sdl_run.concept_medical, 0)),
-              ('金融科技', COALESCE(sdl_run.concept_fintech, 0)),
-              ('消费', COALESCE(sdl_run.concept_consumption, 0)),
-              ('国企改革', COALESCE(sdl_run.concept_state_owned, 0))
-          ) AS concept_scores(tag, score)
-          WHERE score > 0
-          ORDER BY score DESC
-          LIMIT 3
-        ) ranked_tags
-      ),
-      '[]'::jsonb
-    ) AS concept_tags,
-    COALESCE(
-      to_jsonb(array_remove(ARRAY[
-        CASE WHEN COALESCE(sdl_run.idx_hs300, 0) <> 0 THEN '沪深300' END,
-        CASE WHEN COALESCE(sdl_run.idx_zz500, 0) <> 0 THEN '中证500' END,
-        CASE WHEN COALESCE(sdl_run.idx_zz1000, 0) <> 0 THEN '中证1000' END,
-        CASE WHEN COALESCE(sdl_run.idx_chinext, 0) <> 0 THEN '创业板指数' END,
-        CASE WHEN COALESCE(sdl_run.idx_margin, 0) <> 0 THEN '两融标的' END,
-        CASE WHEN COALESCE(sdl_run.idx_all, 0) <> 0 THEN '全市场' END
-      ]::text[], NULL)),
-      '[]'::jsonb
-    ) AS index_tags,
+    {_concept_tags_subquery('sdl_run.symbol')} AS concept_tags,
+    {_index_tags_subquery('sdl_run.symbol')} AS index_tags,
     COALESCE(sdl_run.trade_date, '1970-01-01') AS latest_trade_date,
     COALESCE(sdl_run.consecutive_limit_up_days, 0) AS consecutive_limit_up_days_sdl
 """
@@ -482,12 +439,9 @@ _SDL_SELECT_BY_RUN_DATE = """
 _SDL_LATEST = f"""
     SELECT DISTINCT ON (symbol) symbol, trade_date, stock_name, industry,
         close, pct_change, pe_ttm, pb, roe, adj_factor, turnover_rate, amount, total_mv, float_mv, listed_days, is_st,
-        idx_hs300, idx_zz500, idx_zz1000, idx_chinext, idx_margin, idx_all,
         ma5, ma10, ma_gap_5, ma_gap_10, ma_gap_20,
         rsi_14, rsi_6, vol_atr_14, macd_hist, volume_ratio_5, volume_ratio_20, volume_trend_3d,
         main_flow, flow_net_amount, inst_ownership, profit_growth,
-        concept_ai, concept_chip, concept_new_energy, concept_pv, concept_lithium, concept_military,
-        concept_medical, concept_fintech, concept_consumption, concept_state_owned,
         consecutive_limit_up_days
     FROM {_SDL_TABLE}
     WHERE volume > 0
@@ -507,9 +461,9 @@ _SDL_SELECT_SIMPLE = """
     COALESCE(sdl_latest.float_mv, 0) AS float_mv,
     COALESCE(sdl_latest.listed_days, 0) AS listed_days,
     COALESCE(sdl_latest.is_st, 0) <> 0 AS is_st,
-    COALESCE(sdl_latest.idx_hs300, 0) <> 0 AS is_hs300,
-    COALESCE(sdl_latest.idx_zz500, 0) <> 0 AS is_csi500,
-    COALESCE(sdl_latest.idx_zz1000, 0) <> 0 AS is_csi1000,
+    {_is_index_member('sdl_latest.symbol', 'hs300')} AS is_hs300,
+    {_is_index_member('sdl_latest.symbol', 'csi500')} AS is_csi500,
+    {_is_index_member('sdl_latest.symbol', 'csi1000')} AS is_csi1000,
     COALESCE(sdl_latest.pct_change, 0) AS latest_change_pct,
     0 AS return_1d,
     0 AS return_3d,
@@ -533,42 +487,8 @@ _SDL_SELECT_SIMPLE = """
     COALESCE(sdl_latest.flow_net_amount, 0) AS flow_net_amount,
     COALESCE(sdl_latest.inst_ownership, 0) AS inst_ownership,
     COALESCE(sdl_latest.profit_growth, 0) AS profit_growth,
-    COALESCE(
-      (
-        SELECT to_jsonb(array_agg(tag))
-        FROM (
-          SELECT tag
-          FROM (
-            VALUES
-              ('AI', COALESCE(sdl_latest.concept_ai, 0)),
-              ('芯片', COALESCE(sdl_latest.concept_chip, 0)),
-              ('新能源', COALESCE(sdl_latest.concept_new_energy, 0)),
-              ('光伏', COALESCE(sdl_latest.concept_pv, 0)),
-              ('锂电', COALESCE(sdl_latest.concept_lithium, 0)),
-              ('军工', COALESCE(sdl_latest.concept_military, 0)),
-              ('医药', COALESCE(sdl_latest.concept_medical, 0)),
-              ('金融科技', COALESCE(sdl_latest.concept_fintech, 0)),
-              ('消费', COALESCE(sdl_latest.concept_consumption, 0)),
-              ('国企改革', COALESCE(sdl_latest.concept_state_owned, 0))
-          ) AS concept_scores(tag, score)
-          WHERE score > 0
-          ORDER BY score DESC
-          LIMIT 3
-        ) ranked_tags
-      ),
-      '[]'::jsonb
-    ) AS concept_tags,
-    COALESCE(
-      to_jsonb(array_remove(ARRAY[
-        CASE WHEN COALESCE(sdl_latest.idx_hs300, 0) <> 0 THEN '沪深300' END,
-        CASE WHEN COALESCE(sdl_latest.idx_zz500, 0) <> 0 THEN '中证500' END,
-        CASE WHEN COALESCE(sdl_latest.idx_zz1000, 0) <> 0 THEN '中证1000' END,
-        CASE WHEN COALESCE(sdl_latest.idx_chinext, 0) <> 0 THEN '创业板指数' END,
-        CASE WHEN COALESCE(sdl_latest.idx_margin, 0) <> 0 THEN '两融标的' END,
-        CASE WHEN COALESCE(sdl_latest.idx_all, 0) <> 0 THEN '全市场' END
-      ]::text[], NULL)),
-      '[]'::jsonb
-    ) AS index_tags,
+    {_concept_tags_subquery('sdl_latest.symbol')} AS concept_tags,
+    {_index_tags_subquery('sdl_latest.symbol')} AS index_tags,
     sdl_latest.trade_date AS latest_trade_date,
     COALESCE(sdl_latest.consecutive_limit_up_days, 0) AS consecutive_limit_up_days_sdl,
     COALESCE(sdl_latest.adj_factor, 1) AS adj_factor

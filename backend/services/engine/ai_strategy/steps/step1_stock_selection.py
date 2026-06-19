@@ -100,8 +100,9 @@ FACTOR_COLUMN_MAP = {
     "s_volume": "s_volume",
     # ── 指数关联 ──
     "idx_all": "idx_all",
-    "idx_hs300": "idx_hs300", "hs300": "idx_hs300",
-    "idx_zz1000": "idx_zz1000", "csi1000": "idx_zz1000",
+    "idx_hs300": "idx_hs300", "hs300": "idx_hs300", "is_hs300": "idx_hs300", "is_csi300": "idx_hs300",
+    "idx_zz500": "idx_zz500", "csi500": "idx_zz500", "is_csi500": "idx_zz500",
+    "idx_zz1000": "idx_zz1000", "csi1000": "idx_zz1000", "is_csi1000": "idx_zz1000",
     "idx_margin": "idx_margin",
     "idx_chinext": "idx_chinext",
     # ── 微结构 ──

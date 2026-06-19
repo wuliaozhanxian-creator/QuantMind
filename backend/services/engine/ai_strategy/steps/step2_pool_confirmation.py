@@ -50,17 +50,28 @@ from .step1_stock_selection import (
     _map_factor,
     _parse_dsl,
 )
+from backend.shared.stock_tag_utils import is_membership_true_op, resolve_tag_code
 
 logger = logging.getLogger(__name__)
 TOTAL_MV_PER_YI = float(os.getenv("AI_STRATEGY_TOTAL_MV_PER_YI", "100000000.0"))
 TOTAL_MV_TO_YI = 1.0 / 100000000.0  # 对外统一返回亿元口径，与投研接口一致
 
+
+def _tag_membership_sql(tag_code: str, *, negate: bool = False) -> str:
+    """生成判断 symbol 是否属于某标签的 EXISTS 谓词。
+
+    tag_code 来自 stock_tag_utils 的受控别名表，作为字面量内联，无注入风险。
+    """
+    base = (
+        f"EXISTS(SELECT 1 FROM stock_tag st "
+        f"WHERE st.symbol = {LATEST_TABLE}.symbol AND st.tag_code = '{tag_code}')"
+    )
+    return f"NOT {base}" if negate else base
+
 COMPATIBLE_COLUMN_CANDIDATES = {
     "symbol": ["symbol", "code"],
     "name": ["name", "stock_name"],
     "amount": ["amount", "turnover"],
-    "idx_hs300": ["idx_hs300", "is_hs300", "is_csi300"],
-    "idx_zz1000": ["idx_zz1000", "is_csi1000"],
 }
 
 
@@ -99,11 +110,6 @@ def _build_compat_table_sql(table_name: str, columns: set[str]) -> str:
         "stock_name": _resolve_compatible_column(columns, "name"),
         "amount": _resolve_compatible_column(columns, "amount"),
         "turnover": _resolve_compatible_column(columns, "amount"),
-        "idx_hs300": _resolve_compatible_column(columns, "idx_hs300"),
-        "is_hs300": _resolve_compatible_column(columns, "idx_hs300"),
-        "is_csi300": _resolve_compatible_column(columns, "idx_hs300"),
-        "idx_zz1000": _resolve_compatible_column(columns, "idx_zz1000"),
-        "is_csi1000": _resolve_compatible_column(columns, "idx_zz1000"),
     }
     for alias, target in alias_targets.items():
         if alias not in columns and target in columns:
@@ -335,14 +341,26 @@ def _query_stock_pool(
             where_clauses = ["trade_date = :d"]
 
             # 3. 翻译 DSL 条件
-            flag_cols = {"is_st", "idx_hs300", "idx_zz1000"}
+            flag_cols = {"is_st"}
             for idx, cond in enumerate(conditions):
-                col = _map_factor(cond["factor"])
-                param_key = f"p{idx}"
+                factor = cond["factor"]
                 op = "=" if cond["op"] == "==" else cond["op"]
+                val = cond["value"]
+                tag_code = resolve_tag_code(factor)
+
+                if tag_code is not None:
+                    membership = is_membership_true_op(op, val)
+                    if tag_code == "all":
+                        clause = "TRUE" if membership else "FALSE"
+                    else:
+                        clause = _tag_membership_sql(tag_code, negate=not membership)
+                    where_clauses.append(clause)
+                    continue
+
+                col = _map_factor(factor)
+                param_key = f"p{idx}"
 
                 # 处理数值和类型
-                val = cond["value"]
                 if col in flag_cols:
                     try:
                         val = int(float(val))
