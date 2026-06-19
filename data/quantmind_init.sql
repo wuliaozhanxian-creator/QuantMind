@@ -5474,16 +5474,6 @@ CREATE TABLE public.stock_daily_latest (
     ind_code_l1 text,
     ind_code_l2 text,
     label double precision,
-    concept_ai double precision,
-    concept_chip double precision,
-    concept_new_energy double precision,
-    concept_pv double precision,
-    concept_military double precision,
-    concept_medical double precision,
-    concept_fintech double precision,
-    concept_consumption double precision,
-    concept_state_owned double precision,
-    concept_lithium double precision,
     main_flow double precision,
     inst_ownership double precision,
     lrg_trd_tolbuynum double precision,
@@ -5491,11 +5481,6 @@ CREATE TABLE public.stock_daily_latest (
     flow_net_amount double precision,
     b_volume double precision,
     s_volume double precision,
-    idx_all double precision,
-    idx_hs300 double precision,
-    idx_zz1000 double precision,
-    idx_margin double precision,
-    idx_chinext double precision,
     micro_effective_spread double precision,
     micro_imbalance_volume double precision,
     micro_jump_flag double precision,
@@ -5509,7 +5494,6 @@ CREATE TABLE public.stock_daily_latest (
     raw_close double precision,
     raw_volume double precision,
     raw_amount double precision,
-    idx_zz500 double precision,
     CONSTRAINT stock_daily_latest_pkey PRIMARY KEY (trade_date, symbol)
 );
 
@@ -5986,97 +5970,6 @@ COMMENT ON COLUMN public.stock_daily_latest.volume_ma_3 IS '3日成交量均线'
 
 
 --
--- Name: COLUMN stock_daily_latest.idx_all; Type: COMMENT; Schema: public; Owner: quantmind
---
-
-COMMENT ON COLUMN public.stock_daily_latest.idx_all IS '全市场指数成分（0=否，1=是）';
-
-
---
--- Name: COLUMN stock_daily_latest.idx_hs300; Type: COMMENT; Schema: public; Owner: quantmind
---
-
-COMMENT ON COLUMN public.stock_daily_latest.idx_hs300 IS '沪深300成分（0=否，1=是）';
-
-
---
--- Name: COLUMN stock_daily_latest.idx_zz1000; Type: COMMENT; Schema: public; Owner: quantmind
---
-
-COMMENT ON COLUMN public.stock_daily_latest.idx_zz1000 IS '中证1000成分（0=否，1=是）';
-
-
---
--- Name: COLUMN stock_daily_latest.idx_margin; Type: COMMENT; Schema: public; Owner: quantmind
---
-
-COMMENT ON COLUMN public.stock_daily_latest.idx_margin IS '融资融券标的（0=否，1=是）';
-
-
---
--- Name: COLUMN stock_daily_latest.concept_ai; Type: COMMENT; Schema: public; Owner: quantmind
---
-
-COMMENT ON COLUMN public.stock_daily_latest.concept_ai IS 'AI 概念（0=否，1=是）';
-
-
---
--- Name: COLUMN stock_daily_latest.concept_chip; Type: COMMENT; Schema: public; Owner: quantmind
---
-
-COMMENT ON COLUMN public.stock_daily_latest.concept_chip IS '芯片概念（0=否，1=是）';
-
-
---
--- Name: COLUMN stock_daily_latest.concept_new_energy; Type: COMMENT; Schema: public; Owner: quantmind
---
-
-COMMENT ON COLUMN public.stock_daily_latest.concept_new_energy IS '新能源概念（0=否，1=是）';
-
-
---
--- Name: COLUMN stock_daily_latest.concept_pv; Type: COMMENT; Schema: public; Owner: quantmind
---
-
-COMMENT ON COLUMN public.stock_daily_latest.concept_pv IS '光伏概念（0=否，1=是）';
-
-
---
--- Name: COLUMN stock_daily_latest.concept_military; Type: COMMENT; Schema: public; Owner: quantmind
---
-
-COMMENT ON COLUMN public.stock_daily_latest.concept_military IS '军工概念（0=否，1=是）';
-
-
---
--- Name: COLUMN stock_daily_latest.concept_medical; Type: COMMENT; Schema: public; Owner: quantmind
---
-
-COMMENT ON COLUMN public.stock_daily_latest.concept_medical IS '医药概念（0=否，1=是）';
-
-
---
--- Name: COLUMN stock_daily_latest.concept_fintech; Type: COMMENT; Schema: public; Owner: quantmind
---
-
-COMMENT ON COLUMN public.stock_daily_latest.concept_fintech IS '金融科技概念（0=否，1=是）';
-
-
---
--- Name: COLUMN stock_daily_latest.concept_consumption; Type: COMMENT; Schema: public; Owner: quantmind
---
-
-COMMENT ON COLUMN public.stock_daily_latest.concept_consumption IS '消费概念（0=否，1=是）';
-
-
---
--- Name: COLUMN stock_daily_latest.concept_state_owned; Type: COMMENT; Schema: public; Owner: quantmind
---
-
-COMMENT ON COLUMN public.stock_daily_latest.concept_state_owned IS '国企改革概念（0=否，1=是）';
-
-
---
 -- Name: COLUMN stock_daily_latest.main_flow; Type: COMMENT; Schema: public; Owner: quantmind
 --
 
@@ -6095,13 +5988,6 @@ COMMENT ON COLUMN public.stock_daily_latest.inst_ownership IS '机构持股比�
 --
 
 COMMENT ON COLUMN public.stock_daily_latest.profit_growth IS '利润增长率（%）';
-
-
---
--- Name: COLUMN stock_daily_latest.idx_chinext; Type: COMMENT; Schema: public; Owner: quantmind
---
-
-COMMENT ON COLUMN public.stock_daily_latest.idx_chinext IS '创业板指数成分（0=否，1=是）';
 
 
 --
@@ -6168,16 +6054,6 @@ CREATE TABLE public.stock_daily_new_2026_01 (
     ind_code_l1 text,
     ind_code_l2 text,
     label double precision,
-    concept_ai integer,
-    concept_chip integer,
-    concept_new_energy integer,
-    concept_pv integer,
-    concept_military integer,
-    concept_medical integer,
-    concept_fintech integer,
-    concept_consumption integer,
-    concept_state_owned integer,
-    concept_lithium integer,
     main_flow double precision,
     inst_ownership double precision,
     lrg_trd_tolbuynum double precision,
@@ -6185,11 +6061,6 @@ CREATE TABLE public.stock_daily_new_2026_01 (
     flow_net_amount double precision,
     b_volume double precision,
     s_volume double precision,
-    idx_all integer,
-    idx_hs300 integer,
-    idx_zz1000 integer,
-    idx_margin integer,
-    idx_chinext integer,
     micro_effective_spread double precision,
     micro_imbalance_volume double precision,
     micro_jump_flag double precision,
@@ -6273,16 +6144,6 @@ CREATE TABLE public.stock_daily_new_2026_02 (
     ind_code_l1 text,
     ind_code_l2 text,
     label double precision,
-    concept_ai integer,
-    concept_chip integer,
-    concept_new_energy integer,
-    concept_pv integer,
-    concept_military integer,
-    concept_medical integer,
-    concept_fintech integer,
-    concept_consumption integer,
-    concept_state_owned integer,
-    concept_lithium integer,
     main_flow double precision,
     inst_ownership double precision,
     lrg_trd_tolbuynum double precision,
@@ -6290,11 +6151,6 @@ CREATE TABLE public.stock_daily_new_2026_02 (
     flow_net_amount double precision,
     b_volume double precision,
     s_volume double precision,
-    idx_all integer,
-    idx_hs300 integer,
-    idx_zz1000 integer,
-    idx_margin integer,
-    idx_chinext integer,
     micro_effective_spread double precision,
     micro_imbalance_volume double precision,
     micro_jump_flag double precision,
@@ -6378,16 +6234,6 @@ CREATE TABLE public.stock_daily_new_2026_03 (
     ind_code_l1 text,
     ind_code_l2 text,
     label double precision,
-    concept_ai integer,
-    concept_chip integer,
-    concept_new_energy integer,
-    concept_pv integer,
-    concept_military integer,
-    concept_medical integer,
-    concept_fintech integer,
-    concept_consumption integer,
-    concept_state_owned integer,
-    concept_lithium integer,
     main_flow double precision,
     inst_ownership double precision,
     lrg_trd_tolbuynum double precision,
@@ -6395,11 +6241,6 @@ CREATE TABLE public.stock_daily_new_2026_03 (
     flow_net_amount double precision,
     b_volume double precision,
     s_volume double precision,
-    idx_all integer,
-    idx_hs300 integer,
-    idx_zz1000 integer,
-    idx_margin integer,
-    idx_chinext integer,
     micro_effective_spread double precision,
     micro_imbalance_volume double precision,
     micro_jump_flag double precision,
@@ -6483,16 +6324,6 @@ CREATE TABLE public.stock_daily_new_2026_04 (
     ind_code_l1 text,
     ind_code_l2 text,
     label double precision,
-    concept_ai integer,
-    concept_chip integer,
-    concept_new_energy integer,
-    concept_pv integer,
-    concept_military integer,
-    concept_medical integer,
-    concept_fintech integer,
-    concept_consumption integer,
-    concept_state_owned integer,
-    concept_lithium integer,
     main_flow double precision,
     inst_ownership double precision,
     lrg_trd_tolbuynum double precision,
@@ -6500,11 +6331,6 @@ CREATE TABLE public.stock_daily_new_2026_04 (
     flow_net_amount double precision,
     b_volume double precision,
     s_volume double precision,
-    idx_all integer,
-    idx_hs300 integer,
-    idx_zz1000 integer,
-    idx_margin integer,
-    idx_chinext integer,
     micro_effective_spread double precision,
     micro_imbalance_volume double precision,
     micro_jump_flag double precision,
@@ -6522,6 +6348,103 @@ ALTER TABLE public.stock_daily_new_2026_04 OWNER TO quantmind;
 --
 
 COMMENT ON TABLE public.stock_daily_new_2026_04 IS 'stock_daily_latest 分区：2026年4月数据';
+
+
+--
+-- Name: tag_dictionary; Type: TABLE; Schema: public; Owner: quantmind
+--
+
+CREATE TABLE public.tag_dictionary (
+    tag_code character varying(64) NOT NULL,
+    tag_name character varying(128) NOT NULL,
+    tag_category character varying(32) NOT NULL,
+    source character varying(64),
+    is_active boolean NOT NULL DEFAULT true,
+    sort_order integer NOT NULL DEFAULT 0,
+    created_at timestamp with time zone NOT NULL DEFAULT now(),
+    updated_at timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT tag_dictionary_pkey PRIMARY KEY (tag_code)
+);
+
+
+ALTER TABLE public.tag_dictionary OWNER TO quantmind;
+
+COMMENT ON TABLE public.tag_dictionary IS '标签字典：指数/概念/板块标签元数据';
+COMMENT ON COLUMN public.tag_dictionary.tag_code IS '标签机器码：hs300/ai/chip';
+COMMENT ON COLUMN public.tag_dictionary.tag_name IS '标签中文名';
+COMMENT ON COLUMN public.tag_dictionary.tag_category IS '分类：index/concept/board/custom';
+COMMENT ON COLUMN public.tag_dictionary.source IS '数据来源：csi/metadata_json/manual';
+COMMENT ON COLUMN public.tag_dictionary.is_active IS '软停用';
+COMMENT ON COLUMN public.tag_dictionary.sort_order IS '展示排序';
+
+
+--
+-- Name: stock_tag; Type: TABLE; Schema: public; Owner: quantmind
+--
+
+CREATE TABLE public.stock_tag (
+    id bigint NOT NULL,
+    symbol character varying(16) NOT NULL,
+    tag_code character varying(64) NOT NULL,
+    source character varying(64),
+    created_at timestamp with time zone NOT NULL DEFAULT now(),
+    updated_at timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT stock_tag_pkey PRIMARY KEY (id),
+    CONSTRAINT stock_tag_tag_code_fkey FOREIGN KEY (tag_code) REFERENCES public.tag_dictionary(tag_code) ON DELETE RESTRICT,
+    CONSTRAINT uq_stock_tag_symbol_code UNIQUE (symbol, tag_code)
+);
+
+
+ALTER TABLE public.stock_tag OWNER TO quantmind;
+
+COMMENT ON TABLE public.stock_tag IS '股票-标签成员关系（长表）：一只股票多标签=多行';
+COMMENT ON COLUMN public.stock_tag.symbol IS '股票代码 Prefix 格式：SH600191';
+COMMENT ON COLUMN public.stock_tag.tag_code IS '标签机器码';
+COMMENT ON COLUMN public.stock_tag.source IS '条目级来源';
+
+
+--
+-- Name: stock_tag_id_seq; Type: SEQUENCE; Schema: public; Owner: quantmind
+--
+
+CREATE SEQUENCE public.stock_tag_id_seq
+    AS bigint
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER TABLE public.stock_tag_id_seq OWNER TO quantmind;
+
+
+--
+-- Name: stock_tag_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: quantmind
+--
+
+ALTER SEQUENCE public.stock_tag_id_seq OWNED BY public.stock_tag.id;
+
+
+--
+-- Name: stock_tag id; Default; Schema: public; Owner: quantmind
+--
+
+ALTER TABLE ONLY public.stock_tag ALTER COLUMN id SET DEFAULT nextval('public.stock_tag_id_seq');
+
+
+--
+-- Name: ix_stock_tag_symbol; Type: INDEX; Schema: public; Owner: quantmind
+--
+
+CREATE INDEX ix_stock_tag_symbol ON public.stock_tag USING btree (symbol);
+
+
+--
+-- Name: ix_stock_tag_tag_code; Type: INDEX; Schema: public; Owner: quantmind
+--
+
+CREATE INDEX ix_stock_tag_tag_code ON public.stock_tag USING btree (tag_code);
 
 
 --

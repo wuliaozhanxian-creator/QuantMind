@@ -11,6 +11,8 @@
 --   v1.1.0 (2026-05-11) - 重建 stock_daily_latest 表，统一 volume_trend_3d 为 double precision
 --   v1.2.0 (2026-06-07) - 升级 sim_trades 表结构，添加缺失字段以匹配代码模型
 --   v1.3.0 (2026-06-13) - 对齐模拟盘三表与 ORM：sim_orders / sim_trades / simulation_fund_snapshots
+--   v1.4.0 (2026-06-19) - 标签迁移至 stock_tag 长表，删 stock_daily_latest 16 个标签列
+--                         （详见 data/migrations/upgrade_v1.4.0_stock_tag.sql）
 -- ============================================================
 
 BEGIN;
