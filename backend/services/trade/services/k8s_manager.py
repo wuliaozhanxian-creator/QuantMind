@@ -386,7 +386,7 @@ class K8sManager:
             return self._get_docker_status(user_id, tenant_id)
 
         if not self.api:
-            return {"status": "unknown", "message": "K8s client not initialized"}
+            return None
 
         name = self._deployment_name(tenant_id, user_id)
         try:

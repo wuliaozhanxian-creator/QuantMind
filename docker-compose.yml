@@ -70,6 +70,8 @@ services:
       - SERVICE_MODE=all
       - TZ=Asia/Shanghai
       - PYTHONPATH=/app
+      # 单机部署使用 Docker 编排策略运行时（非 K8s）
+      - DOCKER_MODE=true
 
       # 安全配置
       - SECRET_KEY=${SECRET_KEY:-cbe2c739fa3a59798800aede60f68b87205653395175097802931c12858c2c52}
