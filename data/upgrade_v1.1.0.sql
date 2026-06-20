@@ -391,6 +391,33 @@ BEGIN
     END IF;
 END $$;
 
+-- --- orders.user_id / trades.user_id -> integer ---
+-- init 脚本历史遗留：orders/trades.user_id 为 varchar，但 ORM
+-- (Order/Trade.user_id = Column(Integer)) 为 integer，导致查询触发
+-- "operator does not exist: character varying = integer"。
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name   = 'orders'
+          AND column_name  = 'user_id'
+          AND data_type IN ('character varying', 'text')
+    ) THEN
+        EXECUTE 'ALTER TABLE public.orders ALTER COLUMN user_id TYPE INTEGER USING user_id::integer';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name   = 'trades'
+          AND column_name  = 'user_id'
+          AND data_type IN ('character varying', 'text')
+    ) THEN
+        EXECUTE 'ALTER TABLE public.trades ALTER COLUMN user_id TYPE INTEGER USING user_id::integer';
+    END IF;
+END $$;
+
 -- --- simulation_fund_snapshots 列扩展 ---
 ALTER TABLE public.simulation_fund_snapshots
     ADD COLUMN IF NOT EXISTS account_id VARCHAR(64),
