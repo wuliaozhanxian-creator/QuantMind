@@ -374,6 +374,23 @@ BEGIN
     END IF;
 END $$;
 
+-- --- portfolios.user_id -> integer ---
+-- 修复 init 脚本历史遗留：portfolios.user_id 原为 varchar，但 ORM
+-- (backend/services/trade/portfolio/models/__init__.py) 定义为 Integer，
+-- 导致 Portfolio.user_id == int 查询触发 "varchar = integer" 类型错误。
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name   = 'portfolios'
+          AND column_name  = 'user_id'
+          AND data_type IN ('character varying', 'text')
+    ) THEN
+        EXECUTE 'ALTER TABLE public.portfolios ALTER COLUMN user_id TYPE INTEGER USING user_id::integer';
+    END IF;
+END $$;
+
 -- --- simulation_fund_snapshots 列扩展 ---
 ALTER TABLE public.simulation_fund_snapshots
     ADD COLUMN IF NOT EXISTS account_id VARCHAR(64),

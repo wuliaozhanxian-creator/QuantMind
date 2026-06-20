@@ -3865,7 +3865,7 @@ ALTER SEQUENCE public.portfolio_snapshots_id_seq OWNED BY public.portfolio_snaps
 CREATE TABLE public.portfolios (
     id integer NOT NULL,
     tenant_id character varying(64) NOT NULL,
-    user_id character varying(64) NOT NULL,
+    user_id integer NOT NULL,
     name character varying(100) NOT NULL,
     description text,
     initial_capital numeric(20,2) NOT NULL,
