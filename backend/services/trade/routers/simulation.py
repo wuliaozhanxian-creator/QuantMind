@@ -1701,6 +1701,8 @@ async def get_simulation_account(
     # 今日盈亏基线优先取上一交易日资金快照；没有历史快照时回退初始权益。
     day_open_equity = initial_equity
     normalized_user_id = normalize_trade_user_id(auth.user_id) or str(auth.user_id)
+    today_corp_action_adjustment = 0.0
+    total_corp_action_adjustment = 0.0
     try:
         today = date.today()
         async with get_session(read_only=True) as session:
@@ -1725,10 +1727,35 @@ async def get_simulation_account(
             ).first()
             if prev_row and prev_row[0] is not None:
                 day_open_equity = float(prev_row[0])
+            # 公司行为 apply 带来的资产变动(DIVIDEND_CASH 现金分红 +
+            # BONUS_SHARE_VALUE 转增/送股市值增量),从盈亏中剔除,避免
+            # 非交易性资产变动被误计为交易盈亏。
+            # today_corp_action_adjustment: 今日公司行为变动,用于剔除日收益率
+            # total_corp_action_adjustment: 历史累计公司行为变动,用于剔除总收益率/月收益率
+            corp_stmt = text("""
+                SELECT
+                    COALESCE(SUM(CASE WHEN occurred_at >= :today_start THEN amount ELSE 0 END), 0),
+                    COALESCE(SUM(amount), 0)
+                FROM simulation_cash_ledger
+                WHERE account_id = :account_id
+                  AND ref_type = 'corporate_action'
+            """)
+            corp_row = (
+                await session.execute(
+                    corp_stmt,
+                    {
+                        "account_id": f"sim:{auth.tenant_id}:{auth.user_id}",
+                        "today_start": datetime.combine(today, datetime.min.time()),
+                    },
+                )
+            ).first()
+            if corp_row:
+                today_corp_action_adjustment = float(corp_row[0] or 0)
+                total_corp_action_adjustment = float(corp_row[1] or 0)
     except Exception:
         day_open_equity = initial_equity
-    today_pnl = round(total_asset - day_open_equity, 2)
-    total_pnl = round(total_asset - initial_equity, 2)
+    today_pnl = round(total_asset - day_open_equity - today_corp_action_adjustment, 2)
+    total_pnl = round(total_asset - initial_equity - total_corp_action_adjustment, 2)
     daily_return_pct = (
         round((today_pnl / day_open_equity) * 100, 6) if day_open_equity > 0 else 0.0
     )

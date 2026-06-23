@@ -7,6 +7,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime
 import asyncio
+import json
 import logging
 
 from sqlalchemy import Select, or_, select
@@ -23,6 +24,8 @@ from backend.services.trade.simulation.services.projection_service import (
 )
 from backend.shared.stock_utils import StockCodeUtil
 from backend.shared.database_manager_v2 import get_session
+from backend.shared.trade_account_cache import write_trade_account_cache
+from backend.services.trade.redis_client import redis_client
 
 logger = logging.getLogger(__name__)
 
@@ -154,11 +157,13 @@ class SimulationCorporateActionService:
             if multiplier <= 0:
                 multiplier = 1.0
             touched_accounts: set[str] = set()
+            old_qty_by_account: dict[str, float] = defaultdict(float)
             for lot in lots:
                 old_open = float(lot.quantity_open or 0.0)
                 old_remaining = float(lot.quantity_remaining or 0.0)
                 if old_open <= 0 or old_remaining <= 0:
                     continue
+                old_qty_by_account[str(lot.account_id)] += old_remaining
                 lot.quantity_open = round(old_open * multiplier, 6)
                 lot.quantity_remaining = round(old_remaining * multiplier, 6)
                 if lot.quantity_open > 0:
@@ -167,12 +172,35 @@ class SimulationCorporateActionService:
                         6,
                     )
                 touched_accounts.add(str(lot.account_id))
+            latest_price = await cls._load_latest_price(session, normalized_symbol)
             for account_id in touched_accounts:
                 await cls._refresh_account_projection(
                     session=session,
                     account_id=account_id,
                     applied_at=applied_at,
                 )
+                if latest_price > 0 and multiplier > 1.0:
+                    account = await session.get(SimulationAccount, account_id)
+                    if account is None:
+                        continue
+                    delta_qty = old_qty_by_account.get(account_id, 0.0) * (multiplier - 1.0)
+                    value_delta = round(delta_qty * latest_price, 4)
+                    if value_delta > 0:
+                        session.add(
+                            SimulationCashLedger(
+                                account_id=account.account_id,
+                                tenant_id=account.tenant_id,
+                                user_id=account.user_id,
+                                event_type="BONUS_SHARE_VALUE",
+                                ref_type="corporate_action",
+                                ref_id=str(action.id),
+                                amount=value_delta,
+                                balance_after=float(account.cash or 0.0),
+                                trade_date=applied_at,
+                                occurred_at=applied_at,
+                                note=f"{normalized_symbol} {normalized_type} value delta",
+                            )
+                        )
             cls._merge_action_note(
                 action,
                 f"{normalized_type}_applied_accounts={len(touched_accounts)}",
@@ -306,6 +334,31 @@ class SimulationCorporateActionService:
         account.total_asset = total_asset
         account.equity = total_asset
         account.last_projected_at = applied_at
+        cls._persist_projection_cache(
+            account=account,
+            positions=positions,
+            tenant_id=account.tenant_id,
+            user_id=account.user_id,
+        )
+
+    @staticmethod
+    def _persist_projection_cache(
+        *,
+        account: SimulationAccount,
+        positions: dict,
+        tenant_id: str,
+        user_id: str,
+    ) -> None:
+        if not redis_client.client:
+            return
+        payload = SimulationProjectionService.build_cache_payload(
+            account=account,
+            positions=positions,
+            source="corporate_action_apply",
+        )
+        sim_key = f"simulation:account:{tenant_id}:{str(user_id).strip()}"
+        redis_client.client.set(sim_key, json.dumps(payload, ensure_ascii=False))
+        write_trade_account_cache(redis_client, tenant_id, user_id, payload)
 
     @staticmethod
     async def _load_latest_price(session, symbol: str) -> float:

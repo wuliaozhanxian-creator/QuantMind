@@ -21,6 +21,9 @@ from sqlalchemy import select, func
 
 from backend.services.trade.redis_client import redis_client
 from backend.services.trade.simulation.models.account import SimulationAccount
+from backend.services.trade.simulation.models.fund_snapshot import (
+    SimulationFundSnapshot,
+)
 from backend.services.trade.simulation.models.order_v2 import SimulationOrderV2
 from backend.services.trade.simulation.models.order import OrderStatus
 from backend.services.trade.simulation.services.daily_snapshot_service import (
@@ -199,13 +202,36 @@ async def _execute_eod(trade_date: date) -> bool:
                 "EOD: %d simulation order(s) still in pending status", pending_count
             )
 
+        # 容器重启后 EOD 可能重跑昨日的 trade_date。若 fund_snapshots 已有该日数据,
+        # 跳过 capture_all 避免公司行为 apply 后的值覆盖原始快照。
         try:
-            await SimulationFundSnapshotService.capture_all(
-                redis_client,
-                snapshot_date=trade_date,
+            async with get_session(read_only=True) as check_session:
+                existing_count = (
+                    await check_session.execute(
+                        select(func.count())
+                        .select_from(SimulationFundSnapshot)
+                        .where(
+                            SimulationFundSnapshot.snapshot_date == trade_date
+                        )
+                    )
+                ).scalar_one_or_none()
+        except Exception:
+            existing_count = 0
+
+        if existing_count and existing_count > 0:
+            logger.info(
+                "EOD fund snapshot for %s already exists (%d rows), skipping capture",
+                trade_date,
+                existing_count,
             )
-        except Exception as exc:
-            logger.warning("EOD fund snapshot capture failed: %s", exc)
+        else:
+            try:
+                await SimulationFundSnapshotService.capture_all(
+                    redis_client,
+                    snapshot_date=trade_date,
+                )
+            except Exception as exc:
+                logger.warning("EOD fund snapshot capture failed: %s", exc)
 
         return True
 
