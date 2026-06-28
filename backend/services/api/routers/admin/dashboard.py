@@ -286,6 +286,7 @@ async def get_market_sources_status(
         from backend.services.stream.market_app.market_config import (
             MARKET_REDIS_HOST,
             MARKET_REDIS_PORT,
+            MARKET_REDIS_USER,
             MARKET_REDIS_PASSWORD,
             MARKET_REDIS_DB,
         )
@@ -294,8 +295,8 @@ async def get_market_sources_status(
         redis_client = aioredis.Redis(
             host=MARKET_REDIS_HOST,
             port=MARKET_REDIS_PORT,
-            username="readonly_monitor",
-            password=MARKET_REDIS_PASSWORD,
+            username=MARKET_REDIS_USER or None,
+            password=MARKET_REDIS_PASSWORD or None,
             db=MARKET_REDIS_DB,
         )
         await redis_client.ping()

@@ -124,18 +124,16 @@ curl -fsSL https://gitee.com/qusong0627/quantmind/raw/master/deploy/update.sh | 
 ```
 
 
-### 离线数据包
+### 数据准备
 
-部署完成后，需要下载离线数据包以启用完整功能（回测、模型训练、模型推理）：
+部署完成后，需要准备以下 4 组数据以启用完整功能（回测、模型训练、模型推理、投研平台）：
 
-**下载地址：** [https://oss.quantmindai.cn/data-download.html](https://oss.quantmindai.cn/data-download.html)
+1. **实时行情数据** — 通达信推送至 Redis
+2. **Qlib 回测数据** — CSMAR 数据转换生成
+3. **基础对齐数据** — 通达信导出生成 fundamental_aligned.parquet
+4. **模型特征快照** — CSMAR + Level2 数据计算生成
 
-数据包包含：
-- Qlib 股票特征数据（6000+ 股票）
-- 模型特征快照（2016-2026 年）
-- 预训练模型文件
-
-安装方法详见：[docs/数据包安装指南.md](docs/数据包安装指南.md)
+安装方法详见：[docs/数据配置指南.md](docs/数据配置指南.md)
 
 > 📖 完整部署选项、常见问题 → [docs/部署指南.md](docs/部署指南.md)
 
@@ -307,12 +305,15 @@ flowchart TB
 
 | 类别 | 文档 |
 |------|------|
-| **部署** | [部署指南](docs/部署指南.md) · [数据包安装](docs/数据包安装指南.md) · [Web部署](docs/Web部署指南.md) |
+| **部署** | [部署指南](docs/部署指南.md) · [数据配置指南](docs/数据配置指南.md) |
 | **开发** | [Electron编译](docs/Electron编译方案.md) · [开发环境](#-开发环境) |
-| **架构** | [系统架构](docs/系统架构文档.md) · [Qlib架构](docs/Qlib架构与回测原理.md) |
-| **策略** | [Alpha158训练](docs/alpha158训练计划.md) · [策略比较](docs/策略比较分析.md) · [多模型切换](docs/多模型训练与推理切换设计方案.md) |
-| **规范** | [Qlib策略开发](docs/Qlib内部策略开发规范.md) · [回测费用](docs/回测费用配置说明.md) |
-| **数据** | [高维特征存储](docs/高维特征存储与统一访问方案.md) · [152维特征方案](docs/QuantMind_152维特征方案规范.md) · [行情快照](docs/行情快照写入规范.md) |
+| **架构** | [系统架构](docs/系统架构文档.md) · [Qlib架构](docs/Qlib架构与回测原理.md) · [架构图文档](docs/架构图文档.md) |
+| **策略** | [Alpha158训练](docs/alpha158训练计划.md) · [策略比较](docs/策略比较分析.md) · [多模型切换](docs/多模型训练与推理切换设计方案.md) · [Qlib策略开发](docs/Qlib内部策略开发规范.md) · [回测费用](docs/回测费用配置说明.md) |
+| **数据** | [152维特征方案](docs/QuantMind_152维特征方案规范.md) · [高维特征存储](docs/高维特征存储与统一访问方案.md) · [行情快照规范](docs/行情快照写入规范.md) · [stock_daily_latest表维护](docs/stock_daily_latest表维护文档.md) |
+| **交易** | [模拟交易重构方案](docs/模拟交易重构方案_2026-06.md) · [实盘因子筛选](docs/实盘交易因子筛选手册.md) |
+| **模型** | [模型推理服务设计](docs/模型推理服务设计与链路文档.md) |
+| **AI IDE** | [提示词与策略规范](docs/AI_IDE_提示词与策略规范.md) |
+| **其他** | [quantbot代理服务](docs/quantbot代理服务.md) · [开源版数据更新客户端](docs/开源版数据更新客户端使用指南.md) |
 
 ---
 
@@ -362,7 +363,8 @@ quantmind/
 ├── models/                      # 模型文件
 ├── db/                          # 数据文件
 ├── deploy/
-│   └── deploy.sh                # 一键部署脚本
+│   ├── quick-deploy.sh         # 一键部署脚本
+│   └── update.sh               # 一键更新脚本
 ├── docker/
 │   └── Dockerfile.oss           # 镜像构建
 ├── docs/                        # 文档

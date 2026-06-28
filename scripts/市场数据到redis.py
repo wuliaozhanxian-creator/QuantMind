@@ -1,28 +1,3 @@
-"""
-通达信市场数据推送到 Redis
-
-功能：从通达信客户端获取 A 股实时行情，推送到 Redis 供 QuantMind 使用
-
-使用前请配置 Redis 连接信息（以下三种方式任选其一）：
-
-方式一：设置环境变量
-    export REMOTE_QUOTE_REDIS_HOST=your_redis_host
-    export REMOTE_QUOTE_REDIS_PORT=6379
-    export REMOTE_QUOTE_REDIS_PASSWORD=your_password
-
-方式二：创建 .env 文件（与脚本同目录）
-    REMOTE_QUOTE_REDIS_HOST=your_redis_host
-    REMOTE_QUOTE_REDIS_PORT=6379
-    REMOTE_QUOTE_REDIS_PASSWORD=your_password
-
-方式三：直接修改本文件底部的 REDIS_CONFIG 配置
-
-依赖：
-    - 通达信客户端（需启动并登录）
-    - tqcenter.py（通达信 Python 接口）
-    - redis 包：pip install redis
-"""
-
 import datetime
 import time
 import signal
@@ -40,15 +15,6 @@ except ImportError:
     exit()
 
 load_dotenv()
-
-# ============================================
-# Redis 配置（请根据实际情况修改）
-# ============================================
-REDIS_CONFIG = {
-    "host": os.getenv("REMOTE_QUOTE_REDIS_HOST", ""),
-    "port": int(os.getenv("REMOTE_QUOTE_REDIS_PORT", "6379")),
-    "password": os.getenv("REMOTE_QUOTE_REDIS_PASSWORD", ""),
-}
 
 class MarketDataToRedis:
     """市场数据推送到Redis类 - 符合QuantMind行情快照写入规范V1.0"""
@@ -125,34 +91,26 @@ class MarketDataToRedis:
                     raise
 
     def _init_redis(self):
-        """初始化Redis连接"""
+        """初始化Redis连接 - 通过环境变量配置"""
         try:
-            redis_host = REDIS_CONFIG["host"]
-            redis_port = REDIS_CONFIG["port"]
-            redis_password = REDIS_CONFIG["password"]
-
-            if not redis_host:
-                raise ValueError(
-                    "Redis 配置缺失！请通过以下方式配置：\n"
-                    "  1. 设置环境变量 REMOTE_QUOTE_REDIS_HOST/PORT/PASSWORD\n"
-                    "  2. 创建 .env 文件配置上述变量\n"
-                    "  3. 修改脚本顶部的 REDIS_CONFIG 字典"
-                )
+            redis_host = os.getenv('REDIS_HOST', '127.0.0.1')
+            redis_port = int(os.getenv('REDIS_PORT', '6379'))
+            redis_password = os.getenv('REDIS_PASSWORD', '')
 
             if redis_password:
                 self.redis_client = redis.Redis(
                     host=redis_host,
                     port=redis_port,
                     password=redis_password,
-                    decode_responses=False
+                    decode_responses=False  # 保持数据类型
                 )
             else:
                 self.redis_client = redis.Redis(
                     host=redis_host,
                     port=redis_port,
-                    decode_responses=False
+                    decode_responses=False  # 保持数据类型
                 )
-
+            
             self.redis_client.ping()
             print(f"✓ Redis连接成功: {redis_host}:{redis_port}")
         except Exception as e:
@@ -496,7 +454,7 @@ def main():
     
     print("=" * 60)
     print("通达信市场数据推送到Redis（符合QuantMind规范）")
-    print("循环模式：每隔30秒推送一次数据")
+    print("循环模式：每隔10秒推送一次数据")
     print("按 Ctrl+C 可优雅退出")
     print("=" * 60)
     print()
@@ -511,7 +469,7 @@ def main():
         stock_list = []
 
         print("\n开始循环推送市场数据...")
-        print("推送间隔: 30 秒")
+        print("推送间隔: 10 秒")
         print()
 
         cycle_count = 0
@@ -578,7 +536,7 @@ def main():
             
             # 计算剩余等待时间
             cycle_time = time.time() - cycle_start
-            wait_time = max(0, 30 - cycle_time)
+            wait_time = max(0, 10 - cycle_time)
             
             # 强制等待，确保每轮间隔至少30秒
             if mdtr.running:

@@ -1,35 +1,28 @@
 import json
+import os
 from pathlib import Path
-from typing import List
 
-from cryptography.fernet import Fernet
 from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT_ENV = Path(__file__).resolve().parents[4] / ".env"
 
+# 加载 .env，确保模块级常量能读到本地配置
+try:
+    from dotenv import load_dotenv
+    if ROOT_ENV.exists():
+        load_dotenv(ROOT_ENV, override=False)
+except Exception:
+    pass
+
 # ============================================================
-# 行情 Redis 硬编码配置 (quantmind-redis 访客只读用户)
-# 密码使用 Fernet 对称加密存储，运行时解密
+# 行情 Redis 配置 — 默认使用本地 Redis（通过环境变量覆盖）
 # ============================================================
-_MARKET_REDIS_FERNET_KEY = b"Cfqb_ncv06D9FSIzna990Jrwv3QgYZr56epuuGCcexo="
-_MARKET_REDIS_ENCRYPTED_PASSWORD = (
-    b"gAAAAABqGyJNjS_S84D3PlQoRRPK7w8lYPAPXy2WFLJgRRGZ6iIqsoNFWOPFQHbK3bedGCR5cZCoF0HSi5aCqIqngPsG0ofMsw=="
-)
-
-
-def _decrypt_market_redis_password() -> str:
-    """解密行情 Redis 密码"""
-    return Fernet(_MARKET_REDIS_FERNET_KEY).decrypt(
-        _MARKET_REDIS_ENCRYPTED_PASSWORD
-    ).decode()
-
-
-MARKET_REDIS_HOST = "106.53.100.144"
-MARKET_REDIS_PORT = 6379
-MARKET_REDIS_USER = "readonly_monitor"
-MARKET_REDIS_PASSWORD = _decrypt_market_redis_password()
-MARKET_REDIS_DB = 0
+MARKET_REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+MARKET_REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+MARKET_REDIS_USER = os.getenv("REDIS_USER", "")
+MARKET_REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", "")
+MARKET_REDIS_DB = int(os.getenv("REDIS_DB", "0"))
 
 
 class Settings(BaseSettings):
@@ -95,39 +88,18 @@ class Settings(BaseSettings):
     DB_ECHO: bool = False
 
     # Redis (Unified - OSS Edition)
-    # 行情 Redis 硬编码为远程服务器，不受环境变量覆盖
-    # 使用 _ 属性避免 pydantic-settings 从环境变量读取
-    _REDIS_HOST_OVERRIDE: str = MARKET_REDIS_HOST
-    _REDIS_PORT_OVERRIDE: int = MARKET_REDIS_PORT
-    _REDIS_USER_OVERRIDE: str = MARKET_REDIS_USER
-    _REDIS_PASSWORD_OVERRIDE: str = MARKET_REDIS_PASSWORD
-    _REDIS_DB_OVERRIDE: int = MARKET_REDIS_DB
-
-    @property
-    def REDIS_HOST(self) -> str:
-        return self._REDIS_HOST_OVERRIDE
-
-    @property
-    def REDIS_PORT(self) -> int:
-        return self._REDIS_PORT_OVERRIDE
-
-    @property
-    def REDIS_USER(self) -> str:
-        return self._REDIS_USER_OVERRIDE
-
-    @property
-    def REDIS_PASSWORD(self) -> str:
-        return self._REDIS_PASSWORD_OVERRIDE
-
-    @property
-    def REDIS_DB(self) -> int:
-        return self._REDIS_DB_OVERRIDE
+    # 使用本地 Redis 实例，通过环境变量配置（REDIS_HOST / REDIS_PORT 等）
+    REDIS_HOST: str = Field(default="localhost")
+    REDIS_PORT: int = Field(default=6379)
+    REDIS_USER: str = Field(default="")
+    REDIS_PASSWORD: str = Field(default="")
+    REDIS_DB: int = Field(default=0)
 
     REDIS_USE_SENTINEL: bool = Field(default=False)
     REDIS_SENTINELS_RAW: str = Field(default="localhost:26379")
     REDIS_MASTER_NAME: str = "quantmind-master"
 
-    # 远程行情快照 Redis (OSS: 使用统一 Redis)
+    # 远程行情快照 Redis — 默认使用本地 Redis
     REMOTE_QUOTE_REDIS_HOST: str = Field(default=MARKET_REDIS_HOST)
     REMOTE_QUOTE_REDIS_PORT: int = Field(default=MARKET_REDIS_PORT)
     REMOTE_QUOTE_REDIS_PASSWORD: str = Field(default=MARKET_REDIS_PASSWORD)
