@@ -124,14 +124,18 @@ curl -fsSL https://gitee.com/qusong0627/quantmind/raw/master/deploy/update.sh | 
 ```
 
 
-### 数据准备
+### 离线数据包
 
-部署完成后，需要准备以下 4 组数据以启用完整功能（回测、模型训练、模型推理、投研平台）：
+部署完成后，建议下载离线数据包以启用完整功能（回测、模型训练、模型推理）：
 
-1. **实时行情数据** — 通达信推送至 Redis
-2. **Qlib 回测数据** — CSMAR 数据转换生成
-3. **基础对齐数据** — 通达信导出生成 fundamental_aligned.parquet
-4. **模型特征快照** — CSMAR + Level2 数据计算生成
+**下载地址：** [https://oss.quantmindai.cn/data-download.html](https://oss.quantmindai.cn/data-download.html)
+
+数据包包含：
+- Qlib 股票特征数据（6000+ 股票）
+- 模型特征快照（2016-2026 年）
+- 预训练模型文件
+
+> 离线数据包不定期更新，如需最新数据请通过增量更新脚本自行构建。
 
 安装方法详见：[docs/数据配置指南.md](docs/数据配置指南.md)
 
