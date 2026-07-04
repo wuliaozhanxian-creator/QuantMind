@@ -48,10 +48,36 @@ npm run dashboard:build  # Production build
 ## Architecture Notes
 
 - **Feature engineering**: 48-dim features written to `market_data_daily` table by external service
-- **Trade service**: Enforces "local-first" order persistence before external submission
+- **Trade service**: Enforces "local-first" order persistence before external submission (three-stage architecture: local-persist → broker-submit → account-sync)
 - **Redis DB allocation**: 0=general, 1=auth, 2=trade, 3=market, 4=backtest, 5=cache
 - **Shared modules**: `backend/shared/` contains cross-service code (DB manager, Redis client, config, logging)
 - **Strategy storage**: `backend/shared/strategy_storage.py` is the single entry point for all strategy CRUD operations
+- **Readiness probes**: `/health` (liveness, always 200) vs `/readiness` (checks DB+Redis, 503 if down) — see `backend/shared/readiness.py`
+- **Structured logging**: `backend/shared/logging_config.py` injects `service_name` (api/engine/trade/stream) into JSON logs
+
+## Service JWT Authentication (M2 Security)
+
+**认证体系：用户 JWT + Service JWT 双轨制。**
+
+- **用户 JWT**: `backend/shared/auth.py` — `create_access_token` / `verify_token`，用于前端用户认证
+- **Service JWT**: `backend/shared/auth.py` — `create_service_token`，用于服务间内部调用认证
+- **认证流程图**: `T6.5_service_jwt_flow.md` — 含 15 处调用点矩阵 + 迁移路径
+- **Hard constraint**: `INTERNAL_CALL_SECRET` 未配置时 fail-fast，不得降级
+- **迁移状态**: Phase 1 已完成（死代码清理 + flow doc），Phase 2-4 计划于 M3 执行
+
+## Order Chain Architecture (M2 Robustness)
+
+**"本地优先"持久化原则：本地写成功才允许外部提交。**
+
+- **三阶段架构** (`backend/services/trade/services/trading_engine.py`):
+  1. **阶段1 本地持久化**: `transition_order_status(SUBMITTED)` 落库，commit 失败时 6 字段内存回滚
+  2. **阶段2 外部提交**: `_execute_via_broker()`，防御性断言确保 stage1 成功才进入
+  3. **阶段3 账户同步**: `_sync_account_to_redis()`，仅非 REJECTED 时执行
+- **三层对账扫描** (`backend/services/trade/services/order_timeout_scanner.py`):
+  - 5s 短超时: 标记 `[BRIDGE_ACK_TIMEOUT_PENDING_REVIEW]`
+  - 60s 对账入队: 标记 `[RECONCILE_QUEUED]` + 记录线索
+  - 300s 长超时: 标记 EXPIRED（排除已入队订单）
+- **端到端测试**: `backend/tests/test_order_link_robustness.py` — 9 个测试覆盖 4 场景
 
 ## Data Source Boundaries (CRITICAL)
 
@@ -68,15 +94,23 @@ npm run dashboard:build  # Production build
 - **Redis**: `readonly_monitor` 用户 (只读)
 - **用途**: 投研平台候选池、实盘行情推送
 - **配置文件**:
-  - PostgreSQL: `backend/shared/market_db_manager.py` (Fernet 加密密码)
-  - Redis: `backend/shared/remote_redis_client.py` (Fernet 加密密码)
-- **连接方式**: 密码使用 Fernet 对称加密硬编码，运行时解密
+  - PostgreSQL: `backend/shared/market_db_manager.py`
+  - Redis: `backend/shared/remote_redis_client.py`
+- **连接方式**: 密码通过环境变量注入，运行时读取（M2 安全加固后，Fernet 硬编码加密已废弃）
 
-### 开发配置
-- `.env` 文件中可覆盖远程连接配置（用于开发调试）：
-  - `REMOTE_MARKET_DB_HOST`, `REMOTE_MARKET_DB_PORT`, `REMOTE_MARKET_DB_USER`, `REMOTE_MARKET_DB_PASSWORD`
-  - `REMOTE_QUOTE_REDIS_HOST`, `REMOTE_QUOTE_REDIS_PORT`, `REMOTE_QUOTE_REDIS_USER`, `REMOTE_QUOTE_REDIS_PASSWORD`
-- 如未配置则使用硬编码加密默认值
+### 密钥管理 (CRITICAL - M2 安全加固)
+
+**强制约束：所有密钥/密码必须通过环境变量注入，严禁硬编码。**
+
+- **环境变量清单**（`.env` 文件配置，`.env.example` 为模板）:
+  - `SECRET_KEY` — 应用密钥（空默认值，未配置时 fail-fast 抛 RuntimeError）
+  - `JWT_SECRET_KEY` — JWT 签名密钥（空默认值，未配置时 fail-fast）
+  - `DB_PASSWORD` — 本地数据库密码
+  - `INTERNAL_CALL_SECRET` — 内部服务调用密钥（空默认值，未配置时 fail-fast）
+  - `REMOTE_MARKET_DB_HOST/PORT/USER/PASSWORD` — 远程行情 DB 连接
+  - `REMOTE_QUOTE_REDIS_HOST/PORT/USER/PASSWORD` — 远程行情 Redis 连接
+- **Fernet 加密**: `backend/shared/encryption.py` 已标记 deprecated，新代码不得使用
+- **Fail-fast 原则**: 所有序列化密钥在未配置时抛 `RuntimeError`，不得使用默认值降级
 
 ## Stock Code Standardization (CRITICAL)
 
@@ -130,9 +164,22 @@ git commit -m "descriptive message"
 ssh quant-server "cd /opt/quantmind && git pull && docker-compose restart"
 ```
 
+## CI/CD (M2 Quality)
+
+- **Pipeline**: `.github/workflows/ci.yml` — 3 jobs (typecheck / docker-compose validate / ruff advisory)
+- **Frontend gate**: `npm run typecheck` must pass before merge
+- **Backend lint**: `ruff check backend/` — advisory mode (M2 预存 1166 个 error，计划 M3 末清债，advisory 过期 2026-07-25)
+- **Docker validation**: `docker-compose config` validates compose file syntax
+
 ## Key Files
 
 - `backend/main_oss.py` - Unified entry point for all backend services
 - `backend/run_tests.py` - Test runner with multiple modes
 - `backend/shared/` - Shared modules across services
 - `docker-compose.yml` - Local deployment configuration
+- `backend/shared/readiness.py` - Readiness probe utility (2s timeout, async/sync)
+- `backend/shared/auth.py` - Authentication (user JWT + service JWT)
+- `backend/shared/logging_config.py` - Structured JSON logging with service_name
+- `backend/services/trade/services/trading_engine.py` - Order chain three-stage architecture
+- `T6.5_service_jwt_flow.md` - Service JWT migration flow diagram
+- `.env.example` - Environment variable template
