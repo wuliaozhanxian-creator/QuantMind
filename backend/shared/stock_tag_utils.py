@@ -7,6 +7,13 @@
 
 from __future__ import annotations
 
+import re
+
+# SQL 注入防护：合法标识符正则
+# tag_code 仅允许小写字母数字下划线；symbol_col 允许 字母数字下划线 + 点号（表名.列名）
+_VALID_TAG_CODE_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+_VALID_SYMBOL_COL_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_.]*$")
+
 TAG_FACTOR_ALIASES: dict[str, str] = {
     "idx_hs300": "hs300",
     "hs300": "hs300",
@@ -84,7 +91,14 @@ def build_membership_predicate(
     """生成判断 symbol 是否属于某标签的 SQL 谓词片段（不含参数绑定）。
 
     返回的 SQL 用 :tag 参数占位，调用方需在执行时绑定 tag_code。
+
+    安全约束：tag_code 与 symbol_col 必须为合法 SQL 标识符，
+    严禁包含引号、分号、注释等注入字符。
     """
+    if not _VALID_TAG_CODE_RE.match(tag_code):
+        raise ValueError(f"非法 tag_code（含注入风险）: {tag_code!r}")
+    if not _VALID_SYMBOL_COL_RE.match(symbol_col):
+        raise ValueError(f"非法 symbol_col（含注入风险）: {symbol_col!r}")
     base = (
         f"SELECT 1 FROM stock_tag st "
         f"WHERE st.symbol = {symbol_col} AND st.tag_code = :tag_{tag_code}"

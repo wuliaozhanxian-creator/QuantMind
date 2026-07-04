@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
 
 from backend.services.api.routers import (
     auth,
@@ -37,6 +38,11 @@ from backend.shared.database_pool import init_default_databases as init_sync_db_
 from backend.shared.error_contract import install_error_contract_handlers
 from backend.shared.logging_config import get_logger, setup_logging
 from backend.shared.openapi_utils import quantmind_generate_unique_id
+from backend.shared.readiness import (
+    build_readiness_response,
+    probe_async,
+    probe_sync,
+)
 from backend.shared.request_id import install_request_id_middleware
 from backend.shared.request_logging import install_access_log_middleware
 from backend.shared.service_health_metrics import (
@@ -44,7 +50,9 @@ from backend.shared.service_health_metrics import (
     set_service_health,
 )
 
-setup_logging(service_name="quantmind-api")
+# T8.2: 统一 service_name 为 "api"，与 main_oss.py run_api_service 保持一致，
+# 使 JSON 日志 service_name 字段可区分 api/engine/trade/stream 四个子服务
+setup_logging(service_name="api")
 logger = get_logger(__name__)
 
 
@@ -149,12 +157,50 @@ app.add_middleware(
 
 @app.get("/health")
 async def health_check():
+    """存活探针（liveness）：仅检查进程是否活着，恒返回 200。
+
+    下游依赖状态取自最近一次 /readiness 探测结果缓存（不实时探测），
+    避免频繁探测拖慢 /health 性能。
+    """
     startup_healthy = bool(getattr(app.state, "startup_healthy", True))
     set_service_health("quantmind-api", startup_healthy)
+    last_checks = getattr(app.state, "last_readiness_checks", None) or {}
+    components = {
+        "database": "connected" if last_checks.get("db") == "ok" else "disconnected",
+        "redis": "connected" if last_checks.get("redis") == "ok" else "disconnected",
+    }
     return {
         "status": "healthy" if startup_healthy else "degraded",
         "service": "quantmind-api",
+        "components": components,
     }
+
+
+@app.get("/readiness")
+async def readiness_check():
+    """就绪探针（readiness）：实时探测下游依赖（DB/Redis）连通性。
+
+    探测超时 2s；依赖不可用返回 503 + {"status": "not_ready", "checks": {...}}。
+    """
+    from backend.shared.database_manager_v2 import get_db_manager
+    from backend.shared.redis_sentinel_client import get_redis_sentinel_client
+
+    db_manager = get_db_manager()
+
+    async def _db_probe():
+        # 复用现有异步连接池执行 SELECT 1；get_master_session 会触发懒初始化
+        async with db_manager.get_master_session() as session:
+            await session.execute(text("SELECT 1"))
+
+    def _redis_probe():
+        return get_redis_sentinel_client().ping()
+
+    checks = {
+        "db": await probe_async("api:db", _db_probe),
+        "redis": await probe_sync("api:redis", _redis_probe),
+    }
+    app.state.last_readiness_checks = checks
+    return build_readiness_response(checks)
 
 
 @app.get("/")

@@ -292,6 +292,9 @@ class SimpleSignal(Signal):
                         return "SZ" + code_u
                     if code_u.startswith(("4", "8")):
                         return "BJ" + code_u
+                    # 920xxx 北交所新股,部分以9开头但归属北交所
+                    # 注意:9开头既可能是沪市(900/920)也可能是北交所,优先按 SH 处理
+                    return "SH" + code_u
                 return code_u
 
             candidates = [
@@ -315,6 +318,17 @@ class SimpleSignal(Signal):
             if best_overlap <= raw_overlap:
                 return series
 
+            # 记录格式转换详情,便于排查 symbol 不匹配问题
+            task_logger.info(
+                "to_qlib_code_mapping",
+                "symbol格式转换",
+                best_name=best_name,
+                raw_overlap=raw_overlap,
+                best_overlap=best_overlap,
+                pred_sample=list(pred_set)[:5],
+                qlib_sample=list(qlib_set)[:5],
+            )
+
             transform = dict(candidates)[best_name]
             new_inst = inst_values.map(transform)
             series.index = pd.MultiIndex.from_arrays(
@@ -333,6 +347,19 @@ class SimpleSignal(Signal):
             task_logger.warning("align_instrument_case_failed", "股票代码大小写对齐失败，保持原始 pred 索引", error=str(exc))
             return series
 
+
+    def _find_recent_pred_date(self, target_ts: "pd.Timestamp") -> "pd.Timestamp | None":
+        """在已加载的 pred_series 中查找不晚于 target_ts 的最近预测日期（前向填充）。"""
+        if self._pred_series is None or self._pred_series.empty:
+            return None
+        all_dates = pd.Index(
+            self._pred_series.index.get_level_values("datetime").unique()
+        ).sort_values()
+        pos = all_dates.searchsorted(target_ts, side="right") - 1
+        if pos < 0:
+            return None
+        return all_dates[pos]
+
     def get_signal(self, start_time, end_time):
         if self._pred_path:
             series = self._load_pred_series(start_time, end_time)
@@ -346,6 +373,26 @@ class SimpleSignal(Signal):
                 )
                 return pd.Series(dtype=float)
             if series.empty:
+                # 前向填充：当前区间无精确预测时，使用最近的已加载预测
+                target_ts = pd.to_datetime(end_time) if end_time else (
+                    pd.to_datetime(start_time) if start_time else pd.Timestamp.now()
+                )
+                recent_date = self._find_recent_pred_date(target_ts)
+                if recent_date is not None:
+                    try:
+                        daily = self._pred_series.xs(recent_date, level="datetime")
+                        if not daily.empty:
+                            task_logger.info(
+                                "pred_forward_fill",
+                                "当前区间无预测，前向填充使用最近预测",
+                                start_time=str(start_time),
+                                end_time=str(end_time),
+                                fallback_date=str(recent_date.date()),
+                                entries=len(daily),
+                            )
+                            return daily
+                    except Exception:
+                        pass
                 task_logger.info(
                     "pred_signal_empty",
                     "当前请求区间没有可交易预测信号，返回空信号",

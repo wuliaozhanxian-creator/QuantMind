@@ -5,6 +5,7 @@ AI策略服务应用工厂模块
 """
 
 import logging
+import os
 import sys
 import time
 from contextlib import asynccontextmanager

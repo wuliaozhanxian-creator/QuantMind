@@ -13,12 +13,22 @@ from config.settings import settings
 
 
 class JsonLogFormatter(logging.Formatter):
-    """输出结构化 JSON 日志，兼容 LOG_FORMAT=json 的运行时配置。"""
+    """输出结构化 JSON 日志，兼容 LOG_FORMAT=json 的运行时配置。
+
+    T8.2: 新增 ``service_name`` 字段，使 api/engine/trade/stream 四个子服务
+    可在日志层面区分来源。该字段由 ``setup_logging(service_name=...)`` 注入，
+    仅新增字段，不破坏现有 timestamp/level/logger/message/exception/stack_info 解析。
+    """
+
+    def __init__(self, service_name: str = "quantmind", datefmt: str | None = None):
+        super().__init__(datefmt=datefmt)
+        self.service_name = service_name
 
     def format(self, record: logging.LogRecord) -> str:
         payload: dict[str, Any] = {
             "timestamp": self.formatTime(record, self.datefmt),
             "level": record.levelname,
+            "service_name": self.service_name,
             "logger": record.name,
             "message": record.getMessage(),
         }
@@ -29,10 +39,10 @@ class JsonLogFormatter(logging.Formatter):
         return json.dumps(payload, ensure_ascii=False)
 
 
-def _build_formatter(log_format: str) -> logging.Formatter:
+def _build_formatter(log_format: str, service_name: str = "quantmind") -> logging.Formatter:
     fmt = str(log_format or "").strip()
     if fmt.lower() == "json":
-        return JsonLogFormatter(datefmt="%Y-%m-%d %H:%M:%S")
+        return JsonLogFormatter(service_name=service_name, datefmt="%Y-%m-%d %H:%M:%S")
     try:
         return logging.Formatter(fmt=fmt or "%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
     except ValueError:
@@ -57,7 +67,7 @@ def setup_logging(service_name: str = "quantmind"):
     root_logger.handlers.clear()
 
     # 创建格式器
-    formatter = _build_formatter(settings.logging.log_format)
+    formatter = _build_formatter(settings.logging.log_format, service_name=service_name)
 
     # 控制台处理器
     console_handler = logging.StreamHandler(sys.stdout)

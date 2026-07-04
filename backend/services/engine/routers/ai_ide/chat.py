@@ -42,11 +42,23 @@ class KnowledgeBase:
         if self._cached_context and (now - self._cached_at) < self._CACHE_TTL_SEC:
             return self._cached_context
         summary = "### QuantMind Project Standards & API Reference:\n"
+        # 路径穿越防护：解析 project_root 真实路径用于后续校验
+        project_root_real = os.path.realpath(self.project_root)
         for doc_rel_path in self.doc_paths:
+            # 路径穿越防护：禁止文档相对路径逃逸到 project_root 上级
+            if ".." in doc_rel_path.split(os.sep):
+                summary += f"\n-- Rejected suspicious doc path: {doc_rel_path} --\n"
+                continue
             full_path = os.path.join(self.project_root, doc_rel_path)
-            if os.path.exists(full_path):
+            full_path_real = os.path.realpath(full_path)
+            if full_path_real != project_root_real and not full_path_real.startswith(
+                project_root_real + os.sep
+            ):
+                summary += f"\n-- Path traversal blocked: {doc_rel_path} --\n"
+                continue
+            if os.path.exists(full_path_real):
                 try:
-                    with open(full_path, encoding="utf-8") as f:
+                    with open(full_path_real, encoding="utf-8") as f:
                         content = f.read()
                         summary += f"\n-- From {doc_rel_path} --\n{content[:3000]}\n"
                 except Exception as e:
@@ -298,8 +310,12 @@ def get_strategy_config():
                         logger.error(
                             f"LLM API Error: Status={response.status_code}, Body={err_body.decode('utf-8', 'ignore')}"
                         )
-                    except:
-                        pass
+                    except Exception as body_exc:
+                        logger.warning(
+                            "Failed to read LLM error body (status=%s): %s",
+                            response.status_code,
+                            body_exc,
+                        )
                     yield f"**Error:** AI 服务返回状态码 {response.status_code}。请确认设置中的 API Key 是否正确有效。"
                     return
 
@@ -314,7 +330,15 @@ def get_strategy_config():
                             delta = data["choices"][0]["delta"]
                             if "content" in delta:
                                 yield delta["content"]
-                        except:
+                        except (
+                            json.JSONDecodeError,
+                            KeyError,
+                            IndexError,
+                            TypeError,
+                        ) as parse_exc:
+                            logger.debug(
+                                "Skipping malformed SSE line: %s", parse_exc
+                            )
                             continue
 
     def _format_user_prompt(self, user_input: str, context: dict) -> str:

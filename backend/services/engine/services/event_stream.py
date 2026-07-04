@@ -1,15 +1,48 @@
 from __future__ import annotations
 
 import os
+import threading
 from typing import Any, Dict, List
 
-from redis import Redis
+from redis import ConnectionPool, Redis
 
 from backend.shared.event_bus.schemas import SignalCreatedEvent
 from backend.shared.logging_config import get_logger
 from backend.shared.redis_sentinel_client import get_redis_sentinel_client
 
 logger = get_logger(__name__)
+
+# ============================================================
+# 信号流 Redis 连接池单例
+# —— 每次 publish 新建 Redis 对象会导致连接泄漏（无池无 close），
+#    改为 ConnectionPool + 单例复用，参考实现：
+#      - backend/shared/remote_redis_client.py
+#      - backend/shared/redis_sentinel_client.py
+# ============================================================
+_stream_pool: ConnectionPool | None = None
+_stream_client: Redis | None = None
+_stream_lock = threading.Lock()
+
+
+def close_stream_client() -> None:
+    """关闭信号流 Redis 连接池，优雅释放资源"""
+    global _stream_pool, _stream_client
+    with _stream_lock:
+        client = _stream_client
+        pool = _stream_pool
+        _stream_client = None
+        _stream_pool = None
+        if client is not None:
+            try:
+                client.close()
+            except Exception as e:  # noqa: BLE001
+                logger.error("close signal stream redis client failed: %s", e)
+        if pool is not None:
+            try:
+                pool.disconnect()
+                logger.info("signal stream redis pool closed")
+            except Exception as e:  # noqa: BLE001
+                logger.error("close signal stream redis pool failed: %s", e)
 
 
 class EngineSignalStreamPublisher:
@@ -31,17 +64,36 @@ class EngineSignalStreamPublisher:
 
     def _get_stream_client(self):
         # 优先使用独立信号流 Redis，避免与 engine 其它缓存/队列 Redis 混用。
+        # 使用连接池单例，避免每次调用新建连接导致泄漏。
         if self.stream_redis_host:
-            return Redis(
-                host=self.stream_redis_host,
-                port=self.stream_redis_port,
-                db=self.stream_redis_db,
-                password=self.stream_redis_password,
-                decode_responses=False,
-                socket_timeout=5.0,
-                socket_connect_timeout=5.0,
-                health_check_interval=30,
-            )
+            global _stream_pool, _stream_client
+            if _stream_client is not None:
+                return _stream_client
+            with _stream_lock:
+                if _stream_client is None:
+                    _stream_pool = ConnectionPool(
+                        host=self.stream_redis_host,
+                        port=self.stream_redis_port,
+                        db=self.stream_redis_db,
+                        password=self.stream_redis_password,
+                        decode_responses=False,
+                        max_connections=int(
+                            os.getenv("SIGNAL_STREAM_REDIS_MAX_CONNECTIONS", "20")
+                        ),
+                        socket_timeout=5.0,
+                        socket_connect_timeout=5.0,
+                        health_check_interval=30,
+                    )
+                    _stream_client = Redis(
+                        connection_pool=_stream_pool, decode_responses=False
+                    )
+                    logger.info(
+                        "signal stream redis pool created: host=%s port=%s db=%s",
+                        self.stream_redis_host,
+                        self.stream_redis_port,
+                        self.stream_redis_db,
+                    )
+                return _stream_client
         return get_redis_sentinel_client()
 
     def publish_signals(

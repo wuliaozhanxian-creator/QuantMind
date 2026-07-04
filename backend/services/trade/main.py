@@ -10,6 +10,7 @@ except RuntimeError:
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from backend.services.trade.routers import (
     internal_strategy,
@@ -28,6 +29,11 @@ from backend.shared.cors import resolve_cors_origins
 from backend.shared.error_contract import install_error_contract_handlers
 from backend.shared.logging_config import get_logger
 from backend.shared.openapi_utils import quantmind_generate_unique_id
+from backend.shared.readiness import (
+    build_readiness_response,
+    probe_async,
+    probe_sync,
+)
 from backend.shared.request_id import install_request_id_middleware
 from backend.shared.request_logging import install_access_log_middleware
 from backend.shared.schema_registry import create_registered_tables
@@ -449,6 +455,36 @@ async def health_check():
             "redis": "connected" if redis_connected else "disconnected",
         },
     }
+
+
+@app.get("/readiness")
+async def readiness_check():
+    """就绪探针（readiness）：实时探测下游依赖（DB/Redis）连通性。
+
+    复用 trade 现有 db_connected/redis_connected 的连接对象，但做实时探测，
+    探测超时 2s；依赖不可用返回 503 + {"status": "not_ready", "checks": {...}}。
+    """
+    from backend.shared.database_manager_v2 import get_db_manager
+    from backend.services.trade.redis_client import redis_client
+
+    db_manager = get_db_manager()
+
+    async def _db_probe():
+        # 复用现有异步连接池执行 SELECT 1
+        async with db_manager.get_master_session() as session:
+            await session.execute(text("SELECT 1"))
+
+    def _redis_probe():
+        client = getattr(redis_client, "client", None)
+        if client is None:
+            raise RuntimeError("trade redis client not connected")
+        return client.ping()
+
+    checks = {
+        "db": await probe_async("trade:db", _db_probe),
+        "redis": await probe_sync("trade:redis", _redis_probe),
+    }
+    return build_readiness_response(checks)
 
 
 @app.get("/")

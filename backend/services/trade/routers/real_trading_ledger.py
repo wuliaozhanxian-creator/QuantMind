@@ -241,7 +241,7 @@ async def update_real_account_settings(
             .where(
                 and_(
                     Portfolio.tenant_id == resolved_tenant_id,
-                    Portfolio.user_id == (int(resolved_user_id) if resolved_user_id.isdigit() else 0),
+                    Portfolio.user_id == resolved_user_id,
                     Portfolio.mode == "REAL"
                 )
             )

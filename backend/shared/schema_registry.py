@@ -176,4 +176,5 @@ async def create_registered_tables(
 ) -> None:
     for schema in load_registered_schemas(schema_keys):
         async with engine.begin() as conn:
-            await conn.run_sync(lambda sync_conn: schema.metadata.create_all(sync_conn, checkfirst=checkfirst))
+            # noqa: B023 — run_sync 在当前迭代内同步执行 lambda，schema 不会被后续迭代覆盖
+            await conn.run_sync(lambda sync_conn: schema.metadata.create_all(sync_conn, checkfirst=checkfirst))  # noqa: B023

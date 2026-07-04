@@ -593,7 +593,7 @@ async def stop_trading(
                 select(Portfolio)
                 .where(
                     Portfolio.tenant_id == resolved_tenant_id,
-                    Portfolio.user_id == user_id_int,
+                    Portfolio.user_id == str(user_id_int),
                     Portfolio.run_status == "running",
                     Portfolio.is_deleted.is_(False),
                 )
@@ -1024,7 +1024,7 @@ async def get_orders(
         )
         uid_int = _parse_int_user_id(resolved_user_id)
         stmt = select(Order).where(
-            Order.user_id == uid_int, Order.tenant_id == resolved_tenant_id
+            Order.user_id == str(uid_int), Order.tenant_id == resolved_tenant_id
         )
 
         if status:
@@ -1060,7 +1060,7 @@ async def get_trade_history(
         )
         uid_int = _parse_int_user_id(resolved_user_id)
         stmt = select(Trade).where(
-            Trade.user_id == uid_int, Trade.tenant_id == resolved_tenant_id
+            Trade.user_id == str(uid_int), Trade.tenant_id == resolved_tenant_id
         )
         stmt = stmt.order_by(desc(Trade.executed_at)).limit(limit)
 

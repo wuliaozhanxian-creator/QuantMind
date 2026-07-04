@@ -60,6 +60,8 @@ def get_service_ports() -> dict:
 
 def run_api_service(port: int, workers: int = 1):
     """运行 API 服务"""
+    # T8.2: 子进程独立设置 service_name，使 JSON 日志可区分 api/engine/trade/stream
+    setup_logging(service_name="api")
     import uvicorn
 
     logger.info(f"Starting API service on port {port} with {workers} workers")
@@ -74,6 +76,8 @@ def run_api_service(port: int, workers: int = 1):
 
 def run_engine_service(port: int, workers: int = 4):
     """运行 Engine 服务"""
+    # T8.2: 子进程独立设置 service_name，使 JSON 日志可区分 api/engine/trade/stream
+    setup_logging(service_name="engine")
     import uvicorn
 
     logger.info(f"Starting Engine service on port {port} with {workers} workers")
@@ -88,6 +92,8 @@ def run_engine_service(port: int, workers: int = 4):
 
 def run_trade_service(port: int, workers: int = 1):
     """运行 Trade 服务"""
+    # T8.2: 子进程独立设置 service_name，使 JSON 日志可区分 api/engine/trade/stream
+    setup_logging(service_name="trade")
     import uvicorn
 
     logger.info(f"Starting Trade service on port {port} with {workers} workers")
@@ -102,6 +108,8 @@ def run_trade_service(port: int, workers: int = 1):
 
 def run_stream_service(port: int, workers: int = 1):
     """运行 Stream 服务"""
+    # T8.2: 子进程独立设置 service_name，使 JSON 日志可区分 api/engine/trade/stream
+    setup_logging(service_name="stream")
     import uvicorn
 
     logger.info(f"Starting Stream service on port {port} with {workers} workers")

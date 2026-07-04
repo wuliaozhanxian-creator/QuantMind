@@ -392,8 +392,11 @@ def _extract_metrics(raw: dict[str, Any]) -> dict[str, dict[str, float]] | None:
                 return None
             rmse = _coerce_float(stage_metrics.get("rmse"))
             auc = _coerce_float(stage_metrics.get("auc"))
-            if rmse is None or auc is None:
+            if rmse is None:
                 return None
+            # AUC 可能在 val/test 集上无法计算(单一类别),默认 0.5(随机水平)
+            if auc is None:
+                auc = 0.5
             normalized[stage] = {"rmse": rmse, "auc": auc}
         return normalized
 

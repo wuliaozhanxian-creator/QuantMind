@@ -1,11 +1,23 @@
 """
-配置加密模块
+配置加密模块（已废弃 / DEPRECATED）
 提供密码等敏感信息的加密存储功能
+
+安全变更 (T6.4, 2026-07-04):
+- 本模块已废弃，不再用于新代码。
+- 原因：主密钥默认值 ``quantmind-default-key-2024``（见下文）与固定 salt
+  ``quantmind_salt_v1`` 属于硬编码弱密钥，对称加密密钥可被离线推导，存在明文还原风险。
+- 远程行情 PostgreSQL / Redis 凭证已统一迁移至环境变量：
+    * backend/shared/market_db_manager.py   -> os.getenv("DB_PASSWORD", "")
+    * backend/shared/remote_redis_client.py -> os.getenv("REMOTE_QUOTE_REDIS_PASSWORD", ...)
+  两者均已不引用本模块（勘察确认无 Fernet/ConfigEncryption 依赖）。
+- 保留代码仅为向后兼容历史加密数据的解密场景，新代码严禁引用。
+- 计划在确认无历史加密数据依赖后整体移除本模块。
 """
 
 import base64
 import logging
 import os
+import warnings
 
 from cryptography.fernet import Fernet
 from cryptography.hazmat.backends import default_backend
@@ -13,6 +25,14 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 logger = logging.getLogger(__name__)
+
+# 模块加载即发出 DeprecationWarning，提醒新代码不要引用本模块
+warnings.warn(
+    "backend.shared.encryption 已废弃 (T6.4)：主密钥与 salt 为硬编码弱默认值，"
+    "新代码请直接通过环境变量注入凭证，不要引用本模块。",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 
 class ConfigEncryption:

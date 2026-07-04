@@ -24,11 +24,18 @@ from backend.shared.cors import resolve_cors_origins
 from backend.shared.error_contract import install_error_contract_handlers
 from backend.shared.logging_config import get_logger, setup_logging
 from backend.shared.openapi_utils import quantmind_generate_unique_id
+from backend.shared.readiness import (
+    build_readiness_response,
+    probe_async,
+    probe_sync,
+)
 from backend.shared.request_id import install_request_id_middleware
 from backend.shared.request_logging import install_access_log_middleware
 from backend.shared.service_health_metrics import set_service_health
 
-setup_logging("quantmind-stream")
+# T8.2: 统一 service_name 为 "stream"，与 main_oss.py run_stream_service 保持一致，
+# 使 JSON 日志 service_name 字段可区分 api/engine/trade/stream 四个子服务
+setup_logging("stream")
 logger = get_logger(__name__)
 
 
@@ -508,6 +515,49 @@ async def health_check():
         "ws_connections": len(ws_manager.active_connections),
         "ws_core_started": bool(getattr(app.state, "ws_core_started", False)),
     }
+
+
+@app.get("/readiness")
+async def readiness_check():
+    """就绪探针（readiness）：实时探测下游依赖连通性。
+
+    探测项：market_db（SELECT 1）+ Redis（PING）+ ws_core_started 状态。
+    探测超时 2s；依赖不可用返回 503 + {"status": "not_ready", "checks": {...}}。
+    """
+
+    async def _market_db_probe():
+        # 复用现有异步连接池执行 SELECT 1
+        from backend.services.stream.market_app.database import engine
+
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+
+    def _redis_probe():
+        # 独立短超时连接，避免影响既有连接池；探测后立即关闭
+        import redis as _redis
+
+        from backend.services.stream.market_app.market_config import settings
+
+        client = _redis.Redis(
+            host=settings.REDIS_HOST,
+            port=settings.REDIS_PORT,
+            password=settings.REDIS_PASSWORD or None,
+            db=settings.REDIS_DB,
+            socket_timeout=2.0,
+            socket_connect_timeout=2.0,
+        )
+        try:
+            return client.ping()
+        finally:
+            client.close()
+
+    ws_core_ok = "ok" if bool(getattr(app.state, "ws_core_started", False)) else "fail"
+    checks = {
+        "market_db": await probe_async("stream:market_db", _market_db_probe),
+        "redis": await probe_sync("stream:redis", _redis_probe),
+        "ws_core": ws_core_ok,
+    }
+    return build_readiness_response(checks)
 
 
 @app.get("/api/v1/internal/debug/connections")

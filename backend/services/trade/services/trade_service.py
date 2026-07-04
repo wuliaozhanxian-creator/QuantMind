@@ -63,7 +63,7 @@ class TradeService:
         # Build query (filters and stmt remain the same...)
         filters = [
             Trade.tenant_id == query.tenant_id,
-            Trade.user_id == query.user_id if query.user_id else True,
+            Trade.user_id == str(query.user_id) if query.user_id else True,
             Trade.portfolio_id == query.portfolio_id if query.portfolio_id else True,
             Trade.symbol == query.symbol if query.symbol else True,
             Trade.executed_at >= query.start_date if query.start_date else True,
@@ -254,7 +254,7 @@ class TradeService:
         if tenant_id is not None:
             conditions.append(Trade.tenant_id == tenant_id)
         if user_id is not None:
-            conditions.append(Trade.user_id == user_id)
+            conditions.append(Trade.user_id == str(user_id))
 
         result = await self.db.execute(select(Trade).where(and_(*conditions)))
         trade = result.scalar_one_or_none()
@@ -284,7 +284,7 @@ class TradeService:
         if query.tenant_id:
             conditions.append(Trade.tenant_id == query.tenant_id)
         if query.user_id:
-            conditions.append(Trade.user_id == query.user_id)
+            conditions.append(Trade.user_id == str(query.user_id))
         if query.portfolio_id:
             conditions.append(Trade.portfolio_id == query.portfolio_id)
         if query.order_id:
@@ -315,7 +315,7 @@ class TradeService:
                 and_(
                     Trade.order_id == order_id,
                     Trade.tenant_id == tenant_id,
-                    Trade.user_id == user_id,
+                    Trade.user_id == str(user_id),
                 )
             )
             .order_by(Trade.executed_at)
@@ -324,7 +324,7 @@ class TradeService:
 
     async def get_trade_statistics(self, tenant_id: str, user_id: int, portfolio_id: int | None = None, trading_mode: TradingMode | None = None) -> dict:
         """Get trade statistics"""
-        conditions = [Trade.tenant_id == tenant_id, Trade.user_id == user_id]
+        conditions = [Trade.tenant_id == tenant_id, Trade.user_id == str(user_id)]
         if portfolio_id:
             conditions.append(Trade.portfolio_id == portfolio_id)
         if trading_mode:

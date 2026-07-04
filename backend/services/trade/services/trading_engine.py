@@ -75,46 +75,104 @@ class TradingEngine:
         return broker
 
     async def submit_order(self, order: Order, *, tenant_id: str = "default") -> dict:
-        """Submit order for execution"""
+        """
+        Submit order for execution.
+
+        严格遵循“本地优先”持久化原则，分两阶段执行：
+          阶段1（本地持久化）：将订单状态 PENDING -> SUBMITTED 并落库。
+                本阶段失败绝不进入阶段2，避免“外部已下单但本地无 SUBMITTED 记录”。
+          阶段2（外部提交）：调用 broker.place_order，由 _execute_via_broker 处理回执/异常。
+        """
+        tenant_id = (tenant_id or "").strip() or order.tenant_id or "default"
+
+        # ===== 阶段1：本地持久化 SUBMITTED（本地优先原则）=====
         try:
-            tenant_id = (tenant_id or "").strip() or order.tenant_id or "default"
-
-            # Use OrderService for status transition
             await self.order_service.transition_order_status(order, OrderStatus.SUBMITTED)
-
-            logger.info(f"Order submitted: {order.order_id}")
-
-            # 通过 Broker 执行（自动选择模拟/真实）
-            await self._execute_via_broker(order, tenant_id=tenant_id)
-
-            # 仅在未被 Broker 拒绝时尝试同步账户状态（严格以 broker 回报为准）
-            tenant_id = (tenant_id or "").strip() or "default"
-            if order.status != OrderStatus.REJECTED:
-                await self._sync_account_to_redis(tenant_id, order.user_id)
-
-            return {
-                "success": True,
-                "order_id": str(order.order_id),
-                "status": order.status.value,
-                "message": "Order submitted successfully",
-            }
-
-        except Exception as e:
-            logger.error(f"Failed to submit order {order.order_id}: {e}")
-            # Use transition_order_status for consistent state
+        except Exception as persist_exc:
+            # 本地落库失败：绝不调用 broker，避免外部提交后本地无记录。
+            logger.error(
+                "Local persistence of SUBMITTED failed for order %s; "
+                "aborting before any broker call: %s",
+                order.order_id,
+                persist_exc,
+                exc_info=True,
+            )
+            # 尝试标记 REJECTED（PENDING -> REJECTED 合法），容忍二次失败
             try:
                 await self.order_service.transition_order_status(
-                    order, OrderStatus.REJECTED, remarks=f"Submission failed: {str(e)}"
+                    order, OrderStatus.REJECTED, remarks=f"本地落库失败: {persist_exc}"
                 )
-            except:
-                pass
-
+            except Exception as transition_exc:
+                logger.error(
+                    "Failed to mark order %s as REJECTED after local persistence "
+                    "failure: %s",
+                    order.order_id,
+                    transition_exc,
+                    exc_info=True,
+                )
             return {
                 "success": False,
                 "order_id": str(order.order_id),
                 "status": order.status.value,
-                "message": str(e),
+                "message": f"Local persistence failed: {persist_exc}",
             }
+
+        # 防御性断言：只有本地确认为 SUBMITTED 才允许进入外部提交阶段
+        if order.status != OrderStatus.SUBMITTED:
+            logger.error(
+                "Order %s not in SUBMITTED state after transition (actual=%s); "
+                "aborting broker call to preserve local-first guarantee.",
+                order.order_id,
+                order.status,
+            )
+            return {
+                "success": False,
+                "order_id": str(order.order_id),
+                "status": order.status.value,
+                "message": "Order not in SUBMITTED state; broker call aborted",
+            }
+
+        logger.info(f"Order submitted (local persisted): {order.order_id}")
+
+        # ===== 阶段2：外部 Broker 提交 =====
+        try:
+            await self._execute_via_broker(order, tenant_id=tenant_id)
+        except Exception as broker_exc:
+            # _execute_via_broker 内部已有三层异常处理，此处仅作兜底
+            logger.error(
+                "Unexpected error escaped _execute_via_broker for order %s: %s",
+                order.order_id,
+                broker_exc,
+                exc_info=True,
+            )
+            try:
+                await self.order_service.transition_order_status(
+                    order, OrderStatus.REJECTED, remarks=f"提交异常: {broker_exc}"
+                )
+            except Exception as transition_exc:
+                logger.error(
+                    "Failed to transition order %s to REJECTED after broker error: %s",
+                    order.order_id,
+                    transition_exc,
+                    exc_info=True,
+                )
+
+        # ===== 阶段3：账户状态同步（仅在非 REJECTED 时）=====
+        if order.status != OrderStatus.REJECTED:
+            try:
+                await self._sync_account_to_redis(tenant_id, order.user_id)
+            except Exception as sync_exc:
+                logger.warning(
+                    "Account sync failed for order %s: %s", order.order_id, sync_exc
+                )
+
+        is_rejected = order.status == OrderStatus.REJECTED
+        return {
+            "success": not is_rejected,
+            "order_id": str(order.order_id),
+            "status": order.status.value,
+            "message": "Order submitted successfully" if not is_rejected else "Order rejected",
+        }
 
     async def _execute_via_broker(self, order: Order, tenant_id: str = "default"):
         """
@@ -217,8 +275,26 @@ class TradingEngine:
                 base_remarks = (order.remarks or "").strip()
                 if marker not in base_remarks:
                     order.remarks = (f"{base_remarks} {marker}").strip()
-                await self.db.commit()
-                await self.db.refresh(order)
+                # remarks 落库失败不应影响已成功派发至 broker 的事实，
+                # 否则会导致外层 except 误判为 REJECTED，造成外部已下单、本地却标记拒单。
+                try:
+                    await self.db.commit()
+                    await self.db.refresh(order)
+                except Exception as remarks_exc:
+                    logger.warning(
+                        "Failed to persist [AWAITING_BRIDGE_ACK] remarks for order %s "
+                        "(broker dispatch already succeeded, status kept SUBMITTED): %s",
+                        order.order_id,
+                        remarks_exc,
+                    )
+                    try:
+                        await self.db.rollback()
+                    except Exception as rollback_exc:
+                        logger.warning(
+                            "rollback failed after remarks commit error for order %s: %s",
+                            order.order_id,
+                            rollback_exc,
+                        )
                 logger.info(
                     "✅ 订单 %s 已派发至 Broker，等待执行回报 (交易所单号: %s)",
                     order.order_id,

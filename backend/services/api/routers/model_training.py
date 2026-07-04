@@ -370,15 +370,81 @@ async def list_training_runs(
     if not user_id:
         raise HTTPException(status_code=401, detail="用户身份无效")
 
-    result = _TRAINING_LOG_STREAM.list_user_runs(
-        tenant_id=tenant_id,
-        user_id=user_id,
-        page=page,
-        page_size=page_size,
-    )
-    if result is None:
-        raise HTTPException(status_code=503, detail="训练任务视图暂不可用")
-    return result
+    page = max(1, page)
+    page_size = max(1, min(100, page_size))
+    offset = (page - 1) * page_size
+
+    try:
+        async with get_session(read_only=True) as session:
+            total = (
+                await session.execute(
+                    text(
+                        "SELECT COUNT(*) FROM admin_training_jobs "
+                        "WHERE tenant_id = :tid AND user_id = :uid"
+                    ),
+                    {"tid": tenant_id, "uid": user_id},
+                )
+            ).scalar() or 0
+
+            rows = (
+                await session.execute(
+                    text(
+                        "SELECT id, tenant_id, user_id, status, progress, "
+                        "instance_id, request_payload, result, "
+                        "created_at, updated_at "
+                        "FROM admin_training_jobs "
+                        "WHERE tenant_id = :tid AND user_id = :uid "
+                        "ORDER BY created_at DESC "
+                        "LIMIT :limit OFFSET :offset"
+                    ),
+                    {"tid": tenant_id, "uid": user_id, "limit": page_size, "offset": offset},
+                )
+            ).mappings().all()
+
+            items = []
+            for row in rows:
+                import json as _json
+                result_data = None
+                raw_result = row.get("result")
+                if raw_result:
+                    try:
+                        result_data = _json.loads(raw_result) if isinstance(raw_result, str) else raw_result
+                    except Exception:
+                        result_data = None
+                req_payload = None
+                raw_req = row.get("request_payload")
+                if raw_req:
+                    try:
+                        req_payload = _json.loads(raw_req) if isinstance(raw_req, str) else raw_req
+                    except Exception:
+                        req_payload = None
+                err = None
+                if isinstance(result_data, dict):
+                    err = result_data.get("error")
+                items.append({
+                    "run_id": row.get("id"),
+                    "tenant_id": row.get("tenant_id"),
+                    "user_id": str(row.get("user_id") or ""),
+                    "status": row.get("status"),
+                    "progress": row.get("progress") or 0,
+                    "instance_id": row.get("instance_id"),
+                    "model_type": (req_payload or {}).get("model_type") if isinstance(req_payload, dict) else None,
+                    "job_name": (req_payload or {}).get("job_name") if isinstance(req_payload, dict) else None,
+                    "created_at": str(row.get("created_at") or ""),
+                    "updated_at": str(row.get("updated_at") or ""),
+                    "result": result_data,
+                    "error": err,
+                })
+
+            return {
+                "items": items,
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+            }
+    except Exception as e:
+        logger.exception("Failed to list training runs")
+        raise HTTPException(status_code=500, detail=f"训练任务列表查询失败: {e}")
 
 
 @router.get("/training-runs/{run_id}", summary="获取训练任务状态（用户态）")

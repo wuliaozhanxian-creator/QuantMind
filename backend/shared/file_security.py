@@ -42,7 +42,7 @@ class FileSecurityValidator:
             ".bat",
             ".cmd",
             ".com",
-            ".pi",
+            ".pif",
             ".scr",
             ".vbs",
             ".js",
@@ -186,10 +186,10 @@ class FileSecurityValidator:
                 ".jpg": "image/jpeg",
                 ".jpeg": "image/jpeg",
                 ".png": "image/png",
-                ".gi": "image/gi",
+                ".gif": "image/gif",
                 ".webp": "image/webp",
                 ".bmp": "image/bmp",
-                ".pd": "application/pd",
+                ".pdf": "application/pdf",
                 ".txt": "text/plain",
                 ".csv": "text/csv",
                 ".json": "application/json",
@@ -274,7 +274,7 @@ class FileSecurityValidator:
                 result["warnings"].append("图片文件大小异常，可能包含隐藏数据")
 
             # 检查EXIF数据（可能包含恶意脚本）
-            if hasattr(img, "_getexi") and img._getexif():
+            if hasattr(img, "_getexif") and img._getexif():
                 img._getexif()
                 # 这里可以添加更详细的EXIF检查
 

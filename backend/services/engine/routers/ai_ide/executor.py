@@ -75,6 +75,35 @@ TMP_ROOT = os.getenv("AI_IDE_TEMP_DIR", "/app/db/ai_ide_tmp")
 HOST_PROJECT_PATH = os.getenv("HOST_PROJECT_PATH", "/home/quantmind")
 
 
+def _ensure_path_within(path: str, base_dir: str) -> str:
+    """路径穿越防护：校验 path 解析后位于 base_dir 之内。
+
+    使用 os.path.realpath 解析符号链接和 ../，然后检查是否以 base_dir 为前缀。
+    若校验失败则抛出 HTTPException(400)，防止恶意文件名/路径逃逸沙箱。
+    """
+    base_real = os.path.realpath(base_dir)
+    path_real = os.path.realpath(path)
+    if path_real != base_real and not path_real.startswith(base_real + os.sep):
+        raise HTTPException(
+            status_code=400,
+            detail=f"路径穿越防护：{path} 不在允许的目录 {base_dir} 内",
+        )
+    return path_real
+
+
+def _sanitize_user_id_for_path(user_id: str) -> str:
+    """校验 user_id 不含路径穿越字符（/../ / 等），防止逃逸用户临时目录。"""
+    if not user_id or "/" in user_id or "\\" in user_id or ".." in user_id:
+        raise HTTPException(
+            status_code=400, detail="非法用户标识（含路径穿越字符）"
+        )
+    # 仅允许字母数字下划线连字符
+    safe = "".join(c for c in user_id if c.isalnum() or c in "-_")
+    if not safe:
+        raise HTTPException(status_code=400, detail="非法用户标识")
+    return safe
+
+
 def _build_runner_environment(
     user_id: str, request_meta: dict[str, Any] | None = None
 ) -> dict[str, str]:
@@ -865,17 +894,25 @@ async def start_execution(request: Request, item: StartRequest):
 
         # 2. 准备临时运行环境
         tmp_root = TMP_ROOT
-        user_tmp_dir = os.path.join(tmp_root, user_id)
+        # 路径穿越防护：校验 user_id 不含路径分隔符或 ..
+        safe_user_id = _sanitize_user_id_for_path(user_id)
+        user_tmp_dir = os.path.join(tmp_root, safe_user_id)
         os.makedirs(user_tmp_dir, exist_ok=True)
 
         safe_filename = "".join([c for c in filename if c.isalnum() or c in "._-"])
         if not safe_filename:
             safe_filename = "tmp_code.py"
+        # 路径穿越防护：禁止文件名包含 .. 等穿越字符
+        if ".." in safe_filename:
+            raise HTTPException(status_code=400, detail="非法文件名")
         runner_image = _normalize_image_ref(item.runner_image)
 
         job_id = str(uuid.uuid4())
         file_path = os.path.join(user_tmp_dir, f"{job_id}_{safe_filename}")
         runner_path = os.path.join(user_tmp_dir, f"{job_id}_runner.py")
+        # 路径穿越防护：校验最终路径仍在 user_tmp_dir 内
+        _ensure_path_within(file_path, user_tmp_dir)
+        _ensure_path_within(runner_path, user_tmp_dir)
 
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(code)
@@ -1062,12 +1099,23 @@ async def run_process(job_id: str, file_path: str):
         # 计算宿主机上的文件路径 (用于 Docker 挂载)
         # 假设 API 容器内的 /app 对应 宿主机的 {HOST_PROJECT_PATH}
         rel_path = os.path.relpath(file_path, "/app")
+        # 路径穿越防护：禁止 rel_path 逃逸到 /app 上级目录
+        if rel_path.startswith(".."):
+            raise RuntimeError(f"路径穿越防护：file_path 不在 /app 下: {file_path}")
         host_script_path = os.path.join(HOST_PROJECT_PATH, rel_path)
+        # 路径穿越防护：校验宿主机路径仍在 HOST_PROJECT_PATH 内
+        _ensure_path_within(host_script_path, HOST_PROJECT_PATH)
+        host_runner_path = os.path.join(
+            HOST_PROJECT_PATH, os.path.relpath(runner_path, "/app")
+        )
+        if os.path.relpath(runner_path, "/app").startswith(".."):
+            raise RuntimeError(f"路径穿越防护：runner_path 不在 /app 下: {runner_path}")
+        _ensure_path_within(host_runner_path, HOST_PROJECT_PATH)
 
         # 准备挂载 (策略代码 + Qlib 数据)
         volumes = {
             host_script_path: {"bind": "/app/strategy.py", "mode": "ro"},
-            os.path.join(HOST_PROJECT_PATH, os.path.relpath(runner_path, "/app")): {
+            host_runner_path: {
                 "bind": "/app/runner.py",
                 "mode": "ro",
             },
@@ -1145,8 +1193,12 @@ async def run_process(job_id: str, file_path: str):
             try:
                 c = job_info["container"]
                 await asyncio.to_thread(c.remove, force=True)
-            except:
-                pass
+            except Exception as cleanup_exc:
+                logger.warning(
+                    "Container cleanup failed (job may leak): %s",
+                    cleanup_exc,
+                    exc_info=True,
+                )
         await _cleanup_job_artifacts(job_info)
         job_info.pop("runner", None)
         job_info.pop("container", None)

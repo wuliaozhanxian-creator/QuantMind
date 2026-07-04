@@ -150,7 +150,7 @@ class OrderService:
         if tenant_id is not None:
             conditions.append(Order.tenant_id == tenant_id)
         if user_id is not None:
-            conditions.append(Order.user_id == user_id)
+            conditions.append(Order.user_id == str(user_id))
 
         result = await self.db.execute(select(Order).where(and_(*conditions)))
         return result.scalar_one_or_none()
@@ -171,7 +171,7 @@ class OrderService:
         if query.tenant_id:
             conditions.append(Order.tenant_id == query.tenant_id)
         if query.user_id:
-            conditions.append(Order.user_id == query.user_id)
+            conditions.append(Order.user_id == str(query.user_id))
         if query.portfolio_id:
             conditions.append(Order.portfolio_id == query.portfolio_id)
         if query.symbol:
@@ -211,6 +211,14 @@ class OrderService:
             raise ValueError(f"Invalid status transition: {order.status} -> {new_status}")
 
         old_status = order.status
+        # 快照原始字段，commit 失败时回滚内存状态，避免调用方基于“假成功”继续外部提交。
+        # 这是“本地优先”持久化原则的核心保障：本地确未落库成功，绝不返回成功。
+        old_submitted_at = order.submitted_at
+        old_filled_at = order.filled_at
+        old_cancelled_at = order.cancelled_at
+        old_expired_at = order.expired_at
+        old_remarks = order.remarks
+
         order.status = new_status
 
         if new_status == OrderStatus.SUBMITTED:
@@ -225,7 +233,36 @@ class OrderService:
         if remarks:
             order.remarks = f"{order.remarks or ''} [{new_status.value.upper()}: {remarks}]"
 
-        await self.db.commit()
+        try:
+            await self.db.commit()
+        except Exception as commit_exc:
+            # 本地优先原则：commit 失败必须回滚内存状态，否则调用方会误以为已落库成功
+            # 而继续触发外部 broker 提交，造成“本地无记录但外部已下单”的灾难性不一致。
+            logger.error(
+                "Failed to commit order status transition %s -> %s for order %s: %s; "
+                "rolling back in-memory state to preserve local-first guarantee.",
+                old_status,
+                new_status,
+                order.order_id,
+                commit_exc,
+                exc_info=True,
+            )
+            order.status = old_status
+            order.submitted_at = old_submitted_at
+            order.filled_at = old_filled_at
+            order.cancelled_at = old_cancelled_at
+            order.expired_at = old_expired_at
+            order.remarks = old_remarks
+            try:
+                await self.db.rollback()
+            except Exception as rollback_exc:
+                logger.error(
+                    "Failed to rollback session after commit failure for order %s: %s",
+                    order.order_id,
+                    rollback_exc,
+                )
+            raise
+
         await self.db.refresh(order)
 
         logger.info(f"Order {order.order_id} transitioned: {old_status} -> {new_status}")

@@ -984,9 +984,9 @@ def _get_stream_series_redis_client():
     Stream 行情时序 Redis（quote->series）客户端。
     优先使用 REMOTE_QUOTE_REDIS_*，与 stream 写入端保持一致。
     """
-    host = _get_env_with_root_fallback("REMOTE_QUOTE_REDIS_HOST", "localhost")
+    host = _get_env_with_root_fallback("REMOTE_QUOTE_REDIS_HOST", os.getenv("REDIS_HOST", "redis"))
     port = int(
-        _get_env_with_root_fallback("REMOTE_QUOTE_REDIS_PORT", "36379") or "36379"
+        _get_env_with_root_fallback("REMOTE_QUOTE_REDIS_PORT", os.getenv("REDIS_PORT", "6379")) or "6379"
     )
     password = _get_env_with_root_fallback("REMOTE_QUOTE_REDIS_PASSWORD", "") or None
     client = redis_lib.Redis(

@@ -131,6 +131,9 @@ class DatabaseOptimizer:
 
     def analyze_query_plan(self, sql: str):
         """分析查询计划"""
+        # SQL 注入防护：EXPLAIN 仅用于分析查询计划，禁止多语句注入
+        if ";" in sql.strip().rstrip(";"):
+            raise ValueError("analyze_query_plan 禁止包含分号（多语句注入防护）")
         with self.engine.connect() as conn:
             result = conn.execute(text(f"EXPLAIN {sql}"))
             plan = [dict(row) for row in result]

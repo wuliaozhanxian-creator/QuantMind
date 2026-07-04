@@ -37,7 +37,15 @@ def _get_sync_db_session():
     if "+asyncpg" in sync_db_url:
         sync_db_url = sync_db_url.replace("+asyncpg", "+psycopg2")
     if not sync_db_url or "postgresql" not in sync_db_url:
-        sync_db_url = "postgresql+psycopg2://postgres:quantmind2026@quantmind-postgresql:5432/quantmind"
+        # 安全变更 (T6.2): 移除硬编码密码连接串，改由 DB_* 环境变量拼接。
+        _db_user = os.getenv("DB_USER", "postgres")
+        _db_password = os.getenv("DB_PASSWORD", "")
+        _db_host = os.getenv("DB_HOST", "quantmind-postgresql")
+        _db_port = os.getenv("DB_PORT", "5432")
+        _db_name = os.getenv("DB_NAME", "quantmind")
+        if not _db_password:
+            raise RuntimeError("DB_PASSWORD 未配置，无法构建同步数据库连接")
+        sync_db_url = f"postgresql+psycopg2://{_db_user}:{_db_password}@{_db_host}:{_db_port}/{_db_name}"
 
     sync_engine = sa_create_engine(sync_db_url, pool_pre_ping=True)
     session_factory = sa_sessionmaker(bind=sync_engine)
@@ -592,6 +600,10 @@ def run_strategy_backtest_loop(
                 },
             )
 
+        # 计算回测日期区间（LoopConfig 与 market_data 共用，须在 LoopConfig 之前定义）
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=730)
+
         loop_config = LoopConfig(
             max_iterations=request.max_iterations,
             backtest_period=request.backtest_period,
@@ -616,8 +628,6 @@ def run_strategy_backtest_loop(
         )
 
         market_data_service = MarketDataService()
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=730)
         market_data = await market_data_service.get_market_data(
             symbols=request.target_assets or ["SZ000001"],
             start_date=start_date,
@@ -952,7 +962,10 @@ def get_data_status_task() -> dict[str, Any]:
                                 "lag_days": max(0, cal_len - 1 - end_idx),
                             }
                         )
-            except:
+            except Exception as bin_exc:
+                logger.debug(
+                    "Invalid qlib bin data for symbol %s: %s", inst, bin_exc
+                )
                 invalid_count += 1
 
         qlib_info["latest_date_coverage"] = {

@@ -617,8 +617,13 @@ class AuthService:
         """管理员专用登录"""
         from backend.services.api.user_app.config import settings
 
-        # 1. 验证全局管理员密钥 (Security by Obscurity)
-        expected_key = os.getenv("ADMIN_SECURE_ENTRY_KEY", "qwer1234")
+        # 1. 验证全局管理员密钥 (T6.3: 移除弱默认值 "qwer1234"，未配置则 fail-fast)
+        expected_key = os.getenv("ADMIN_SECURE_ENTRY_KEY", "")
+        if not expected_key:
+            logger.error(
+                f"Admin login blocked: ADMIN_SECURE_ENTRY_KEY 未配置，管理员入口已禁用 (ip={ip_address})"
+            )
+            raise ValueError("管理员入口未配置安全密钥，请联系系统管理员配置 ADMIN_SECURE_ENTRY_KEY")
         if credentials.admin_key != expected_key:
             logger.warning(f"Admin login blocked: Invalid admin_key from {ip_address}")
             raise ValueError("入口验证失败")

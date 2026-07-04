@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -17,6 +18,9 @@ from typing import Any
 import asyncpg
 import pandas as pd
 from dotenv import load_dotenv
+
+# SQL 注入防护：合法列名/表名正则（仅允许字母数字下划线）
+_VALID_IDENT_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 
 def _sha256_file(path: Path) -> str:
@@ -261,6 +265,11 @@ async def _upsert_stock_daily_latest(parquet_path: Path) -> int:
         use_cols = [c for c in df.columns.tolist() if c in table_cols]
         if "trade_date" not in use_cols or "symbol" not in use_cols:
             raise RuntimeError("目标表缺少主键列 trade_date/symbol")
+
+        # SQL 注入防护：校验动态列名格式，仅允许字母数字下划线
+        invalid_cols = [c for c in use_cols if not _VALID_IDENT_RE.match(str(c))]
+        if invalid_cols:
+            raise RuntimeError(f"非法列名（含注入风险）: {invalid_cols}")
 
         records = []
         for row in df[use_cols].itertuples(index=False, name=None):

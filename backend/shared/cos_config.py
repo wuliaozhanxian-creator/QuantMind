@@ -93,15 +93,15 @@ class COSConfigManager:
         file_extension = file_extension.lower().lstrip(".")
         allowed_types = self.config["allowed_file_types"]
 
-        # 根据类别进行特殊处理
+        # 根据类别进行特殊处理（修复截断 bug：gi→gif, pd→pdf）
         if category == "avatar":
-            avatar_types = ["jpg", "jpeg", "png", "gi", "webp"]
+            avatar_types = ["jpg", "jpeg", "png", "gif", "webp"]
             return file_extension in avatar_types
         elif category == "image":
-            image_types = ["jpg", "jpeg", "png", "gi", "webp", "bmp"]
+            image_types = ["jpg", "jpeg", "png", "gif", "webp", "bmp"]
             return file_extension in image_types
         elif category == "document":
-            doc_types = ["pd", "doc", "docx", "txt", "md", "csv", "xlsx", "xls"]
+            doc_types = ["pdf", "doc", "docx", "txt", "md", "csv", "xlsx", "xls"]
             return file_extension in doc_types
 
         return file_extension in allowed_types
@@ -280,7 +280,7 @@ FILE_CATEGORIES = {
     "avatar": {
         "name": "头像",
         "max_size": 5 * 1024 * 1024,  # 5MB
-        "allowed_types": ["jpg", "jpeg", "png", "gi", "webp"],
+        "allowed_types": ["jpg", "jpeg", "png", "gif", "webp"],
         "description": "用户头像图片",
     },
     "avatar_image": {
@@ -292,13 +292,13 @@ FILE_CATEGORIES = {
     "comment_image": {
         "name": "评论图片",
         "max_size": 5 * 1024 * 1024,  # 5MB
-        "allowed_types": ["jpg", "jpeg", "png", "gi", "webp"],
+        "allowed_types": ["jpg", "jpeg", "png", "gif", "webp"],
         "description": "评论中的图片",
     },
     "post_image": {
         "name": "帖子图片",
         "max_size": 10 * 1024 * 1024,  # 10MB
-        "allowed_types": ["jpg", "jpeg", "png", "gi", "webp", "bmp"],
+        "allowed_types": ["jpg", "jpeg", "png", "gif", "webp", "bmp"],
         "description": "帖子中的图片",
     },
     "cover_image": {
@@ -310,7 +310,7 @@ FILE_CATEGORIES = {
     "document": {
         "name": "文档",
         "max_size": 50 * 1024 * 1024,  # 50MB
-        "allowed_types": ["pd", "doc", "docx", "txt", "md", "csv", "xlsx", "xls"],
+        "allowed_types": ["pdf", "doc", "docx", "txt", "md", "csv", "xlsx", "xls"],
         "description": "文档文件",
     },
     "archive": {

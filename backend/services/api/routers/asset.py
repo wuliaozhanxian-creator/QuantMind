@@ -164,13 +164,15 @@ async def get_positions(
             text("""
             SELECT 
                 p.symbol,
+                p.symbol_name,
+                p.side,
                 p.quantity,
                 p.available_quantity,
-                p.average_cost,
+                p.avg_cost,
                 p.current_price,
                 p.market_value,
-                p.floating_pnl,
-                p.floating_pnl_pct
+                p.unrealized_pnl,
+                p.unrealized_pnl_rate
             FROM positions p
             JOIN portfolios pf ON p.portfolio_id = pf.id
             WHERE pf.user_id = :user_id 
@@ -189,18 +191,20 @@ async def get_positions(
             positions.append(
                 {
                     "symbol": row.symbol,
+                    "symbol_name": row.symbol_name or "",
+                    "side": row.side or "long",
                     "quantity": float(row.quantity) if row.quantity else 0,
                     "available_quantity": float(row.available_quantity)
                     if row.available_quantity
                     else 0,
-                    "average_cost": float(row.average_cost) if row.average_cost else 0,
+                    "average_cost": float(row.avg_cost) if row.avg_cost else 0,
                     "current_price": float(row.current_price)
                     if row.current_price
                     else 0,
                     "market_value": float(row.market_value) if row.market_value else 0,
-                    "floating_pnl": float(row.floating_pnl) if row.floating_pnl else 0,
-                    "floating_pnl_pct": float(row.floating_pnl_pct)
-                    if row.floating_pnl_pct
+                    "floating_pnl": float(row.unrealized_pnl) if row.unrealized_pnl else 0,
+                    "floating_pnl_pct": float(row.unrealized_pnl_rate)
+                    if row.unrealized_pnl_rate
                     else 0,
                 }
             )

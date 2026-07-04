@@ -9,6 +9,7 @@ from urllib.parse import quote_plus
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
 
 from backend.shared.auth import AuthManager, get_internal_call_secret
 from backend.shared.config_manager import init_unified_config
@@ -17,6 +18,10 @@ from backend.shared.database_pool import init_default_databases as init_sync_db_
 from backend.shared.error_contract import install_error_contract_handlers
 from backend.shared.logging_config import get_logger
 from backend.shared.openapi_utils import quantmind_generate_unique_id
+from backend.shared.readiness import (
+    build_readiness_response,
+    probe_sync,
+)
 from backend.shared.request_id import install_request_id_middleware
 from backend.shared.request_logging import install_access_log_middleware
 from backend.shared.service_health_metrics import (
@@ -146,40 +151,48 @@ install_access_log_middleware(app, service_name="quantmind-engine")
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     """
-    统一认证中间件：支持内部信任 Header (X-User-Id) 或直接通过 JWT 令牌 (Bearer) 校验。
+    统一认证中间件：支持 JWT 令牌 (Bearer) 校验。
+
+    安全变更 (T6.2): X-Internal-Call header 仅对 /api/v1/internal/* 路径生效，
+    不再作为业务路由的认证替代。所有 /api/v1/* 业务路由必须通过有效 JWT。
     """
     path = request.url.path
     method = request.method.upper()
-    internal_secret = request.headers.get("X-Internal-Call")
-    expected_secret = get_internal_call_secret()
 
-    # 1. 尝试从网关透传的信任 Header 获取
-    user_id = request.headers.get("X-User-Id")
-    tenant_id = request.headers.get("X-Tenant-Id", "default")
-
-    # 2. 如果没有信任 Header，尝试直接校验 JWT (支持 Nginx 直接转发)
+    # 1. 尝试从 JWT 获取用户身份
+    user_id = None
+    tenant_id = "default"
     auth_header = request.headers.get("Authorization")
-    if not user_id and auth_header and auth_header.startswith("Bearer "):
+    if auth_header and auth_header.startswith("Bearer "):
         try:
             token = auth_header.split(" ")[1]
             payload = AuthManager().verify_token(token)
             user_id = str(payload.get("sub") or payload.get("user_id") or "")
             tenant_id = str(payload.get("tenant_id") or "default")
         except Exception:
-            # 校验失败不立即报错，留待具体的路由逻辑（或 internal_secret 检查）决定
             pass
 
-    # 所有 /api/v1/* 业务路由必须通过内部密钥或有效的用户身份。
-    # 只有在内部密钥不匹配且用户身份也缺失的情况下才报错（OPTIONS 放行）。
+    # 2. X-Internal-Call 仅对专用内部路径生效（T6.2 收紧）
+    internal_secret = request.headers.get("X-Internal-Call")
+    is_internal_path = path.startswith("/api/v1/internal/")
+    if internal_secret and is_internal_path:
+        try:
+            expected_secret = get_internal_call_secret()
+            if internal_secret == expected_secret:
+                user_id = request.headers.get("X-User-Id") or user_id or "internal"
+                tenant_id = request.headers.get("X-Tenant-Id") or tenant_id
+        except RuntimeError:
+            logger.warning("INTERNAL_CALL_SECRET 未配置，内部路径认证失败")
+
+    # 3. 所有 /api/v1/* 业务路由必须通过有效用户身份（OPTIONS 放行）
     if method != "OPTIONS" and path.startswith("/api/v1/"):
-        if internal_secret != expected_secret and not user_id:
+        if not user_id:
             return JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                content={"detail": "Authentication required (Invalid internal secret or missing user context)"},
+                content={"detail": "Authentication required (valid JWT or internal secret for internal paths)"},
             )
 
     if user_id:
-        # 注入到 request.state
         request.state.user = {"user_id": user_id, "tenant_id": tenant_id, "sub": user_id}
 
     response = await call_next(request)
@@ -298,12 +311,48 @@ except ImportError as e:
 
 @app.get("/health")
 async def health_check():
+    """存活探针（liveness）：仅检查进程是否活着，恒返回 200。
+
+    下游依赖状态取自最近一次 /readiness 探测结果缓存（不实时探测），
+    避免频繁探测拖慢 /health 性能。
+    """
     startup_healthy = bool(getattr(app.state, "startup_healthy", True))
     set_service_health("quantmind-engine", startup_healthy)
+    last_checks = getattr(app.state, "last_readiness_checks", None) or {}
+    components = {
+        "database": "connected" if last_checks.get("db") == "ok" else "disconnected",
+        "redis": "connected" if last_checks.get("redis") == "ok" else "disconnected",
+    }
     return {
         "status": "healthy" if startup_healthy else "degraded",
         "service": "quantmind-engine",
+        "components": components,
     }
+
+
+@app.get("/readiness")
+async def readiness_check():
+    """就绪探针（readiness）：实时探测下游依赖（DB/Redis）连通性。
+
+    探测超时 2s；依赖不可用返回 503 + {"status": "not_ready", "checks": {...}}。
+    """
+    from backend.shared.database_pool import get_db
+    from backend.shared.redis_sentinel_client import get_redis_sentinel_client
+
+    def _db_probe():
+        # 复用现有同步连接池执行 SELECT 1
+        with get_db("postgres") as session:
+            session.execute(text("SELECT 1")).fetchone()
+
+    def _redis_probe():
+        return get_redis_sentinel_client().ping()
+
+    checks = {
+        "db": await probe_sync("engine:db", _db_probe),
+        "redis": await probe_sync("engine:redis", _redis_probe),
+    }
+    app.state.last_readiness_checks = checks
+    return build_readiness_response(checks)
 
 
 @app.get("/")

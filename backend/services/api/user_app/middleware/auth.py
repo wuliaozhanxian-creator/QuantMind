@@ -1,6 +1,11 @@
 """
 Authentication Middleware
 增强的认证中间件，支持RBAC权限控制
+
+安全变更 (T6.2, 2026-07-04):
+- 移除 _get_internal_user_from_headers：不再信任 X-Internal-Call + X-User-Id header 注入身份
+- get_current_user 仅通过 JWT 认证，无 header 绕过
+- 服务间调用将统一迁移至 service JWT（T6.5 完成）
 """
 
 import logging
@@ -19,29 +24,6 @@ logger = logging.getLogger(__name__)
 security = HTTPBearer(auto_error=False)
 
 
-def _get_internal_user_from_headers(request: Request) -> dict | None:
-    """
-    仅在内部调用 secret 匹配时，信任网关注入的身份头。
-    注意：网关中间件会剥离外部传入的这些头，避免客户端伪造。
-    """
-    secret = request.headers.get("X-Internal-Call")
-    if not secret or secret != settings.INTERNAL_CALL_SECRET:
-        return None
-
-    user_id = request.headers.get("X-User-Id")
-    tenant_id = request.headers.get("X-Tenant-Id") or "default"
-    if not user_id:
-        return None
-
-    return {
-        "user_id": str(user_id),
-        "tenant_id": str(tenant_id),
-        "username": "internal",
-        "email": "",
-        "jti": None,
-    }
-
-
 async def get_current_user(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
@@ -49,12 +31,9 @@ async def get_current_user(
     """
     获取当前用户（依赖注入）
 
-    从JWT Token中解析用户信息
+    安全变更 (T6.2): 仅通过 JWT Token 认证，移除 X-Internal-Call header 绕过。
+    服务间调用请使用 service JWT（T6.5 实现）。
     """
-    internal_user = _get_internal_user_from_headers(request)
-    if internal_user:
-        return internal_user
-
     if not credentials:
         print(f"DEBUG: get_current_user Missing authentication token for {request.url.path}")
         raise HTTPException(

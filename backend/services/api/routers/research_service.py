@@ -887,28 +887,36 @@ def _humanize_model_name(model_id: str) -> str:
 
 async def get_available_models(tid: str, uid: str) -> dict[str, Any]:
     async with get_session(read_only=True) as session:
+        # 同时返回有推理记录的模型和所有可用模型（ready/active）
         sql = """
-            SELECT DISTINCT ir.model_id,
-                   COALESCE(
+            SELECT DISTINCT
+                COALESCE(ir.model_id, um.model_id) AS model_id,
+                COALESCE(
                      um.metadata_json->>'display_name',
                      um.metadata_json->>'model_name'
-                   ) AS display_name
-            FROM qm_model_inference_runs ir
-            INNER JOIN qm_research_candidate_snapshot snap ON snap.tenant_id = ir.tenant_id
-                                                            AND snap.user_id = ir.user_id
-                                                            AND snap.model_id = ir.model_id
-            LEFT JOIN qm_user_models um ON um.tenant_id = ir.tenant_id
-                                        AND um.user_id = ir.user_id
-                                        AND um.model_id = ir.model_id
-            WHERE ir.tenant_id = :tid AND ir.user_id = :uid AND ir.status = 'completed'
-              AND (um.status IS NULL OR um.status != 'archived')
+                ) AS display_name,
+                COALESCE(um.status, 'available') AS status,
+                CASE WHEN ir.model_id IS NOT NULL THEN true ELSE false END AS has_inference
+            FROM qm_user_models um
+            LEFT JOIN qm_model_inference_runs ir ON ir.tenant_id = um.tenant_id
+                                                AND ir.user_id = um.user_id
+                                                AND ir.model_id = um.model_id
+                                                AND ir.status = 'completed'
+            WHERE um.tenant_id = :tid AND um.user_id = :uid
+              AND um.status IN ('ready', 'active')
+            ORDER BY has_inference DESC, model_id
         """
         res = await session.execute(text(sql), {"tid": tid, "uid": uid})
         models = []
         for r in res.mappings():
             mid = r["model_id"]
             name = r["display_name"] or _humanize_model_name(mid)
-            models.append({"modelId": mid, "name": name})
+            models.append({
+                "modelId": mid,
+                "name": name,
+                "status": r["status"],
+                "hasInference": r["has_inference"]
+            })
         return {"code": 200, "data": {"models": models}}
 
 
@@ -1146,12 +1154,18 @@ async def get_symbols_features(tid: str, uid: str, symbols: list[str], lite: boo
     if not normalized_symbols:
         return {"code": 200, "data": {"items": []}}
 
-    vals = ", ".join(f"('{s}')" for s in normalized_symbols)
+    # SQL 注入防护：校验每个 symbol 格式（仅允许 SH/SZ/BJ + 6位数字）
+    import re as _re
+    _valid_symbol_re = _re.compile(r"^(SH|SZ|BJ)\d{6}$")
+    normalized_symbols = [s for s in normalized_symbols if _valid_symbol_re.match(s)]
+    if not normalized_symbols:
+        return {"code": 200, "data": {"items": []}}
+
     norm = _norm_symbol_sql("symbol")
 
-    # 简化逻辑：直接读取数据库中的快照，不再进行实时关联或计算
+    # SQL 注入防护：使用 unnest 参数化替代 VALUES 字面量拼接
     sql = f"""
-        WITH sym_list(raw_symbol) AS (VALUES {vals}),
+        WITH sym_list(raw_symbol) AS (SELECT unnest(:symbols::text[])),
         pool_norm AS (
             SELECT symbol, features_snapshot, ({norm}) AS prefix_symbol
             FROM qm_user_research_pool WHERE tenant_id = :tid AND user_id = :uid
@@ -1168,7 +1182,9 @@ async def get_symbols_features(tid: str, uid: str, symbols: list[str], lite: boo
         LEFT JOIN watchlist_norm ws ON ws.prefix_symbol = sym_list.raw_symbol
     """
     async with get_session(read_only=True) as session:
-        result = await session.execute(text(sql), {"tid": tid, "uid": uid})
+        result = await session.execute(
+            text(sql), {"tid": tid, "uid": uid, "symbols": normalized_symbols}
+        )
         items = []
         for r in result.mappings():
             snap = r["snapshot"]
@@ -1186,8 +1202,10 @@ async def get_symbols_features(tid: str, uid: str, symbols: list[str], lite: boo
 
 
 async def get_stock_kline(symbol: str, days: int) -> dict[str, Any]:
-    """构建 K 线：直接从远程 PostgreSQL stock_daily_latest 查询"""
+    """构建 K 线：优先从 stock_daily_latest 查询，不足时从 klines 表补充"""
     normalized_symbol = StockCodeUtil.to_prefix(symbol)
+    # klines 表使用不带前缀的 symbol
+    bare_symbol = symbol.replace("SH", "").replace("SZ", "").replace("BJ", "").replace("sh.", "").replace("sz.", "").strip()
     cache_key = f"sdl-kline:{normalized_symbol}:{days}"
     cached = _get_local_cache(_SDL_CACHE, cache_key, _SDL_CACHE_TTL_SECONDS)
     if cached is not None:
@@ -1195,7 +1213,8 @@ async def get_stock_kline(symbol: str, days: int) -> dict[str, Any]:
 
     items: list[dict[str, Any]] = []
     try:
-        sql = f"""
+        # 先从 stock_daily_latest 查询
+        sql_sdl = f"""
             SELECT trade_date, open, high, low, close, volume
             FROM {_SDL_TABLE}
             WHERE symbol = :symbol
@@ -1205,7 +1224,7 @@ async def get_stock_kline(symbol: str, days: int) -> dict[str, Any]:
         """
         async with get_market_session() as m_session:
             res = await m_session.execute(
-                text(sql),
+                text(sql_sdl),
                 {"symbol": normalized_symbol, "days": days},
             )
             rows = res.mappings().all()
@@ -1220,6 +1239,38 @@ async def get_stock_kline(symbol: str, days: int) -> dict[str, Any]:
                         "close": round(close, 2),
                         "volume": float(row.get("volume", 0) or 0),
                     })
+
+            # 如果 stock_daily_latest 数据不足，从 klines 表补充历史数据
+            if len(items) < days:
+                sql_klines = """
+                    SELECT timestamp::date AS trade_date,
+                           open_price AS open, high_price AS high,
+                           low_price AS low, close_price AS close,
+                           volume
+                    FROM klines
+                    WHERE symbol = :symbol AND interval = '1d'
+                      AND volume > 0
+                    ORDER BY timestamp DESC
+                    LIMIT :days
+                """
+                res2 = await m_session.execute(
+                    text(sql_klines),
+                    {"symbol": bare_symbol, "days": days},
+                )
+                rows2 = res2.mappings().all()
+                existing_dates = {item["date"] for item in items}
+                for row in rows2:
+                    date_str = str(row.get("trade_date", ""))
+                    close = float(row.get("close", 0) or 0)
+                    if close > 0 and date_str not in existing_dates:
+                        items.append({
+                            "date": date_str,
+                            "open": round(float(row.get("open", 0) or 0), 2),
+                            "high": round(float(row.get("high", 0) or 0), 2),
+                            "low": round(float(row.get("low", 0) or 0), 2),
+                            "close": round(close, 2),
+                            "volume": float(row.get("volume", 0) or 0),
+                        })
             items.reverse()
     except Exception as e:
         import logging

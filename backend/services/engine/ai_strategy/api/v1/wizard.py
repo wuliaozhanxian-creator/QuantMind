@@ -863,14 +863,20 @@ async def parse_text(body: ParseTextRequest, request: Request):
         try:
             dsl, mapping, suggestions = _simple_parse_text(body.text)
             return ParseResponse(dsl=dsl, mapping=mapping, suggestions=suggestions)
-        except:
+        except Exception as fallback_exc:
+            logger.warning(
+                "parse_text fallback parse also failed: %s", fallback_exc
+            )
             raise HTTPException(status_code=400, detail=f"解析完全失败: {e}")
     except Exception as e:
         logger.error("parse_text failed: %s", e)
         try:
             dsl, mapping, suggestions = _simple_parse_text(body.text)
             return ParseResponse(dsl=dsl, mapping=mapping, suggestions=suggestions)
-        except:
+        except Exception as fallback_exc:
+            logger.warning(
+                "parse_text fallback parse also failed: %s", fallback_exc
+            )
             raise HTTPException(status_code=400, detail=f"解析失败: {e}")
 
 

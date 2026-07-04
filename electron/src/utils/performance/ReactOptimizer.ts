@@ -247,7 +247,7 @@ export const globalProfiler = new PerformanceProfiler();
 // React命名空间修复
 declare global {
   namespace React {
-    function useState<T>(initialState: T | (() => T)): [T, (value: T) => void];
+    function useState<T>(initialState: T | (() => T)): [T, (value: T | ((prevState: T) => T)) => void];
   }
 }
 

@@ -119,7 +119,7 @@ async def _forward_stream(request: Request, upstream_path: str, user: dict | Non
         try:
             upstream = await client.send(req, stream=True)
 
-            async def _cleanup() -> None:
+            async def _cleanup(upstream=upstream, client=client) -> None:
                 await upstream.aclose()
                 await client.aclose()
 

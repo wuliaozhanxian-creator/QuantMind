@@ -429,27 +429,16 @@ class DataValidator(DatabaseDataOperation):
             }
 
     def _fetch_validation_data(self, **kwargs) -> pd.DataFrame:
-        """获取用于验证的数据"""
-        # 模拟数据获取
-        dates = pd.date_range(start="2025-10-01", end="2025-10-10", freq="D")
-        data = pd.DataFrame(
-            {
-                "date": dates,
-                "symbol": "000001",
-                "open": [10.0 + i * 0.1 for i in range(len(dates))],
-                "high": [10.5 + i * 0.1 for i in range(len(dates))],
-                "low": [9.5 + i * 0.1 for i in range(len(dates))],
-                "close": [10.2 + i * 0.1 for i in range(len(dates))],
-                "volume": [1000000 + i * 10000 for i in range(len(dates))],
-            }
+        """获取用于验证的数据(已禁用 - mock 数据)"""
+        import warnings
+
+        warnings.warn(
+            "DataValidator._fetch_validation_data 当前返回 mock 假数据。"
+            "请使用真实数据库查询替代。此方法已禁用。",
+            DeprecationWarning,
+            stacklevel=2,
         )
-
-        # 添加一些异常数据用于测试
-        if len(data) > 5:
-            data.loc[5, "close"] = 50.0  # 价格异常
-            data.loc[6, "volume"] = 50000000  # 成交量异常
-
-        return data
+        return pd.DataFrame()
 
     # 验证函数
     def _validate_no_null_prices(self, data: pd.DataFrame) -> ValidationResult:

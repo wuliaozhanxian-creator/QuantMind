@@ -196,7 +196,7 @@ class K8sManager:
                 "TZ": os.getenv("TZ", "Asia/Shanghai"),
                 "RUNNER_TIMEZONE": os.getenv("RUNNER_TIMEZONE", "Asia/Shanghai"),
                 "REDIS_HOST": os.getenv("REDIS_HOST", "quantmind-trade-redis"),
-                "REDIS_PASSWORD": os.getenv("REDIS_PASSWORD", "quantmind2026"),
+                "REDIS_PASSWORD": os.getenv("REDIS_PASSWORD", ""),
             }
 
             container = self.docker_client.containers.run(

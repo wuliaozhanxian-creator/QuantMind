@@ -37,7 +37,7 @@ class KLineService:
         """获取K线数据 - 优先从远程 stock_daily_latest 读取"""
 
         if use_cache and self.redis:
-            cached = await self._get_cached_klines(symbol, interval, limit)
+            cached = await self._get_cached_klines(symbol, interval, limit, start_time, end_time)
             if cached:
                 logger.debug(f"KLine cache hit for {symbol} {interval}")
                 return cached
@@ -46,7 +46,7 @@ class KLineService:
             klines = await self._fetch_from_stock_daily_latest(symbol, limit)
             if klines:
                 if self.redis:
-                    await self._cache_klines(symbol, interval, klines)
+                    await self._cache_klines(symbol, interval, klines, start_time, end_time)
                 return klines
 
         klines = await self.list_klines(symbol, interval, start_time, end_time, limit)
@@ -170,14 +170,15 @@ class KLineService:
         return KLineResponse.model_validate(kline) if kline else None
 
     async def _get_cached_klines(
-        self, symbol: str, interval: str, limit: int
+        self, symbol: str, interval: str, limit: int, start_time: datetime | None = None, end_time: datetime | None = None
     ) -> list[KLineResponse] | None:
         """从缓存获取K线"""
         if not self.redis:
             return None
 
         try:
-            cache_key = f"kline:{symbol}:{interval}:{limit}"
+            ts_key = f"{start_time.isoformat() if start_time else 'none'}_{end_time.isoformat() if end_time else 'none'}"
+            cache_key = f"kline:{symbol}:{interval}:{limit}:{ts_key}"
             cached_data = await self.redis.get(cache_key)
 
             if cached_data:
@@ -189,14 +190,15 @@ class KLineService:
         return None
 
     async def _cache_klines(
-        self, symbol: str, interval: str, klines: list[KLineResponse]
+        self, symbol: str, interval: str, klines: list[KLineResponse], start_time: datetime | None = None, end_time: datetime | None = None
     ) -> None:
         """缓存K线数据"""
         if not self.redis:
             return
 
         try:
-            cache_key = f"kline:{symbol}:{interval}:{len(klines)}"
+            ts_key = f"{start_time.isoformat() if start_time else 'none'}_{end_time.isoformat() if end_time else 'none'}"
+            cache_key = f"kline:{symbol}:{interval}:{len(klines)}:{ts_key}"
             cache_data = json.dumps([k.model_dump() for k in klines], default=str)
             await self.redis.setex(cache_key, settings.CACHE_TTL_KLINE, cache_data)
         except Exception as e:

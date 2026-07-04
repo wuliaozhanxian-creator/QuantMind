@@ -8,7 +8,7 @@ import logging
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from backend.shared.market_db_manager import get_market_session
 from backend.shared.redis_sentinel_client import get_redis_sentinel_client
 from backend.shared.stock_utils import StockCodeUtil
@@ -99,8 +99,8 @@ class StockDailyLatestCache:
                 # 为了性能，建议数据库有 (symbol, trade_date) 的联合索引
                 query = text("""
                     SELECT * FROM stock_daily_latest 
-                    WHERE symbol = ANY(:symbols)
-                """)
+                    WHERE symbol IN :symbols
+                """).bindparams(bindparam("symbols", expanding=True))
                 db_results = await session.execute(query, {"symbols": missing_symbols})
                 
                 # 由于 stock_daily_latest 理论上每只股票只有一行最新数据，直接存入即可

@@ -23,6 +23,14 @@ class StockDataUpdater(DatabaseDataOperation):
 
     def __init__(self, config: dict[str, Any] | None = None):
         super().__init__("stock-data-updater", config)
+        import warnings
+
+        warnings.warn(
+            "StockDataUpdater 当前为 mock 实现,会生成假数据。"
+            "请使用 scripts/fetch_history.py 拉取真实数据。此模块已禁用。",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
         # 默认配置
         self.default_config = {
@@ -40,49 +48,18 @@ class StockDataUpdater(DatabaseDataOperation):
 
     def _execute_operation(self, **kwargs) -> dict[str, Any]:
         """
-        执行股票数据更新操作
+        执行股票数据更新操作(已禁用 - mock 数据)
 
         Args:
             **kwargs: 操作参数
-                - symbols: 股票代码列表（可选）
-                - start_date: 开始日期（可选）
-                - end_date: 结束日期（可选）
-                - update_type: 更新类型 (basic_info, historical_data, all)
 
         Returns:
-            操作结果
+            操作结果(错误:模块已弃用)
         """
-        update_type = kwargs.get("update_type", "all")
-
-        # 连接数据库
-        if not self.connect_to_database():
-            return {"success": False, "error": "Failed to connect to database"}
-
-        try:
-            results = {}
-
-            if update_type in ["basic_info", "all"]:
-                results["basic_info"] = self._update_basic_stock_info(symbols=kwargs.get("symbols"))
-
-            if update_type in ["historical_data", "all"]:
-                results["historical_data"] = self._update_historical_data(
-                    symbols=kwargs.get("symbols"),
-                    start_date=kwargs.get("start_date"),
-                    end_date=kwargs.get("end_date"),
-                )
-
-            # 汇总结果
-            total_records = sum(result.get("records_processed", 0) for result in results.values())
-
-            return {
-                "success": True,
-                "update_type": update_type,
-                "results": results,
-                "records_processed": total_records,
-            }
-
-        finally:
-            self.close_database_connection()
+        return {
+            "success": False,
+            "error": "StockDataUpdater is deprecated (mock data). Use fetch_history.py instead.",
+        }
 
     def _update_basic_stock_info(self, symbols: list[str] | None = None) -> dict[str, Any]:
         """

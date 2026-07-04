@@ -337,8 +337,10 @@ class RedisLoggerMixin:
                 if hasattr(order, "start_time"):
                     try:
                         date_str = order.start_time.strftime("%Y-%m-%d")
-                    except:
-                        pass
+                    except (AttributeError, ValueError) as fmt_exc:
+                        logger.debug(
+                            "Failed to format order start_time: %s", fmt_exc
+                        )
 
                 cash_after = None
                 position_value_after = None

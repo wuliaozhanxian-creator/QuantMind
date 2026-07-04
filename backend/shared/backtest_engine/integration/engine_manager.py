@@ -436,7 +436,7 @@ class BacktestEngineManager:
                     }
 
                 # 生成建议
-                max_relative_diff = max(diff["relative_dif"] for diff in comparison["differences"].values())
+                max_relative_diff = max(diff["relative_diff"] for diff in comparison["differences"].values())
 
                 if max_relative_diff < 0.01:  # 小于1%差异
                     comparison["recommendations"].append("两种引擎结果高度一致，可以优先使用向量化引擎以获得更好的性能")

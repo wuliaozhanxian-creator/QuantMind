@@ -1,7 +1,7 @@
 """Qlib 回测历史与结果路由"""
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -139,7 +139,23 @@ async def get_backtest_history(
 
     reverse = sort_order == "desc"
     if sort_by == "created_at":
-        results.sort(key=lambda x: _field(x, "created_at", datetime.min), reverse=reverse)
+        def _safe_sort_key(x):
+            val = _field(x, "created_at", None)
+            if val is None:
+                return datetime.min.replace(tzinfo=timezone.utc)
+            if isinstance(val, datetime):
+                if val.tzinfo is None:
+                    return val.replace(tzinfo=timezone.utc)
+                return val
+            # Try to parse string dates
+            try:
+                parsed = datetime.fromisoformat(str(val).replace("Z", "+00:00"))
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+                return parsed
+            except Exception:
+                return datetime.min.replace(tzinfo=timezone.utc)
+        results.sort(key=_safe_sort_key, reverse=reverse)
     elif sort_by in ["total_return", "sharpe_ratio", "max_drawdown"]:
         results.sort(key=lambda x: _field(x, sort_by, 0.0), reverse=reverse)
 

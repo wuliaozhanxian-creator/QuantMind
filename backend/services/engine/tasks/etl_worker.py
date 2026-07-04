@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import date as date_cls
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -13,6 +14,9 @@ logger = logging.getLogger(__name__)
 
 # 系统保留列，不作为特征列返回
 _SYSTEM_COLUMNS = {"trade_date", "date", "symbol", "stock_name", "industry", "province", "updated_at", "features"}
+
+# SQL 注入防护：合法列名正则（仅允许字母数字下划线，防止动态列名注入）
+_VALID_COLUMN_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 
 class ETLWorker:
@@ -65,6 +69,10 @@ class ETLWorker:
 
         if feature_cols:
             try:
+                # SQL 注入防护：校验动态列名格式，仅允许字母数字下划线
+                invalid_cols = [c for c in feature_cols if not _VALID_COLUMN_RE.match(c)]
+                if invalid_cols:
+                    raise ValueError(f"非法列名（含注入风险）: {invalid_cols}")
                 cols_sql = ", ".join(f'"{c}"' for c in feature_cols)
                 stmt = text(f"""
                     SELECT symbol, {cols_sql}

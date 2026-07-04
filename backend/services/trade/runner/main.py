@@ -92,14 +92,26 @@ def _safe_json_loads(val: Any, default: Any) -> Any:
 
 
 def get_internal_call_secret() -> str:
-    """Runner 优先直接读取环境变量，避免依赖完整认证模块。"""
+    """Runner 优先直接读取环境变量，避免依赖完整认证模块。
+
+    安全变更 (T6.2): 移除硬编码 fallback ``dev-internal-call-secret``。
+    INTERNAL_CALL_SECRET / SECRET_KEY 均未配置时返回空字符串并打 warning，
+    由调用方决定是否阻断（避免 runner 在导入期崩溃）。
+    """
     if _shared_internal_call_secret is not None:
         try:
             return str(_shared_internal_call_secret()).strip()
         except Exception:
             pass
 
-    return str(os.getenv("INTERNAL_CALL_SECRET") or os.getenv("SECRET_KEY") or "dev-internal-call-secret").strip()
+    secret = str(os.getenv("INTERNAL_CALL_SECRET") or os.getenv("SECRET_KEY") or "").strip()
+    if not secret:
+        logger.warning(
+            "[Security] INTERNAL_CALL_SECRET 与 SECRET_KEY 均未配置，"
+            "内部调用认证将失败。请在环境变量中配置 INTERNAL_CALL_SECRET"
+            "（T6.5 将迁移至 service JWT）。"
+        )
+    return secret
 
 
 def _headers(user_id: str, tenant_id: str) -> dict[str, str]:
@@ -581,7 +593,7 @@ def process_cycle(
 def _build_redis_client() -> redis.Redis:
     host = os.getenv("REDIS_HOST", "quantmind-trade-redis")
     port = int(os.getenv("REDIS_PORT", "6379"))
-    password = os.getenv("REDIS_PASSWORD", "quantmind2026")
+    password = os.getenv("REDIS_PASSWORD", "")
     db = int(os.getenv("REDIS_DB", "0"))
     return redis.Redis(
         host=host,

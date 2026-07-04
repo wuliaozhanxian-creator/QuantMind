@@ -173,6 +173,27 @@ def load_date_data(trade_date: str, data_dir: Path, meta: dict) -> pd.DataFrame 
         logger.warning("日期 %s 在 parquet 中无数据", trade_date)
         return None
 
+    # 归一化 symbol 格式:统一为大写 SH/SZ/BJ + 6位数字
+    day_df["symbol"] = day_df["symbol"].astype(str).str.upper().str.strip()
+    # 去掉可能的 .SH/.SZ/.BJ 后缀,统一为纯6位
+    day_df["symbol"] = day_df["symbol"].str.replace(r"\.(SH|SZ|BJ)$", "", regex=True)
+    # 去掉可能的 SH/SZ/BJ 前缀(如果已经是前缀格式)
+    day_df["symbol"] = day_df["symbol"].str.replace(r"^(SH|SZ|BJ)", "", regex=True)
+    # 确保6位数字
+    day_df = day_df[day_df["symbol"].str.match(r"^\d{6}$")]
+    # 重新加上统一前缀
+    def _add_prefix(code):
+        if code.startswith(("6", "9")):
+            return "SH" + code
+        elif code.startswith(("0", "2", "3")):
+            return "SZ" + code
+        elif code.startswith(("4", "8")):
+            return "BJ" + code
+        return code
+    day_df["symbol"] = day_df["symbol"].apply(_add_prefix)
+
+    logger.info("symbol归一化完成,%d 条记录", len(day_df))
+
     filtered_df = filter_untradable_rows(day_df)
     if len(filtered_df) == 0:
         logger.warning("日期 %s 全部记录均不可交易", trade_date)

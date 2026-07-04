@@ -144,7 +144,13 @@ class StorageResolver:
                 if isinstance(config_data, str):
                     try:
                         config_data = json.loads(config_data)
-                    except:
+                    except (json.JSONDecodeError, TypeError) as parse_exc:
+                        logger.warning(
+                            "Failed to parse strategy config JSON for %s, "
+                            "falling back to empty dict: %s",
+                            strategy_id,
+                            parse_exc,
+                        )
                         config_data = {}
 
                 code = config_data.get("code")

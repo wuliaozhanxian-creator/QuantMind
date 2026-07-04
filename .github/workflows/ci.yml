@@ -1,0 +1,93 @@
+# QuantMind CI Pipeline (T7.1)
+# 门禁：后端 ruff lint + 前端 typecheck + docker-compose 语法校验
+# 设计原则：不安装全量依赖，仅 ruff + node + npm，保证 CI 轻量快速
+
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+# 同一分支的并发运行取消旧任务，节省 CI 资源
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ============================================================
+  # Job 1: 后端 lint 门禁 (ruff)
+  # 后端测试需要 Docker service container (DB+Redis)，CI 暂时仅保留 lint
+  # 测试 job 待 Docker service container 配置后补充
+  # ============================================================
+  backend-lint-test:
+    name: Backend Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Ruff lint (门禁)
+        # lint 门禁，不通过则 CI 失败
+        # ruff 配置读取 pyproject.toml [tool.ruff] 段
+        run: ruff check backend/
+
+      - name: Ruff format check
+        # 仅检查格式，不实际格式化
+        run: ruff format --check backend/
+
+      # 测试 job 待 Docker service container 配置后补充
+      # 后端 pytest 需要 PostgreSQL + Redis，当前 CI 环境暂未配置 service container
+      # 补充方案：后续新增 backend-test job，使用 services: 启动 postgres:15 + redis:7
+      # 并通过 DB_HOST=127.0.0.1 / REDIS_HOST=127.0.0.1 注入连接信息
+
+  # ============================================================
+  # Job 2: 前端 typecheck 门禁
+  # T2.1 已修复全部 typecheck 错误，CI 守护不让新的类型错误进入
+  # ============================================================
+  frontend-typecheck:
+    name: Frontend Typecheck
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: electron
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies (npm ci with fallback)
+        # npm ci 要求 package-lock.json；若失败则 fallback 到 npm install
+        run: npm ci || npm install
+
+      - name: Typecheck (门禁)
+        # 关键门禁：tsc --noEmit，零错误才通过
+        run: npm run typecheck
+
+  # ============================================================
+  # Job 3: docker-compose.yml 语法与环境变量插值校验
+  # ============================================================
+  docker-compose-validate:
+    name: Docker Compose Validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate docker-compose.yml
+        # config -q 静默模式，仅在有错误时输出；验证 YAML 语法与 ${VAR} 插值
+        # 注意：CI 环境无 .env，未设置且无默认值的变量会插值为空字符串
+        # 此处仅校验语法结构，不校验业务连通性
+        run: docker compose config -q

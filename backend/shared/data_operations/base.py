@@ -13,10 +13,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-# 添加路径以便导入共享模块
-sys.path.insert(0, "/app")
-sys.path.insert(0, "/app/shared")
-sys.path.insert(0, "/app/backend/shared")
+# 添加路径以便导入共享模块(使用相对路径,不硬编码 /app)
+_proj_root = str(Path(__file__).resolve().parents[3])  # backend/shared/data_operations -> 项目根
+sys.path.insert(0, _proj_root)
+sys.path.insert(0, str(Path(_proj_root) / "backend" / "shared"))
+sys.path.insert(0, str(Path(_proj_root) / "backend"))
 
 # 导入共享模块
 try:

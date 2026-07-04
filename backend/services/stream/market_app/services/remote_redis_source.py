@@ -128,11 +128,19 @@ class RemoteRedisDataSource(DataSourceAdapter):
             if not data:
                 continue
 
+            # noqa: B023 — _f 在同一循环迭代内立即调用（见下方 _f("Now") 等），
+            # 不存在延迟调用导致 data 被后续迭代覆盖的风险
             def _f(field: str) -> float | None:
-                v = data.get(field)
+                v = data.get(field)  # noqa: B023
                 try:
                     return float(v) if v is not None else None
-                except:
+                except (TypeError, ValueError) as conv_exc:
+                    logger.debug(
+                        "Quote field %s not numeric (%r): %s",
+                        field,
+                        v,
+                        conv_exc,
+                    )
                     return None
 
             # 新鲜度规则:
@@ -226,7 +234,12 @@ class RemoteRedisDataSource(DataSourceAdapter):
                 try:
                     d = json.loads(item)
                     results.append(d)
-                except:
+                except (json.JSONDecodeError, TypeError) as parse_exc:
+                    logger.debug(
+                        "Skipping malformed series point for %s: %s",
+                        normalized,
+                        parse_exc,
+                    )
                     continue
             return results
         except Exception as e:

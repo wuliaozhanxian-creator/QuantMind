@@ -18,11 +18,35 @@ from .response import error, success
 class FileUploadService:
     """文件上传服务类"""
 
-    # 支持的文件类型
-    ALLOWED_IMAGE_TYPES = ["jpg", "jpeg", "png", "gi", "bmp", "webp"]
+    # 支持的文件类型（修复截断 bug：gi→gif, pd→pdf, pi→pif）
+    ALLOWED_IMAGE_TYPES = ["jpg", "jpeg", "png", "gif", "bmp", "webp"]
     ALLOWED_VIDEO_TYPES = ["mp4", "webm", "ogg", "mov", "m4v", "avi"]
-    ALLOWED_DOCUMENT_TYPES = ["pd", "doc", "docx", "txt", "md", "csv", "xlsx", "xls"]
+    ALLOWED_DOCUMENT_TYPES = ["pdf", "doc", "docx", "txt", "md", "csv", "xlsx", "xls"]
     ALLOWED_ARCHIVE_TYPES = ["zip", "rar", "7z", "tar", "gz"]
+
+    # Magic bytes 签名表（用于内容校验，防止扩展名伪造）
+    # 键为小写扩展名，值为该类型合法的文件头字节前缀列表（任一匹配即通过）
+    MAGIC_BYTES: dict[str, list[bytes]] = {
+        "jpg": [b"\xff\xd8\xff"],
+        "jpeg": [b"\xff\xd8\xff"],
+        "png": [b"\x89PNG\r\n\x1a\n"],
+        "gif": [b"GIF87a", b"GIF89a"],
+        "bmp": [b"BM"],
+        "webp": [b"RIFF"],
+        "mp4": [b"\x00\x00\x00\x1cftyp", b"\x00\x00\x00\x18ftyp", b"\x00\x00\x00\x20ftyp"],
+        "webm": [b"\x1aE\xdf\xa3"],
+        "ogg": [b"OggS"],
+        "mov": [b"\x00\x00\x00\x14ftypqt", b"\x00\x00\x00\x1cftypqt"],
+        "pdf": [b"%PDF"],
+        "zip": [b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"],
+        "gz": [b"\x1f\x8b"],
+        # docx/xlsx/xls 本质是 ZIP 容器，复用 zip 签名
+        "docx": [b"PK\x03\x04"],
+        "xlsx": [b"PK\x03\x04"],
+        "xls": [b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"],
+        "doc": [b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"],
+        # txt/md/csv 无固定 magic bytes，跳过内容校验
+    }
 
     # 文件大小限制 (MB)
     MAX_IMAGE_SIZE = 10
@@ -98,6 +122,23 @@ class FileUploadService:
                     "error": f"文件大小超过限制 ({max_size // (1024 * 1024)}MB)",
                 }
 
+            # Magic bytes 内容校验：防止扩展名伪造（仅对有签名表的类型校验）
+            magic_signatures = self.MAGIC_BYTES.get(file_ext)
+            if magic_signatures and file_size > 0:
+                try:
+                    header = file.file.read(max(16, len(max(magic_signatures, key=len))))
+                    file.file.seek(0)
+                except Exception as exc:
+                    return {"valid": False, "error": f"文件头读取失败: {exc}"}
+                if not any(header.startswith(sig) for sig in magic_signatures):
+                    return {
+                        "valid": False,
+                        "error": (
+                            f"文件内容与扩展名不匹配（magic bytes 校验失败）: "
+                            f"声明的类型 {file_ext}"
+                        ),
+                    }
+
             return {
                 "valid": True,
                 "file_category": file_category,
@@ -148,7 +189,7 @@ class FileUploadService:
         try:
             metadata = {}
 
-            if file_ext in ("pdf", "pd"):
+            if file_ext == "pdf":
                 import io
 
                 import fitz
@@ -258,8 +299,8 @@ class FileUploadService:
                 content_type = f"image/{file_ext}"
             elif file_category == "video":
                 content_type = file.content_type or f"video/{file_ext}"
-            elif file_ext == "pd":
-                content_type = "application/pd"
+            elif file_ext == "pdf":
+                content_type = "application/pdf"
             elif file_ext in ["doc", "docx"]:
                 content_type = "application/msword"
             elif file_ext in ["xlsx", "xls"]:

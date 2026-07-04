@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import os
+import threading
 from datetime import datetime
 from urllib.parse import urlparse
 from typing import Any, Dict, List, Optional
@@ -15,6 +16,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 import exchange_calendars as xcals
+from redis import ConnectionPool, Redis
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import text
@@ -45,30 +47,80 @@ ACTIVE_STRATEGIES_KEY = "quantmind:active_strategies"
 _RUNTIME_STATES = {"running", "starting", "stopped", "error"}
 _ACTIVATE_INFERENCE_LOCK_PREFIX = "qm:lock:inference:on_activate"
 
+# ============================================================
+# trade-redis 连接池单例
+# —— 每次调用新建 Redis 对象会导致连接泄漏（无池无 close），
+#    改为 ConnectionPool + 单例复用，参考实现：
+#      - backend/shared/remote_redis_client.py
+# ============================================================
+_trade_pool: ConnectionPool | None = None
+_trade_client: Redis | None = None
+_trade_lock = threading.Lock()
+
+
+def close_trade_redis() -> None:
+    """关闭 trade-redis 连接池，优雅释放资源"""
+    global _trade_pool, _trade_client
+    with _trade_lock:
+        client = _trade_client
+        pool = _trade_pool
+        _trade_client = None
+        _trade_pool = None
+        if client is not None:
+            try:
+                client.close()
+            except Exception as e:  # noqa: BLE001
+                logger.error("close trade redis client failed: %s", e)
+        if pool is not None:
+            try:
+                pool.disconnect()
+                logger.info("trade redis pool closed")
+            except Exception as e:  # noqa: BLE001
+                logger.error("close trade redis pool failed: %s", e)
+
 
 def _get_trade_redis():
     """
     获取 trade-redis 客户端，与 Runner 使用同一 Redis 实例。
     配置来源：SIGNAL_STREAM_REDIS_HOST 环境变量（docker-compose.server.yml 中已配置）。
     返回 None 表示未配置（单 Redis 开发环境）。
+
+    使用连接池单例，避免每次调用新建连接导致泄漏。
     """
     host = str(os.getenv("SIGNAL_STREAM_REDIS_HOST", "")).strip()
     if not host:
         return None
-    try:
-        from redis import Redis
-        return Redis(
-            host=host,
-            port=int(os.getenv("SIGNAL_STREAM_REDIS_PORT", "6379")),
-            db=int(os.getenv("SIGNAL_STREAM_REDIS_DB", "0")),
-            password=os.getenv("SIGNAL_STREAM_REDIS_PASSWORD") or None,
-            decode_responses=True,
-            socket_timeout=3.0,
-            socket_connect_timeout=3.0,
-        )
-    except Exception as e:
-        StructuredTaskLogger(logger, "user-strategies").warning("trade_redis_unavailable", "无法连接 trade-redis", error=e)
-        return None
+    global _trade_pool, _trade_client
+    if _trade_client is not None:
+        return _trade_client
+    with _trade_lock:
+        if _trade_client is None:
+            try:
+                _trade_pool = ConnectionPool(
+                    host=host,
+                    port=int(os.getenv("SIGNAL_STREAM_REDIS_PORT", "6379")),
+                    db=int(os.getenv("SIGNAL_STREAM_REDIS_DB", "0")),
+                    password=os.getenv("SIGNAL_STREAM_REDIS_PASSWORD") or None,
+                    decode_responses=True,
+                    max_connections=int(os.getenv("TRADE_REDIS_MAX_CONNECTIONS", "20")),
+                    socket_timeout=3.0,
+                    socket_connect_timeout=3.0,
+                )
+                _trade_client = Redis(
+                    connection_pool=_trade_pool, decode_responses=True
+                )
+                logger.info(
+                    "trade redis pool created: host=%s port=%s db=%s",
+                    host,
+                    os.getenv("SIGNAL_STREAM_REDIS_PORT", "6379"),
+                    os.getenv("SIGNAL_STREAM_REDIS_DB", "0"),
+                )
+            except Exception as e:
+                StructuredTaskLogger(logger, "user-strategies").warning(
+                    "trade_redis_unavailable", "无法连接 trade-redis", error=e
+                )
+                return None
+        return _trade_client
 
 
 def _is_valid_bearer_jwt(auth_header: str) -> bool:

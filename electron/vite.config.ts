@@ -25,6 +25,7 @@ export default defineConfig(({ mode }) => {
   return {
     base: mode === 'production' ? './' : '/',
     plugins: [react()],
+    cacheDir: "/tmp/quantmind-vite-cache",
     optimizeDeps: {
       include: [
         'dayjs/plugin/weekday',

@@ -45,8 +45,8 @@ try:
         try:
             error_data = response.json()
             print(f"  错误详情: {json.dumps(error_data, indent=4, ensure_ascii=False)}")
-        except:
-            pass
+        except Exception as json_exc:
+            print(f"  无法解析错误详情: {json_exc}")
 
 except Exception as e:
     print(f"\n❌ 异常: {e}")

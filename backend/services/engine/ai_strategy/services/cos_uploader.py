@@ -889,8 +889,14 @@ class StrategyStorageService:
             try:
                 await self.cos_uploader.delete_object(url=upload_result["url"], object_key=upload_result["object_key"])
                 logger.info(f"已因请求异常补偿删除孤儿文件: {upload_result['object_key']}")
-            except:
-                pass
+            except Exception as cleanup_exc:
+                logger.warning(
+                    "Failed to clean up orphan file %s after strategy save "
+                    "failure: %s",
+                    upload_result.get("object_key"),
+                    cleanup_exc,
+                    exc_info=True,
+                )
             raise RuntimeError(f"策略保存同步到服务失败: {e}")
 
 

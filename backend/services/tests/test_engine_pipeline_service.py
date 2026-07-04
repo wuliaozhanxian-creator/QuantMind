@@ -15,12 +15,27 @@ INTERNAL_HEADERS = {
     "X-Internal-Call": "dev-internal-call-secret",
     "X-User-Id": "u1",
     "X-Tenant-Id": "t1",
+    # /api/v1/pipeline/* 属于业务路由（非 /api/v1/internal/*），T6.2 收紧后
+    # X-Internal-Call 不再作为认证凭据，改用 JWT Bearer 方式认证。
+    "Authorization": "Bearer test-token",
 }
 
 
 @contextmanager
-def _client():
+def _client(monkeypatch):
     from backend.services.engine import main as engine_main
+    from backend.shared.auth import AuthManager
+
+    # 使 X-Internal-Call header 与环境变量保持一致（T6.2 收尾）。
+    monkeypatch.setenv("INTERNAL_CALL_SECRET", "dev-internal-call-secret")
+    # auth_middleware 现在仅对 /api/v1/internal/* 路径接受 X-Internal-Call，
+    # 业务路由必须通过有效 JWT。这里 mock verify_token，使中间件能够从
+    # Bearer token 解出身份并写入 request.state.user，供路由依赖读取。
+    monkeypatch.setattr(
+        AuthManager,
+        "verify_token",
+        lambda self, token: {"sub": "u1", "tenant_id": "t1"},
+    )
 
     @asynccontextmanager
     async def mock_lifespan(app: FastAPI):
@@ -60,7 +75,7 @@ def test_pipeline_run_endpoint_success(monkeypatch):
         lambda *args, **kwargs: None,
     )
 
-    with _client() as client:
+    with _client(monkeypatch) as client:
         resp = client.post(
             "/api/v1/pipeline/runs",
             headers=INTERNAL_HEADERS,
@@ -85,7 +100,7 @@ def test_pipeline_status_not_found(monkeypatch):
 
     monkeypatch.setattr(pipeline_router.pipeline_service, "get_status", fake_get_status)
 
-    with _client() as client:
+    with _client(monkeypatch) as client:
         resp = client.get(
             "/api/v1/pipeline/runs/notfound?user_id=u1&tenant_id=t1",
             headers=INTERNAL_HEADERS,
@@ -110,7 +125,7 @@ def test_pipeline_status_success(monkeypatch):
 
     monkeypatch.setattr(pipeline_router.pipeline_service, "get_status", fake_get_status)
 
-    with _client() as client:
+    with _client(monkeypatch) as client:
         resp = client.get(
             "/api/v1/pipeline/runs/r2?user_id=u1&tenant_id=t1",
             headers=INTERNAL_HEADERS,
@@ -133,7 +148,7 @@ def test_pipeline_cleanup_success(monkeypatch):
 
     monkeypatch.setattr(pipeline_router.pipeline_service, "cleanup_old_runs", fake_cleanup)
 
-    with _client() as client:
+    with _client(monkeypatch) as client:
         resp = client.delete(
             "/api/v1/pipeline/runs?user_id=u1&tenant_id=t1",
             headers=INTERNAL_HEADERS,
@@ -176,7 +191,7 @@ def test_pipeline_result_contains_fallback_metadata(monkeypatch):
 
     monkeypatch.setattr(pipeline_router.pipeline_service, "get_result", fake_get_result)
 
-    with _client() as client:
+    with _client(monkeypatch) as client:
         resp = client.get(
             "/api/v1/pipeline/runs/r3/result?user_id=u1&tenant_id=t1",
             headers=INTERNAL_HEADERS,

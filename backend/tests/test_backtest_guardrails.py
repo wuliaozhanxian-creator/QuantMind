@@ -5,6 +5,7 @@ import types
 import json
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 project_root = os.path.join(os.path.dirname(__file__), "../../")

@@ -556,8 +556,16 @@ class InferenceScriptRunner:
         if "+asyncpg" in sync_db_url:
             sync_db_url = sync_db_url.replace("+asyncpg", "+psycopg2")
         if not sync_db_url.startswith("postgresql"):
+            # 安全变更 (T6.2): 移除硬编码密码连接串，改由 DB_* 环境变量拼接。
+            _db_user = os.getenv("DB_USER", "quantmind")
+            _db_password = os.getenv("DB_PASSWORD", "")
+            _db_host = os.getenv("DB_HOST", "localhost")
+            _db_port = os.getenv("DB_PORT", "5432")
+            _db_name = os.getenv("DB_NAME", "quantmind")
+            if not _db_password:
+                raise RuntimeError("DB_PASSWORD 未配置，无法构建同步数据库连接")
             sync_db_url = (
-                "postgresql+psycopg2://quantmind:quantmind2026@localhost:5432/quantmind"
+                f"postgresql+psycopg2://{_db_user}:{_db_password}@{_db_host}:{_db_port}/{_db_name}"
             )
         sync_engine = create_engine(sync_db_url, pool_pre_ping=True, future=True)
         SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=sync_engine)
@@ -920,8 +928,10 @@ class InferenceScriptRunner:
             with open(p, encoding="utf-8") as f:
                 data = json.load(f)
         except json.JSONDecodeError:
+            logger.warning(f"[InferenceScriptRunner] 信号文件 JSON 解析失败: {file_path}")
             return None
-        finally:
+        else:
+            # 解析成功后才删除临时文件
             try:
                 p.unlink()
             except Exception:
@@ -957,7 +967,12 @@ class InferenceScriptRunner:
                     )
                 except (ValueError, TypeError):
                     pass
-        return valid if valid else None
+        if not valid and data:
+            logger.warning(
+                f"[InferenceScriptRunner] 所有 {len(data)} 条信号被过滤（B股/北交所），"
+                f"file={file_path}"
+            )
+        return valid  # 返回空列表而非 None，便于上层区分「文件解析失败」和「全部被过滤」
 
     @staticmethod
     def _normalize_model_bucket(model_id: str | None) -> str:

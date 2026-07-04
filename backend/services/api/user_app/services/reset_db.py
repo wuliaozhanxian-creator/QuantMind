@@ -1,10 +1,14 @@
 import asyncio
+import re
 import urllib.parse
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from backend.services.api.user_app.config import settings
+
+# SQL 注入防护：合法表名正则（仅允许字母数字下划线）
+_VALID_TABLE_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 
 async def reset_db():
@@ -31,6 +35,9 @@ async def reset_db():
         ]
 
         for table in tables_to_drop:
+            # SQL 注入防护：校验表名格式（虽然来自硬编码列表，仍做深度防御）
+            if not _VALID_TABLE_RE.match(table):
+                raise ValueError(f"非法表名（含注入风险）: {table!r}")
             print(f"Dropping {table}...")
             await conn.execute(text(f"DROP TABLE IF EXISTS {table} CASCADE"))
 

@@ -25,6 +25,15 @@ class VectorizedBacktestResult:
     portfolio_dict: dict | None = None
     indicator_dict: dict | None = None
     error_message: str = ""
+    # 以下字段用于兼容 engine_manager._run_vectorized_backtest 的结果转换。
+    # equity_curve 为按日期索引的净值序列（pd.Series）；positions/trades 在向量化
+    # 引擎中按组合权重运作、不逐笔记录，故默认空表，保持接口兼容。
+    equity_curve: pd.Series = field(default_factory=pd.Series)
+    positions: pd.DataFrame = field(default_factory=pd.DataFrame)
+    trades: pd.DataFrame = field(default_factory=pd.DataFrame)
+    performance_metrics: dict = field(default_factory=dict)
+    risk_metrics: dict = field(default_factory=dict)
+    analysis: dict = field(default_factory=dict)
 
 class VectorizedBacktestEngine:
     def __init__(self, config: VectorizedBacktestConfig):
@@ -112,7 +121,15 @@ class VectorizedBacktestEngine:
                 total_return=float(total_return),
                 win_rate=float(win_rate),
                 portfolio_dict={"dummy": dummy_portfolio}, # Just something so RiskAnalyzer doesn't crash or we bypass it
-                indicator_dict={"dummy": pd.DataFrame()}
+                indicator_dict={"dummy": pd.DataFrame()},
+                equity_curve=equity_curve,
+                performance_metrics={
+                    "total_return": float(total_return),
+                    "annual_return": float(annual_return),
+                    "sharpe_ratio": float(sharpe_ratio),
+                    "max_drawdown": float(max_drawdown),
+                    "total_trades": 0,  # 向量化引擎按组合权重运作，不逐笔记录交易
+                },
             )
 
         except Exception as e:

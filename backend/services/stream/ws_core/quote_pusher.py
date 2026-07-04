@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
 实时行情数据推送器
+Updated: 2026-07-04 - K线推送接入真实数据源（KLineService: stock_daily_latest / klines）
 Updated: 2026-02-19 - 接入远程 Redis 行情快照数据源
 """
 
 import asyncio
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Set
 from collections.abc import Iterable
 
@@ -31,6 +32,25 @@ def get_remote_redis_source() -> RemoteRedisDataSource:
     if _remote_redis_source is None:
         _remote_redis_source = RemoteRedisDataSource()
     return _remote_redis_source
+
+
+# K线缓存用的 Redis 客户端（懒加载、复用，避免每次请求新建连接）
+_kline_redis: Any = None
+
+
+async def _get_kline_redis():
+    """获取（懒加载、复用）K线缓存 Redis 客户端；不可用时返回 None（跳过缓存）"""
+    global _kline_redis
+    if _kline_redis is None:
+        try:
+            from backend.services.stream.market_app.database import get_redis
+
+            client = await get_redis()
+            if client is not None:
+                _kline_redis = client
+        except Exception as e:
+            logger.warning(f"K线缓存 Redis 不可用，将跳过缓存: {e}")
+    return _kline_redis
 
 
 def _as_utc_aware(dt: datetime | None) -> datetime:
@@ -247,7 +267,7 @@ class QuotePusher:
         """
         topic = f"kline.{stock_code}.{period}"
 
-        # TODO: 获取K线数据
+        # 从真实数据源获取最新K线（stock_daily_latest / klines 表）
         kline_data = await self._fetch_kline(stock_code, period)
 
         if kline_data:
@@ -263,24 +283,87 @@ class QuotePusher:
 
     async def _fetch_kline(self, stock_code: str, period: str) -> dict[str, Any] | None:
         """
-        获取K线数据
+        获取最新K线数据（接入真实数据源）
+
+        通过 KLineService 读取 stock_daily_latest（日线）/ klines（分钟线）表，
+        不再返回硬编码假数据。Redis 缓存键含 start_time/end_time，避免区间碰撞。
 
         Args:
-            stock_code: 股票代码
-            period: K线周期
+            stock_code: 股票代码（任意格式，内部标准化为 SH/SZ/BJ 前缀）
+            period: K线周期（1min / 5min / 1d 等）
 
         Returns:
-            K线数据
+            最新一根K线 dict（open/high/low/close/volume/timestamp），无数据时返回 None
         """
-        # TODO: 实现K线数据获取
+        from backend.services.stream.market_app.services.kline_service import KLineService
+        from backend.shared.stock_utils import StockCodeUtil
+
+        # 1. 标准化股票代码为 SH/SZ/BJ 前缀格式（项目强制规范）
+        symbol = StockCodeUtil.to_prefix(stock_code)
+        if not symbol:
+            logger.warning("K线查询股票代码为空: %s", stock_code)
+            return None
+
+        # 2. 映射 period → 数据库 interval
+        interval = self._period_to_interval(period)
+
+        # 3. 计算查询窗口（同时作为缓存键组成部分，避免区间碰撞）
+        end_time = datetime.now(timezone.utc)
+        lookback = timedelta(days=30) if interval == "1d" else timedelta(days=1)
+        start_time = end_time - lookback
+
+        try:
+            redis = await _get_kline_redis()
+            async with AsyncSessionLocal() as db:
+                service = KLineService(db, redis)
+                klines = await service.get_klines(
+                    symbol=symbol,
+                    interval=interval,
+                    start_time=start_time,
+                    end_time=end_time,
+                    limit=1,
+                    use_cache=True,
+                )
+        except Exception as e:
+            logger.error("获取K线数据失败 %s %s: %s", symbol, interval, e, exc_info=True)
+            return None
+
+        if not klines:
+            logger.debug("K线数据为空 %s %s", symbol, interval)
+            return None
+
+        # KLineService 按 timestamp DESC 返回，第一条即最新
+        k = klines[0]
+        ts = k.timestamp
         return {
-            "open": 100.0,
-            "high": 102.0,
-            "low": 99.0,
-            "close": 101.0,
-            "volume": 10000,
-            "timestamp": datetime.now().isoformat(),
+            "open": float(k.open_price or 0),
+            "high": float(k.high_price or 0),
+            "low": float(k.low_price or 0),
+            "close": float(k.close_price or 0),
+            "volume": int(k.volume or 0),
+            "timestamp": ts.isoformat() if ts else datetime.now(timezone.utc).isoformat(),
         }
+
+    @staticmethod
+    def _period_to_interval(period: str) -> str:
+        """将前端 period 映射为数据库 interval"""
+        if not period:
+            return "1d"
+        p = period.strip().lower()
+        minute_map = {
+            "1m": "1min", "1min": "1min",
+            "5m": "5min", "5min": "5min",
+            "15m": "15min", "15min": "15min",
+            "30m": "30min", "30min": "30min",
+            "60m": "60min", "60min": "60min", "1h": "60min",
+        }
+        if p in minute_map:
+            return minute_map[p]
+        if p in ("1d", "day", "daily", "d"):
+            return "1d"
+        if p in ("1w", "week", "weekly"):
+            return "1w"
+        return "1d"
 
     def get_stats(self) -> dict[str, Any]:
         """

@@ -2,6 +2,7 @@ import asyncio
 import glob
 import hashlib
 import json
+import logging
 import math
 import os
 import re
@@ -22,6 +23,8 @@ try:
     import exchange_calendars as xcals
 except Exception:
     xcals = None
+
+logger = logging.getLogger(__name__)
 
 from backend.services.api.user_app.middleware.auth import require_admin
 from backend.services.engine.inference.router_service import InferenceRouterService
@@ -414,7 +417,8 @@ def _scan_feature_snapshots_status(
             first_df = pd.read_parquet(files[0], columns=["trade_date"], engine="pyarrow")
             if not first_df.empty:
                 min_date = pd.to_datetime(first_df["trade_date"].min(), errors="coerce").date()
-        except Exception: pass
+        except Exception as min_exc:
+            logger.warning("Failed to read min date from parquet: %s", min_exc)
 
         # 获取最大日期（最后一个文件）
         try:
@@ -455,7 +459,8 @@ def _scan_feature_snapshots_status(
                         "invalid_count": 0,
                     }
                     result["topn_samples"]["older_samples"] = older_samples
-        except Exception: pass
+        except Exception as max_exc:
+            logger.warning("Failed to read max date coverage from parquet: %s", max_exc)
 
     # 统计总行数（轻量化，如果文件多则只估算或跳过耗时操作）
     result["scanned_files"] = len(files)

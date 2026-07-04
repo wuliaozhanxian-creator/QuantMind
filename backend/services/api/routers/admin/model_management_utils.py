@@ -122,6 +122,7 @@ def _load_feature_catalog_from_file(path: str = FEATURE_CATALOG_FALLBACK) -> dic
                 {
                     "feature_id": str(feat.get("feature_id") or ""),
                     "key": f_key,
+                    "name": str(feat.get("name") or feat.get("description") or feat.get("feature_name") or f_key),
                     "feature_name": str(feat.get("description") or feat.get("feature_name") or f_key),
                     "formula": str(feat.get("formula") or ""),
                     "source_table_fields": str(feat.get("source") or feat.get("source_table_fields") or ""),

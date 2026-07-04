@@ -56,6 +56,53 @@ logger = logging.getLogger(__name__)
 TOTAL_MV_PER_YI = float(os.getenv("AI_STRATEGY_TOTAL_MV_PER_YI", "100000000.0"))
 TOTAL_MV_TO_YI = 1.0 / 100000000.0  # 对外统一返回亿元口径，与投研接口一致
 
+# === SQL 注入防护：动态表名白名单 ===
+# 仅允许以下表名出现在动态拼接的 SQL 中，任何其他表名直接拒绝。
+ALLOWED_TABLES: frozenset[str] = frozenset(
+    {
+        LATEST_TABLE,  # stock_daily_latest
+        "stock_selection",
+        "stock_daily",
+        "user_universe",
+    }
+)
+
+# === SQL 注入防护：tag_code 白名单 ===
+# tag_code 来自 stock_tag_utils.TAG_FACTOR_ALIASES 的受控别名表，
+# 此处显式枚举所有合法值，防止任何外部输入以 tag_code 名义注入字面量。
+ALLOWED_TAG_CODES: frozenset[str] = frozenset(
+    {
+        "hs300",
+        "csi500",
+        "csi1000",
+        "chinext",
+        "margin",
+        "all",
+        "ai",
+        "chip",
+        "new_energy",
+        "pv",
+        "military",
+        "medical",
+        "fintech",
+        "consumption",
+        "state_owned",
+        "lithium",
+    }
+)
+
+
+def _validate_table_name(table_name: str) -> str:
+    """校验动态表名是否在白名单内，防止 SQL 注入。
+
+    所有需要拼接进 SQL 的表名必须经过此函数校验。
+    """
+    if table_name not in ALLOWED_TABLES:
+        raise ValueError(
+            f"非法表名 '{table_name}'，仅允许: {sorted(ALLOWED_TABLES)}"
+        )
+    return table_name
+
 
 def _tag_membership_sql(tag_code: str, *, negate: bool = False, symbol_ref: str | None = None) -> str:
     """生成判断 symbol 是否属于某标签的 EXISTS 谓词。
@@ -64,6 +111,11 @@ def _tag_membership_sql(tag_code: str, *, negate: bool = False, symbol_ref: str 
     symbol_ref 默认指向 LATEST_TABLE（外层查询别名）；compat 子查询内部投影时
     需传入子查询自身的表名以避免引用错位。
     """
+    # 深度防御：确保 tag_code 在白名单内，防止字面量注入
+    if tag_code not in ALLOWED_TAG_CODES:
+        raise ValueError(
+            f"非法 tag_code '{tag_code}'，仅允许: {sorted(ALLOWED_TAG_CODES)}"
+        )
     ref = symbol_ref or f"{LATEST_TABLE}.symbol"
     base = (
         f"EXISTS(SELECT 1 FROM stock_tag st "
@@ -102,6 +154,8 @@ def _resolve_compatible_column(columns: set[str], logical_name: str) -> str:
 
 
 def _build_compat_table_sql(table_name: str, columns: set[str]) -> str:
+    # 校验动态表名，防止 SQL 注入
+    _validate_table_name(table_name)
     if not columns:
         return table_name
 
@@ -231,7 +285,9 @@ def _get_universe_total(user_id: str) -> int:
                     pass
                 pass
 
-            n2 = session.execute(text(f"select count(1) from {LATEST_TABLE}")).scalar()
+            n2 = session.execute(
+                text(f"select count(1) from {_validate_table_name(LATEST_TABLE)}")
+            ).scalar()
             return int(n2 or 0)
     except Exception:
         return 0
@@ -268,6 +324,8 @@ def _execute_raw_selection_sql(sql: str) -> tuple[list[PoolItem], date | None]:
                 raise HTTPException(status_code=400, detail=f"表名替换失败: {str(e)}")
 
         target_table = LATEST_TABLE if f"from {LATEST_TABLE}" in normalized_sql.lower() else "stock_selection"
+        # 校验动态表名，防止 SQL 注入
+        _validate_table_name(target_table)
 
         # 强制清除 LLM 可能生成的 LIMIT 限制，确保返回足够多的股票
         normalized_sql = re.sub(r"limit\s+\d+", "", normalized_sql, flags=re.IGNORECASE).strip()
@@ -277,7 +335,9 @@ def _execute_raw_selection_sql(sql: str) -> tuple[list[PoolItem], date | None]:
 
         with get_db() as session:
             target_columns = _get_table_columns(session, target_table)
-            as_of_date = session.execute(text(f"select max(trade_date) from {target_table}")).scalar()
+            as_of_date = session.execute(
+                text(f"select max(trade_date) from {_validate_table_name(target_table)}")
+            ).scalar()
             compat_table_sql = _build_compat_table_sql(target_table, target_columns)
             normalized_sql = _inject_trade_date_filter(normalized_sql, as_of_date)
             normalized_sql = _replace_table_with_compat_subquery(normalized_sql, target_table, compat_table_sql)
@@ -334,7 +394,7 @@ def _query_stock_pool(
             # 而不是简单的 MAX，因为有些股票可能在最新一天停牌或未更新
             date_res = session.execute(
                 text(
-                    f"SELECT trade_date, COUNT(*) as cnt FROM {LATEST_TABLE} GROUP BY trade_date ORDER BY cnt DESC LIMIT 1"
+                    f"SELECT trade_date, COUNT(*) as cnt FROM {_validate_table_name(LATEST_TABLE)} GROUP BY trade_date ORDER BY cnt DESC LIMIT 1"
                 )
             ).fetchone()
 
@@ -373,7 +433,13 @@ def _query_stock_pool(
                 if col in flag_cols:
                     try:
                         val = int(float(val))
-                    except:
+                    except (TypeError, ValueError) as flag_exc:
+                        logger.debug(
+                            "Flag column %s value not numeric, falling back to "
+                            "truthy check: %s",
+                            col,
+                            flag_exc,
+                        )
                         val = 1 if str(val).lower() in ("true", "1", "yes") else 0
 
                 params[param_key] = val
@@ -536,7 +602,9 @@ async def _ensure_latest_table_data(session) -> bool:
     """确保最新数据表中有可用数据，否则尝试检查原始表。"""
     try:
         # 1. 检查 latest 表
-        res = session.execute(text(f"SELECT COUNT(*) FROM {LATEST_TABLE}")).scalar()
+        res = session.execute(
+            text(f"SELECT COUNT(*) FROM {_validate_table_name(LATEST_TABLE)}")
+        ).scalar()
         if int(res or 0) > 0:
             return True
 

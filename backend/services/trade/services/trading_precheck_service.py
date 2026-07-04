@@ -16,6 +16,10 @@ from backend.shared.trade_redis_keys import (
 )
 from backend.shared.utils import normalize_user_id
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 def _build_check(key: str, label: str, passed: bool, detail: str) -> dict[str, Any]:
     return {
@@ -133,8 +137,8 @@ def _get_env_with_root_fallback(key: str, default: str = "") -> str:
 
 
 def _get_stream_series_redis_client():
-    host = _get_env_with_root_fallback("REMOTE_QUOTE_REDIS_HOST", "localhost")
-    port = int(_get_env_with_root_fallback("REMOTE_QUOTE_REDIS_PORT", "36379") or "36379")
+    host = _get_env_with_root_fallback("REMOTE_QUOTE_REDIS_HOST", os.getenv("REDIS_HOST", "redis"))
+    port = int(_get_env_with_root_fallback("REMOTE_QUOTE_REDIS_PORT", os.getenv("REDIS_PORT", "6379")) or "6379")
     password = _get_env_with_root_fallback("REMOTE_QUOTE_REDIS_PASSWORD", "") or None
     client = redis_lib.Redis(
         host=host,
@@ -377,8 +381,12 @@ def _check_stream_series_freshness(redis_client) -> tuple[bool, str]:
                 elif ktype == "hash":
                     score_raw = stream_redis.hget(key, "timestamp")
                     if score_raw:
-                        try: score = float(score_raw)
-                        except: pass
+                        try:
+                            score = float(score_raw)
+                        except (TypeError, ValueError) as _e:
+                            logger.debug(
+                                "stream series timestamp unparseable: %s", _e
+                            )
 
                 if score is not None:
                     latest_age_sec = max(0, int(time.time() - float(score)))
@@ -404,8 +412,12 @@ def _check_stream_series_freshness(redis_client) -> tuple[bool, str]:
                 elif ktype == "hash":
                     score_raw = stream_redis.hget(key, "timestamp")
                     if score_raw:
-                        try: score = float(score_raw)
-                        except: pass
+                        try:
+                            score = float(score_raw)
+                        except (TypeError, ValueError) as _e:
+                            logger.debug(
+                                "stream series timestamp unparseable: %s", _e
+                            )
                 
                 if score is not None:
                     latest_age_sec = max(0, int(time.time() - float(score)))

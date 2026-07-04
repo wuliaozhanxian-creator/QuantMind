@@ -358,9 +358,15 @@ class QlibBacktestServiceRuntimeMixin(QlibBacktestServiceQueryMixin):
                         strategy["kwargs"]["signal"] = normalized_curr_signal
                         curr_signal = normalized_curr_signal
                 if (
-                    curr_signal == "<PRED>"
+                    curr_signal is None
+                    or curr_signal == "<PRED>"
                     or (isinstance(curr_signal, str) and curr_signal.startswith("$"))
                 ) and signal_data is not None:
+                    if curr_signal is None:
+                        task_log.warning(
+                            "signal_missing_in_kwargs",
+                            "strategy kwargs 中缺少 signal 参数，自动注入 signal_data",
+                        )
                     strategy["kwargs"]["signal"] = signal_data
 
                 # --- 信号实例化保障 [START] ---
@@ -507,6 +513,20 @@ class QlibBacktestServiceRuntimeMixin(QlibBacktestServiceQueryMixin):
                 **backtest_config,
             )
 
+            # 检查回测是否实际产生交易
+            trade_count = 0
+            if isinstance(portfolio_dict, dict):
+                trade_records = portfolio_dict.get("trade_records", [])
+                trade_count = len(trade_records) if trade_records else 0
+            if trade_count == 0:
+                task_log.warning(
+                    "backtest_zero_trades",
+                    "回测产生0笔交易，可能是信号与universe不匹配",
+                    signal_source=signal_meta.get("source"),
+                    universe=request.universe,
+                    pred_instrument_count=signal_meta.get("instrument_count"),
+                )
+
             execution_time = time.time() - start_time
             task_log.info(
                 "run_done", "回测完成", execution_time=f"{execution_time:.2f}"
@@ -648,6 +668,41 @@ class QlibBacktestServiceRuntimeMixin(QlibBacktestServiceQueryMixin):
         resolved = PROJECT_ROOT / path
         return str(resolved)
 
+    def _count_forward_filled_instruments(
+        self,
+        effective_pred: "pd.DataFrame",
+        pred_dates_sorted: "pd.Index | None",
+        request: "QlibBacktestRequest",
+    ) -> int:
+        """计算前向填充后的有效股票数：取回测区间内及之前最近预测日的最大股票数。"""
+        try:
+            import pandas as _pd
+            if effective_pred.empty:
+                return 0
+            bt_end = _pd.Timestamp(request.end_date)
+            bt_start = _pd.Timestamp(request.start_date)
+            datetime_idx = _pd.to_datetime(effective_pred.index.get_level_values("datetime"))
+            if pred_dates_sorted is None:
+                pred_dates_sorted = _pd.Index(datetime_idx.unique()).sort_values()
+            # 找到回测区间内及之前的所有预测日
+            eligible_dates = pred_dates_sorted[pred_dates_sorted <= bt_end]
+            if len(eligible_dates) == 0:
+                return int(effective_pred.index.get_level_values("instrument").nunique())
+            # 取这些日期中最大的股票数（前向填充后每个交易日可用的股票数）
+            max_inst = 0
+            for d in eligible_dates:
+                try:
+                    daily = effective_pred.xs(d, level="datetime")
+                    max_inst = max(max_inst, len(daily))
+                except Exception:
+                    continue
+            # 同时也统计区间内的总唯一股票数
+            in_range_mask = (datetime_idx >= bt_start) & (datetime_idx <= bt_end)
+            in_range_inst = effective_pred.loc[in_range_mask].index.get_level_values("instrument").nunique() if in_range_mask.any() else 0
+            return int(max(max_inst, in_range_inst))
+        except Exception:
+            return int(effective_pred.index.get_level_values("instrument").nunique())
+
     def _build_pred_signal_meta(
         self, pred: pd.DataFrame, pred_path: str, request: QlibBacktestRequest
     ) -> dict[str, Any]:
@@ -684,6 +739,91 @@ class QlibBacktestServiceRuntimeMixin(QlibBacktestServiceQueryMixin):
             else pd.Series(dtype=float)
         )
         nan_ratio = float(score.isna().mean()) if len(score) > 0 else 1.0
+
+        # 前向填充日期计数：当预测信号稀疏时，使用交易日历计算可覆盖的交易日数
+        actual_date_count = int(
+            pred_in_range.index.get_level_values("datetime").nunique()
+        ) if len(pred_in_range) > 0 else 0
+        forward_filled_date_count = actual_date_count
+
+        try:
+            from pathlib import Path as _Path
+            cal_file = _Path(os.getenv("QLIB_PRIMARY_DATA_PATH", "db/qlib_data")) / "calendars" / "day.txt"
+            if not cal_file.exists():
+                cal_file = _Path("/app/db/qlib_data/calendars/day.txt")
+            if cal_file.exists() and len(datetime_index) > 0:
+                import pandas as _pd
+                cal_df = _pd.read_csv(cal_file, header=None, names=["date"])
+                cal_df["date"] = _pd.to_datetime(cal_df["date"])
+                bt_start = _pd.Timestamp(request.start_date)
+                bt_end = _pd.Timestamp(request.end_date)
+                cal_in_range = cal_df.loc[
+                    (cal_df["date"] >= bt_start) & (cal_df["date"] <= bt_end), "date"
+                ].tolist()
+                pred_dates_sorted = _pd.Index(datetime_index.unique()).sort_values()
+                first_pred_date = pred_dates_sorted.min()
+                coverable = 0
+                max_fill_days = int(os.getenv("QLIB_SIGNAL_MAX_FILL_DAYS", "7"))
+                for cal_date in cal_in_range:
+                    if cal_date < first_pred_date:
+                        continue
+                    # 有该日预测或之前有预测可前向填充
+                    pos = pred_dates_sorted.searchsorted(cal_date, side="right") - 1
+                    if pos >= 0:
+                        fill_source_date = pred_dates_sorted[pos]
+                        if (cal_date - fill_source_date).days <= max_fill_days:
+                            coverable += 1
+                        # 超过 max_fill_days 的不计数,避免用过期信号
+                if coverable > actual_date_count:
+                    forward_filled_date_count = coverable
+                    task_logger.info(
+                        "pred_forward_fill_count",
+                        "预测信号前向填充日期计数",
+                        actual_dates=actual_date_count,
+                        forward_filled_dates=forward_filled_date_count,
+                        calendar_days=len(cal_in_range),
+                    )
+        except Exception as exc:
+            task_logger.warning(
+                "forward_fill_count_failed",
+                "前向填充日期计数失败，使用实际值",
+                error=str(exc),
+            )
+
+        # universe 交叉验证:计算 pred symbol 与 qlib universe 的实际匹配数
+        instrument_count_raw = self._count_forward_filled_instruments(
+            effective_pred, pred_dates_sorted if "pred_dates_sorted" in dir() else None, request
+        )
+        effective_instrument_count = instrument_count_raw
+        try:
+            pred_symbols = set(
+                effective_pred.index.get_level_values("instrument").astype(str).unique()
+            ) if len(effective_pred) > 0 else set()
+            from backend.services.engine.qlib_app.utils.simple_signal import SimpleSignal
+            temp_signal = SimpleSignal(universe=request.universe or "all")
+            qlib_instruments = set(map(str, temp_signal._get_universe_instruments()))
+            if qlib_instruments and pred_symbols:
+                matched = 0
+                for ps in pred_symbols:
+                    ps_upper = ps.upper()
+                    for qs in qlib_instruments:
+                        qs_upper = qs.upper()
+                        if ps_upper == qs_upper or ps_upper in qs_upper or qs_upper in ps_upper:
+                            matched += 1
+                            break
+                effective_instrument_count = matched
+                min_inst = int(os.getenv("QLIB_SIGNAL_MIN_INSTRUMENTS", "100"))
+                if matched < min_inst and matched < len(pred_symbols) * 0.1:
+                    task_logger.warning(
+                        "instrument_match_low",
+                        "pred symbol 与 qlib universe 匹配率极低",
+                        pred_count=len(pred_symbols),
+                        matched=matched,
+                        match_rate=f"{matched / len(pred_symbols):.1%}",
+                    )
+        except Exception as exc:
+            task_logger.warning("instrument_match_check_failed", "universe匹配检查失败", error=str(exc))
+
         return {
             "source": "pred_pkl",
             "pred_path": pred_path,
@@ -691,13 +831,13 @@ class QlibBacktestServiceRuntimeMixin(QlibBacktestServiceQueryMixin):
             if not pd.isnull(max_available_date)
             else None,
             "rows_in_range": int(len(pred_in_range)),
-            "date_count": int(
-                pred_in_range.index.get_level_values("datetime").nunique()
-            ),
-            "instrument_count": int(
-                pred_in_range.index.get_level_values("instrument").nunique()
-            ),
+            "date_count": forward_filled_date_count,
+            "actual_date_count": actual_date_count,
+            "instrument_count": effective_instrument_count,
+            "raw_instrument_count": instrument_count_raw,
             "score_nan_ratio": nan_ratio,
+            "score_std": float(score.std()) if len(score) > 0 else 0.0,
+            "score_mean": float(score.mean()) if len(score) > 0 else 0.0,
             "signal_lag_days": lag_days,
         }
 
@@ -818,6 +958,14 @@ class QlibBacktestServiceRuntimeMixin(QlibBacktestServiceQueryMixin):
         if nan_ratio > max_nan_ratio:
             raise ValueError(
                 f"信号质量预检失败：score 空值比例过高（{nan_ratio:.2%} > {max_nan_ratio:.2%}）"
+            )
+        # 预测值方差检查:防止模型输出全相同值(未有效训练)
+        pred_std = float(signal_meta.get("score_std") or 0.0)
+        min_score_std = float(os.getenv("QLIB_SIGNAL_MIN_STD", "0.001"))
+        if pred_std < min_score_std:
+            raise ValueError(
+                f"信号质量预检失败：预测值方差过低（std={pred_std:.6f} < {min_score_std}），"
+                f"模型可能未有效训练，所有标的预测值接近相同"
             )
 
     def _load_pred_pkl(

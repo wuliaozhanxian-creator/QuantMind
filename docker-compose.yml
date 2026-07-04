@@ -12,7 +12,8 @@ services:
     environment:
       - POSTGRES_DB=${DB_NAME:-quantmind}
       - POSTGRES_USER=${DB_USER:-quantmind}
-      - POSTGRES_PASSWORD=${DB_PASSWORD:-quantmind2026}
+      # T6.1: 移除硬编码默认密码，强制通过 .env 注入 DB_PASSWORD
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
       - TZ=Asia/Shanghai
     volumes:
       - postgres-data:/var/lib/postgresql/data
@@ -51,8 +52,8 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.oss
-    platform: linux/amd64
     container_name: quantmind
+    command: ["python", "backend/main_oss.py"]
     depends_on:
       db:
         condition: service_healthy
@@ -73,9 +74,9 @@ services:
       # 单机部署使用 Docker 编排策略运行时（非 K8s）
       - DOCKER_MODE=true
 
-      # 安全配置
-      - SECRET_KEY=${SECRET_KEY:-cbe2c739fa3a59798800aede60f68b87205653395175097802931c12858c2c52}
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-cbe2c739fa3a59798800aede60f68b87205653395175097802931c12858c2c52}
+      # 安全配置 (T6.1: 移除硬编码默认密钥，强制通过 .env 注入)
+      - SECRET_KEY=${SECRET_KEY}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
 
       # 数据库配置
       - DB_DRIVER=asyncpg
@@ -83,11 +84,18 @@ services:
       - DB_PORT=5432
       - DB_NAME=${DB_NAME:-quantmind}
       - DB_USER=${DB_USER:-quantmind}
-      - DB_PASSWORD=${DB_PASSWORD:-quantmind2026}
-      - DATABASE_URL=postgresql+asyncpg://quantmind:quantmind2026@db:5432/quantmind
+      # T6.1: 移除硬编码默认密码，强制通过 .env 注入
+      - DB_PASSWORD=${DB_PASSWORD}
+      # DATABASE_URL 由环境变量拼接，避免内嵌明文密码
+      - DATABASE_URL=postgresql+asyncpg://${DB_USER:-quantmind}:${DB_PASSWORD}@db:${DB_PORT:-5432}/${DB_NAME:-quantmind}
 
-      # 远程数据源配置（用于从官方数据库拉取增量数据）
-      - SOURCE_DATABASE_URL=${SOURCE_DATABASE_URL:-postgresql://readonly_sync:quantmind_sync_2026@139.199.75.121:5432/quantmind}
+      # 远程数据源配置（T6.1: 拆分为独立环境变量，凭证通过 .env 注入，不再硬编码明文连接串）
+      - SOURCE_DB_HOST=${SOURCE_DB_HOST}
+      - SOURCE_DB_PORT=${SOURCE_DB_PORT:-5432}
+      - SOURCE_DB_NAME=${SOURCE_DB_NAME:-quantmind}
+      - SOURCE_DB_USER=${SOURCE_DB_USER}
+      - SOURCE_DB_PASSWORD=${SOURCE_DB_PASSWORD}
+      - SOURCE_DATABASE_URL=postgresql://${SOURCE_DB_USER}:${SOURCE_DB_PASSWORD}@${SOURCE_DB_HOST}:${SOURCE_DB_PORT}/${SOURCE_DB_NAME}
 
       # Redis 配置
       - REDIS_HOST=redis
@@ -125,6 +133,7 @@ services:
       # 落到不同 worker 时出现 "Job not found"。
       - API_WORKERS=1
       - ENGINE_WORKERS=${ENGINE_WORKERS:-1}
+      - ENGINE_ALLOW_MOCK_QLIB=false
       - TRADE_WORKERS=1
       - STREAM_WORKERS=1
 
@@ -150,7 +159,10 @@ services:
       - QLIB_BACKTEST_RESULT_DIR=/data/backtest_results
 
       # 本地 Docker 训练编排（模型训练）
-      - INTERNAL_CALL_SECRET=${INTERNAL_CALL_SECRET:-quantmind-internal-secret}
+      # T6.1/T6.2: 移除硬编码默认 internal secret，强制通过 .env 注入
+      - INTERNAL_CALL_SECRET=${INTERNAL_CALL_SECRET}
+      # T6.3: 管理员安全入口密钥，未配置则 admin 登录 fail-fast（通过 .env 注入）
+      - ADMIN_SECURE_ENTRY_KEY=${ADMIN_SECURE_ENTRY_KEY}
       - TRAINING_IMAGE=${TRAINING_IMAGE:-quantmind-oss:latest}
       - TRAINING_DOCKER_NETWORK=${TRAINING_DOCKER_NETWORK:-quantmind_quantmind-net}
       - HOST_PROJECT_PATH=${HOST_PROJECT_PATH:-/opt/quantmind}
@@ -187,6 +199,14 @@ services:
       - ./user_pools_local:/app/user_pools_local
       # 允许 API 容器调用宿主机 Docker 启动训练容器
       - /var/run/docker.sock:/var/run/docker.sock
+    # T8.1: 核心容器 healthcheck（api 服务 8000 端口 /health 端点）
+    # curl 已在 docker/Dockerfile.oss 中安装；start_period 60s 给四服务启动留足时间
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     restart: unless-stopped
     networks:
       - quantmind-net
@@ -194,7 +214,6 @@ services:
   # 4. Celery Worker (Qlib 回测任务)
   celery-worker:
     image: quantmind-oss:latest
-    platform: linux/amd64
     container_name: quantmind-celery
     depends_on:
       db:
@@ -214,8 +233,10 @@ services:
       - DB_PORT=5432
       - DB_NAME=${DB_NAME:-quantmind}
       - DB_USER=${DB_USER:-quantmind}
-      - DB_PASSWORD=${DB_PASSWORD:-quantmind2026}
-      - DATABASE_URL=postgresql+asyncpg://quantmind:quantmind2026@db:5432/quantmind
+      # T6.1: 移除硬编码默认密码，强制通过 .env 注入
+      - DB_PASSWORD=${DB_PASSWORD}
+      # DATABASE_URL 由环境变量拼接，避免内嵌明文密码
+      - DATABASE_URL=postgresql+asyncpg://${DB_USER:-quantmind}:${DB_PASSWORD}@db:${DB_PORT:-5432}/${DB_NAME:-quantmind}
 
       # Redis 配置
       - REDIS_HOST=redis
@@ -248,7 +269,8 @@ services:
       - QLIB_BACKTEST_RESULT_DIR=/data/backtest_results
 
       # 本地 Docker 训练编排（模型训练）
-      - INTERNAL_CALL_SECRET=${INTERNAL_CALL_SECRET:-quantmind-internal-secret}
+      # T6.1/T6.2: 移除硬编码默认 internal secret，强制通过 .env 注入
+      - INTERNAL_CALL_SECRET=${INTERNAL_CALL_SECRET}
       - TRAINING_IMAGE=${TRAINING_IMAGE:-quantmind-oss:latest}
       - TRAINING_DOCKER_NETWORK=${TRAINING_DOCKER_NETWORK:-quantmind_quantmind-net}
       - HOST_PROJECT_PATH=${HOST_PROJECT_PATH:-/opt/quantmind}
@@ -256,6 +278,7 @@ services:
 
       # 回测进度回调地址（OSS 模式使用 quantmind 容器名）
       - BACKTEST_PROGRESS_URL=http://quantmind:8001
+      - ENGINE_ALLOW_MOCK_QLIB=false
 
       # Qwen/DashScope API (mock key 允许启动，用户需配置真实 key)
       - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-mock-api-key-not-configured}

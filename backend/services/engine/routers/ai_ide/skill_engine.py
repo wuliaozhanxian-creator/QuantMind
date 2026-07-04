@@ -74,9 +74,23 @@ class SkillEngine:
         if template_name in self._cache:
             return self._cache[template_name]
 
+        # 路径穿越防护：校验模板名不含路径分隔符或 ..
+        if not template_name or "/" in template_name or "\\" in template_name or ".." in template_name:
+            logger.warning(f"Rejected suspicious template name: {template_name!r}")
+            return ""
+
         template_path = os.path.join(self.templates_dir, f"{template_name}.md")
-        if not os.path.exists(template_path):
-            logger.warning(f"Template not found: {template_path}")
+        # 路径穿越防护：校验最终路径仍在 templates_dir 内
+        templates_dir_real = os.path.realpath(self.templates_dir)
+        template_path_real = os.path.realpath(template_path)
+        if template_path_real != templates_dir_real and not template_path_real.startswith(
+            templates_dir_real + os.sep
+        ):
+            logger.warning(f"Path traversal blocked for template: {template_name!r}")
+            return ""
+
+        if not os.path.exists(template_path_real):
+            logger.warning(f"Template not found: {template_path_real}")
             return ""
 
         try:
