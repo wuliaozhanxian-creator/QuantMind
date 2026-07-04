@@ -41,6 +41,19 @@ _RECONCILE_QUERY_ATTEMPTS_MARKER = "[RECONCILE_QUERY_ATTEMPTS:"
 _RECONCILE_MAX_QUERY_ATTEMPTS = int(os.getenv("RECONCILE_MAX_QUERY_ATTEMPTS", "5"))
 _RECONCILE_QUERY_ATTEMPTS_RE = re.compile(r"\[RECONCILE_QUERY_ATTEMPTS:\d+\]")
 
+# ==================== 订单状态查询轮询（T4.3）====================
+# 对已提交但未成交的订单，定期主动查询 broker 获取柜台回报。
+_QMT_ORDER_POLL_INTERVAL_SEC = int(os.getenv("QMT_ORDER_POLL_INTERVAL_SEC", "30"))
+_QMT_ORDER_POLL_SCAN_INTERVAL_SEC = int(
+    os.getenv("QMT_ORDER_POLL_SCAN_INTERVAL_SEC", "30")
+)
+_QMT_ORDER_POLL_MIN_AGE_SEC = int(os.getenv("QMT_ORDER_POLL_MIN_AGE_SEC", "30"))
+_QMT_ORDER_POLL_LAST_QUERY_MARKER = "[POLL_LAST_QUERY:"
+_QMT_ORDER_POLL_LAST_QUERY_RE = re.compile(
+    r"\[POLL_LAST_QUERY:\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?\]"
+)
+_QMT_ORDER_POLL_MAX_PER_SCAN = int(os.getenv("QMT_ORDER_POLL_MAX_PER_SCAN", "50"))
+
 
 async def _scan_once() -> int:
     """扫描一次，返回本次过期的订单数量。"""
@@ -311,7 +324,6 @@ def _get_reconcile_broker():
             stream_base_url=getattr(
                 settings, "MARKET_DATA_SERVICE_URL", "http://stream-gateway:8003"
             ),
-            internal_secret=getattr(settings, "INTERNAL_CALL_SECRET", None),
         )
     except Exception as exc:
         logger.error("Failed to create reconcile broker: %s", exc)
@@ -557,19 +569,220 @@ async def _reconcile_queued_orders_once() -> int:
     return processed_count
 
 
+async def _scan_pending_orders_for_query_once() -> int:
+    """订单状态查询轮询（T4.3）。
+
+    对已提交但未成交的 REAL 订单，主动调用 broker.query_order 查询柜台回报，
+    避免单纯依赖 ExecutionStreamConsumer 被动接收回报（回报丢失/延迟时主动补齐）。
+
+    筛选条件：
+      - REAL + SUBMITTED
+      - submitted_at 距今 >= _QMT_ORDER_POLL_MIN_AGE_SEC 秒
+      - 有 client_order_id
+      - 未进入 RECONCILE_QUEUED（已在对账流程中，不重复查询）
+      - 距上次查询 >= _QMT_ORDER_POLL_INTERVAL_SEC 秒（通过 remarks 标记节流）
+
+    处理逻辑：
+      - FILLED/PARTIALLY_FILLED/CANCELLED/REJECTED → 更新本地状态（与对账闭环一致）
+      - STILL_PENDING → 记录查询时间，等待下次轮询
+      - 查询异常 → 记录日志，不崩溃
+
+    返回本次处理的订单数量。
+    """
+    if _QMT_ORDER_POLL_MIN_AGE_SEC <= 0:
+        return 0
+
+    min_age_cutoff = datetime.now() - timedelta(seconds=_QMT_ORDER_POLL_MIN_AGE_SEC)
+    poll_recheck_cutoff = datetime.now() - timedelta(seconds=_QMT_ORDER_POLL_INTERVAL_SEC)
+    processed_count = 0
+
+    async with get_session() as db:
+        stmt = (
+            select(Order)
+            .where(
+                and_(
+                    Order.status == OrderStatus.SUBMITTED,
+                    Order.trading_mode == TradingMode.REAL,
+                    Order.submitted_at <= min_age_cutoff,
+                    Order.client_order_id.is_not(None),
+                    ~Order.remarks.like(f"%{_RECONCILE_QUEUED_MARKER}%"),
+                    ~Order.remarks.like(f"%{_BRIDGE_ACK_TIMEOUT_MARKER}%"),
+                )
+            )
+            .limit(_QMT_ORDER_POLL_MAX_PER_SCAN)
+        )
+        result = await db.execute(stmt)
+        orders = list(result.scalars().all())
+
+        if not orders:
+            return 0
+
+        broker = _get_reconcile_broker()
+        for order in orders:
+            # 节流：检查距上次查询是否足够久
+            last_query = _parse_poll_last_query(order.remarks)
+            if last_query is not None and last_query > poll_recheck_cutoff:
+                continue  # 距上次查询未满间隔，跳过
+
+            client_order_id = str(getattr(order, "client_order_id", "") or "").strip()
+            if not client_order_id:
+                continue
+
+            try:
+                await _poll_single_order(order, broker, client_order_id)
+                processed_count += 1
+            except Exception as exc:
+                logger.error(
+                    "poll order %s failed: %s", order.order_id, exc
+                )
+
+        if orders:
+            await db.commit()
+
+    return processed_count
+
+
+def _parse_poll_last_query(remarks: str | None) -> datetime | None:
+    """从 remarks 解析上次轮询查询时间。"""
+    if not remarks:
+        return None
+    match = _QMT_ORDER_POLL_LAST_QUERY_RE.search(remarks)
+    if not match:
+        return None
+    raw = match.group(0)[len(_QMT_ORDER_POLL_LAST_QUERY_MARKER):-1]
+    try:
+        return datetime.fromisoformat(raw)
+    except (ValueError, TypeError):
+        return None
+
+
+def _write_poll_last_query(remarks: str, when: datetime) -> str:
+    """写入或更新上次轮询查询时间标记。"""
+    marker = f"{_QMT_ORDER_POLL_LAST_QUERY_MARKER}{when.isoformat()}]"
+    base = remarks or ""
+    if _QMT_ORDER_POLL_LAST_QUERY_RE.search(base):
+        return _QMT_ORDER_POLL_LAST_QUERY_RE.sub(marker, base)
+    return f"{base.strip()} {marker}".strip()
+
+
+async def _poll_single_order(order: Order, broker, client_order_id: str) -> None:
+    """处理单个轮询订单：查询 broker 并更新本地状态。
+
+    逻辑与 _reconcile_single_order 一致，但额外写入 POLL_LAST_QUERY 时间标记
+    用于节流，且不累计 RECONCILE_QUERY_ATTEMPTS（轮询是主动补齐，非对账补救）。
+    """
+    now = datetime.now()
+    order.remarks = _write_poll_last_query(order.remarks or "", now)
+
+    if broker is None:
+        logger.warning(
+            "poll order %s: broker unavailable, skip (will retry next scan)",
+            order.order_id,
+        )
+        return
+
+    try:
+        result = await broker.query_order(client_order_id)
+    except Exception as exc:
+        logger.warning(
+            "poll order %s query failed: %s", order.order_id, exc
+        )
+        return
+
+    status = str(getattr(result, "status", "") or "").upper()
+
+    if status == "FILLED":
+        order.status = OrderStatus.FILLED
+        order.filled_quantity = float(
+            result.filled_quantity or order.filled_quantity or 0
+        )
+        order.average_price = float(result.avg_price or order.average_price or 0)
+        order.filled_value = order.filled_quantity * order.average_price
+        order.filled_at = datetime.now()
+        if result.exchange_order_id:
+            order.exchange_order_id = str(result.exchange_order_id)
+        order.remarks = (
+            f"{(order.remarks or '').strip()} "
+            f"[POLL_FILLED: qty={order.filled_quantity}, "
+            f"avg_price={order.average_price}]"
+        ).strip()
+        logger.info("order %s poll confirmed FILLED", order.order_id)
+        await _notify_reconcile(
+            order,
+            "轮询确认成交",
+            (
+                f"{order.symbol} 轮询确认已成交 {order.filled_quantity} 股，"
+                f"均价 {order.average_price}"
+            ),
+            level="success",
+        )
+
+    elif status == "PARTIALLY_FILLED":
+        order.status = OrderStatus.PARTIALLY_FILLED
+        order.filled_quantity = float(
+            result.filled_quantity or order.filled_quantity or 0
+        )
+        order.average_price = float(result.avg_price or order.average_price or 0)
+        order.filled_value = order.filled_quantity * order.average_price
+        if result.exchange_order_id:
+            order.exchange_order_id = str(result.exchange_order_id)
+        order.remarks = (
+            f"{(order.remarks or '').strip()} "
+            f"[POLL_PARTIAL: qty={order.filled_quantity}, "
+            f"avg_price={order.average_price}]"
+        ).strip()
+        logger.info("order %s poll confirmed PARTIALLY_FILLED", order.order_id)
+
+    elif status == "CANCELLED":
+        order.status = OrderStatus.CANCELLED
+        order.cancelled_at = datetime.now()
+        order.remarks = (
+            f"{(order.remarks or '').strip()} [POLL_CANCELLED]"
+        ).strip()
+        logger.info("order %s poll confirmed CANCELLED", order.order_id)
+        await _notify_reconcile(
+            order,
+            "轮询确认撤单",
+            f"{order.symbol} 轮询确认已撤单",
+            level="info",
+        )
+
+    elif status == "REJECTED":
+        order.status = OrderStatus.REJECTED
+        order.remarks = (
+            f"{(order.remarks or '').strip()} [POLL_REJECTED]"
+        ).strip()
+        logger.info("order %s poll confirmed REJECTED", order.order_id)
+        await _notify_reconcile(
+            order,
+            "轮询确认拒单",
+            f"{order.symbol} 轮询确认已被柜台拒绝",
+            level="warning",
+        )
+
+    else:
+        # STILL_PENDING 或未知状态：仅记录查询时间，等待下次轮询
+        logger.debug(
+            "order %s poll still pending (status=%s)", order.order_id, status
+        )
+
+
 async def run_order_timeout_scanner() -> None:
     """后台无限循环，定期扫描悬挂订单。"""
     logger.info(
-        "Order timeout scanner started: timeout=%dm, interval=%ds, bridge_ack_timeout=%ss, bridge_scan_interval=%ss, reconcile_scan_interval=%ds, reconcile_max_attempts=%d",
+        "Order timeout scanner started: timeout=%dm, interval=%ds, bridge_ack_timeout=%ss, bridge_scan_interval=%ss, reconcile_scan_interval=%ds, reconcile_max_attempts=%d, poll_scan_interval=%ds, poll_min_age=%ds",
         _TIMEOUT_MINUTES,
         _SCAN_INTERVAL,
         _BRIDGE_ACK_TIMEOUT_SECONDS,
         _BRIDGE_ACK_SCAN_INTERVAL,
         _RECONCILE_SCAN_INTERVAL,
         _RECONCILE_MAX_QUERY_ATTEMPTS,
+        _QMT_ORDER_POLL_SCAN_INTERVAL_SEC,
+        _QMT_ORDER_POLL_MIN_AGE_SEC,
     )
     next_long_scan = datetime.now()
     next_reconcile_scan = datetime.now()
+    next_poll_scan = datetime.now()
     while True:
         await asyncio.sleep(max(1, _BRIDGE_ACK_SCAN_INTERVAL))
         try:
@@ -595,6 +808,18 @@ async def run_order_timeout_scanner() -> None:
                         closed_count,
                     )
                 next_reconcile_scan = now + timedelta(seconds=max(1, _RECONCILE_SCAN_INTERVAL))
+
+            # T4.3: 订单状态查询轮询 — 主动查询已提交未成交订单的柜台回报
+            if now >= next_poll_scan:
+                poll_count = await _scan_pending_orders_for_query_once()
+                if poll_count:
+                    logger.info(
+                        "Order timeout scanner: polled %d pending order(s) via broker query",
+                        poll_count,
+                    )
+                next_poll_scan = now + timedelta(
+                    seconds=max(1, _QMT_ORDER_POLL_SCAN_INTERVAL_SEC)
+                )
 
             if now >= next_long_scan:
                 count = await _scan_once()

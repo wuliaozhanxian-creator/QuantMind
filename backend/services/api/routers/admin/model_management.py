@@ -26,7 +26,6 @@ except Exception:
 from backend.services.api.user_app.middleware.auth import require_admin
 from backend.services.engine.inference.router_service import InferenceRouterService
 from backend.services.engine.inference.script_runner import InferenceScriptRunner
-from backend.shared.auth import get_internal_call_secret
 from backend.shared.database_manager_v2 import get_session
 from backend.shared.redis_sentinel_client import get_redis_sentinel_client
 from backend.shared.trading_calendar import calendar_service

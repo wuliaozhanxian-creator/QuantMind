@@ -118,9 +118,8 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 48  # 48 hours
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
-    # 内部调用鉴别密钥（T6.2: 不再使用硬编码默认值，未配置时为空字符串）
-    # 专用内部端点校验使用，服务间认证将迁移至 service JWT（T6.5）
-    INTERNAL_CALL_SECRET: str = os.getenv("INTERNAL_CALL_SECRET", "")
+    # T6.5-P3: INTERNAL_CALL_SECRET 已废弃，服务间认证统一使用 service JWT
+    # （verify_service_token / require_service_token），由 SECRET_KEY 签发。
 
     # ============ CORS配置 ============
     CORS_ORIGINS: list[str] = ["*"]

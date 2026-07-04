@@ -69,7 +69,6 @@ class TradingEngine:
             redis_client=self.redis,
             market_url=getattr(settings, "MARKET_DATA_SERVICE_URL", "http://stream-gateway:8003"),
             stream_base_url=getattr(settings, "MARKET_DATA_SERVICE_URL", "http://stream-gateway:8003"),
-            internal_secret=getattr(settings, "INTERNAL_CALL_SECRET", None),
         )
         self._broker_cache[mode] = broker
         return broker

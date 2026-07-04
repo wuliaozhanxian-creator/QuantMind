@@ -633,13 +633,14 @@ async def run_trading_readiness_precheck(
     except Exception as exc:
         checks.append(_build_check("db", "PostgreSQL", False, f"数据库自检失败: {exc}"))
 
-    internal_secret = str(os.getenv("INTERNAL_CALL_SECRET", "")).strip()
+    # T6.5-P3: 内部认证统一使用 service JWT，由 SECRET_KEY 签发
+    secret_key = str(os.getenv("SECRET_KEY", "")).strip()
     checks.append(
         _build_check(
             "internal_secret",
             "内部密钥",
-            bool(internal_secret),
-            "INTERNAL_CALL_SECRET 已配置" if internal_secret else "缺少 INTERNAL_CALL_SECRET 配置",
+            bool(secret_key),
+            "SECRET_KEY 已配置" if secret_key else "缺少 SECRET_KEY 配置",
         )
     )
 

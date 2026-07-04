@@ -144,7 +144,7 @@ def _build_runner_environment(
         "REDIS_PASSWORD",
         "SECRET_KEY",
         "JWT_SECRET_KEY",
-        "INTERNAL_CALL_SECRET",
+        # T6.5-P3: INTERNAL_CALL_SECRET 已废弃，service JWT 由 SECRET_KEY 签发
         "STORAGE_MODE",
         "STORAGE_ROOT",
         "DASHSCOPE_API_KEY",

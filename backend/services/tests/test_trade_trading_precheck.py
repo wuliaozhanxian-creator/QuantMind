@@ -106,7 +106,7 @@ class _SnapshotDb:
 async def test_trading_precheck_fails_when_model_missing(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("MODELS_PRODUCTION", str(tmp_path / "missing_model_dir"))
-    monkeypatch.setenv("INTERNAL_CALL_SECRET", "secret")
+    monkeypatch.setenv("SECRET_KEY", "secret")  # T6.5-P3: precheck checks SECRET_KEY
     monkeypatch.setattr(
         "backend.services.trade.services.trading_precheck_service._check_stream_series_freshness",
         lambda _redis: (True, "stream_ready"),
@@ -171,7 +171,7 @@ async def test_trading_precheck_fails_without_pg_snapshot_even_with_heartbeat(mo
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("MODELS_PRODUCTION", str(model_dir))
     monkeypatch.setenv("STRATEGY_RUNNER_IMAGE", "quantmind-ml-runtime:latest")
-    monkeypatch.setenv("INTERNAL_CALL_SECRET", "secret")
+    monkeypatch.setenv("SECRET_KEY", "secret")  # T6.5-P3: precheck checks SECRET_KEY
     monkeypatch.setattr(
         "backend.services.trade.services.trading_precheck_service._check_stream_series_freshness",
         lambda _redis: (True, "stream_ready"),
@@ -214,7 +214,7 @@ async def test_trading_precheck_shadow_skips_qmt(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("MODELS_PRODUCTION", str(model_dir))
     monkeypatch.setenv("STRATEGY_RUNNER_IMAGE", "quantmind-ml-runtime:latest")
-    monkeypatch.setenv("INTERNAL_CALL_SECRET", "secret")
+    monkeypatch.setenv("SECRET_KEY", "secret")  # T6.5-P3: precheck checks SECRET_KEY
     monkeypatch.setattr(
         "backend.services.trade.services.trading_precheck_service._check_stream_series_freshness",
         lambda _redis: (True, "stream_ready"),
@@ -589,7 +589,7 @@ async def test_trading_precheck_simulation_keeps_base_checks_and_inference_datab
     model_dir.mkdir(parents=True)
     (model_dir / "model.pkl").write_bytes(b"fake_model")
     monkeypatch.setenv("MODELS_PRODUCTION", str(model_dir))
-    monkeypatch.setenv("INTERNAL_CALL_SECRET", "secret")
+    monkeypatch.setenv("SECRET_KEY", "secret")  # T6.5-P3: precheck checks SECRET_KEY
     monkeypatch.setattr(
         "backend.services.trade.services.trading_precheck_service._check_stream_series_freshness",
         lambda _redis: (True, "stream_ready"),

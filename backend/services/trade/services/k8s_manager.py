@@ -20,8 +20,6 @@ try:
 except ImportError:
     docker = None
 
-from backend.shared.auth import get_internal_call_secret
-
 logger = logging.getLogger(__name__)
 
 
@@ -178,7 +176,8 @@ class K8sManager:
                 "RUN_ID": str(run_id),
                 "EXECUTION_CONFIG": json.dumps(exec_config or {}),
                 "LIVE_TRADE_CONFIG": json.dumps(live_trade_config or {}),
-                "INTERNAL_CALL_SECRET": get_internal_call_secret(),
+                # T6.5-P3: runner 使用 service JWT 认证，需要 SECRET_KEY 签发 token
+                "SECRET_KEY": os.getenv("SECRET_KEY", ""),
                 "TRADE_SERVICE_INTERNAL_URL": os.getenv(
                     "TRADE_SERVICE_INTERNAL_URL",
                     "http://quantmind-trade:8002/api/v1/internal/strategy",
@@ -295,7 +294,8 @@ class K8sManager:
                 client.V1EnvVar(name="RUN_ID", value=run_id),
                 client.V1EnvVar(name="EXECUTION_CONFIG", value=json.dumps(exec_config)),
                 client.V1EnvVar(name="LIVE_TRADE_CONFIG", value=json.dumps(live_trade_config)),
-                client.V1EnvVar(name="INTERNAL_CALL_SECRET", value=get_internal_call_secret()),
+                # T6.5-P3: runner 使用 service JWT 认证，需要 SECRET_KEY 签发 token
+                client.V1EnvVar(name="SECRET_KEY", value=os.getenv("SECRET_KEY", "")),
                 client.V1EnvVar(
                     name="TRADE_SERVICE_INTERNAL_URL", value="http://quantmind-trade:8002/api/v1/internal/strategy"
                 ),

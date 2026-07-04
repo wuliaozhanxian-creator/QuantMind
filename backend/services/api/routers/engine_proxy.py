@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, Request, Response
 
 from backend.services.api.routers.proxy_error_mapping import map_upstream_http_error
 from backend.services.api.user_app.middleware.auth import get_optional_user
-from backend.shared.auth import create_service_token, get_internal_call_secret
+from backend.shared.auth import create_service_token
 
 logger = logging.getLogger(__name__)
 
@@ -45,10 +45,8 @@ async def _proxy(request: Request, user: dict | None = None) -> Response:
     headers = {
         k: v for k, v in request.headers.items() if k.lower() not in {"host", "content-length", "transfer-encoding"}
     }
-    # T6.5-P2: service JWT（专用 X-Service-Token header，委托方 M2 第三轮裁决）
+    # T6.5-P3: service JWT（专用 X-Service-Token header）
     headers["X-Service-Token"] = create_service_token("api")
-    # deprecated: X-Internal-Call 过渡期保留，第三阶段移除（见 T6.5_service_jwt_flow.md）
-    headers["X-Internal-Call"] = get_internal_call_secret()
 
     if user:
         headers["X-User-Id"] = str(user.get("user_id") or "")

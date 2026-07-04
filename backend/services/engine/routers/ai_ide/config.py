@@ -6,7 +6,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from backend.shared.auth import create_service_token, get_internal_call_secret
+from backend.shared.auth import create_service_token
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -45,10 +45,8 @@ async def get_llm_config(request: Request):
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             headers = {
-                # T6.5-P2: service JWT（专用 X-Service-Token header）
+                # T6.5-P3: service JWT（专用 X-Service-Token header）
                 "X-Service-Token": create_service_token("engine"),
-                # deprecated: X-Internal-Call 过渡期保留，第三阶段移除
-                "X-Internal-Call": get_internal_call_secret(),
                 "X-User-Id": user_id,
                 "X-Tenant-Id": tenant_id,
             }
@@ -89,10 +87,8 @@ async def save_llm_config(request: Request, config: LLMConfig):
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             headers = {
-                # T6.5-P2: service JWT（专用 X-Service-Token header）
+                # T6.5-P3: service JWT（专用 X-Service-Token header）
                 "X-Service-Token": create_service_token("engine"),
-                # deprecated: X-Internal-Call 过渡期保留，第三阶段移除
-                "X-Internal-Call": get_internal_call_secret(),
                 "X-User-Id": user_id,
                 "X-Tenant-Id": tenant_id,
             }

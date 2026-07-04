@@ -186,16 +186,12 @@ class SimulationSettler:
         stream_url = os.getenv(
             "STREAM_SERVICE_URL", "http://quantmind-stream:8003/api/v1/quotes"
         )
-        internal_secret = (os.getenv("INTERNAL_CALL_SECRET") or "").strip()
-        # T6.5-P2: service JWT（专用 X-Service-Token header，委托方 M2 第三轮裁决）
-        # deprecated: X-Internal-Call 过渡期保留，第三阶段移除
+        # T6.5-P3: service JWT（专用 X-Service-Token header）
         headers = {}
         try:
             headers["X-Service-Token"] = create_service_token("trade")
         except Exception:
-            pass  # SECRET_KEY 未配置或 jose 未安装，回退到 X-Internal-Call
-        if internal_secret:
-            headers["X-Internal-Call"] = internal_secret
+            pass  # SECRET_KEY 未配置或 jose 未安装
         results = {}
 
         async with httpx.AsyncClient() as client:

@@ -19,7 +19,7 @@ from backend.services.engine.qlib_app.services.strategy_templates import (
     get_all_templates,
     invalidate_templates_cache,
 )
-from backend.shared.auth import get_internal_call_secret, verify_service_token
+from backend.shared.auth import verify_service_token
 from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
 
 logger = logging.getLogger(__name__)
@@ -27,7 +27,6 @@ task_logger = StructuredTaskLogger(logger, "AdminTemplatesAPI")
 
 router = APIRouter()
 
-_INTERNAL_SECRET = get_internal_call_secret()
 _MAX_CODE_BYTES = 200 * 1024  # 200 KB
 _ID_PATTERN = re.compile(r"^[a-z0-9_]{1,64}$")
 
@@ -39,27 +38,17 @@ _ID_PATTERN = re.compile(r"^[a-z0-9_]{1,64}$")
 
 def _verify_internal(
     x_service_token: str | None = Header(default=None, alias="X-Service-Token"),
-    x_internal_call: str | None = Header(default=None),
 ) -> None:
     """校验内部调用凭证，防止外部直接访问。
 
-    T6.5-P2: 优先校验 X-Service-Token（service JWT），回退 X-Internal-Call（deprecated）。
-    第三阶段将移除 X-Internal-Call 回退分支。
+    T6.5-P3: 仅接受 X-Service-Token（service JWT），已移除 X-Internal-Call 回退。
     """
-    # 1. 优先 service JWT（专用 X-Service-Token header，委托方 M2 第三轮裁决）
     if x_service_token:
         try:
             verify_service_token(x_service_token, ["api", "engine", "trade", "stream"])
             return
         except Exception:
-            pass  # service token 无效，回退到 X-Internal-Call
-    # 2. 回退 X-Internal-Call（deprecated，过渡期保留，第三阶段移除）
-    if x_internal_call:
-        logger.warning(
-            "Deprecated X-Internal-Call header; migrate to X-Service-Token (T6.5-P2)"
-        )
-        if _INTERNAL_SECRET and x_internal_call == _INTERNAL_SECRET:
-            return
+            pass
     raise HTTPException(status_code=403, detail="内部调用凭证无效")
 
 
@@ -172,10 +161,10 @@ def _write_template(template_id: str, data: TemplateCreateRequest) -> None:
 
 @router.get("")
 async def list_admin_templates(
-    x_internal_call: str | None = Header(None),
+    x_service_token: str | None = Header(default=None, alias="X-Service-Token"),
 ):
     """列出所有策略模板（含完整代码，供管理员使用）。"""
-    _verify_internal(x_internal_call)
+    _verify_internal(x_service_token)
     invalidate_templates_cache()  # 管理员查看时始终拿最新数据
     templates = get_all_templates()
     return {
@@ -187,10 +176,10 @@ async def list_admin_templates(
 @router.post("", status_code=201)
 async def create_template(
     data: TemplateCreateRequest,
-    x_internal_call: str | None = Header(None),
+    x_service_token: str | None = Header(default=None, alias="X-Service-Token"),
 ):
     """新建策略模板（写 .json + .py 文件）。"""
-    _verify_internal(x_internal_call)
+    _verify_internal(x_service_token)
 
     # 生成或校验 ID
     template_id = (data.id or _slug(data.name)).lower()
@@ -211,10 +200,10 @@ async def create_template(
 async def update_template(
     template_id: str,
     data: TemplateCreateRequest,
-    x_internal_call: str | None = Header(None),
+    x_service_token: str | None = Header(default=None, alias="X-Service-Token"),
 ):
     """更新策略模板（覆盖 .json + .py 文件）。"""
-    _verify_internal(x_internal_call)
+    _verify_internal(x_service_token)
     _validate_id(template_id)
 
     json_path, _ = _get_file_pair(template_id)
@@ -228,10 +217,10 @@ async def update_template(
 @router.delete("/{template_id}")
 async def delete_template(
     template_id: str,
-    x_internal_call: str | None = Header(None),
+    x_service_token: str | None = Header(default=None, alias="X-Service-Token"),
 ):
     """删除策略模板（删除 .json + .py 文件）。"""
-    _verify_internal(x_internal_call)
+    _verify_internal(x_service_token)
     _validate_id(template_id)
 
     json_path, py_path = _get_file_pair(template_id)

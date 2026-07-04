@@ -12,11 +12,11 @@ from backend.services.engine.services.pipeline_service import (
 )
 
 INTERNAL_HEADERS = {
-    "X-Internal-Call": "dev-internal-call-secret",
+    "X-Service-Token": "test-service-token",  # T6.5-P3: service JWT 替代 X-Internal-Call
     "X-User-Id": "u1",
     "X-Tenant-Id": "t1",
     # /api/v1/pipeline/* 属于业务路由（非 /api/v1/internal/*），T6.2 收紧后
-    # X-Internal-Call 不再作为认证凭据，改用 JWT Bearer 方式认证。
+    # 改用 JWT Bearer 方式认证。
     "Authorization": "Bearer test-token",
 }
 
@@ -26,9 +26,9 @@ def _client(monkeypatch):
     from backend.services.engine import main as engine_main
     from backend.shared.auth import AuthManager
 
-    # 使 X-Internal-Call header 与环境变量保持一致（T6.2 收尾）。
-    monkeypatch.setenv("INTERNAL_CALL_SECRET", "dev-internal-call-secret")
-    # auth_middleware 现在仅对 /api/v1/internal/* 路径接受 X-Internal-Call，
+    # T6.5-P3: service JWT 由 SECRET_KEY 签发，不再依赖 INTERNAL_CALL_SECRET
+    monkeypatch.setenv("SECRET_KEY", "test-secret-key-for-service-jwt")
+    # auth_middleware 仅对 /api/v1/internal/* 路径接受 X-Service-Token，
     # 业务路由必须通过有效 JWT。这里 mock verify_token，使中间件能够从
     # Bearer token 解出身份并写入 request.state.user，供路由依赖读取。
     monkeypatch.setattr(

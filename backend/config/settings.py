@@ -21,7 +21,7 @@ class LoggingSettings:
 class SecuritySettings:
     # 安全变更 (T6.5): 移除弱默认值 "dev-secret-key"，改为空字符串。
     # 未配置时由 AuthManager 在签发/验证 JWT 时 fail-fast（抛 RuntimeError），
-    # 与 shared/auth.py 的 get_internal_call_secret / decode_jwt_token 风格一致。
+    # 与 shared/auth.py 的 decode_jwt_token / create_service_token 风格一致。
     secret_key: str = os.getenv("SECRET_KEY", "")
     jwt_algorithm: str = os.getenv("JWT_ALGORITHM", "HS256")
     jwt_expire_minutes: int = int(os.getenv("JWT_EXPIRE_MINUTES", "2880"))  # 48 hours

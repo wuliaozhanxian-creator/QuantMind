@@ -64,6 +64,9 @@ class LocalDockerOrchestrator:
         self.api_base = (
             os.getenv("QUANTMIND_API_BASE_URL") or "http://quantmind-api:8000"
         ).strip()
+        # T6.5-P3 residual: INTERNAL_CALL_SECRET 仅用于训练容器回调 (X-Internal-Call-Secret)。
+        # 训练脚本 docker/training/train.py 在 backend/ 之外，暂未迁移至 service JWT。
+        # 待 docker/training/train.py 迁移完成后可彻底移除。
         self.internal_secret = (os.getenv("INTERNAL_CALL_SECRET") or "").strip()
         self.log_stream = TrainingRunLogStream()
 

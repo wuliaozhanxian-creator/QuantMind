@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
-from backend.shared.auth import AuthManager, get_internal_call_secret, verify_service_token
+from backend.shared.auth import AuthManager, verify_service_token
 from backend.shared.config_manager import init_unified_config
 from backend.shared.cors import resolve_cors_origins
 from backend.shared.database_pool import init_default_databases as init_sync_db_pool
@@ -153,8 +153,9 @@ async def auth_middleware(request: Request, call_next):
     """
     统一认证中间件：支持 JWT 令牌 (Bearer) 校验。
 
-    安全变更 (T6.2): X-Internal-Call header 仅对 /api/v1/internal/* 路径生效，
-    不再作为业务路由的认证替代。所有 /api/v1/* 业务路由必须通过有效 JWT。
+    安全变更 (T6.2/T6.5-P3): 内部路径 /api/v1/internal/* 仅接受 X-Service-Token
+    （service JWT），不再支持 X-Internal-Call header。所有 /api/v1/* 业务路由
+    必须通过有效 JWT。
     """
     path = request.url.path
     method = request.method.upper()
@@ -172,10 +173,10 @@ async def auth_middleware(request: Request, call_next):
         except Exception:
             pass
 
-    # 2. 内部路径认证（T6.5-P2: 优先 X-Service-Token，回退 X-Internal-Call deprecated）
+    # 2. 内部路径认证（T6.5-P3: 仅接受 X-Service-Token service JWT）
     is_internal_path = path.startswith("/api/v1/internal/")
     if is_internal_path and not user_id:
-        # 优先 service JWT（专用 X-Service-Token header，委托方 M2 第三轮裁决）
+        # service JWT（专用 X-Service-Token header，委托方 M2 第三轮裁决）
         service_token = request.headers.get("X-Service-Token", "")
         if service_token:
             try:
@@ -185,23 +186,7 @@ async def auth_middleware(request: Request, call_next):
                 user_id = request.headers.get("X-User-Id") or "internal"
                 tenant_id = request.headers.get("X-Tenant-Id") or tenant_id
             except Exception:
-                pass  # service token 无效，回退到 X-Internal-Call
-        # 回退 X-Internal-Call（deprecated，过渡期保留，第三阶段移除）
-        if not user_id:
-            internal_secret = request.headers.get("X-Internal-Call")
-            if internal_secret:
-                logger.warning(
-                    "Deprecated X-Internal-Call header on %s; "
-                    "migrate to X-Service-Token (T6.5-P2)",
-                    path,
-                )
-                try:
-                    expected_secret = get_internal_call_secret()
-                    if internal_secret == expected_secret:
-                        user_id = request.headers.get("X-User-Id") or "internal"
-                        tenant_id = request.headers.get("X-Tenant-Id") or tenant_id
-                except RuntimeError:
-                    logger.warning("INTERNAL_CALL_SECRET 未配置，内部路径认证失败")
+                pass
 
     # 3. 所有 /api/v1/* 业务路由必须通过有效用户身份（OPTIONS 放行）
     if method != "OPTIONS" and path.startswith("/api/v1/"):

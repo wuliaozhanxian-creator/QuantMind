@@ -22,11 +22,6 @@ import requests
 import redis
 
 try:
-    from backend.shared.auth import get_internal_call_secret as _shared_internal_call_secret
-except Exception:  # pragma: no cover - runner image keeps auth deps minimal
-    _shared_internal_call_secret = None
-
-try:
     from backend.shared.auth import create_service_token as _shared_create_service_token
 except Exception:  # pragma: no cover - runner image keeps auth deps minimal
     _shared_create_service_token = None
@@ -96,43 +91,18 @@ def _safe_json_loads(val: Any, default: Any) -> Any:
         return default
 
 
-def get_internal_call_secret() -> str:
-    """Runner 优先直接读取环境变量，避免依赖完整认证模块。
-
-    安全变更 (T6.2): 移除硬编码 fallback ``dev-internal-call-secret``。
-    INTERNAL_CALL_SECRET / SECRET_KEY 均未配置时返回空字符串并打 warning，
-    由调用方决定是否阻断（避免 runner 在导入期崩溃）。
-    """
-    if _shared_internal_call_secret is not None:
-        try:
-            return str(_shared_internal_call_secret()).strip()
-        except Exception:
-            pass
-
-    secret = str(os.getenv("INTERNAL_CALL_SECRET") or os.getenv("SECRET_KEY") or "").strip()
-    if not secret:
-        logger.warning(
-            "[Security] INTERNAL_CALL_SECRET 与 SECRET_KEY 均未配置，"
-            "内部调用认证将失败。请在环境变量中配置 INTERNAL_CALL_SECRET"
-            "（T6.5 将迁移至 service JWT）。"
-        )
-    return secret
-
-
 def _headers(user_id: str, tenant_id: str) -> dict[str, str]:
     h = {
         "X-User-Id": str(user_id),
         "X-Tenant-Id": str(tenant_id),
-        # deprecated: X-Internal-Call 过渡期保留，第三阶段移除（见 T6.5_service_jwt_flow.md）
-        "X-Internal-Call": get_internal_call_secret(),
         "Content-Type": "application/json",
     }
-    # T6.5-P2: service JWT（专用 X-Service-Token header，委托方 M2 第三轮裁决）
+    # T6.5-P3: service JWT（专用 X-Service-Token header）
     if _shared_create_service_token is not None:
         try:
             h["X-Service-Token"] = _shared_create_service_token("trade")
         except Exception:
-            pass  # SECRET_KEY 未配置或 jose 未安装，回退到 X-Internal-Call
+            pass  # SECRET_KEY 未配置或 jose 未安装
     return h
 
 

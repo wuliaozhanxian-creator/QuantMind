@@ -79,7 +79,7 @@ async def preflight_check(
     - Redis 连通性（必需）
     - DB 连通性（必需）
     - Runner 镜像配置（REAL/SHADOW 必需）
-    - INTERNAL_CALL_SECRET 配置（必需）
+    - SECRET_KEY 配置（必需，service JWT 签发）
     """
     resolved_user_id, resolved_tenant_id = _normalize_identity(auth, user_id=user_id, tenant_id=tenant_id)
     mode = str(trading_mode or "REAL").strip().upper()
@@ -127,12 +127,12 @@ async def preflight_check(
     except Exception as e:
         add_check("db", "PostgreSQL", False, True, f"数据库自检失败: {e}")
 
-    # 3) Internal Secret
-    internal_secret = str(os.getenv("INTERNAL_CALL_SECRET", "")).strip()
-    if internal_secret:
-        add_check("internal_secret", "内部密钥", True, True, "INTERNAL_CALL_SECRET 已配置")
+    # 3) Internal Secret (T6.5-P3: service JWT 由 SECRET_KEY 签发)
+    secret_key = str(os.getenv("SECRET_KEY", "")).strip()
+    if secret_key:
+        add_check("internal_secret", "内部密钥", True, True, "SECRET_KEY 已配置")
     else:
-        add_check("internal_secret", "内部密钥", False, True, "缺少 INTERNAL_CALL_SECRET 配置")
+        add_check("internal_secret", "内部密钥", False, True, "缺少 SECRET_KEY 配置")
 
     # 4) 商业化门禁：仅 Pro 用户可托管 (模拟盘放行)
     try:

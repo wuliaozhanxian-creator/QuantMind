@@ -176,17 +176,28 @@ class TestEngineHealthEndpoints:
 
     @property
     def _internal_headers(self):
-        from backend.shared.auth import get_internal_call_secret
-
-        return {"X-Internal-Call": get_internal_call_secret()}
+        # T6.5-P3: service JWT（专用 X-Service-Token header）
+        # 测试环境可能未安装 python-jose，使用 mock token 绕过签名
+        return {"X-Service-Token": "test-service-token-mock"}
 
     @pytest.fixture(autouse=True)
     def setup_client(self):
         """设置测试客户端，mock 掉 lifespan 中的外部依赖"""
+        import os
         from contextlib import asynccontextmanager
+        from unittest.mock import patch
 
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
+
+        # T6.5-P3: create_service_token 需要 SECRET_KEY
+        os.environ.setdefault("SECRET_KEY", "test-secret-key-for-service-jwt")
+
+        # Mock verify_service_token 以绕过 python-jose 依赖
+        def _mock_verify(token, allowed=None):
+            if token and "mock" in str(token):
+                return {"service": "api", "exp": 9999999999}
+            raise Exception("Invalid token")
 
         @asynccontextmanager
         async def mock_lifespan(app: FastAPI):
@@ -196,8 +207,9 @@ class TestEngineHealthEndpoints:
 
         original_lifespan = engine_main.app.router.lifespan_context
         engine_main.app.router.lifespan_context = mock_lifespan
-        self.client = TestClient(engine_main.app)
-        yield
+        with patch("backend.shared.auth.verify_service_token", _mock_verify):
+            self.client = TestClient(engine_main.app)
+            yield
         engine_main.app.router.lifespan_context = original_lifespan
 
     def test_health_returns_200(self):
@@ -247,10 +259,11 @@ class TestEngineHealthEndpoints:
         assert body["error"]["request_id"]
 
     def test_api_v1_requires_internal_secret(self):
-        """验证 /api/v1/* 业务路由缺失内部密钥时返回 401"""
+        """验证 /api/v1/* 业务路由缺失认证时返回 401"""
         response = self.client.get("/api/v1/nonexistent_endpoint_xyz")
         assert response.status_code == 401
-        assert response.json()["detail"] == "Invalid internal authentication"
+        # T6.5-P3: 错误消息统一为 "Authentication required (...)"
+        assert "Authentication required" in response.json()["detail"]
 
     def test_openapi_schema_available(self):
         """验证 OpenAPI 文档可访问"""

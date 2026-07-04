@@ -621,14 +621,12 @@ def register_to_strategy_service(
     }
 
     # 用 user_id 构造 internal auth header
-    # T6.5-P2: service JWT（专用 X-Service-Token header，委托方 M2 第三轮裁决）
-    # deprecated: X-Internal-Call 过渡期保留，第三阶段移除
+    # T6.5-P3: service JWT（专用 X-Service-Token header）
     headers = {
         "Content-Type": "application/json",
         "X-User-Id": str(user_id) if user_id else "0",
         "X-Internal-Service": "ai_strategy",
         "X-Service-Token": create_service_token("engine"),
-        "X-Internal-Call": config.INTERNAL_AUTH_KEY,  # 注入内部调用 Secret
     }
 
     try:

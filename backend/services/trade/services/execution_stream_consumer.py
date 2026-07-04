@@ -27,6 +27,11 @@ class ExecutionStreamConsumer:
     - order_filled: 按 broker_order_id+exec_id 幂等落成交并更新订单状态
     - order_rejected: 更新订单为 REJECTED
     - order_submitted: 将 PENDING 推进到 SUBMITTED
+
+    T4.3 增强：回报解析容错
+      - 字段缺失/类型错误/未知状态均做容错处理
+      - 解析失败时记录日志 + 通知，不崩溃
+      - 异常回报写入 DLQ 供人工排查
     """
 
     def __init__(self):
@@ -319,6 +324,48 @@ class ExecutionStreamConsumer:
         except Exception:
             return None
 
+    @staticmethod
+    def _safe_float(raw: Any, default: float = 0.0) -> float:
+        """安全转换为 float，失败返回 default（T4.3 容错）。"""
+        try:
+            if raw is None:
+                return default
+            text = str(raw).strip()
+            if not text:
+                return default
+            return float(text)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _safe_str(raw: Any, default: str = "", max_len: int = 500) -> str:
+        """安全转换为 str，失败返回 default，截断防止超长（T4.3 容错）。"""
+        try:
+            text = str(raw if raw is not None else default)
+            if max_len > 0 and len(text) > max_len:
+                text = text[:max_len]
+            return text
+        except Exception:
+            return default
+
+    def _log_report_anomaly(self, fields: dict[str, Any], reason: str) -> None:
+        """记录回报解析异常（T4.3 容错）。
+
+        不崩溃，仅记录日志 + 关键字段，便于人工排查。
+        异常回报后续由 _retry_or_dlq 流程写入 DLQ。
+        """
+        client_order_id = self._safe_str(fields.get("client_order_id"), max_len=64)
+        broker_order_id = self._safe_str(fields.get("broker_order_id"), max_len=64)
+        event_type = self._safe_str(fields.get("event_type"), max_len=32)
+        logger.warning(
+            "execution report anomaly: event_type=%s reason=%s "
+            "client_order_id=%s broker_order_id=%s",
+            event_type,
+            reason,
+            client_order_id,
+            broker_order_id,
+        )
+
     async def _resolve_order(self, session, fields: dict[str, Any]) -> Order | None:
         order_uuid = self._try_parse_uuid(fields.get("order_id"))
         if order_uuid is not None:
@@ -390,23 +437,46 @@ class ExecutionStreamConsumer:
         async with get_session() as session:
             order = await self._resolve_order(session, fields)
             if order is None:
+                # T4.3: 订单未找到时记录异常而非静默返回
+                self._log_report_anomaly(
+                    fields,
+                    "order_submitted cannot resolve order",
+                )
                 return
             if order.status == OrderStatus.PENDING:
                 order.status = OrderStatus.SUBMITTED
-                order.remarks = ((order.remarks or "") + f" [STREAM_SUBMITTED event_id={fields.get('event_id')}]")[
+                # T4.3: 容错截断 event_id（字段可能缺失/超长）
+                event_id = self._safe_str(fields.get("event_id"), max_len=100)
+                order.remarks = ((order.remarks or "") + f" [STREAM_SUBMITTED event_id={event_id}]")[
                     -500:
                 ]
+            elif order.status != OrderStatus.SUBMITTED:
+                # T4.3: 订单已在非 PENDING/SUBMITTED 状态，记录异常
+                self._log_report_anomaly(
+                    fields,
+                    f"order_submitted received but order already {order.status}",
+                )
 
     async def _handle_order_rejected(self, fields: dict[str, Any]) -> None:
-        reason = str(fields.get("reason") or "stream rejected")
+        # T4.3: 容错解析 reason（字段缺失/类型错误时降级）
+        reason = self._safe_str(
+            fields.get("reason"), default="stream rejected", max_len=400
+        )
 
         async with get_session() as session:
             order = await self._resolve_order(session, fields)
             if order is None:
+                # T4.3: 订单未找到时记录异常而非静默返回
+                self._log_report_anomaly(
+                    fields,
+                    f"order_rejected cannot resolve order: {reason}",
+                )
                 return
             if order.status not in {OrderStatus.FILLED, OrderStatus.CANCELLED}:
                 order.status = OrderStatus.REJECTED
-                order.remarks = ((order.remarks or "") + f" [STREAM_REJECTED {reason}]")[-500:]
+                order.remarks = ((order.remarks or "") + f" [STREAM_REJECTED {reason}]")[
+                    -500:
+                ]
                 await publish_notification_async(
                     user_id=str(order.user_id),
                     tenant_id=str(order.tenant_id or "default"),
@@ -416,14 +486,47 @@ class ExecutionStreamConsumer:
                     level="error",
                     action_url="/trading",
                 )
+            else:
+                # T4.3: 订单已终态但收到 rejected 回报，记录异常
+                self._log_report_anomaly(
+                    fields,
+                    f"order_rejected received but order already {order.status}: {reason}",
+                )
 
     async def _handle_order_filled(self, fields: dict[str, Any]) -> None:
-        idem_key = self._trade_idempotency_key(fields)
-
-        filled_qty = float(fields.get("filled_qty") or fields.get("quantity") or 0.0)
-        filled_price = float(fields.get("filled_price") or fields.get("price") or 0.0)
+        # T4.3: 容错解析 filled_qty / filled_price（字段缺失/类型错误时降级而非崩溃）
+        filled_qty = self._safe_float(
+            fields.get("filled_qty") or fields.get("quantity"), default=0.0
+        )
+        filled_price = self._safe_float(
+            fields.get("filled_price") or fields.get("price"), default=0.0
+        )
         if filled_qty <= 0 or filled_price <= 0:
+            # 记录异常回报线索，便于人工排查（不崩溃）
+            self._log_report_anomaly(
+                fields,
+                f"order_filled invalid filled_qty={filled_qty} filled_price={filled_price}",
+            )
             raise ValueError("order_filled invalid filled_qty/filled_price")
+
+        # T4.3: 容错解析 idem_key（字段缺失时生成兜底 key 并记录异常）
+        try:
+            idem_key = self._trade_idempotency_key(fields)
+        except ValueError:
+            broker_order_id = self._safe_str(fields.get("broker_order_id"))
+            exec_id = self._safe_str(fields.get("exec_id"))
+            if not broker_order_id and not exec_id:
+                self._log_report_anomaly(
+                    fields,
+                    "order_filled missing idempotency key fields (exchange_trade_id/broker_order_id/exec_id)",
+                )
+                raise
+            # 兜底：用 broker_order_id + exec_id 或时间戳生成 key
+            idem_key = f"{broker_order_id}:{exec_id}" if broker_order_id and exec_id else f"fallback:{int(time.time() * 1000)}"
+            self._log_report_anomaly(
+                fields,
+                f"order_filled idempotency key fallback to {idem_key}",
+            )
 
         async with get_session() as session:
             # 幂等检查：已有同 idem_key 的成交则直接返回
@@ -433,6 +536,11 @@ class ExecutionStreamConsumer:
 
             order = await self._resolve_order(session, fields)
             if order is None:
+                # T4.3: 记录异常回报线索后抛出，由 _process_message 写入 DLQ
+                self._log_report_anomaly(
+                    fields,
+                    "order_filled cannot resolve order",
+                )
                 raise ValueError(
                     "order not found for execution event "
                     f"order_id={fields.get('order_id')} "
@@ -455,7 +563,7 @@ class ExecutionStreamConsumer:
                 commission=0.0,
                 exchange_trade_id=idem_key,
                 exchange_name="execution_stream",
-                remarks=str(fields.get("reason") or ""),
+                remarks=self._safe_str(fields.get("reason"), max_len=400),
             )
             session.add(trade)
 
@@ -481,11 +589,19 @@ class ExecutionStreamConsumer:
             await session.commit()
 
     async def _handle_order_cancelled(self, fields: dict[str, Any]) -> None:
-        reason = str(fields.get("reason") or "stream cancelled")
+        # T4.3: 容错解析 reason（字段缺失/类型错误时降级）
+        reason = self._safe_str(
+            fields.get("reason"), default="stream cancelled", max_len=400
+        )
 
         async with get_session() as session:
             order = await self._resolve_order(session, fields)
             if order is None:
+                # T4.3: 订单未找到时记录异常而非静默返回
+                self._log_report_anomaly(
+                    fields,
+                    f"order_cancelled cannot resolve order: {reason}",
+                )
                 return
 
             if order.status not in {OrderStatus.FILLED, OrderStatus.CANCELLED}:

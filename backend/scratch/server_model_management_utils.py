@@ -29,7 +29,6 @@ logger = logging.getLogger(__name__)
 from backend.services.api.user_app.middleware.auth import require_admin
 from backend.services.engine.inference.router_service import InferenceRouterService
 from backend.services.engine.inference.script_runner import InferenceScriptRunner
-from backend.shared.auth import get_internal_call_secret
 from backend.shared.database_manager_v2 import get_session
 from backend.shared.redis_sentinel_client import get_redis_sentinel_client
 from backend.shared.trading_calendar import calendar_service
@@ -47,7 +46,7 @@ MODELS_ROOT = os.path.abspath(os.path.join(os.getcwd(), "models"))
 
 # Engine 服务地址（与 engine_proxy 保持一致）
 _ENGINE_BASE_URL = os.getenv("ENGINE_SERVICE_URL", "http://127.0.0.1:8001").rstrip("/")
-_ENGINE_INTERNAL_SECRET = get_internal_call_secret()
+# T6.5-P3: _ENGINE_INTERNAL_SECRET 已移除，service JWT 由 create_service_token 签发
 # 每日推理分布式锁：TTL 30 分钟，防止 Admin 手动触发与 Celery Beat 09:15 并发冲突
 _INFERENCE_LOCK_TTL_SEC = int(os.getenv("INFERENCE_LOCK_TTL_SEC", "1800"))
 _INFERENCE_LOCK_KEY_PREFIX = "qm:lock:inference:daily"

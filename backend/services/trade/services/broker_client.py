@@ -5,19 +5,21 @@ Broker Client - 抽象 Broker 接口，支持模拟和真实交易
 """
 
 import abc
+import asyncio
 import logging
 import os
 import random
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from enum import Enum
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 
 if TYPE_CHECKING:
     from backend.services.trade.services.simulation_manager import SimulationAccountManager
 
 from sqlalchemy import select, text
 
-from backend.shared.auth import create_service_token, get_internal_call_secret
+from backend.shared.auth import create_service_token
 from backend.shared.database_manager_v2 import get_session
 
 logger = logging.getLogger(__name__)
@@ -70,8 +72,295 @@ class MarketQuoteSnapshot:
     suspended: bool = False
 
 
+# ==================== 连接状态机 & 自动重连 (T4.3) ====================
+
+
+class BrokerConnectionState(str, Enum):
+    """Broker 连接状态机。
+
+    状态流转：
+      CONNECTED → DISCONNECTED → RECONNECTING → CONNECTED / FAILED
+    """
+
+    CONNECTED = "connected"
+    DISCONNECTED = "disconnected"
+    RECONNECTING = "reconnecting"
+    FAILED = "failed"
+
+
+def compute_reconnect_backoff(
+    attempt: int,
+    base: float = 1.0,
+    max_interval: float = 60.0,
+) -> float:
+    """计算指数退避重连间隔。
+
+    序列：1s, 2s, 4s, 8s, 16s, 32s, 60s, 60s, ...（上限 60s）。
+
+    attempt 从 1 开始计数（第1次重连等待 base*2^0 = 1s）。
+    """
+    if attempt <= 0:
+        return base
+    interval = base * (2 ** (attempt - 1))
+    return min(interval, max_interval)
+
+
+class BrokerConnectionManager:
+    """Broker 连接状态机管理器（T4.3）。
+
+    职责：
+      - 心跳检测：定期调用 health_check_func 检测连接是否存活
+      - 自动重连：连接断开后指数退避重连（1s/2s/4s/8s/16s，最大间隔 60s）
+      - 重连上限：连续重连失败超过 MAX_RECONNECT_ATTEMPTS 次后标记 FAILED
+      - 状态机：CONNECTED → DISCONNECTED → RECONNECTING → CONNECTED/FAILED
+
+    线程安全：通过 asyncio.Lock 保护状态变更。
+    可测试性：backoff 计算独立为纯函数 compute_reconnect_backoff；
+             health_check_func / on_failure_callback 可注入。
+    """
+
+    MAX_RECONNECT_ATTEMPTS = 10
+    BASE_BACKOFF_SECONDS = 1.0
+    MAX_BACKOFF_SECONDS = 60.0
+    DEFAULT_HEARTBEAT_INTERVAL = 30.0
+
+    def __init__(
+        self,
+        broker_name: str,
+        health_check_func: Optional[Callable[[], Any]] = None,
+        on_failure_callback: Optional[Callable[[str, str], Any]] = None,
+        heartbeat_interval: float = DEFAULT_HEARTBEAT_INTERVAL,
+    ):
+        self.broker_name = broker_name
+        self._health_check_func = health_check_func
+        self._on_failure_callback = on_failure_callback
+        self._heartbeat_interval = float(heartbeat_interval)
+        self._state: BrokerConnectionState = BrokerConnectionState.DISCONNECTED
+        self._reconnect_attempts = 0
+        self._heartbeat_task: Optional[asyncio.Task] = None
+        self._reconnect_task: Optional[asyncio.Task] = None
+        self._running = False
+        self._lock = asyncio.Lock()
+        # 可注入的 sleep/now，便于测试
+        self._sleep_func: Callable[[float], Any] = asyncio.sleep
+        self._reconnect_sleeps: list[float] = []  # 记录实际退避秒数（测试观察用）
+
+    @property
+    def state(self) -> BrokerConnectionState:
+        return self._state
+
+    @property
+    def reconnect_attempts(self) -> int:
+        return self._reconnect_attempts
+
+    def is_available(self) -> bool:
+        """broker 是否可用（CONNECTED 或 RECONNECTING 中允许尝试操作）。"""
+        return self._state in (
+            BrokerConnectionState.CONNECTED,
+            BrokerConnectionState.RECONNECTING,
+        )
+
+    async def _set_state(self, new_state: BrokerConnectionState) -> None:
+        async with self._lock:
+            old = self._state
+            self._state = new_state
+            if old != new_state:
+                logger.info(
+                    "[%s] connection state transition: %s -> %s",
+                    self.broker_name,
+                    old.value,
+                    new_state.value,
+                )
+
+    async def mark_connected(self) -> None:
+        """标记连接已恢复，重置重连计数。"""
+        await self._set_state(BrokerConnectionState.CONNECTED)
+        async with self._lock:
+            self._reconnect_attempts = 0
+
+    async def mark_disconnected(self) -> None:
+        """标记连接断开，触发重连流程。"""
+        async with self._lock:
+            if self._state == BrokerConnectionState.FAILED:
+                return
+        await self._set_state(BrokerConnectionState.DISCONNECTED)
+        # 异步触发重连（不阻塞调用方）
+        if self._running and self._reconnect_task is None:
+            self._reconnect_task = asyncio.create_task(
+                self._reconnect_loop(), name=f"{self.broker_name}-reconnect"
+            )
+
+    async def start(self) -> None:
+        """启动心跳检测。"""
+        if self._running:
+            return
+        self._running = True
+        # 初始假定连接正常，首次心跳会确认
+        await self._set_state(BrokerConnectionState.CONNECTED)
+        if self._health_check_func is not None:
+            self._heartbeat_task = asyncio.create_task(
+                self._heartbeat_loop(), name=f"{self.broker_name}-heartbeat"
+            )
+        logger.info(
+            "[%s] connection manager started, heartbeat_interval=%ss",
+            self.broker_name,
+            self._heartbeat_interval,
+        )
+
+    async def stop(self) -> None:
+        """停止心跳检测和重连。"""
+        self._running = False
+        for task in (self._heartbeat_task, self._reconnect_task):
+            if task is not None and not task.done():
+                task.cancel()
+                try:
+                    await asyncio.wait_for(task, timeout=2.0)
+                except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
+                    pass
+        self._heartbeat_task = None
+        self._reconnect_task = None
+        await self._set_state(BrokerConnectionState.DISCONNECTED)
+        logger.info("[%s] connection manager stopped", self.broker_name)
+
+    async def _heartbeat_loop(self) -> None:
+        """心跳检测循环：定期调用 health_check_func，失败则标记断开。"""
+        while self._running:
+            try:
+                await self._sleep_func(self._heartbeat_interval)
+            except asyncio.CancelledError:
+                break
+            if not self._running:
+                break
+            try:
+                result = self._health_check_func()
+                if asyncio.iscoroutine(result):
+                    result = await result
+                if result:
+                    await self.mark_connected()
+                else:
+                    logger.warning(
+                        "[%s] heartbeat check returned false, marking disconnected",
+                        self.broker_name,
+                    )
+                    await self.mark_disconnected()
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                logger.warning(
+                    "[%s] heartbeat check failed: %s, marking disconnected",
+                    self.broker_name,
+                    exc,
+                )
+                await self.mark_disconnected()
+
+    async def _reconnect_loop(self) -> None:
+        """指数退避重连循环。"""
+        await self._set_state(BrokerConnectionState.RECONNECTING)
+        while self._running:
+            async with self._lock:
+                if self._reconnect_attempts >= self.MAX_RECONNECT_ATTEMPTS:
+                    break
+                self._reconnect_attempts += 1
+                attempt = self._reconnect_attempts
+
+            backoff = compute_reconnect_backoff(
+                attempt,
+                base=self.BASE_BACKOFF_SECONDS,
+                max_interval=self.MAX_BACKOFF_SECONDS,
+            )
+            self._reconnect_sleeps.append(backoff)
+            logger.info(
+                "[%s] reconnect attempt %d/%d, backoff=%.1fs",
+                self.broker_name,
+                attempt,
+                self.MAX_RECONNECT_ATTEMPTS,
+                backoff,
+            )
+            try:
+                await self._sleep_func(backoff)
+            except asyncio.CancelledError:
+                break
+            if not self._running:
+                break
+
+            try:
+                result = self._health_check_func()
+                if asyncio.iscoroutine(result):
+                    result = await result
+                if result:
+                    await self.mark_connected()
+                    logger.info(
+                        "[%s] reconnected successfully after %d attempt(s)",
+                        self.broker_name,
+                        attempt,
+                    )
+                    self._reconnect_task = None
+                    return
+                else:
+                    logger.warning(
+                        "[%s] reconnect attempt %d health check returned false",
+                        self.broker_name,
+                        attempt,
+                    )
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                logger.warning(
+                    "[%s] reconnect attempt %d failed: %s",
+                    self.broker_name,
+                    attempt,
+                    exc,
+                )
+
+        # 超过最大重连次数 → 标记 FAILED
+        if self._running:
+            await self._set_state(BrokerConnectionState.FAILED)
+            logger.error(
+                "[%s] reconnect failed after %d attempts, marking broker FAILED; "
+                "manual intervention required",
+                self.broker_name,
+                self.MAX_RECONNECT_ATTEMPTS,
+            )
+            if self._on_failure_callback is not None:
+                try:
+                    cb_result = self._on_failure_callback(
+                        self.broker_name,
+                        f"reconnect failed after {self.MAX_RECONNECT_ATTEMPTS} attempts",
+                    )
+                    if asyncio.iscoroutine(cb_result):
+                        await cb_result
+                except Exception as cb_exc:
+                    logger.error(
+                        "[%s] on_failure_callback raised: %s",
+                        self.broker_name,
+                        cb_exc,
+                    )
+        self._reconnect_task = None
+
+    async def force_reconnect(self) -> bool:
+        """手动触发一次重连尝试（测试/运维用）。
+
+        返回 True 表示重连成功。
+        """
+        if not self._health_check_func:
+            return False
+        try:
+            result = self._health_check_func()
+            if asyncio.iscoroutine(result):
+                result = await result
+            if result:
+                await self.mark_connected()
+                return True
+        except Exception as exc:
+            logger.debug("[%s] force_reconnect check failed: %s", self.broker_name, exc)
+        return False
+
+
 class BaseBroker(abc.ABC):
     """Broker 抽象基类"""
+
+    def __init__(self):
+        self._connection_manager: Optional[BrokerConnectionManager] = None
 
     @abc.abstractmethod
     async def place_order(
@@ -112,6 +401,37 @@ class BaseBroker(abc.ABC):
         raise NotImplementedError(
             f"{self.__class__.__name__} 未实现 query_order，无法支持自动对账"
         )
+
+    # ====== 连接管理（T4.3）======
+
+    def get_connection_manager(self) -> Optional[BrokerConnectionManager]:
+        """获取连接管理器（若已配置）。"""
+        return getattr(self, "_connection_manager", None)
+
+    def set_connection_manager(self, manager: BrokerConnectionManager) -> None:
+        """注入连接管理器。"""
+        self._connection_manager = manager
+
+    def is_available(self) -> bool:
+        """broker 是否可用。
+
+        未配置连接管理器时默认返回 True（向后兼容）；
+        配置后由连接状态机决定。
+        """
+        manager = getattr(self, "_connection_manager", None)
+        if manager is None:
+            return True
+        return manager.is_available()
+
+    async def start_heartbeat(self) -> None:
+        """启动心跳检测（若已配置连接管理器）。"""
+        if self._connection_manager is not None:
+            await self._connection_manager.start()
+
+    async def stop_heartbeat(self) -> None:
+        """停止心跳检测（若已配置连接管理器）。"""
+        if self._connection_manager is not None:
+            await self._connection_manager.stop()
 
 
 class PaperTradingBroker(BaseBroker):
@@ -409,11 +729,30 @@ class QMTBroker(BaseBroker):
 
     通过 HTTP 调用本地 QMT 柜台客户端进行实盘下单。
     QMT 客户端通常在本地运行，提供 REST 接口或 Socket 接口。
+
+    T4.3 增强：
+      - 集成 BrokerConnectionManager 实现心跳检测 + 自动重连
+      - 实现 query_order 支持对账闭环
     """
 
     def __init__(self, qmt_host: str = "127.0.0.1", qmt_port: int = 18080):
+        super().__init__()
         self.base_url = f"http://{qmt_host}:{qmt_port}"
         self._session = None
+        # 连接管理器：心跳通过 /api/health 端点检测
+        self._connection_manager = BrokerConnectionManager(
+            broker_name="QMTBroker",
+            health_check_func=self._health_check,
+        )
+
+    async def _health_check(self) -> bool:
+        """心跳检测：GET /api/health，200 视为存活。"""
+        try:
+            client = await self._get_session()
+            resp = await client.get(f"{self.base_url}/api/health", timeout=5.0)
+            return resp.status_code == 200
+        except Exception:
+            return False
 
     async def _get_session(self):
         if self._session is None:
@@ -432,6 +771,8 @@ class QMTBroker(BaseBroker):
         price: float | None = None,
         tenant_id: str = "default",
     ) -> BrokerResult:
+        if not self.is_available():
+            logger.warning("[QMTBroker] place_order called but broker is not available")
         try:
             client = await self._get_session()
             payload = {
@@ -495,6 +836,106 @@ class QMTBroker(BaseBroker):
         except Exception as e:
             logger.error(f"[QMTBroker] query_quote failed: {e}")
         return {}
+
+    async def query_order(self, client_order_id: str) -> OrderStatusResult:
+        """查询 QMT 订单最终状态（对账闭环用，T4.3）。
+
+        优先调用本地 QMT Bridge 的 /api/order/query 接口获取柜台回报；
+        若接口不可用（404/超时/异常），回退查询本地 orders 表。
+        """
+        if not client_order_id:
+            return OrderStatusResult(status="STILL_PENDING", message="empty client_order_id")
+
+        # 层级1：尝试 QMT Bridge HTTP 查询接口
+        try:
+            client = await self._get_session()
+            resp = await client.get(
+                f"{self.base_url}/api/order/query",
+                params={"client_order_id": client_order_id},
+                timeout=8.0,
+            )
+            if resp.status_code == 200:
+                data = resp.json() or {}
+                mapped = self._map_qmt_status(data.get("status") or data.get("order_status"))
+                return OrderStatusResult(
+                    status=mapped,
+                    filled_quantity=float(data.get("filled_quantity") or data.get("filled_qty") or 0),
+                    avg_price=float(data.get("avg_price") or data.get("average_price") or 0),
+                    exchange_order_id=str(data.get("exchange_order_id") or data.get("order_id") or ""),
+                    message=str(data.get("message") or "qmt bridge query"),
+                )
+        except Exception as exc:
+            logger.debug("[QMTBroker] query_order HTTP fallback to DB: %s", exc)
+
+        # 层级2：回退本地 orders 表
+        return await self._query_order_from_db(client_order_id)
+
+    @staticmethod
+    def _map_qmt_status(raw_status: Any) -> str:
+        """将 QMT 柜台状态映射为 OrderStatusResult.status。"""
+        text = str(raw_status or "").strip().upper()
+        # QMT 常见状态：已成交/部成/已撤/废单/未成交
+        status_map = {
+            "FILLED": "FILLED",
+            "DEAL": "FILLED",
+            "TRADED": "FILLED",
+            "已成交": "FILLED",
+            "PARTIALLY_FILLED": "PARTIALLY_FILLED",
+            "PARTIAL": "PARTIALLY_FILLED",
+            "部成": "PARTIALLY_FILLED",
+            "CANCELLED": "CANCELLED",
+            "CANCELED": "CANCELLED",
+            "已撤": "CANCELLED",
+            "REJECTED": "REJECTED",
+            "REJECT": "REJECTED",
+            "废单": "REJECTED",
+            "PENDING": "STILL_PENDING",
+            "SUBMITTED": "STILL_PENDING",
+            "未成交": "STILL_PENDING",
+            "ACTIVE": "STILL_PENDING",
+        }
+        return status_map.get(text, "STILL_PENDING")
+
+    async def _query_order_from_db(self, client_order_id: str) -> OrderStatusResult:
+        """从本地 orders 表查询订单状态（回退方案）。"""
+        try:
+            from backend.services.trade.models.enums import (
+                OrderStatus as _OrderStatus,
+            )
+            from backend.services.trade.models.order import Order as _Order
+
+            async with get_session(read_only=True) as session:
+                stmt = (
+                    select(_Order)
+                    .where(_Order.client_order_id == client_order_id)
+                    .limit(1)
+                )
+                result = await session.execute(stmt)
+                order = result.scalar_one_or_none()
+                if not order:
+                    return OrderStatusResult(
+                        status="STILL_PENDING",
+                        message=f"order not found for client_order_id={client_order_id}",
+                    )
+                status_map = {
+                    _OrderStatus.FILLED: "FILLED",
+                    _OrderStatus.PARTIALLY_FILLED: "PARTIALLY_FILLED",
+                    _OrderStatus.CANCELLED: "CANCELLED",
+                    _OrderStatus.REJECTED: "REJECTED",
+                    _OrderStatus.EXPIRED: "CANCELLED",
+                }
+                raw_status = order.status
+                mapped = status_map.get(raw_status, "STILL_PENDING")
+                return OrderStatusResult(
+                    status=mapped,
+                    filled_quantity=float(order.filled_quantity or 0),
+                    avg_price=float(order.average_price or 0),
+                    exchange_order_id=str(order.exchange_order_id or ""),
+                    message=f"qmt broker db fallback: {getattr(raw_status, 'value', raw_status)}",
+                )
+        except Exception as exc:
+            logger.error("[QMTBroker] _query_order_from_db failed for %s: %s", client_order_id, exc)
+            return OrderStatusResult(status="STILL_PENDING", message=f"query error: {exc}")
 
     @staticmethod
     def _normalize_account_payload(data: Any) -> dict[str, Any]:
@@ -564,18 +1005,37 @@ class QMTBridgeBroker(BaseBroker):
 
     REAL 下单通过 quantmind-stream 内部派发接口推送到 bridge_session 连接，
     执行回报由 Agent 回写 /internal/strategy/bridge/execution。
+
+    T4.3 增强：
+      - 集成 BrokerConnectionManager 实现心跳检测 + 自动重连
+      - 实现 query_order 支持对账闭环和订单状态轮询
     """
 
     def __init__(
         self,
         stream_base_url: str,
-        internal_secret: str = "",
         redis_client: Any = None,
     ):
+        super().__init__()
         self.stream_base_url = str(stream_base_url or "").rstrip("/")
-        self.internal_secret = str(internal_secret or "").strip() or get_internal_call_secret()
         self.redis_client = redis_client
         self._session = None
+        # 连接管理器：心跳通过 stream /health 端点检测
+        self._connection_manager = BrokerConnectionManager(
+            broker_name="QMTBridgeBroker",
+            health_check_func=self._health_check,
+        )
+
+    async def _health_check(self) -> bool:
+        """心跳检测：GET stream /health，200 视为存活。"""
+        if not self.stream_base_url:
+            return False
+        try:
+            client = await self._get_session()
+            resp = await client.get(f"{self.stream_base_url}/health", timeout=5.0)
+            return resp.status_code == 200
+        except Exception:
+            return False
 
     async def _get_session(self):
         if self._session is None:
@@ -603,6 +1063,8 @@ class QMTBridgeBroker(BaseBroker):
             return BrokerResult(success=False, message="client_order_id is required in bridge mode")
         if not self.stream_base_url:
             return BrokerResult(success=False, message="stream_base_url is empty")
+        if not self.is_available():
+            logger.warning("[QMTBridgeBroker] place_order called but broker connection is not available")
 
         payload = {
             "tenant_id": str(tenant_id or "").strip() or "default",
@@ -645,10 +1107,8 @@ class QMTBridgeBroker(BaseBroker):
                 f"{self.stream_base_url}/api/v1/internal/bridge/order",
                 json=payload,
                 headers={
-                    # T6.5-P2: service JWT（专用 X-Service-Token header）
+                    # T6.5-P3: service JWT（专用 X-Service-Token header）
                     "X-Service-Token": create_service_token("trade"),
-                    # deprecated: X-Internal-Call 过渡期保留，第三阶段移除
-                    "X-Internal-Call": self.internal_secret,
                 },
             )
             if resp.status_code != 200:
@@ -760,10 +1220,8 @@ class QMTBridgeBroker(BaseBroker):
                     "payload": cancel_payload,
                 },
                 headers={
-                    # T6.5-P2: service JWT（专用 X-Service-Token header）
+                    # T6.5-P3: service JWT（专用 X-Service-Token header）
                     "X-Service-Token": create_service_token("trade"),
-                    # deprecated: X-Internal-Call 过渡期保留，第三阶段移除
-                    "X-Internal-Call": self.internal_secret,
                 },
             )
             if resp.status_code != 200:
@@ -790,10 +1248,8 @@ class QMTBridgeBroker(BaseBroker):
             resp = await client.get(
                 f"{self.stream_base_url}/api/v1/quotes/{symbol}",
                 headers={
-                    # T6.5-P2: service JWT（专用 X-Service-Token header）
+                    # T6.5-P3: service JWT（专用 X-Service-Token header）
                     "X-Service-Token": create_service_token("trade"),
-                    # deprecated: X-Internal-Call 过渡期保留，第三阶段移除
-                    "X-Internal-Call": self.internal_secret,
                 },
             )
             if resp.status_code != 200:
@@ -819,6 +1275,114 @@ class QMTBridgeBroker(BaseBroker):
         except Exception as e:
             logger.error("[QMTBridgeBroker] query_quote failed for %s: %s", symbol, e)
             return {}
+
+    async def query_order(self, client_order_id: str) -> OrderStatusResult:
+        """查询 Bridge 订单最终状态（对账闭环用，T4.3）。
+
+        双层查询策略：
+          层级1：尝试调用 stream 服务 /api/v1/internal/bridge/query 接口获取柜台回报
+                 （若 stream 尚未实现该端点，404/异常时优雅降级）
+          层级2：回退查询本地 orders 表（由 ExecutionStreamConsumer 写入回报）
+
+        此设计保证：即使 stream bridge query 端点暂未上线，对账闭环仍可通过
+        本地 orders 表（回报消费已落库）正常工作。
+        """
+        if not client_order_id:
+            return OrderStatusResult(status="STILL_PENDING", message="empty client_order_id")
+
+        # 层级1：尝试 stream bridge query 端点（前向兼容，可能尚未实现）
+        if self.stream_base_url:
+            try:
+                client = await self._get_session()
+                resp = await client.post(
+                    f"{self.stream_base_url}/api/v1/internal/bridge/query",
+                    json={"client_order_id": client_order_id},
+                    headers={
+                        # T6.5-P3: service JWT（专用 X-Service-Token header）
+                        "X-Service-Token": create_service_token("trade"),
+                    },
+                    timeout=8.0,
+                )
+                if resp.status_code == 200:
+                    data = resp.json() or {}
+                    if data.get("ok"):
+                        payload = data.get("payload") or data
+                        mapped = QMTBroker._map_qmt_status(
+                            payload.get("status") or payload.get("order_status")
+                        )
+                        return OrderStatusResult(
+                            status=mapped,
+                            filled_quantity=float(
+                                payload.get("filled_quantity")
+                                or payload.get("filled_qty")
+                                or 0
+                            ),
+                            avg_price=float(
+                                payload.get("avg_price")
+                                or payload.get("average_price")
+                                or 0
+                            ),
+                            exchange_order_id=str(
+                                payload.get("exchange_order_id")
+                                or payload.get("order_id")
+                                or ""
+                            ),
+                            message=str(payload.get("message") or "bridge query ok"),
+                        )
+                # 404 或非 200：端点未实现，降级到 DB
+            except Exception as exc:
+                logger.debug(
+                    "[QMTBridgeBroker] query_order bridge endpoint fallback to DB: %s",
+                    exc,
+                )
+
+        # 层级2：回退本地 orders 表
+        return await self._query_order_from_db(client_order_id)
+
+    async def _query_order_from_db(self, client_order_id: str) -> OrderStatusResult:
+        """从本地 orders 表查询订单状态（回退方案）。"""
+        try:
+            from backend.services.trade.models.enums import (
+                OrderStatus as _OrderStatus,
+            )
+            from backend.services.trade.models.order import Order as _Order
+
+            async with get_session(read_only=True) as session:
+                stmt = (
+                    select(_Order)
+                    .where(_Order.client_order_id == client_order_id)
+                    .limit(1)
+                )
+                result = await session.execute(stmt)
+                order = result.scalar_one_or_none()
+                if not order:
+                    return OrderStatusResult(
+                        status="STILL_PENDING",
+                        message=f"order not found for client_order_id={client_order_id}",
+                    )
+                status_map = {
+                    _OrderStatus.FILLED: "FILLED",
+                    _OrderStatus.PARTIALLY_FILLED: "PARTIALLY_FILLED",
+                    _OrderStatus.CANCELLED: "CANCELLED",
+                    _OrderStatus.REJECTED: "REJECTED",
+                    _OrderStatus.EXPIRED: "CANCELLED",
+                }
+                raw_status = order.status
+                mapped = status_map.get(raw_status, "STILL_PENDING")
+                return OrderStatusResult(
+                    status=mapped,
+                    filled_quantity=float(order.filled_quantity or 0),
+                    avg_price=float(order.average_price or 0),
+                    exchange_order_id=str(order.exchange_order_id or ""),
+                    message=f"bridge broker db fallback: {getattr(raw_status, 'value', raw_status)}",
+                )
+        except Exception as exc:
+            logger.error(
+                "[QMTBridgeBroker] _query_order_from_db failed for %s: %s",
+                client_order_id,
+                exc,
+            )
+            return OrderStatusResult(status="STILL_PENDING", message=f"query error: {exc}")
 
 
 class RedisBroker(BaseBroker):
@@ -1127,7 +1691,6 @@ def create_broker(enable_real: bool, **kwargs) -> BaseBroker:
                 stream_base_url=kwargs.get("stream_base_url")
                 or kwargs.get("market_url")
                 or os.getenv("MARKET_DATA_SERVICE_URL", "http://stream-gateway:8003"),
-                internal_secret=kwargs.get("internal_secret") or get_internal_call_secret(),
                 redis_client=kwargs.get("redis_client"),
             )
         raise ValueError(
