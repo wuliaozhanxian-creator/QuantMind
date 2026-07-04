@@ -1,0 +1,83 @@
+# 风控规则配置 (T4.2)
+#
+# 引擎：backend/services/trade/services/risk_control.py
+# 审计：backend/services/trade/models/risk_audit.py (表 risk_audit_log)
+#
+# 字段说明：
+#   rule_id    : 规则唯一标识 (热加载/审计日志引用)
+#   rule_type  : PRICE_LIMIT / POSITION_LIMIT / ORDER_LIMIT / FREQUENCY_LIMIT / CAPITAL_CHECK
+#   enabled    : 是否启用
+#   action     : REJECT (立即拒绝) / WARN (警告继续) / REQUIRE_CONFIRMATION (需人工确认)
+#   priority   : 数字越小越早执行 (命中 REJECT 立即返回)
+#   params     : 规则参数 (各 rule_type 不同)
+#
+# 热加载：修改本文件后调用 reload_default_engine() 即可生效，无需重启服务。
+# 审计：每次命中 REJECT/WARN/REQUIRE_CONFIRMATION 写入 risk_audit_log 表。
+#
+# 与 T4.1 ORM 规则的关系：
+#   - 本文件为基线规则 (运维维护)
+#   - DB 表 risk_rules (ORM RiskRule) 可覆盖同 rule_id 的规则或追加新规则
+#   - 合并策略见 RiskRuleLoader.merge()
+
+rules:
+  # ── 1. PRICE_LIMIT : 涨跌停价格检查 ──────────────────────────────────
+  - rule_id: price_limit
+    rule_type: PRICE_LIMIT
+    enabled: true
+    action: REJECT
+    priority: 10
+    description: 涨跌停价格检查 (主板±10%/创业板科创板±20%/北交所±30%)
+    params:
+      main_board_pct: 0.10       # 沪深主板 ±10%
+      gem_board_pct: 0.20        # 创业板 ±20%
+      star_board_pct: 0.20       # 科创板 ±20%
+      bj_board_pct: 0.30         # 北交所 ±30%
+      st_pct: 0.05               # ST 股 ±5% (需 params.is_st=true 触发)
+      block_near_limit: true     # 已涨停禁买、已跌停禁卖
+      near_limit_tolerance: 0.01 # 贴近容差 (元)
+
+  # ── 2. POSITION_LIMIT : 持仓上限检查 ─────────────────────────────────
+  - rule_id: position_limit
+    rule_type: POSITION_LIMIT
+    enabled: true
+    action: REJECT
+    priority: 20
+    description: 单股持仓不超过总资产 10%，总仓位不超过 100%
+    params:
+      max_single_position_pct: 0.10   # 单股持仓占总资产上限
+      max_total_position_pct: 1.0     # 总仓位占总资产上限
+
+  # ── 3. ORDER_LIMIT : 单笔下单限额 ────────────────────────────────────
+  - rule_id: order_limit
+    rule_type: ORDER_LIMIT
+    enabled: true
+    action: REJECT
+    priority: 30
+    description: 单笔金额 [100, 1000000]，单笔数量上限 100000
+    params:
+      max_order_value: 1000000.0   # 单笔金额上限 (元)
+      min_order_value: 100.0       # 单笔金额下限 (元)
+      max_order_quantity: 100000   # 单笔数量上限 (股)
+
+  # ── 4. FREQUENCY_LIMIT : 日内交易频次限制 ────────────────────────────
+  - rule_id: frequency_limit
+    rule_type: FREQUENCY_LIMIT
+    enabled: true
+    action: REJECT
+    priority: 40
+    description: 单用户日内最多 100 笔，单股日内最多 5 次
+    params:
+      max_daily_trades: 100          # 单用户日内总交易次数上限
+      max_per_symbol_trades: 5       # 单股日内交易次数上限
+
+  # ── 5. CAPITAL_CHECK : 可用资金/持仓检查 ─────────────────────────────
+  - rule_id: capital_check
+    rule_type: CAPITAL_CHECK
+    enabled: true
+    action: REJECT
+    priority: 50
+    description: 买入查资金 (含佣金)，卖出查持仓
+    params:
+      commission_rate_buy: 0.0003    # 买入佣金率
+      min_commission: 5.0            # 最低佣金 (元)
+      commission_rate_sell: 0.0013   # 卖出佣金率 (含印花税+过户费)

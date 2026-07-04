@@ -23,6 +23,8 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List
 from collections.abc import Callable
 
+from sqlalchemy import text
+
 
 @dataclass
 class HealthCheck:
@@ -185,7 +187,7 @@ class StandardHealthChecks:
 
             # 执行简单查询
             with db_engine.connect() as conn:
-                result = conn.execute("SELECT 1").fetchone()
+                result = conn.execute(text("SELECT 1")).fetchone()
 
             duration = (time.time() - start_time) * 1000
 

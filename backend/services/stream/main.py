@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, Optional
 
-from fastapi import FastAPI, Header, HTTPException, Response, WebSocket
+from fastapi import FastAPI, Header, HTTPException, JSONResponse, Response, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlalchemy import text
@@ -535,18 +535,35 @@ async def market_websocket_compat_endpoint(websocket: WebSocket):
 @app.get("/health")
 async def health_check():
     market_db_connected = bool(getattr(app.state, "market_db_connected", False))
+    ws_core_started = bool(getattr(app.state, "ws_core_started", False))
     set_service_health("quantmind-stream", market_db_connected)
     if STREAM_MARKET_DB_CONNECTED is not None:
         STREAM_MARKET_DB_CONNECTED.set(1 if market_db_connected else 0)
     if STREAM_SERVICE_DEGRADED is not None:
         STREAM_SERVICE_DEGRADED.set(0 if market_db_connected else 1)
-    return {
-        "status": "healthy" if market_db_connected else "degraded",
-        "service": "quantmind-stream",
-        "market_db": "connected" if market_db_connected else "disconnected",
-        "ws_connections": len(ws_manager.active_connections),
-        "ws_core_started": bool(getattr(app.state, "ws_core_started", False)),
-    }
+    # ws_core 是 stream 服务核心依赖，未启动时返回 503
+    # （/health 存活探针反映进程内核心组件状态；/readiness 探测下游依赖，二者语义分离）
+    if not ws_core_started:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "starting",
+                "service": "quantmind-stream",
+                "ws_core": False,
+                "market_db": "connected" if market_db_connected else "disconnected",
+                "ws_connections": len(ws_manager.active_connections),
+            },
+        )
+    return JSONResponse(
+        status_code=200,
+        content={
+            "status": "healthy",
+            "service": "quantmind-stream",
+            "ws_core": True,
+            "market_db": "connected" if market_db_connected else "disconnected",
+            "ws_connections": len(ws_manager.active_connections),
+        },
+    )
 
 
 @app.get("/readiness")

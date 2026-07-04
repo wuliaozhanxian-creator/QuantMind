@@ -3,6 +3,7 @@
 支持主从读写分离、连接池、健康检查
 """
 
+import asyncio
 import logging
 import os
 import urllib.parse
@@ -258,30 +259,46 @@ class DatabaseManager:
             async with self.get_master_session() as session:
                 yield session
 
+    # 健康检查超时硬约束：2s，与 readiness.PROBE_TIMEOUT_SECONDS 保持一致
+    HEALTH_CHECK_TIMEOUT_SECONDS: float = 2.0
+
+    async def _probe_engine(self, engine: AsyncEngine, timeout: float = HEALTH_CHECK_TIMEOUT_SECONDS) -> bool:
+        """探测单个引擎连通性，带超时约束。
+
+        数据库不可用时避免长时间阻塞，超时即视为不健康。
+        """
+        async def _do_probe():
+            async with engine.connect() as conn:
+                await conn.execute(text("SELECT 1"))
+
+        try:
+            await asyncio.wait_for(_do_probe(), timeout=timeout)
+            return True
+        except asyncio.TimeoutError:
+            logger.warning(f"Database health check timed out after {timeout}s")
+            return False
+        except Exception as e:
+            logger.error(f"Database health check failed: {e}")
+            return False
+
     async def health_check(self) -> dict:
-        """健康检查"""
+        """健康检查（每项探测 2s 超时，避免数据库不可用时长时间阻塞）"""
         result = {"master": False, "slaves": []}
 
         # 检查主库
-        try:
-            async with self._master_engine.connect() as conn:
-                await conn.execute(text("SELECT 1"))
-                result["master"] = True
+        if self._master_engine is not None:
+            result["master"] = await self._probe_engine(self._master_engine)
+            if result["master"]:
                 logger.info("Master database health check: OK")
-        except Exception as e:
-            logger.error(f"Master database health check failed: {e}")
+        else:
             result["master"] = False
 
         # 检查从库
         for idx, engine in enumerate(self._slave_engines, 1):
-            try:
-                async with engine.connect() as conn:
-                    await conn.execute(text("SELECT 1"))
-                    result["slaves"].append({"index": idx, "healthy": True})
-                    logger.info(f"Slave database {idx} health check: OK")
-            except Exception as e:
-                logger.error(f"Slave database {idx} health check failed: {e}")
-                result["slaves"].append({"index": idx, "healthy": False})
+            healthy = await self._probe_engine(engine)
+            result["slaves"].append({"index": idx, "healthy": healthy})
+            if healthy:
+                logger.info(f"Slave database {idx} health check: OK")
 
         return result
 

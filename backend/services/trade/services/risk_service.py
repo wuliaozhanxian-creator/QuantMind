@@ -367,3 +367,87 @@ class RiskService:
                     )
 
         return {"passed": len(violations) == 0, "violations": violations}
+
+    # ── T4.2 桥接：可配置风控规则引擎 ─────────────────────────────────────
+
+    async def check_order_risk_engine(
+        self,
+        user_id: int,
+        order: Order,
+        portfolio_value: float = 0.0,
+        available_cash: float = -1.0,
+        daily_trade_count: int = 0,
+        prev_close: float | None = None,
+        symbol_trade_count: int = 0,
+        current_position_value: float = 0.0,
+        total_position_value: float = 0.0,
+        available_position: float = -1.0,
+        use_orm_rules: bool = True,
+    ) -> dict[str, Any]:
+        """
+        T4.2 可配置引擎版风控检查 (与 ``check_order_risk`` 并存，向后兼容)。
+
+        流程：
+          1. 从 config/risk_rules.yaml 加载基线规则；
+          2. (可选) 从 ORM risk_rules 表加载 DB 规则并合并；
+          3. 调用 ``RiskControlEngine.check`` 逐条检查；
+          4. 命中 REJECT/WARN 通过 ``RiskAuditService`` 落库 risk_audit_log。
+
+        返回与 ``check_order_risk`` 同结构的 ``{"passed": bool, "violations": list}``，
+        便于上层 ``TradingEngine.check_order_risk`` 无缝替换。
+        """
+        from backend.services.trade.services.risk_audit_service import risk_audit_service
+        from backend.services.trade.services.risk_control import (
+            RiskControlEngine,
+            RiskRuleLoader,
+            get_default_engine,
+        )
+
+        # 1. 加载基线规则 (配置文件)
+        file_rules = RiskRuleLoader(None).load()  # 占位；实际由 get_default_engine 加载
+        engine = get_default_engine(audit_callback=risk_audit_service.log_rule_hit)
+        # 绑定当前请求的 DB session，使审计日志落库
+        risk_audit_service.bind_session(self.db)
+
+        # 2. (可选) 合并 ORM 规则
+        if use_orm_rules:
+            try:
+                orm_rules_raw = await self.list_rules(active_only=True)
+                orm_rules = RiskRuleLoader.from_orm_rules(orm_rules_raw)
+                merged = RiskRuleLoader.merge(file_rules or engine.rules, orm_rules)
+                if merged:
+                    engine = RiskControlEngine(
+                        merged, audit_callback=risk_audit_service.log_rule_hit
+                    )
+            except Exception as exc:
+                logger.warning("[RiskEngine] merge ORM rules failed: %s", exc)
+
+        # 3. 构造 account / context
+        account = {
+            "portfolio_value": float(portfolio_value or 0.0),
+            "available_cash": float(available_cash if available_cash is not None else -1.0),
+            "available_position": float(
+                available_position if available_position is not None else -1.0
+            ),
+            "current_position_value": float(current_position_value or 0.0),
+            "total_position_value": float(total_position_value or 0.0),
+        }
+        context = {
+            "prev_close": float(prev_close) if prev_close else 0.0,
+            "daily_trade_count": int(daily_trade_count or 0),
+            "symbol_trade_count": int(symbol_trade_count or 0),
+            "tenant_id": str(getattr(order, "tenant_id", "") or "default"),
+            "user_id": str(user_id),
+        }
+
+        # 4. 执行检查
+        result = await engine.check(order, account, context)
+
+        # 5. 转换为兼容的返回结构
+        return {
+            "passed": result.passed,
+            "violations": list(result.violations),
+            "action": result.action,
+            "rule_id": result.rule_id,
+            "message": result.message,
+        }
