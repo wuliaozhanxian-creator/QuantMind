@@ -19,6 +19,7 @@ from backend.services.trade.simulation.services.execution_engine import (
     SimulationExecutionEngine,
 )
 from backend.services.trade.simulation.services.order_service import SimOrderService
+from backend.shared.auth import create_service_token
 
 logger = logging.getLogger(__name__)
 
@@ -186,7 +187,15 @@ class SimulationSettler:
             "STREAM_SERVICE_URL", "http://quantmind-stream:8003/api/v1/quotes"
         )
         internal_secret = (os.getenv("INTERNAL_CALL_SECRET") or "").strip()
-        headers = {"X-Internal-Call": internal_secret} if internal_secret else {}
+        # T6.5-P2: service JWT（专用 X-Service-Token header，委托方 M2 第三轮裁决）
+        # deprecated: X-Internal-Call 过渡期保留，第三阶段移除
+        headers = {}
+        try:
+            headers["X-Service-Token"] = create_service_token("trade")
+        except Exception:
+            pass  # SECRET_KEY 未配置或 jose 未安装，回退到 X-Internal-Call
+        if internal_secret:
+            headers["X-Internal-Call"] = internal_secret
         results = {}
 
         async with httpx.AsyncClient() as client:
@@ -270,9 +279,10 @@ class SimulationSettler:
     ) -> dict[str, float]:
         """已废弃：仅供本地调试使用，生产环境请勿调用"""
         await asyncio.sleep(0.5)
+        # T5.2 股票代码标准化：使用 SH/SZ 前缀格式（原 600519.SH/000001.SZ 已清理）
         return {
-            "600519.SH": 0.2,
-            "000001.SZ": 0.1,
+            "SH600519": 0.2,
+            "SZ000001": 0.1,
         }
 
 

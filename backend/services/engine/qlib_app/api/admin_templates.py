@@ -19,7 +19,7 @@ from backend.services.engine.qlib_app.services.strategy_templates import (
     get_all_templates,
     invalidate_templates_cache,
 )
-from backend.shared.auth import get_internal_call_secret
+from backend.shared.auth import get_internal_call_secret, verify_service_token
 from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
 
 logger = logging.getLogger(__name__)
@@ -37,10 +37,30 @@ _ID_PATTERN = re.compile(r"^[a-z0-9_]{1,64}$")
 # ---------------------------------------------------------------------------
 
 
-def _verify_internal(x_internal_call: str | None = Header(None)) -> None:
-    """校验内部调用 Secret，防止外部直接访问。"""
-    if not _INTERNAL_SECRET or x_internal_call != _INTERNAL_SECRET:
-        raise HTTPException(status_code=403, detail="内部调用凭证无效")
+def _verify_internal(
+    x_service_token: str | None = Header(default=None, alias="X-Service-Token"),
+    x_internal_call: str | None = Header(default=None),
+) -> None:
+    """校验内部调用凭证，防止外部直接访问。
+
+    T6.5-P2: 优先校验 X-Service-Token（service JWT），回退 X-Internal-Call（deprecated）。
+    第三阶段将移除 X-Internal-Call 回退分支。
+    """
+    # 1. 优先 service JWT（专用 X-Service-Token header，委托方 M2 第三轮裁决）
+    if x_service_token:
+        try:
+            verify_service_token(x_service_token, ["api", "engine", "trade", "stream"])
+            return
+        except Exception:
+            pass  # service token 无效，回退到 X-Internal-Call
+    # 2. 回退 X-Internal-Call（deprecated，过渡期保留，第三阶段移除）
+    if x_internal_call:
+        logger.warning(
+            "Deprecated X-Internal-Call header; migrate to X-Service-Token (T6.5-P2)"
+        )
+        if _INTERNAL_SECRET and x_internal_call == _INTERNAL_SECRET:
+            return
+    raise HTTPException(status_code=403, detail="内部调用凭证无效")
 
 
 # ---------------------------------------------------------------------------

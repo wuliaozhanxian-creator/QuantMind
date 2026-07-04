@@ -27,6 +27,11 @@ except Exception:  # pragma: no cover - runner image keeps auth deps minimal
     _shared_internal_call_secret = None
 
 try:
+    from backend.shared.auth import create_service_token as _shared_create_service_token
+except Exception:  # pragma: no cover - runner image keeps auth deps minimal
+    _shared_create_service_token = None
+
+try:
     from exchange_calendars import get_calendar
 except ImportError:  # pragma: no cover - optional dependency in local/unit test env
     get_calendar = None
@@ -115,12 +120,20 @@ def get_internal_call_secret() -> str:
 
 
 def _headers(user_id: str, tenant_id: str) -> dict[str, str]:
-    return {
+    h = {
         "X-User-Id": str(user_id),
         "X-Tenant-Id": str(tenant_id),
+        # deprecated: X-Internal-Call 过渡期保留，第三阶段移除（见 T6.5_service_jwt_flow.md）
         "X-Internal-Call": get_internal_call_secret(),
         "Content-Type": "application/json",
     }
+    # T6.5-P2: service JWT（专用 X-Service-Token header，委托方 M2 第三轮裁决）
+    if _shared_create_service_token is not None:
+        try:
+            h["X-Service-Token"] = _shared_create_service_token("trade")
+        except Exception:
+            pass  # SECRET_KEY 未配置或 jose 未安装，回退到 X-Internal-Call
+    return h
 
 
 def _load_live_trade_config() -> dict[str, Any]:

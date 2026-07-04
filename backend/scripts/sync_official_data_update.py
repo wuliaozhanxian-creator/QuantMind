@@ -19,6 +19,12 @@ import asyncpg
 import pandas as pd
 from dotenv import load_dotenv
 
+# T5.2 入库前校验：添加项目根目录到 sys.path 以导入 StockCodeUtil
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+from backend.shared.stock_utils import StockCodeUtil
+
 # SQL 注入防护：合法列名/表名正则（仅允许字母数字下划线）
 _VALID_IDENT_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
@@ -244,6 +250,9 @@ async def _upsert_stock_daily_latest(parquet_path: Path) -> int:
     df = df.dropna(subset=["trade_date", "symbol"])
     if df.empty:
         return 0
+
+    # T5.2 入库前校验：股票代码标准化为 SH600000 前缀格式
+    df["symbol"] = df["symbol"].astype(str).map(StockCodeUtil.to_prefix)
 
     conn = await asyncpg.connect(
         host=db_host,

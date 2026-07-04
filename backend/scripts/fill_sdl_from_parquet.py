@@ -11,6 +11,9 @@ import asyncpg
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
+# T5.2 入库前校验：导入股票代码标准化工具
+from backend.shared.stock_utils import StockCodeUtil
+
 # 加载凭据
 DB_HOST = os.getenv("DB_HOST", "127.0.0.1")
 DB_PORT = os.getenv("DB_PORT", "5432")
@@ -32,7 +35,8 @@ async def fill_data_super_fast(file_path):
         
         # 预处理数据
         df_2026['amount'] = df_2026['close'] * df_2026['volume']
-        df_2026['symbol'] = df_2026['symbol'].str.upper()
+        # T5.2 入库前校验：股票代码标准化为 SH600000 前缀格式
+        df_2026['symbol'] = df_2026['symbol'].astype(str).map(StockCodeUtil.to_prefix)
         df_2026['adj_factor'] = df_2026['factor'].astype(float)
         df_2026['stock_name'] = ""
         df_2026['industry'] = ""

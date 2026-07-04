@@ -18,7 +18,7 @@ from backend.services.stream.market_app.database import AsyncSessionLocal, close
 from backend.services.stream.ws_core.manager import manager as ws_manager
 from backend.services.stream.ws_core.server import server as ws_server
 from backend.services.stream.ws_core.server import websocket_endpoint as core_ws_endpoint
-from backend.shared.auth import get_internal_call_secret
+from backend.shared.auth import get_internal_call_secret, verify_service_token
 from backend.shared.config_manager import init_unified_config
 from backend.shared.cors import resolve_cors_origins
 from backend.shared.error_contract import install_error_contract_handlers
@@ -401,13 +401,44 @@ def _resolve_bridge_targets(tenant_id: str, user_id: str, account_id: str | None
     return [candidates[0][1]]
 
 
+def _verify_internal_auth(
+    x_service_token: str | None = None,
+    x_internal_call: str | None = None,
+) -> None:
+    """内部调用认证：优先 X-Service-Token，回退 X-Internal-Call（deprecated）。
+
+    T6.5-P2 迁移：被调用方校验点逐步从 X-Internal-Call 切换到 X-Service-Token。
+    过渡期两种 header 都接受，但 X-Internal-Call 会打 deprecated warning。
+    第三阶段将移除 X-Internal-Call 回退分支。
+    """
+    # 1. 优先 service JWT（专用 X-Service-Token header，委托方 M2 第三轮裁决）
+    if x_service_token:
+        try:
+            verify_service_token(x_service_token, ["api", "engine", "trade", "stream"])
+            return
+        except Exception:
+            pass  # service token 无效，回退到 X-Internal-Call
+    # 2. 回退 X-Internal-Call（deprecated，过渡期保留，第三阶段移除）
+    if x_internal_call:
+        logger.warning(
+            "Deprecated X-Internal-Call header; migrate to X-Service-Token (T6.5-P2)"
+        )
+        try:
+            if str(x_internal_call or "").strip() == get_internal_call_secret():
+                return
+        except RuntimeError:
+            pass
+    raise HTTPException(status_code=401, detail="Invalid internal credentials")
+
+
 @app.post("/api/v1/internal/bridge/order")
 async def dispatch_bridge_order(
     payload: BridgeOrderDispatchRequest,
+    x_service_token: str | None = Header(default=None, alias="X-Service-Token"),
     x_internal_call: str | None = Header(default=None),
 ):
-    if str(x_internal_call or "").strip() != get_internal_call_secret():
-        raise HTTPException(status_code=401, detail="Invalid internal secret")
+    # T6.5-P2: 优先 X-Service-Token，回退 X-Internal-Call（deprecated）
+    _verify_internal_auth(x_service_token, x_internal_call)
 
     order_payload = payload.payload or {}
     client_order_id = str(order_payload.get("client_order_id") or "").strip()
@@ -446,10 +477,11 @@ async def dispatch_bridge_order(
 @app.post("/api/v1/internal/bridge/cancel")
 async def dispatch_bridge_cancel(
     payload: BridgeCancelDispatchRequest,
+    x_service_token: str | None = Header(default=None, alias="X-Service-Token"),
     x_internal_call: str | None = Header(default=None),
 ):
-    if str(x_internal_call or "").strip() != get_internal_call_secret():
-        raise HTTPException(status_code=401, detail="Invalid internal secret")
+    # T6.5-P2: 优先 X-Service-Token，回退 X-Internal-Call（deprecated）
+    _verify_internal_auth(x_service_token, x_internal_call)
 
     cancel_payload = payload.payload or {}
     client_order_id = str(cancel_payload.get("client_order_id") or "").strip()
@@ -562,11 +594,12 @@ async def readiness_check():
 
 @app.get("/api/v1/internal/debug/connections")
 async def debug_connections(
+    x_service_token: str | None = Header(default=None, alias="X-Service-Token"),
     x_internal_call: str | None = Header(default=None),
 ):
     """临时调试端点：查看活跃 WS 连接元数据（仅内部调用）"""
-    if str(x_internal_call or "").strip() != get_internal_call_secret():
-        raise HTTPException(status_code=401, detail="Invalid internal secret")
+    # T6.5-P2: 优先 X-Service-Token，回退 X-Internal-Call（deprecated）
+    _verify_internal_auth(x_service_token, x_internal_call)
     connections = []
     for conn_id, meta in ws_manager.connection_metadata.items():
         connections.append({

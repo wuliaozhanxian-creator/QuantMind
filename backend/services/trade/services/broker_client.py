@@ -15,9 +15,9 @@ from typing import TYPE_CHECKING, Any, Dict, Optional
 if TYPE_CHECKING:
     from backend.services.trade.services.simulation_manager import SimulationAccountManager
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 
-from backend.shared.auth import get_internal_call_secret
+from backend.shared.auth import create_service_token, get_internal_call_secret
 from backend.shared.database_manager_v2 import get_session
 
 logger = logging.getLogger(__name__)
@@ -41,6 +41,25 @@ class BrokerResult:
         self.commission = commission
         self.exchange_order_id = exchange_order_id
         self.message = message
+
+
+@dataclass
+class OrderStatusResult:
+    """Broker 订单状态查询结果（对账闭环用）。
+
+    status 取值：
+      - FILLED: 已全部成交
+      - PARTIALLY_FILLED: 部分成交
+      - CANCELLED: 已撤单
+      - REJECTED: 已拒绝
+      - STILL_PENDING: 仍在挂单中（未达终态）
+    """
+
+    status: str
+    filled_quantity: float = 0.0
+    avg_price: float = 0.0
+    exchange_order_id: str = ""
+    message: str = ""
 
 
 @dataclass
@@ -82,6 +101,17 @@ class BaseBroker(abc.ABC):
     async def query_quote(self, symbol: str) -> dict[str, Any]:
         """查询行情"""
         ...
+
+    async def query_order(self, client_order_id: str) -> OrderStatusResult:
+        """查询订单最终状态（对账闭环用）。
+
+        子类应实现此方法以支持自动对账闭环。
+        未实现时抛出 NotImplementedError，对账扫描器会将其视为查询失败
+        并计入失败次数，超过阈值后标记人工核查。
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} 未实现 query_order，无法支持自动对账"
+        )
 
 
 class PaperTradingBroker(BaseBroker):
@@ -310,6 +340,67 @@ class PaperTradingBroker(BaseBroker):
             "last_price": price,
             "timestamp": datetime.now().isoformat(),
         }
+
+    async def query_order(self, client_order_id: str) -> OrderStatusResult:
+        """查询模拟订单最终状态（对账闭环用）。
+
+        通过 client_order_id 在本地 orders 表查询订单状态，
+        映射为 OrderStatusResult 返回。
+        """
+        if not client_order_id:
+            return OrderStatusResult(
+                status="STILL_PENDING", message="empty client_order_id"
+            )
+        try:
+            from backend.services.trade.models.enums import (
+                OrderStatus as _OrderStatus,
+            )
+            from backend.services.trade.models.order import Order as _Order
+
+            async with get_session(read_only=True) as session:
+                stmt = (
+                    select(_Order)
+                    .where(_Order.client_order_id == client_order_id)
+                    .limit(1)
+                )
+                result = await session.execute(stmt)
+                order = result.scalar_one_or_none()
+                if not order:
+                    return OrderStatusResult(
+                        status="STILL_PENDING",
+                        message=(
+                            f"order not found for client_order_id={client_order_id}"
+                        ),
+                    )
+                status_map = {
+                    _OrderStatus.FILLED: "FILLED",
+                    _OrderStatus.PARTIALLY_FILLED: "PARTIALLY_FILLED",
+                    _OrderStatus.CANCELLED: "CANCELLED",
+                    _OrderStatus.REJECTED: "REJECTED",
+                }
+                raw_status = order.status
+                status_value = (
+                    raw_status.value
+                    if hasattr(raw_status, "value")
+                    else str(raw_status)
+                )
+                mapped = status_map.get(raw_status, "STILL_PENDING")
+                return OrderStatusResult(
+                    status=mapped,
+                    filled_quantity=float(order.filled_quantity or 0),
+                    avg_price=float(order.average_price or 0),
+                    exchange_order_id=str(order.exchange_order_id or ""),
+                    message=f"paper trading order status: {status_value}",
+                )
+        except Exception as exc:
+            logger.error(
+                "[PaperTrading] query_order failed for %s: %s",
+                client_order_id,
+                exc,
+            )
+            return OrderStatusResult(
+                status="STILL_PENDING", message=f"query error: {exc}"
+            )
 
 
 class QMTBroker(BaseBroker):
@@ -553,7 +644,12 @@ class QMTBridgeBroker(BaseBroker):
             resp = await client.post(
                 f"{self.stream_base_url}/api/v1/internal/bridge/order",
                 json=payload,
-                headers={"X-Internal-Call": self.internal_secret},
+                headers={
+                    # T6.5-P2: service JWT（专用 X-Service-Token header）
+                    "X-Service-Token": create_service_token("trade"),
+                    # deprecated: X-Internal-Call 过渡期保留，第三阶段移除
+                    "X-Internal-Call": self.internal_secret,
+                },
             )
             if resp.status_code != 200:
                 return BrokerResult(
@@ -663,7 +759,12 @@ class QMTBridgeBroker(BaseBroker):
                     "account_id": account_id,
                     "payload": cancel_payload,
                 },
-                headers={"X-Internal-Call": self.internal_secret},
+                headers={
+                    # T6.5-P2: service JWT（专用 X-Service-Token header）
+                    "X-Service-Token": create_service_token("trade"),
+                    # deprecated: X-Internal-Call 过渡期保留，第三阶段移除
+                    "X-Internal-Call": self.internal_secret,
+                },
             )
             if resp.status_code != 200:
                 logger.warning("[QMTBridgeBroker] cancel_order HTTP %s: %s", resp.status_code, resp.text)
@@ -688,7 +789,12 @@ class QMTBridgeBroker(BaseBroker):
             client = await self._get_session()
             resp = await client.get(
                 f"{self.stream_base_url}/api/v1/quotes/{symbol}",
-                headers={"X-Internal-Call": self.internal_secret},
+                headers={
+                    # T6.5-P2: service JWT（专用 X-Service-Token header）
+                    "X-Service-Token": create_service_token("trade"),
+                    # deprecated: X-Internal-Call 过渡期保留，第三阶段移除
+                    "X-Internal-Call": self.internal_secret,
+                },
             )
             if resp.status_code != 200:
                 logger.warning(
@@ -892,6 +998,92 @@ class RedisBroker(BaseBroker):
     async def query_quote(self, symbol: str) -> dict[str, Any]:
         # 行情由 Stream 服务提供，不走终端代理
         return {}
+
+
+class MockBroker(BaseBroker):
+    """可配置的 Mock Broker，用于测试和开发环境。
+
+    支持通过 set_order_result 预设 query_order 的返回值，
+    便于对账闭环等场景的端到端测试。
+
+    用法::
+
+        broker = MockBroker()
+        broker.set_order_result("cid-001", OrderStatusResult(status="FILLED", ...))
+        result = await broker.query_order("cid-001")
+    """
+
+    def __init__(self, order_results: dict[str, OrderStatusResult] | None = None):
+        self._order_results: dict[str, OrderStatusResult] = dict(order_results or {})
+        self.place_order_calls: list[dict] = []
+        self.query_order_calls: list[str] = []
+
+    def set_order_result(
+        self, client_order_id: str, result: OrderStatusResult
+    ) -> None:
+        """预设某 client_order_id 的对账查询结果。"""
+        self._order_results[client_order_id] = result
+
+    async def place_order(
+        self,
+        user_id: int,
+        symbol: str,
+        side: str,
+        quantity: float,
+        order_type: str,
+        price: float | None = None,
+        tenant_id: str = "default",
+        **kwargs,
+    ) -> BrokerResult:
+        self.place_order_calls.append(
+            {
+                "user_id": user_id,
+                "symbol": symbol,
+                "side": side,
+                "quantity": quantity,
+                "price": price,
+                "tenant_id": tenant_id,
+                **kwargs,
+            }
+        )
+        client_order_id = str(kwargs.get("client_order_id", "") or "")
+        return BrokerResult(
+            success=True,
+            filled_quantity=float(quantity),
+            filled_price=float(price or 0),
+            exchange_order_id=client_order_id
+            or f"mock-{len(self.place_order_calls)}",
+            message="MockBroker fill",
+        )
+
+    async def query_order(self, client_order_id: str) -> OrderStatusResult:
+        self.query_order_calls.append(client_order_id)
+        if client_order_id in self._order_results:
+            return self._order_results[client_order_id]
+        return OrderStatusResult(
+            status="STILL_PENDING",
+            message=f"MockBroker: no preset result for {client_order_id}",
+        )
+
+    async def query_account(
+        self, user_id: str, tenant_id: str = "default"
+    ) -> dict[str, Any]:
+        return {
+            "total_asset": 100000.0,
+            "cash": 100000.0,
+            "market_value": 0.0,
+            "positions": {},
+        }
+
+    async def cancel_order(self, exchange_order_id: str, **kwargs) -> bool:
+        return True
+
+    async def query_quote(self, symbol: str) -> dict[str, Any]:
+        return {
+            "symbol": symbol,
+            "last_price": 100.0,
+            "timestamp": datetime.now().isoformat(),
+        }
 
 
 def create_broker(enable_real: bool, **kwargs) -> BaseBroker:

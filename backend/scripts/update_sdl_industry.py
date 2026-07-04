@@ -5,6 +5,7 @@ from pathlib import Path
 import asyncio
 from sqlalchemy import text
 from backend.shared.database_manager_v2 import get_session
+from backend.shared.stock_utils import StockCodeUtil
 
 INDUSTRY_DIR = "/Users/qusong/git/quantmind/db/concept_data/industry/csrc1"
 
@@ -23,12 +24,8 @@ async def update_industry():
                 industry_name = concept.replace("CSRC1", "")
                 stocks = data.get('stocks', [])
                 
-                # 转换代码格式: 600001.SH -> SH600001
-                formatted_stocks = []
-                for s in stocks:
-                    parts = s.split('.')
-                    if len(parts) == 2:
-                        formatted_stocks.append(f"{parts[1]}{parts[0]}")
+                # T5.2 入库前校验：股票代码标准化为 SH600000 前缀格式
+                formatted_stocks = [StockCodeUtil.to_prefix(s) for s in stocks if s]
                 
                 industry_map[industry_name] = formatted_stocks
                 print(f"Found industry '{industry_name}' with {len(formatted_stocks)} stocks.")

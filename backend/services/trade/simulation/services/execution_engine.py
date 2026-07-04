@@ -29,7 +29,7 @@ from backend.services.trade.simulation.services.simulation_manager import (
     SimulationAccountManager,
 )
 from backend.services.trade.trade_config import settings
-from backend.shared.auth import get_internal_call_secret
+from backend.shared.auth import create_service_token, get_internal_call_secret
 from backend.shared.trade_account_cache import write_json_cache, write_trade_account_cache
 from backend.shared.trading_calendar import calendar_service
 from sqlalchemy import select
@@ -358,7 +358,12 @@ class SimulationExecutionEngine:
         # Level 1: 实时行情服务
         try:
             client = await self._http_client()
-            headers = {"X-Internal-Call": get_internal_call_secret()}
+            # T6.5-P2: service JWT（专用 X-Service-Token header）
+            # deprecated: X-Internal-Call 过渡期保留，第三阶段移除
+            headers = {
+                "X-Service-Token": create_service_token("trade"),
+                "X-Internal-Call": get_internal_call_secret(),
+            }
             if user_id is not None:
                 headers["X-User-Id"] = str(user_id)
                 headers["X-Tenant-Id"] = str(tenant_id or "default")

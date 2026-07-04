@@ -295,7 +295,7 @@ footer .signoff .sign-block strong { color: #e8eef5; }
             <td><code>T5.1</code></td>
             <td>数据边界强制隔离</td>
             <td>数据工程师</td>
-            <td>3d</td>
+            <td>2d</td>
             <td>无</td>
             <td>market_db_manager.py 只读凭据隔离；静态检查防越界写入（注：M2 已完成 Fernet 废弃 + 环境变量迁移，本任务聚焦只读隔离）</td>
           </tr>
@@ -467,22 +467,22 @@ footer .signoff .sign-block strong { color: #e8eef5; }
 
   <div class="callout ok">
     <div class="callout-title">已完成</div>
+    <p style="margin-bottom:0;"><strong>部署验证</strong>：委托方已确认部署验证通过，M3 所有任务（含部署依赖的 T4.2/T4.3/T6.5-P2）均可启动。</p>
+  </div>
+
+  <div class="callout ok">
+    <div class="callout-title">已完成</div>
     <p style="margin-bottom:0;"><strong>AGENTS.md 更新</strong>：已删除 Fernet 失真描述，补充单库架构+环境变量密钥管理+service JWT 认证流程+订单链路架构+CI/CD+可观测性。</p>
   </div>
 
-  <div class="callout warn">
-    <div class="callout-title">待完成</div>
-    <p style="margin-bottom:0;"><strong>部署验证</strong>：M2 的 26 个文件变更需推送至 GitHub 并部署到 quant-server。部署后 2 小时内同步：容器健康状态、/health 与 /readiness 端点响应、日志 service_name。回归验证：<code>python backend/run_tests.py trade-long-short</code>。</p>
+  <div class="callout ok">
+    <div class="callout-title">已完成</div>
+    <p style="margin-bottom:0;"><strong>Service JWT 流程图</strong>（<code>T6.5_service_jwt_flow.md</code>）：委托方评审通过，header 命名已修正为 <code>X-Service-Token</code>。T6.5 Phase 2 前置条件满足。</p>
   </div>
 
-  <div class="callout warn">
-    <div class="callout-title">待委托方评审</div>
-    <p style="margin-bottom:0;"><strong>Service JWT 流程图</strong>（<code>T6.5_service_jwt_flow.md</code>）：T6.5 Phase 2 的前置条件。委托方评审通过后方可启动 Phase 2-4 迁移。</p>
-  </div>
-
-  <div class="callout warn">
-    <div class="callout-title">待委托方评审</div>
-    <p style="margin-bottom:0;"><strong>本 M3 任务分解清单</strong>：委托方评审通过后授权 M3 启动。</p>
+  <div class="callout ok">
+    <div class="callout-title">已完成</div>
+    <p style="margin-bottom:0;"><strong>本 M3 任务分解清单</strong>：委托方评审通过，T5.1 工时已更正为 2d。M3 已授权启动。</p>
   </div>
 </section>
 

@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
 """从 stock_daily_latest 表生成因子特征快照"""
 import os
+import sys
 import pandas as pd
 import numpy as np
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from pathlib import Path
+
+# T5.2 入库前校验：添加项目根目录到 sys.path 以导入 StockCodeUtil
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+from backend.shared.stock_utils import StockCodeUtil
 
 PG_DSN = os.getenv(
     "DATABASE_URL",
@@ -69,8 +76,8 @@ def main():
     df = pd.DataFrame(rows)
     df["trade_date"] = pd.to_datetime(df["trade_date"])
 
-    # 统一 symbol 格式
-    df["symbol"] = df["symbol"].astype(str).str.upper()
+    # T5.2 入库前校验：股票代码标准化为 SH600000 前缀格式
+    df["symbol"] = df["symbol"].astype(str).map(StockCodeUtil.to_prefix)
 
     print(f"读取 {len(df)} 条记录, {df['symbol'].nunique()} 只标的")
 

@@ -3,6 +3,7 @@ import numpy as np
 import asyncio
 from sqlalchemy import text
 from backend.shared.database_manager_v2 import get_session
+from backend.shared.stock_utils import StockCodeUtil
 
 OHLCV_PATH = "/Users/qusong/git/quantmind/data/ohlcv_complete_2016_2026.parquet"
 FEATURES_PATH = "/Users/qusong/git/quantmind/data/feature_snapshots/model_features_2026.parquet"
@@ -11,6 +12,8 @@ async def update_data_pipeline():
     print(f"Reading OHLCV from {OHLCV_PATH}...")
     df = pd.read_parquet(OHLCV_PATH)
     df['trade_date'] = pd.to_datetime(df['trade_date']).dt.date
+    # T5.2 入库前校验：股票代码标准化为 SH600000 前缀格式
+    df['symbol'] = df['symbol'].astype(str).map(StockCodeUtil.to_prefix)
     
     # 基础还原 (未复权比例)
     df['close_unadj'] = df['close'] / df['factor']
@@ -52,6 +55,8 @@ async def update_data_pipeline():
     print(f"Reading Features from {FEATURES_PATH}...")
     df_feat = pd.read_parquet(FEATURES_PATH)
     df_feat['trade_date'] = pd.to_datetime(df_feat['trade_date']).dt.date
+    # T5.2 入库前校验：股票代码标准化为 SH600000 前缀格式（与 df 对齐以便 merge）
+    df_feat['symbol'] = df_feat['symbol'].astype(str).map(StockCodeUtil.to_prefix)
     
     df = pd.merge(
         df, 

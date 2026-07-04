@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 from datetime import datetime, timedelta
 
 from sqlalchemy import and_, select
@@ -34,6 +35,11 @@ _BRIDGE_ACK_TIMEOUT_MARKER = "[BRIDGE_ACK_TIMEOUT_PENDING_REVIEW]"
 # 对账队列标记：标记后该订单进入人工/自动对账流程，避免被 _scan_once 误判为 EXPIRED。
 _RECONCILE_QUEUED_MARKER = "[RECONCILE_QUEUED]"
 _RECONCILE_SCAN_INTERVAL = int(os.getenv("ORDER_RECONCILE_SCAN_INTERVAL_SEC", "60"))
+# 对账闭环相关常量
+_RECONCILE_FAILED_MARKER = "[RECONCILE_FAILED_MANUAL_REVIEW]"
+_RECONCILE_QUERY_ATTEMPTS_MARKER = "[RECONCILE_QUERY_ATTEMPTS:"
+_RECONCILE_MAX_QUERY_ATTEMPTS = int(os.getenv("RECONCILE_MAX_QUERY_ATTEMPTS", "5"))
+_RECONCILE_QUERY_ATTEMPTS_RE = re.compile(r"\[RECONCILE_QUERY_ATTEMPTS:\d+\]")
 
 
 async def _scan_once() -> int:
@@ -263,15 +269,304 @@ async def _scan_reconcile_candidates_once() -> int:
     return flagged_count
 
 
+# ==================== 对账闭环（T4.1-followup）====================
+
+
+def _parse_query_attempts(remarks: str | None) -> int:
+    """从 remarks 解析当前对账查询次数。"""
+    if not remarks:
+        return 0
+    match = _RECONCILE_QUERY_ATTEMPTS_RE.search(remarks)
+    if not match:
+        return 0
+    try:
+        inner = match.group(0)
+        return int(inner[len(_RECONCILE_QUERY_ATTEMPTS_MARKER) : -1])
+    except (ValueError, IndexError):
+        return 0
+
+
+def _write_query_attempts(remarks: str, attempts: int) -> str:
+    """写入或更新对账查询次数标记。"""
+    marker = f"{_RECONCILE_QUERY_ATTEMPTS_MARKER}{attempts}]"
+    base = remarks or ""
+    if _RECONCILE_QUERY_ATTEMPTS_RE.search(base):
+        return _RECONCILE_QUERY_ATTEMPTS_RE.sub(marker, base)
+    return f"{base.strip()} {marker}".strip()
+
+
+def _get_reconcile_broker():
+    """获取对账用 broker（REAL 模式）。
+
+    生产环境通过 create_broker 创建；测试中可 monkeypatch 此函数
+    返回 MockBroker 或 None 以控制对账行为。
+    """
+    try:
+        from backend.services.trade.services.broker_client import create_broker
+        from backend.services.trade.trade_config import settings
+
+        return create_broker(
+            enable_real=True,
+            broker_type=getattr(settings, "REAL_BROKER_TYPE", "bridge"),
+            stream_base_url=getattr(
+                settings, "MARKET_DATA_SERVICE_URL", "http://stream-gateway:8003"
+            ),
+            internal_secret=getattr(settings, "INTERNAL_CALL_SECRET", None),
+        )
+    except Exception as exc:
+        logger.error("Failed to create reconcile broker: %s", exc)
+        return None
+
+
+async def _notify_reconcile(
+    order: Order, title: str, content: str, level: str = "warning"
+) -> None:
+    """发送对账结果通知（fire-and-forget）。"""
+    try:
+        await publish_notification_async(
+            user_id=str(order.user_id),
+            tenant_id=str(order.tenant_id or "default"),
+            title=title,
+            content=content,
+            type="trading",
+            level=level,
+            action_url="/trading",
+        )
+    except Exception as exc:
+        logger.warning(
+            "notify failed for reconcile order %s: %s", order.order_id, exc
+        )
+
+
+async def _mark_reconcile_failed(order: Order) -> None:
+    """标记对账失败，需人工介入。"""
+    suffix = (
+        f"{_RECONCILE_FAILED_MARKER} "
+        f"[MANUAL_REVIEW: max_query_attempts={_RECONCILE_MAX_QUERY_ATTEMPTS} exceeded]"
+    )
+    order.remarks = f"{(order.remarks or '').strip()} {suffix}".strip()
+    logger.warning(
+        "order %s reconcile failed after %d attempts, manual review required",
+        order.order_id,
+        _RECONCILE_MAX_QUERY_ATTEMPTS,
+    )
+    await _notify_reconcile(
+        order,
+        "对账失败待人工介入",
+        (
+            f"{order.symbol} 订单 {str(order.order_id)[:8]}... "
+            f"对账查询连续 {_RECONCILE_MAX_QUERY_ATTEMPTS} 次未获得终态，"
+            "需人工核查柜台最终状态。"
+        ),
+        level="error",
+    )
+
+
+async def _reconcile_single_order(order: Order, broker) -> None:
+    """处理单个对账订单：查询 broker 并更新本地状态。
+
+    - FILLED/PARTIALLY_FILLED/CANCELLED/REJECTED → 更新本地状态，闭环完成
+    - STILL_PENDING → 保持 RECONCILE_QUEUED，累计查询次数
+    - 查询异常 → 保持 RECONCILE_QUEUED，累计查询失败次数
+    - 超过 _RECONCILE_MAX_QUERY_ATTEMPTS → 标记 RECONCILE_FAILED_MANUAL_REVIEW
+    """
+    client_order_id = str(getattr(order, "client_order_id", "") or "").strip()
+    remarks = order.remarks or ""
+    attempts = _parse_query_attempts(remarks)
+
+    # broker 不可用视为查询失败
+    if broker is None:
+        attempts += 1
+        remarks = _write_query_attempts(remarks, attempts)
+        remarks = (
+            f"{remarks} [RECONCILE_QUERY_FAIL: "
+            f"broker unavailable, attempts={attempts}]"
+        ).strip()
+        order.remarks = remarks
+        logger.warning(
+            "order %s reconcile broker unavailable, attempts=%d",
+            order.order_id,
+            attempts,
+        )
+        if attempts >= _RECONCILE_MAX_QUERY_ATTEMPTS:
+            await _mark_reconcile_failed(order)
+        return
+
+    # 调用 broker.query_order 查询实际状态
+    try:
+        result = await broker.query_order(client_order_id)
+    except Exception as exc:
+        attempts += 1
+        remarks = _write_query_attempts(remarks, attempts)
+        remarks = (
+            f"{remarks} [RECONCILE_QUERY_FAIL: {exc}, attempts={attempts}]"
+        ).strip()
+        order.remarks = remarks
+        logger.warning(
+            "order %s reconcile query failed: %s, attempts=%d",
+            order.order_id,
+            exc,
+            attempts,
+        )
+        if attempts >= _RECONCILE_MAX_QUERY_ATTEMPTS:
+            await _mark_reconcile_failed(order)
+        return
+
+    status = str(getattr(result, "status", "") or "").upper()
+
+    if status == "FILLED":
+        order.status = OrderStatus.FILLED
+        order.filled_quantity = float(
+            result.filled_quantity or order.filled_quantity or 0
+        )
+        order.average_price = float(result.avg_price or order.average_price or 0)
+        order.filled_value = order.filled_quantity * order.average_price
+        order.filled_at = datetime.now()
+        if result.exchange_order_id:
+            order.exchange_order_id = str(result.exchange_order_id)
+        order.remarks = (
+            f"{(order.remarks or '').strip()} "
+            f"[RECONCILE_FILLED: qty={order.filled_quantity}, "
+            f"avg_price={order.average_price}]"
+        ).strip()
+        logger.info("order %s reconciled as FILLED", order.order_id)
+        await _notify_reconcile(
+            order,
+            "对账确认成交",
+            (
+                f"{order.symbol} 对账确认已成交 {order.filled_quantity} 股，"
+                f"均价 {order.average_price}"
+            ),
+            level="success",
+        )
+
+    elif status == "PARTIALLY_FILLED":
+        order.status = OrderStatus.PARTIALLY_FILLED
+        order.filled_quantity = float(
+            result.filled_quantity or order.filled_quantity or 0
+        )
+        order.average_price = float(result.avg_price or order.average_price or 0)
+        order.filled_value = order.filled_quantity * order.average_price
+        if result.exchange_order_id:
+            order.exchange_order_id = str(result.exchange_order_id)
+        order.remarks = (
+            f"{(order.remarks or '').strip()} "
+            f"[RECONCILE_PARTIAL: qty={order.filled_quantity}, "
+            f"avg_price={order.average_price}]"
+        ).strip()
+        logger.info("order %s reconciled as PARTIALLY_FILLED", order.order_id)
+        await _notify_reconcile(
+            order,
+            "对账确认部分成交",
+            (
+                f"{order.symbol} 对账确认部分成交 {order.filled_quantity} 股，"
+                f"均价 {order.average_price}"
+            ),
+            level="info",
+        )
+
+    elif status == "CANCELLED":
+        order.status = OrderStatus.CANCELLED
+        order.cancelled_at = datetime.now()
+        order.remarks = (
+            f"{(order.remarks or '').strip()} [RECONCILE_CANCELLED]"
+        ).strip()
+        logger.info("order %s reconciled as CANCELLED", order.order_id)
+        await _notify_reconcile(
+            order,
+            "对账确认撤单",
+            f"{order.symbol} 对账确认已撤单",
+            level="info",
+        )
+
+    elif status == "REJECTED":
+        order.status = OrderStatus.REJECTED
+        order.remarks = (
+            f"{(order.remarks or '').strip()} [RECONCILE_REJECTED]"
+        ).strip()
+        logger.info("order %s reconciled as REJECTED", order.order_id)
+        await _notify_reconcile(
+            order,
+            "对账确认拒单",
+            f"{order.symbol} 对账确认已被柜台拒绝",
+            level="warning",
+        )
+
+    else:
+        # STILL_PENDING 或未知状态：保持 RECONCILE_QUEUED，累计查询次数
+        attempts += 1
+        remarks = _write_query_attempts(order.remarks or "", attempts)
+        order.remarks = (
+            f"{remarks} [RECONCILE_STILL_PENDING: attempts={attempts}]"
+        ).strip()
+        logger.info(
+            "order %s still pending after reconcile query, attempts=%d",
+            order.order_id,
+            attempts,
+        )
+        if attempts >= _RECONCILE_MAX_QUERY_ATTEMPTS:
+            await _mark_reconcile_failed(order)
+
+
+async def _reconcile_queued_orders_once() -> int:
+    """对账闭环：扫描 [RECONCILE_QUEUED] 订单，调用 broker.query_order 查询最终状态。
+
+    流程：
+      1. 查询所有标记 [RECONCILE_QUEUED] 且未标记 [RECONCILE_FAILED_MANUAL_REVIEW] 的订单
+      2. 获取对账用 broker（REAL 模式）
+      3. 逐单调用 broker.query_order(client_order_id)
+      4. 根据回报更新本地订单状态（FILLED/CANCELLED/REJECTED/STILL_PENDING）
+      5. 查询失败或持续 STILL_PENDING 累计次数，超过阈值标记人工核查
+
+    返回本次处理的订单数量。
+    """
+    processed_count = 0
+
+    async with get_session() as db:
+        stmt = (
+            select(Order)
+            .where(
+                and_(
+                    Order.status == OrderStatus.SUBMITTED,
+                    Order.trading_mode == TradingMode.REAL,
+                    Order.remarks.is_not(None),
+                    Order.remarks.like(f"%{_RECONCILE_QUEUED_MARKER}%"),
+                    ~Order.remarks.like(f"%{_RECONCILE_FAILED_MARKER}%"),
+                )
+            )
+            .limit(100)
+        )
+        result = await db.execute(stmt)
+        orders = list(result.scalars().all())
+
+        if not orders:
+            return 0
+
+        broker = _get_reconcile_broker()
+        for order in orders:
+            try:
+                await _reconcile_single_order(order, broker)
+                processed_count += 1
+            except Exception as exc:
+                logger.error(
+                    "reconcile order %s failed: %s", order.order_id, exc
+                )
+
+        await db.commit()
+
+    return processed_count
+
+
 async def run_order_timeout_scanner() -> None:
     """后台无限循环，定期扫描悬挂订单。"""
     logger.info(
-        "Order timeout scanner started: timeout=%dm, interval=%ds, bridge_ack_timeout=%ss, bridge_scan_interval=%ss, reconcile_scan_interval=%ds",
+        "Order timeout scanner started: timeout=%dm, interval=%ds, bridge_ack_timeout=%ss, bridge_scan_interval=%ss, reconcile_scan_interval=%ds, reconcile_max_attempts=%d",
         _TIMEOUT_MINUTES,
         _SCAN_INTERVAL,
         _BRIDGE_ACK_TIMEOUT_SECONDS,
         _BRIDGE_ACK_SCAN_INTERVAL,
         _RECONCILE_SCAN_INTERVAL,
+        _RECONCILE_MAX_QUERY_ATTEMPTS,
     )
     next_long_scan = datetime.now()
     next_reconcile_scan = datetime.now()
@@ -283,13 +578,21 @@ async def run_order_timeout_scanner() -> None:
                 logger.info("Order timeout scanner: flagged %d bridge-timeout order(s) for review", bridge_count)
 
             now = datetime.now()
-            # 对账候选扫描：将待核查订单入队，避免被 _scan_once 误判 EXPIRED
+            # 对账候选扫描：将待核查订单入队 + 对账闭环查询
             if now >= next_reconcile_scan:
+                # 阶段1：将 [BRIDGE_ACK_TIMEOUT_PENDING_REVIEW] 订单入队
                 reconcile_count = await _scan_reconcile_candidates_once()
                 if reconcile_count:
                     logger.info(
                         "Order timeout scanner: queued %d order(s) for reconciliation",
                         reconcile_count,
+                    )
+                # 阶段2：对账闭环 — 查询已入队订单的 broker 终态并更新本地状态
+                closed_count = await _reconcile_queued_orders_once()
+                if closed_count:
+                    logger.info(
+                        "Order timeout scanner: reconciled %d order(s) via broker query",
+                        closed_count,
                     )
                 next_reconcile_scan = now + timedelta(seconds=max(1, _RECONCILE_SCAN_INTERVAL))
 

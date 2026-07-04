@@ -77,6 +77,11 @@ def _redis_get_json(key: str) -> dict[str, Any] | None:
 
 
 def _redis_set_json(key: str, value: dict[str, Any], ttl_seconds: int) -> None:
+    # T5.1 只读约束：此处通过 get_remote_redis_client 写入应用层缓存。
+    # 当前 docker-compose 配置下连本地 Redis，写入安全；若配置
+    # REMOTE_QUOTE_REDIS_* 连远程行情 Redis，只读用户断言会阻止使用
+    # 读写凭据，且只读用户的 setex 会被 Redis ACL 拒绝（except 捕获后
+    # 降级为无缓存，不影响功能正确性）。
     try:
         redis = get_remote_redis_client(db=3)
         payload = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
@@ -115,6 +120,9 @@ def _is_index_member(symbol_ref: str, tag_code: str) -> str:
 
 
 def _delete_remote_sdl_keys(redis_client: Any, keys: list[str]) -> None:
+    # T5.1 只读约束：此处通过远程 Redis 客户端删除无效行情缓存。
+    # 若连远程行情 Redis（只读用户），delete 会被 Redis ACL 拒绝，
+    # except 捕获后跳过清理（不影响功能正确性，仅缓存不被清理）。
     if not keys:
         return
     try:

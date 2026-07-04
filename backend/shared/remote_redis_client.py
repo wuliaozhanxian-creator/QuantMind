@@ -20,6 +20,34 @@ REMOTE_REDIS_DB = int(os.getenv("REMOTE_QUOTE_REDIS_DB", os.getenv("REDIS_DB", "
 REMOTE_REDIS_MAX_CONNECTIONS = int(os.getenv("REMOTE_REDIS_MAX_CONNECTIONS", "50"))
 
 # ============================================================
+# T5.1 只读凭据隔离：远程 Redis 只读用户白名单
+# ------------------------------------------------------------
+# 远程行情 Redis（106.53.100.144）仅允许只读访问，禁止写入。
+# 配置了 REMOTE_QUOTE_REDIS_USER 时，必须在只读用户白名单中；
+# 未配置用户名时（本地 Redis 无 ACL），允许通过。
+# ============================================================
+READONLY_REDIS_USERS = {"readonly_monitor", "quantmind_readonly"}
+
+
+def _assert_readonly_redis_user() -> None:
+    """T5.1 远程 Redis 只读凭据隔离断言
+
+    配置了用户名时，必须在只读用户白名单中，防止以读写凭据连接
+    远程行情 Redis 执行写入操作。未配置用户名时（本地 Redis 无
+    ACL），允许通过。
+    """
+    user = (REMOTE_REDIS_USER or "").strip()
+    if not user:
+        return  # 本地 Redis 无 ACL，允许
+    if user not in READONLY_REDIS_USERS:
+        raise RuntimeError(
+            f"[T5.1] 远程 Redis 只读凭据隔离失败：user={user} "
+            f"不在只读用户白名单 {sorted(READONLY_REDIS_USERS)} 中。"
+            f"远程行情 Redis 仅允许只读访问，禁止使用读写凭据连接。"
+        )
+
+
+# ============================================================
 # 连接池单例（按 db 分组）
 # —— Redis 连接池绑定特定 db，为保持 get_remote_redis_client(db=...)
 #    签名向后兼容，按 db 维度各维护一个 ConnectionPool + Redis 单例，
@@ -66,6 +94,7 @@ def get_remote_redis_client(db: int = None) -> Redis:
         # 双检锁：进入锁后再次确认，避免并发重复创建
         client = _clients.get(db)
         if client is None:
+            _assert_readonly_redis_user()  # T5.1 只读凭据断言
             pool = _pools.get(db)
             if pool is None:
                 pool = _build_pool(db)

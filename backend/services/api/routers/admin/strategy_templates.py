@@ -11,7 +11,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from backend.services.api.user_app.middleware.auth import require_admin
-from backend.shared.auth import get_internal_call_secret
+from backend.shared.auth import create_service_token, get_internal_call_secret
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +21,7 @@ _ENGINE_BASE_URL = os.getenv("ENGINE_SERVICE_URL", "http://127.0.0.1:8001").rstr
 _ENGINE_INTERNAL_SECRET = get_internal_call_secret()
 _ENGINE_TEMPLATES_BASE = f"{_ENGINE_BASE_URL}/api/v1/admin/strategy-templates"
 
+# deprecated: X-Internal-Call 过渡期保留，第三阶段移除（见 T6.5_service_jwt_flow.md）
 _INTERNAL_HEADERS = {
     "X-Internal-Call": _ENGINE_INTERNAL_SECRET,
 }
@@ -34,6 +35,9 @@ async def _proxy(
 ) -> dict:
     headers = {
         **_INTERNAL_HEADERS,
+        # T6.5-P2: service JWT（专用 X-Service-Token header，委托方 M2 第三轮裁决）
+        # 动态签发，避免模块级常量中 token 过期（service JWT 默认 5min）
+        "X-Service-Token": create_service_token("api"),
         "X-User-Id": str(current_user.get("user_id", "admin")),
         "X-Tenant-Id": str(current_user.get("tenant_id", "default")),
     }

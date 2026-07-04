@@ -4,7 +4,7 @@ import httpx
 
 from backend.services.trade.models.trade import Trade
 from backend.services.trade.trade_config import settings
-from backend.shared.auth import get_internal_call_secret
+from backend.shared.auth import create_service_token, get_internal_call_secret
 
 logger = logging.getLogger(__name__)
 
@@ -22,10 +22,11 @@ class RemoteService:
         """
         url = f"{self.portfolio_base_url}/api/v1/portfolios/{portfolio_id}"
         # 需要内部鉴权或透传当前请求的 Token。这里暂假设内部接口可通过或有默认鉴权。
-        # 实际开发中通常会在 Header 加入 X-Internal-Call: secret
-
+        # T6.5-P2: service JWT（专用 X-Service-Token header，委托方 M2 第三轮裁决）
+        # deprecated: X-Internal-Call 过渡期保留，第三阶段移除
         headers = {
             "X-User-Id": str(user_id),
+            "X-Service-Token": create_service_token("trade"),
             "X-Internal-Call": get_internal_call_secret(),
         }
 

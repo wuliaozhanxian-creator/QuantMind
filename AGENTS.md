@@ -90,13 +90,17 @@ npm run dashboard:build  # Production build
 - **注意**: 本地数据需要通过 ETL 服务同步维护
 
 ### 远程行情服务器 (Remote Market Server - 106.53.100.144)
-- **PostgreSQL**: `quantmind_market` 用户 (只读)
+- **PostgreSQL**: 已废弃（M2 安全加固后 `market_db_manager.py` 改为读取容器内本地 PostgreSQL，远程 PG 仅 Redis 在用）
 - **Redis**: `readonly_monitor` 用户 (只读)
-- **用途**: 投研平台候选池、实盘行情推送
+- **用途**: 实盘行情推送（远程 PostgreSQL 已由本地库替代）
 - **配置文件**:
-  - PostgreSQL: `backend/shared/market_db_manager.py`
+  - PostgreSQL: `backend/shared/market_db_manager.py`（已改为本地 PG，DB_* 环境变量）
   - Redis: `backend/shared/remote_redis_client.py`
 - **连接方式**: 密码通过环境变量注入，运行时读取（M2 安全加固后，Fernet 硬编码加密已废弃）
+- **T5.1 只读凭据隔离**:
+  - 远程 PG 只读用户白名单：`quantmind_market` / `readonly_monitor` / `quantmind_readonly`（若未来恢复远程 PG 连接，强制要求只读用户）
+  - 远程 Redis 只读用户白名单：`readonly_monitor` / `quantmind_readonly`（配置用户名时强制校验，使用读写凭据将 fail-fast）
+  - 硬约束：远程行情库仅允许只读访问，禁止 INSERT/UPDATE/DELETE 写入操作
 
 ### 密钥管理 (CRITICAL - M2 安全加固)
 

@@ -133,7 +133,7 @@ async def _run() -> None:
             "execution_plan": {
                 "sell_orders": [
                     {
-                        "symbol": "600000.SH",
+                        "symbol": "SH600000",
                         "side": "SELL",
                         "trade_action": "SELL_TO_CLOSE",
                         "quantity": 100,
@@ -145,7 +145,7 @@ async def _run() -> None:
                 ],
                 "buy_orders": [
                     {
-                        "symbol": "000001.SZ",
+                        "symbol": "SZ000001",
                         "side": "BUY",
                         "trade_action": "BUY_TO_OPEN",
                         "quantity": 100,

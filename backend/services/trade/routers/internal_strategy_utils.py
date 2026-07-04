@@ -73,7 +73,7 @@ from backend.services.trade.services.simulation_manager import SimulationAccount
 from backend.services.trade.services.trading_engine import TradingEngine
 from backend.services.trade.utils.stock_lookup import lookup_symbol_name
 from backend.shared.cos_service import get_cos_service
-from backend.shared.auth import get_internal_call_secret
+from backend.shared.auth import get_internal_call_secret, verify_service_token
 
 router = APIRouter(prefix="/api/v1/internal/strategy", tags=["Internal Strategy Gateway"])
 logger = logging.getLogger(__name__)
@@ -81,11 +81,31 @@ logger = logging.getLogger(__name__)
 INTERNAL_CALL_SECRET = get_internal_call_secret()
 
 
-async def verify_internal_call(x_internal_call: str = Header(None)):
-    """验证请求是否来自受信任的内部 K8s 集群"""
-    if not x_internal_call or x_internal_call != INTERNAL_CALL_SECRET:
-        logger.warning(f"Unauthorized internal call attempt with secret: {x_internal_call}")
-        raise HTTPException(status_code=401, detail="Invalid internal secret")
+async def verify_internal_call(
+    x_service_token: str | None = Header(default=None, alias="X-Service-Token"),
+    x_internal_call: str | None = Header(default=None),
+):
+    """验证请求是否来自受信任的内部服务。
+
+    T6.5-P2: 优先校验 X-Service-Token（service JWT），回退 X-Internal-Call（deprecated）。
+    第三阶段将移除 X-Internal-Call 回退分支。
+    """
+    # 1. 优先 service JWT（专用 X-Service-Token header，委托方 M2 第三轮裁决）
+    if x_service_token:
+        try:
+            verify_service_token(x_service_token, ["api", "engine", "trade", "stream"])
+            return
+        except Exception:
+            pass  # service token 无效，回退到 X-Internal-Call
+    # 2. 回退 X-Internal-Call（deprecated，过渡期保留，第三阶段移除）
+    if x_internal_call:
+        logger.warning(
+            "Deprecated X-Internal-Call header; migrate to X-Service-Token (T6.5-P2)"
+        )
+        if x_internal_call == INTERNAL_CALL_SECRET:
+            return
+    logger.warning("Unauthorized internal call attempt")
+    raise HTTPException(status_code=401, detail="Invalid internal secret")
 
 
 def _bridge_ws_url() -> str:

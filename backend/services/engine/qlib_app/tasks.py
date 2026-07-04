@@ -35,7 +35,7 @@ from backend.services.engine.qlib_app.services.optimization_persistence import (
 from backend.services.engine.qlib_app.services.optimization_service import (
     OptimizationCancelledError,
 )
-from backend.shared.auth import get_internal_call_secret
+from backend.shared.auth import create_service_token, get_internal_call_secret
 from backend.services.engine.qlib_app.utils.structured_logger import (
     StructuredTaskLogger,
 )
@@ -107,7 +107,12 @@ def _send_progress_update(data: dict[str, Any]):
     """通过 HTTP 发送进度更新到 FastAPI"""
     try:
         url = f"{API_BASE_URL}/api/v1/qlib/progress"
-        headers = {"X-Internal-Call": get_internal_call_secret()}
+        # T6.5-P2: service JWT（专用 X-Service-Token header）
+        # deprecated: X-Internal-Call 过渡期保留，第三阶段移除
+        headers = {
+            "X-Service-Token": create_service_token("engine"),
+            "X-Internal-Call": get_internal_call_secret(),
+        }
         requests.post(url, json=data, headers=headers, timeout=1)
     except Exception as e:
         task_logger.warning(

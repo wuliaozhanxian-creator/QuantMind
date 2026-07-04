@@ -59,7 +59,7 @@ from backend.shared.stock_utils import StockCodeUtil
 import logging
 import httpx
 from sqlalchemy import select, text
-from backend.shared.auth import get_internal_call_secret
+from backend.shared.auth import create_service_token, get_internal_call_secret
 
 logger = logging.getLogger(__name__)
 _SIMULATION_TZ = ZoneInfo("Asia/Shanghai")
@@ -123,7 +123,12 @@ async def _get_latest_price(symbol: str) -> float:
         async with httpx.AsyncClient(
             timeout=SIMULATION_ACCOUNT_MARKET_QUOTE_TIMEOUT_SECONDS
         ) as client:
-            headers = {"X-Internal-Call": get_internal_call_secret()}
+            # T6.5-P2: service JWT（专用 X-Service-Token header）
+            # deprecated: X-Internal-Call 过渡期保留，第三阶段移除
+            headers = {
+                "X-Service-Token": create_service_token("trade"),
+                "X-Internal-Call": get_internal_call_secret(),
+            }
             for candidate in [raw_symbol, prefix_symbol, suffix_symbol]:
                 if not candidate:
                     continue

@@ -11,7 +11,7 @@ from starlette.background import BackgroundTask
 
 from backend.services.api.routers.proxy_error_mapping import map_upstream_http_error
 from backend.services.api.user_app.middleware.auth import get_optional_user
-from backend.shared.auth import get_internal_call_secret
+from backend.shared.auth import create_service_token, get_internal_call_secret
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +41,9 @@ def _sanitize_request_headers(headers: Iterable, user: dict | None = None) -> di
         out[k] = v
 
     # 添加内部调用凭证
+    # T6.5-P2: service JWT（专用 X-Service-Token header，委托方 M2 第三轮裁决）
+    out["X-Service-Token"] = create_service_token("api")
+    # deprecated: X-Internal-Call 过渡期保留，第三阶段移除（见 T6.5_service_jwt_flow.md）
     out["X-Internal-Call"] = get_internal_call_secret()
     if user:
         out["X-User-Id"] = str(user.get("user_id") or "")
