@@ -35,7 +35,8 @@ jobs:
       - name: Install ruff
         run: pip install ruff
 
-      - name: Ruff lint (门禁)
+      - name: Ruff lint (门禁/blocking gate)
+        # M4-P0-1: ruff advisory 转 blocking gate（T-ruff-debt 全量修复 1166 error 清零，无 continue-on-error，失败即阻断 CI）
         # lint 门禁，不通过则 CI 失败
         # ruff 配置读取 pyproject.toml [tool.ruff] 段
         run: ruff check backend/

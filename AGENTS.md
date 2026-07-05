@@ -170,9 +170,9 @@ ssh quant-server "cd /opt/quantmind && git pull && docker-compose restart"
 
 ## CI/CD (M2 Quality)
 
-- **Pipeline**: `.github/workflows/ci.yml` — 3 jobs (typecheck / docker-compose validate / ruff advisory)
+- **Pipeline**: `.github/workflows/ci.yml` — 3 jobs (typecheck / docker-compose validate / ruff blocking gate)
 - **Frontend gate**: `npm run typecheck` must pass before merge
-- **Backend lint**: `ruff check backend/` — advisory mode (M2 预存 1166 个 error，计划 M3 末清债，advisory 过期 2026-07-25)
+- **Backend lint**: `ruff check backend/` — blocking gate（M4-P0-1：T-ruff-debt 全量修复 1166 个 error 清零后转 blocking）
 - **Docker validation**: `docker-compose config` validates compose file syntax
 
 ## Key Files
