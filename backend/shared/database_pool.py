@@ -6,7 +6,7 @@
 import logging
 import os
 from contextlib import contextmanager
-from typing import Dict, Optional
+from typing import Optional
 from collections.abc import Generator
 from urllib.parse import quote_plus
 
@@ -15,13 +15,13 @@ from sqlalchemy.orm import Session, sessionmaker
 
 logger = logging.getLogger(__name__)
 
-
 class PoolConfig:
-    def __init__(self, pool_size: int = 10, max_overflow: int = 20, pool_pre_ping: bool = True):
+    def __init__(
+        self, pool_size: int = 10, max_overflow: int = 20, pool_pre_ping: bool = True
+    ):
         self.pool_size = pool_size
         self.max_overflow = max_overflow
         self.pool_pre_ping = pool_pre_ping
-
 
 class DatabasePool:
     _instance = None
@@ -58,7 +58,9 @@ class DatabasePool:
                 pool_recycle=3600,
             )
             self._engines[name] = engine
-            self._session_factories[name] = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+            self._session_factories[name] = sessionmaker(
+                bind=engine, autocommit=False, autoflush=False
+            )
             logger.info(f"Database pool '{name}' registered successfully.")
         except Exception as e:
             logger.error(f"Failed to register database pool '{name}': {e}")
@@ -76,13 +78,10 @@ class DatabasePool:
 
         return self._session_factories[name]()
 
-
 _pool = DatabasePool()
-
 
 def get_database_pool() -> DatabasePool:
     return _pool
-
 
 @contextmanager
 def get_db(name: str = "postgres") -> Generator[Session, None, None]:
@@ -92,7 +91,6 @@ def get_db(name: str = "postgres") -> Generator[Session, None, None]:
         yield session
     finally:
         session.close()
-
 
 def init_default_databases(pool_size: int = 20, max_overflow: int = 10):
     """初始化默认数据库连接 (从环境变量读取)"""
@@ -106,4 +104,6 @@ def init_default_databases(pool_size: int = 20, max_overflow: int = 10):
         db_name = os.getenv("DB_NAME", "quantmind")
         url = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{db_name}"
 
-    _pool.register_database("postgres", url, PoolConfig(pool_size=pool_size, max_overflow=max_overflow))
+    _pool.register_database(
+        "postgres", url, PoolConfig(pool_size=pool_size, max_overflow=max_overflow)
+    )

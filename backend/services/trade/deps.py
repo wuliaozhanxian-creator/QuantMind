@@ -12,14 +12,12 @@ from backend.shared.auth import decode_jwt_token
 logger = logging.getLogger(__name__)
 security = HTTPBearer()
 
-
 @dataclass
 class AuthContext:
     user_id: str
     tenant_id: str
     raw_sub: str
     roles: list[str]
-
 
 async def get_auth_context(
     credentials: HTTPAuthorizationCredentials = Depends(security),
@@ -40,7 +38,6 @@ async def get_auth_context(
 
     return AuthContext(user_id=sub, tenant_id=tenant_id, raw_sub=sub, roles=roles)
 
-
 def get_redis():
     """获取 Redis 客户端"""
     client = get_trade_redis()
@@ -53,14 +50,12 @@ def get_redis():
         )
     return client
 
-
 async def get_db() -> Generator:
     """获取数据库 Session (Async)"""
     from backend.shared.database_manager_v2 import get_session
 
     async with get_session(read_only=False) as session:
         yield session
-
 
 async def get_read_db() -> Generator:
     """获取只读数据库 Session"""

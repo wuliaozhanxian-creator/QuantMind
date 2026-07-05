@@ -8,7 +8,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 from textwrap import dedent
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request
@@ -36,10 +36,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _QLIB_TASK_TTL_SECONDS = int(os.getenv("QLIB_GENERATE_TASK_TTL_SECONDS", "3600"))
-_QLIB_TASK_REDIS_PREFIX = os.getenv("QLIB_GENERATE_TASK_REDIS_PREFIX", "quantmind:strategy:generate_qlib:task:").strip()
+_QLIB_TASK_REDIS_PREFIX = os.getenv(
+    "QLIB_GENERATE_TASK_REDIS_PREFIX", "quantmind:strategy:generate_qlib:task:"
+).strip()
 _qlib_task_lock = asyncio.Lock()
 _qlib_tasks: dict[str, dict[str, Any]] = {}
-
 
 def _trace_id(request: Request | None) -> str | None:
     if not request:
@@ -49,7 +50,6 @@ def _trace_id(request: Request | None) -> str | None:
         or request.headers.get("X-Trace-Id")
         or request.headers.get("X-Request-Id")
     )
-
 
 async def _cleanup_expired_qlib_tasks() -> None:
     now = datetime.now().timestamp()
@@ -61,10 +61,8 @@ async def _cleanup_expired_qlib_tasks() -> None:
     for task_id in expired_ids:
         _qlib_tasks.pop(task_id, None)
 
-
 def _qlib_task_cache_key(task_id: str) -> str:
     return f"{_QLIB_TASK_REDIS_PREFIX}{task_id}"
-
 
 async def _save_qlib_task_to_redis(task_id: str, task: dict[str, Any]) -> None:
     def _write() -> None:
@@ -78,8 +76,9 @@ async def _save_qlib_task_to_redis(task_id: str, task: dict[str, Any]) -> None:
     try:
         await asyncio.to_thread(_write)
     except Exception as exc:
-        logger.warning("save qlib task to redis failed: task_id=%s err=%s", task_id, exc)
-
+        logger.warning(
+            "save qlib task to redis failed: task_id=%s err=%s", task_id, exc
+        )
 
 async def _load_qlib_task_from_redis(task_id: str) -> dict[str, Any] | None:
     def _read() -> bytes | None:
@@ -89,7 +88,9 @@ async def _load_qlib_task_from_redis(task_id: str) -> dict[str, Any] | None:
     try:
         raw = await asyncio.to_thread(_read)
     except Exception as exc:
-        logger.warning("load qlib task from redis failed: task_id=%s err=%s", task_id, exc)
+        logger.warning(
+            "load qlib task from redis failed: task_id=%s err=%s", task_id, exc
+        )
         return None
 
     if not raw:
@@ -101,19 +102,21 @@ async def _load_qlib_task_from_redis(task_id: str) -> dict[str, Any] | None:
             return json.loads(raw)
         return None
     except Exception as exc:
-        logger.warning("decode qlib task from redis failed: task_id=%s err=%s", task_id, exc)
+        logger.warning(
+            "decode qlib task from redis failed: task_id=%s err=%s", task_id, exc
+        )
         return None
-
 
 async def _save_qlib_task(task_id: str, updates: dict[str, Any]) -> None:
     async with _qlib_task_lock:
         await _cleanup_expired_qlib_tasks()
-        task = _qlib_tasks.get(task_id) or await _load_qlib_task_from_redis(task_id) or {}
+        task = (
+            _qlib_tasks.get(task_id) or await _load_qlib_task_from_redis(task_id) or {}
+        )
         task.update(updates)
         task["updated_at_ts"] = datetime.now().timestamp()
         _qlib_tasks[task_id] = task
         await _save_qlib_task_to_redis(task_id, task)
-
 
 async def _get_qlib_task(task_id: str) -> dict[str, Any] | None:
     async with _qlib_task_lock:
@@ -127,8 +130,9 @@ async def _get_qlib_task(task_id: str) -> dict[str, Any] | None:
             return None
         return dict(task)
 
-
-async def _generate_qlib_impl(body: GenerateQlibRequest, trace_id: str | None) -> GenerateQlibResponse:
+async def _generate_qlib_impl(
+    body: GenerateQlibRequest, trace_id: str | None
+) -> GenerateQlibResponse:
     try:
         logger.info("generate_qlib started", extra={"trace_id": trace_id})
 
@@ -183,7 +187,9 @@ async def _generate_qlib_impl(body: GenerateQlibRequest, trace_id: str | None) -
                 "backtest",
                 "backtest_config",
             }
-            return {k: v for k, v in (d or {}).items() if k not in drop and v is not None}
+            return {
+                k: v for k, v in (d or {}).items() if k not in drop and v is not None
+            }
 
         def _dedupe_condition_tree(node: Any) -> Any:
             if not isinstance(node, dict):
@@ -209,7 +215,9 @@ async def _generate_qlib_impl(body: GenerateQlibRequest, trace_id: str | None) -
             if not content.strip():
                 return ""
 
-            local_root = Path(os.getenv("AI_STRATEGY_LOCAL_POOL_ROOT", "/app/user_pools_local"))
+            local_root = Path(
+                os.getenv("AI_STRATEGY_LOCAL_POOL_ROOT", "/app/user_pools_local")
+            )
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             relative = Path(str(user_id or "default")) / ts / "stock_pool.txt"
 
@@ -232,9 +240,13 @@ async def _generate_qlib_impl(body: GenerateQlibRequest, trace_id: str | None) -
         rebalance_period = qp.get("rebalance_period", "weekly")
         if rebalance_days_raw in (1, 3, 5):
             holding_period = int(rebalance_days_raw)
-            rebalance_period = {1: "daily", 3: "every_3_days", 5: "weekly"}.get(holding_period, rebalance_period)
+            rebalance_period = {1: "daily", 3: "every_3_days", 5: "weekly"}.get(
+                holding_period, rebalance_period
+            )
         else:
-            holding_period = {"daily": 1, "weekly": 5, "monthly": 21}.get(rebalance_period, 5)
+            holding_period = {"daily": 1, "weekly": 5, "monthly": 21}.get(
+                rebalance_period, 5
+            )
 
         logger.info(
             "generate_qlib params",
@@ -276,7 +288,11 @@ async def _generate_qlib_impl(body: GenerateQlibRequest, trace_id: str | None) -
                 """
             ).strip()
 
-        llm_provider = (os.getenv("LLM_PROVIDER_FORCE") or os.getenv("LLM_PROVIDER") or "qwen").strip().lower()
+        llm_provider = (
+            (os.getenv("LLM_PROVIDER_FORCE") or os.getenv("LLM_PROVIDER") or "qwen")
+            .strip()
+            .lower()
+        )
         llm_router = get_resilient_llm_router()
 
         # 从数据库获取用户配置的 API Key
@@ -290,7 +306,10 @@ async def _generate_qlib_impl(body: GenerateQlibRequest, trace_id: str | None) -
                     ).fetchone()
                     if row and row[0]:
                         user_api_key = str(row[0]).strip()
-                        logger.info("Loaded user API key from database for user_id=%s", body.user_id)
+                        logger.info(
+                            "Loaded user API key from database for user_id=%s",
+                            body.user_id,
+                        )
             except Exception as e:
                 logger.warning("Failed to load user API key from database: %s", e)
 
@@ -299,26 +318,36 @@ async def _generate_qlib_impl(body: GenerateQlibRequest, trace_id: str | None) -
         if not pool_content.strip() and body.pool_file_key:
             try:
                 uploader = get_cos_uploader()
-                pool_content = await uploader.read_object(object_key=body.pool_file_key) or ""
+                pool_content = (
+                    await uploader.read_object(object_key=body.pool_file_key) or ""
+                )
             except Exception as e:
                 logger.warning("Failed to read pool from COS: %s", e)
 
         # 股票池一致性校验：核对前端传入数量与实际内容数量是否一致
         expected_count = body.pool_expected_count
         if expected_count is not None and pool_content.strip():
-            actual_count = len([line for line in pool_content.strip().split('\n') if line.strip()])
+            actual_count = len(
+                [line for line in pool_content.strip().split("\n") if line.strip()]
+            )
             if actual_count != expected_count:
                 logger.warning(
                     "Pool count mismatch: expected=%d, actual=%d, user_id=%s",
-                    expected_count, actual_count, body.user_id
+                    expected_count,
+                    actual_count,
+                    body.user_id,
                 )
                 raise HTTPException(
                     status_code=400,
-                    detail=f"股票池数量不一致：前端选中 {expected_count} 只，实际内容 {actual_count} 只，请重新保存股票池后再试"
+                    detail=f"股票池数量不一致：前端选中 {expected_count} 只，实际内容 {actual_count} 只，请重新保存股票池后再试",
                 )
 
         # 保存股票池到本地
-        pool_file_local = _persist_local_pool_file(pool_content, body.user_id) if pool_content.strip() else ""
+        pool_file_local = (
+            _persist_local_pool_file(pool_content, body.user_id)
+            if pool_content.strip()
+            else ""
+        )
 
         if strategy_type == "long_short_topk":
             strategy_class = "RedisLongShortTopkStrategy"
@@ -386,12 +415,23 @@ async def _generate_qlib_impl(body: GenerateQlibRequest, trace_id: str | None) -
             """
         ).strip()
         try:
-            code, _meta = await asyncio.to_thread(llm_router.generate_code, prompt, llm_provider, "simple", api_key=user_api_key)
+            code, _meta = await asyncio.to_thread(
+                llm_router.generate_code,
+                prompt,
+                llm_provider,
+                "simple",
+                api_key=user_api_key,
+            )
             code = _strip_markdown_fences(code)
             if "POOL_FILE" not in code:
-                code = f"POOL_FILE = {json.dumps(pool_file_local, ensure_ascii=False)}\n\n" + code
+                code = (
+                    f"POOL_FILE = {json.dumps(pool_file_local, ensure_ascii=False)}\n\n"
+                    + code
+                )
             if "STRATEGY_CONFIG" not in code:
-                n_drop_entry = f'"n_drop": {n_drop},' if strategy_type == "TopkDropout" else ""
+                n_drop_entry = (
+                    f'"n_drop": {n_drop},' if strategy_type == "TopkDropout" else ""
+                )
                 code += dedent(
                     f"""
 
@@ -413,13 +453,21 @@ async def _generate_qlib_impl(body: GenerateQlibRequest, trace_id: str | None) -
             # 兜底：强制使用前端传入的选股条件，避免 LLM 生成重复/漂移条件
             if body.conditions:
                 normalized_conditions = _dedupe_condition_tree(body.conditions)
-                cond_json = json.dumps(normalized_conditions, ensure_ascii=False, separators=(",", ":"))
-                code += f"\nSTRATEGY_CONFIG['kwargs']['selection_condition']={cond_json}\n"
+                cond_json = json.dumps(
+                    normalized_conditions, ensure_ascii=False, separators=(",", ":")
+                )
+                code += (
+                    f"\nSTRATEGY_CONFIG['kwargs']['selection_condition']={cond_json}\n"
+                )
 
             # 添加策略名称（用于回测历史显示）
             if body.strategy_name:
-                strategy_name_escaped = json.dumps(body.strategy_name, ensure_ascii=False)
-                code += f"\nSTRATEGY_CONFIG['strategy_name'] = {strategy_name_escaped}\n"
+                strategy_name_escaped = json.dumps(
+                    body.strategy_name, ensure_ascii=False
+                )
+                code += (
+                    f"\nSTRATEGY_CONFIG['strategy_name'] = {strategy_name_escaped}\n"
+                )
 
             ok, err = _syntax_check(code)
             if not ok:
@@ -446,11 +494,9 @@ async def _generate_qlib_impl(body: GenerateQlibRequest, trace_id: str | None) -
         logger.error("Generate qlib failed: %s", e, exc_info=True)
         return GenerateQlibResponse(success=False, error=f"生成失败: {e}")
 
-
 @router.post("/generate-qlib", response_model=GenerateQlibResponse)
 async def generate_qlib(body: GenerateQlibRequest, request: Request):
     return await _generate_qlib_impl(body, _trace_id(request))
-
 
 @router.post("/generate-qlib/async", response_model=GenerateQlibTaskSubmitResponse)
 async def submit_generate_qlib_task(body: GenerateQlibRequest, request: Request):
@@ -460,7 +506,9 @@ async def submit_generate_qlib_task(body: GenerateQlibRequest, request: Request)
 
     task_id = uuid4().hex
     trace_id = _trace_id(request)
-    tenant_id = str(getattr(request.state, "user", {}).get("tenant_id") or "default").strip()
+    tenant_id = str(
+        getattr(request.state, "user", {}).get("tenant_id") or "default"
+    ).strip()
 
     await _save_qlib_task(
         task_id,
@@ -490,10 +538,13 @@ async def submit_generate_qlib_task(body: GenerateQlibRequest, request: Request)
         )
 
     asyncio.create_task(_runner())
-    return GenerateQlibTaskSubmitResponse(success=True, task_id=task_id, status="pending")
+    return GenerateQlibTaskSubmitResponse(
+        success=True, task_id=task_id, status="pending"
+    )
 
-
-@router.get("/generate-qlib/tasks/{task_id}", response_model=GenerateQlibTaskStatusResponse)
+@router.get(
+    "/generate-qlib/tasks/{task_id}", response_model=GenerateQlibTaskStatusResponse
+)
 async def get_generate_qlib_task(task_id: str, request: Request):
     task = await _get_qlib_task(task_id)
     if not task:
@@ -522,7 +573,6 @@ async def get_generate_qlib_task(task_id: str, request: Request):
         error=task.get("error"),
     )
 
-
 @router.post("/remote/scan")
 async def scan_remote_strategies(body: ScanRemoteRequest):
     """扫描云端未导入的策略文件"""
@@ -536,7 +586,10 @@ async def scan_remote_strategies(body: ScanRemoteRequest):
             return {"success": True, "items": []}
 
         with get_db() as session:
-            rows = session.execute(text("SELECT cos_url FROM user_strategies WHERE user_id = :uid"), {"uid": user_id}).fetchall()
+            rows = session.execute(
+                text("SELECT cos_url FROM user_strategies WHERE user_id = :uid"),
+                {"uid": user_id},
+            ).fetchall()
             existing_urls = {r[0] for r in rows if r[0]}
 
         candidates = []
@@ -551,7 +604,11 @@ async def scan_remote_strategies(body: ScanRemoteRequest):
                         "key": key,
                         "strategy_id": strategy_id,
                         "size": obj["size"],
-                        "last_modified": (obj["last_modified"].isoformat() if obj["last_modified"] else None),
+                        "last_modified": (
+                            obj["last_modified"].isoformat()
+                            if obj["last_modified"]
+                            else None
+                        ),
                     }
                 )
 
@@ -559,7 +616,6 @@ async def scan_remote_strategies(body: ScanRemoteRequest):
     except Exception as e:
         logger.error("Scan remote strategies failed: %s", e, exc_info=True)
         return {"success": False, "error": f"扫描失败: {e}"}
-
 
 @router.post("/remote/import")
 async def import_remote_strategies(body: ImportRemoteRequest):
@@ -603,7 +659,10 @@ async def import_remote_strategies(body: ImportRemoteRequest):
                     file_size = len(code.encode("utf-8"))
                     code_hash = hashlib.sha256(code.encode("utf-8")).hexdigest()
 
-                    exists = session.execute(text("SELECT 1 FROM user_strategies WHERE id = :id"), {"id": strategy_id}).scalar()
+                    exists = session.execute(
+                        text("SELECT 1 FROM user_strategies WHERE id = :id"),
+                        {"id": strategy_id},
+                    ).scalar()
                     final_id = strategy_id if not exists else str(uuid4())
 
                     session.execute(
@@ -652,7 +711,6 @@ async def import_remote_strategies(body: ImportRemoteRequest):
         logger.error("Batch import failed: %s", e, exc_info=True)
         return {"success": False, "error": f"导入失败: {e}"}
 
-
 @router.get("/remote/list")
 async def list_remote_strategies(user_id: str):
     try:
@@ -660,7 +718,9 @@ async def list_remote_strategies(user_id: str):
             items = []
             seen_ids = set()
 
-            user_int_id = session.execute(text("SELECT id FROM users WHERE user_id = :uid"), {"uid": user_id}).scalar()
+            user_int_id = session.execute(
+                text("SELECT id FROM users WHERE user_id = :uid"), {"uid": user_id}
+            ).scalar()
             if user_int_id:
                 try:
                     rows = session.execute(
@@ -700,11 +760,14 @@ async def list_remote_strategies(user_id: str):
                             }
                         )
                 except Exception as read_new_err:
-                    logger.warning("read strategies table failed, fallback to user_strategies: %s", read_new_err)
+                    logger.warning(
+                        "read strategies table failed, fallback to user_strategies: %s",
+                        read_new_err,
+                    )
                     try:
                         session.rollback()
                     except Exception:
-                        pass
+                        logger.debug("ignored exception", exc_info=True)
 
             old_rows = session.execute(
                 text(
@@ -741,9 +804,8 @@ async def list_remote_strategies(user_id: str):
                 )
         return {"success": True, "items": items}
     except Exception as e:
-        logger.error("List remote strategies failed: %s", e, exc_info=True)
+        logger.error("list remote strategies failed: %s", e, exc_info=True)
         return {"success": False, "error": f"列表获取失败: {e}"}
-
 
 @router.get("/remote/{strategy_id}")
 async def get_remote_strategy(strategy_id: str, user_id: str | None = None):
@@ -809,7 +871,9 @@ async def get_remote_strategy(strategy_id: str, user_id: str | None = None):
             if old_row[5]:
                 try:
                     uploader = get_cos_uploader()
-                    code = await uploader.read_object(object_key=old_row[5].split("/")[-1])
+                    code = await uploader.read_object(
+                        object_key=old_row[5].split("/")[-1]
+                    )
                 except Exception:
                     code = ""
             tags = old_row[4] or []

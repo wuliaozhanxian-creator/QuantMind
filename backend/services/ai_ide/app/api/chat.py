@@ -1,13 +1,17 @@
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from backend.services.ai_ide.app.core.agent import QuantAgent
-from backend.services.ai_ide.app.settings import PROJECT_ROOT, refresh_runtime_settings, settings
+from backend.services.ai_ide.app.settings import (
+    PROJECT_ROOT,
+    refresh_runtime_settings,
+    settings,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -20,11 +24,9 @@ agent = QuantAgent(
     project_root=PROJECT_ROOT,
 )
 
-
 class ChatMessage(BaseModel):
     role: str
     content: str
-
 
 class ChatRequest(BaseModel):
     message: str
@@ -37,7 +39,6 @@ class ChatRequest(BaseModel):
     history: list[ChatMessage] | None = []
     extra_context: dict[str, Any] | None = None
 
-
 @router.post("/chat")
 async def chat_completions(request: ChatRequest):
     # 动态更新 API Key (适配配置热更新)
@@ -47,7 +48,9 @@ async def chat_completions(request: ChatRequest):
     agent.model = settings.model
 
     if not agent.api_key:
-        raise HTTPException(status_code=500, detail="尚未配置 AI Key，请在 AI-IDE 设置中填写后重试。")
+        raise HTTPException(
+            status_code=500, detail="尚未配置 AI Key，请在 AI-IDE 设置中填写后重试。"
+        )
 
     context = {
         "current_code": request.current_code,
@@ -75,7 +78,6 @@ async def chat_completions(request: ChatRequest):
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
-
 
 @router.post("/stop")
 async def stop_chat():

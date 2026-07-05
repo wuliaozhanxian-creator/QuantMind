@@ -2,7 +2,6 @@
 
 from typing import Optional
 
-
 def _identity_from_request(
     request,
     *,

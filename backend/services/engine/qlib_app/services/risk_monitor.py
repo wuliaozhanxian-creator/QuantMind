@@ -1,16 +1,17 @@
 """风险监控服务"""
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
-from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
+from backend.services.engine.qlib_app.utils.structured_logger import (
+    StructuredTaskLogger,
+)
 
 task_logger = StructuredTaskLogger(logger, "RiskMonitor")
-
 
 class RiskMonitor:
     """风险监控服务"""
@@ -72,18 +73,24 @@ class RiskMonitor:
                 metrics["beta"] = 0.0
 
             # 计算 Calmar Ratio
-            annual_return = (df["value"].iloc[-1] / df["value"].iloc[0]) ** (252 / len(returns)) - 1
+            annual_return = (df["value"].iloc[-1] / df["value"].iloc[0]) ** (
+                252 / len(returns)
+            ) - 1
             if metrics["max_drawdown"] != 0:
                 metrics["calmar_ratio"] = annual_return / abs(metrics["max_drawdown"])
 
             # 计算 Sortino Ratio
             if metrics["downside_volatility"] != 0:
-                metrics["sortino_ratio"] = annual_return / metrics["downside_volatility"]
+                metrics["sortino_ratio"] = (
+                    annual_return / metrics["downside_volatility"]
+                )
 
             return metrics
 
         except Exception as e:
-            task_logger.error("calculate_risk_metrics_failed", "计算风险指标失败", error=str(e))
+            task_logger.error(
+                "calculate_risk_metrics_failed", "计算风险指标失败", error=str(e)
+            )
             return self._empty_metrics()
 
     def _calculate_var(self, returns: pd.Series, confidence: float = 0.95) -> float:
@@ -105,14 +112,18 @@ class RiskMonitor:
         """计算波动率（年化）"""
         return float(returns.std() * np.sqrt(252))
 
-    def _calculate_downside_volatility(self, returns: pd.Series, target: float = 0.0) -> float:
+    def _calculate_downside_volatility(
+        self, returns: pd.Series, target: float = 0.0
+    ) -> float:
         """计算下行波动率"""
         downside_returns = returns[returns < target]
         if len(downside_returns) == 0:
             return 0.0
         return float(downside_returns.std() * np.sqrt(252))
 
-    def _calculate_beta(self, returns: pd.Series, benchmark_returns: list[float]) -> float:
+    def _calculate_beta(
+        self, returns: pd.Series, benchmark_returns: list[float]
+    ) -> float:
         """计算 Beta"""
         try:
             benchmark_series = pd.Series(benchmark_returns)
@@ -162,7 +173,7 @@ class RiskMonitor:
                 {
                     "type": "max_drawdown",
                     "severity": "high",
-                    "message": f"最大回撤达到 {metrics['max_drawdown']*100:.2f}%，超过阈值 {config['max_drawdown_threshold']*100:.2f}%",
+                    "message": f"最大回撤达到 {metrics['max_drawdown'] * 100:.2f}%，超过阈值 {config['max_drawdown_threshold'] * 100:.2f}%",
                     "value": metrics["max_drawdown"],
                     "threshold": config["max_drawdown_threshold"],
                 }
@@ -174,7 +185,7 @@ class RiskMonitor:
                 {
                     "type": "var_95",
                     "severity": "medium",
-                    "message": f"VaR(95%) 为 {metrics['var_95']*100:.2f}%，超过阈值 {config['var_threshold']*100:.2f}%",
+                    "message": f"VaR(95%) 为 {metrics['var_95'] * 100:.2f}%，超过阈值 {config['var_threshold'] * 100:.2f}%",
                     "value": metrics["var_95"],
                     "threshold": config["var_threshold"],
                 }
@@ -187,7 +198,7 @@ class RiskMonitor:
                 {
                     "type": "volatility",
                     "severity": "medium",
-                    "message": f"波动率达到 {metrics['volatility']*100:.2f}%，可能存在异常",
+                    "message": f"波动率达到 {metrics['volatility'] * 100:.2f}%，可能存在异常",
                     "value": metrics["volatility"],
                     "threshold": 0.5,
                 }
@@ -233,7 +244,7 @@ class RiskMonitor:
                     {
                         "type": "daily_loss",
                         "severity": "high",
-                        "message": f"单日亏损 {last_return*100:.2f}%，超过阈值 {config['daily_loss_threshold']*100:.2f}%",
+                        "message": f"单日亏损 {last_return * 100:.2f}%，超过阈值 {config['daily_loss_threshold'] * 100:.2f}%",
                         "value": last_return,
                         "threshold": config["daily_loss_threshold"],
                     }
@@ -259,6 +270,8 @@ class RiskMonitor:
                 )
 
         except Exception as e:
-            task_logger.error("check_daily_alerts_failed", "检查每日预警失败", error=str(e))
+            task_logger.error(
+                "check_daily_alerts_failed", "检查每日预警失败", error=str(e)
+            )
 
         return alerts

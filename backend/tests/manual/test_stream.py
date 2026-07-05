@@ -7,10 +7,10 @@ import requests
 
 def test_stream(url, message, test_name):
     """测试流式端点"""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"测试: {test_name}")
     print(f"消息: {message}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     payload = {"message": message, "user_id": "test_user"}
 
@@ -64,7 +64,7 @@ def test_stream(url, message, test_name):
                     except json.JSONDecodeError:
                         print(f"⚠️  无法解析: {data_str}")
 
-        print(f"\n{'='*60}\n")
+        print(f"\n{'=' * 60}\n")
         return True
 
     except requests.exceptions.RequestException as e:

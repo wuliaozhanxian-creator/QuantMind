@@ -10,7 +10,6 @@ from backend.services.trade.redis_client import RedisClient
 
 logger = logging.getLogger(__name__)
 
-
 class SimulationRuntimeRestorer:
     """Restore simulation sandbox workers from active strategy state after trade restarts."""
 
@@ -113,7 +112,7 @@ class SimulationRuntimeRestorer:
                 json.dumps(active_data, ensure_ascii=False),
             )
         except Exception:
-            pass
+            logger.debug("ignored exception", exc_info=True)
         logger.info(
             "simulation sandbox restored: tenant=%s user=%s strategy=%s run_id=%s",
             tenant_id,

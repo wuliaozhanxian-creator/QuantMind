@@ -41,7 +41,6 @@ from .model_management_utils import (
 
 router = APIRouter()
 
-
 @router.get("/scan", summary="扫描本地模型目录")
 async def scan_model_directories(
     current_user: dict = Depends(require_admin),
@@ -63,7 +62,6 @@ async def scan_model_directories(
             results.append({"model_id": Path(d).name, "dir_path": d, "error": str(e)})
 
     return {"total": len(results), "models": results}
-
 
 @router.get("/feature-catalog", summary="获取模型训练特征字典（动态）")
 async def get_model_feature_catalog(
@@ -91,7 +89,6 @@ async def get_model_feature_catalog(
         status_code=404, detail="未找到可用的特征字典（DB/文件均不可用）"
     )
 
-
 @router.get("/data-status", summary="查看当前数据状态（Qlib + 特征快照）")
 async def get_data_status(
     refresh: bool = Query(False, description="是否强制刷新（后台异步）"),
@@ -108,7 +105,7 @@ async def get_data_status(
     try:
         redis = get_redis_sentinel_client()
     except Exception:
-        pass
+        pass  # noqa: BLE001 - None
 
     # 1. 如果不是强制刷新，尝试读取缓存
     if not refresh and redis:
@@ -194,7 +191,7 @@ async def get_data_status(
                 qlib_info["calendar_last_date"] = calendar[-1]
                 qlib_info["latest_date_coverage"]["target_date"] = calendar[-1]
         except Exception:
-            pass
+            pass  # noqa: BLE001 - None
 
     if instruments_all_path.exists():
         try:
@@ -212,7 +209,7 @@ async def get_data_status(
                 else:
                     qlib_info["instruments"]["other"] += 1
         except Exception:
-            pass
+            pass  # noqa: BLE001 - None
 
     if features_root.exists() and features_root.is_dir():
         feature_dirs = [p for p in features_root.iterdir() if p.is_dir()]
@@ -235,7 +232,6 @@ async def get_data_status(
         if not refresh
         else "已触发强制刷新任务",
     }
-
 
 @router.post(
     "/sync-stock-daily-latest",
@@ -260,7 +256,6 @@ async def sync_stock_daily_latest(
     raise HTTPException(
         status_code=410, detail="该接口已废弃，数据由官方服务器统一推送，无需手动同步"
     )
-
 
 @router.get("/precheck-inference", summary="生成明日信号前置检查")
 async def precheck_inference(

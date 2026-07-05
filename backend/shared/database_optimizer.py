@@ -11,14 +11,13 @@
 
 import logging
 import time
-from typing import Any, Dict, List
+from typing import Any
 
 from sqlalchemy import event, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
-
 
 class DatabaseOptimizer:
     """数据库优化器"""
@@ -33,11 +32,15 @@ class DatabaseOptimizer:
         """设置查询监控"""
 
         @event.listens_for(Engine, "before_cursor_execute")
-        def receive_before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+        def receive_before_cursor_execute(
+            conn, cursor, statement, parameters, context, executemany
+        ):
             conn.info.setdefault("query_start_time", []).append(time.time())
 
         @event.listens_for(Engine, "after_cursor_execute")
-        def receive_after_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+        def receive_after_cursor_execute(
+            conn, cursor, statement, parameters, context, executemany
+        ):
             total_time = time.time() - conn.info["query_start_time"].pop()
 
             # 记录慢查询
@@ -139,7 +142,6 @@ class DatabaseOptimizer:
             plan = [dict(row) for row in result]
             return plan
 
-
 class BatchOperationHelper:
     """批量操作助手"""
 
@@ -173,7 +175,6 @@ class BatchOperationHelper:
             session.bulk_update_mappings(model_class, batch)
             session.commit()
             logger.info(f"Updated {i + len(batch)}/{total} records")
-
 
 # 使用示例
 """

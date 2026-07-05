@@ -6,7 +6,7 @@ API路由处理器模块
 
 import json
 import logging
-from typing import Any, Dict
+from typing import Any
 
 from fastapi import HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -17,7 +17,6 @@ from ..services.startup_health import get_startup_health_report
 
 logger = logging.getLogger(__name__)
 
-
 # 请求模型
 class StrategyRequest(BaseModel):
     description: str
@@ -27,12 +26,10 @@ class StrategyRequest(BaseModel):
     user_id: str = "desktop-user"
     provider: str = None
 
-
 class ChatRequest(BaseModel):
     message: str
     user_id: str = "desktop-user"
     provider: str = None
-
 
 async def root_handler() -> dict[str, Any]:
     """服务根端点处理器"""
@@ -56,7 +53,6 @@ async def root_handler() -> dict[str, Any]:
         "qwen_available": qwen_available,
     }
 
-
 async def health_check_handler() -> dict[str, Any]:
     """健康检查端点处理器"""
     from ..provider_registry import get_provider
@@ -77,7 +73,6 @@ async def health_check_handler() -> dict[str, Any]:
         "startup_health": startup_health,
     }
 
-
 async def api_health_handler() -> dict[str, Any]:
     """API健康检查处理器"""
     from ..provider_registry import get_provider
@@ -90,7 +85,6 @@ async def api_health_handler() -> dict[str, Any]:
         providers["qwen"] = {"is_healthy": False, "active": False}
 
     return {"status": "healthy", "service": "ai-strategy", "providers": providers}
-
 
 async def generate_strategy_handler(request: StrategyRequest) -> dict[str, Any]:
     """策略生成端点处理器"""
@@ -130,8 +124,7 @@ async def generate_strategy_handler(request: StrategyRequest) -> dict[str, Any]:
                 "description": request.description[:100],
             },
         )
-        raise HTTPException(status_code=500, detail=f"策略生成失败: {str(e)}")
-
+        raise HTTPException(status_code=500, detail=f"策略生成失败: {str(e)}") from e
 
 async def generate_strategy_stream_handler(
     request: StrategyRequest,
@@ -173,7 +166,6 @@ async def generate_strategy_stream_handler(
         },
     )
 
-
 async def chat_stream_handler(request: ChatRequest) -> StreamingResponse:
     """SSE流式对话端点处理器"""
     if not request.message.strip():
@@ -203,7 +195,6 @@ async def chat_stream_handler(request: ChatRequest) -> StreamingResponse:
         },
     )
 
-
 class RequestLoggingMiddleware:
     """请求日志中间件"""
 
@@ -217,7 +208,9 @@ class RequestLoggingMiddleware:
 
         start_time = time.time()
         request_id = (
-            getattr(request.state, "trace_id", None) or request.headers.get("X-Request-Id") or str(uuid.uuid4())[:8]
+            getattr(request.state, "trace_id", None)
+            or request.headers.get("X-Request-Id")
+            or str(uuid.uuid4())[:8]
         )
 
         # 记录请求开始

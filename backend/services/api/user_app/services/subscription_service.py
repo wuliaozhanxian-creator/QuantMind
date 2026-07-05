@@ -2,7 +2,7 @@ import hashlib
 import logging
 import os
 from datetime import datetime, timedelta
-from typing import List, Optional
+from typing import Optional
 from urllib.parse import quote_plus
 
 from fastapi import HTTPException
@@ -28,7 +28,6 @@ except ImportError:
     logger.warning(
         "python-alipay-sdk not installed. Payment features will be disabled."
     )
-
 
 class SubscriptionService:
     def __init__(self, db: AsyncSession):
@@ -102,7 +101,7 @@ class SubscriptionService:
         return db_plan
 
     async def get_plans(self, active_only: bool = True) -> list[SubscriptionPlan]:
-        """List all subscription plans"""
+        """list all subscription plans"""
         query = select(SubscriptionPlan)
         if active_only:
             query = query.where(SubscriptionPlan.is_active)
@@ -186,7 +185,7 @@ class SubscriptionService:
             logger.error(f"创建支付宝订单失败: {e}")
             raise HTTPException(
                 status_code=500, detail=f"Failed to create payment order: {str(e)}"
-            )
+            ) from e
 
     async def subscribe_user(
         self, user_id: str, tenant_id: str, plan_code: str

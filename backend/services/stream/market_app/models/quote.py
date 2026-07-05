@@ -63,7 +63,9 @@ class Quote(Base):
 
     # Metadata
     data_source = Column(String(20), comment="数据源")
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    created_at = Column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
 
     __table_args__ = (
         Index("idx_symbol_timestamp", "symbol", "timestamp"),

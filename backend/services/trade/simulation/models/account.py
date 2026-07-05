@@ -31,7 +31,9 @@ class SimulationAccount(Base, TimestampMixin):
     available_cash: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     frozen_cash: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     long_market_value: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-    short_market_value: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    short_market_value: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0.0
+    )
     total_asset: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     liabilities: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     equity: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)

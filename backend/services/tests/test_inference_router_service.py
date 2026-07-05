@@ -29,7 +29,11 @@ class _FakeInferenceService:
 
 def test_router_primary_success(monkeypatch):
     svc = _FakeInferenceService()
-    svc._responses["model_qlib"] = lambda _data: {"status": "success", "model_id": "model_qlib", "predictions": [0.1]}
+    svc._responses["model_qlib"] = lambda _data: {
+        "status": "success",
+        "model_id": "model_qlib",
+        "predictions": [0.1],
+    }
     router = InferenceRouterService(inference_service=svc)
     monkeypatch.setattr(router, "primary_model_id", "model_qlib")
     monkeypatch.setattr(router, "primary_data_source", "db/qlib_data")
@@ -44,7 +48,11 @@ def test_router_primary_success(monkeypatch):
 
 def test_router_primary_failure_does_not_fallback(monkeypatch):
     svc = _FakeInferenceService()
-    svc._responses["model_qlib"] = lambda _data: {"status": "error", "model_id": "model_qlib", "error": "primary broken"}
+    svc._responses["model_qlib"] = lambda _data: {
+        "status": "error",
+        "model_id": "model_qlib",
+        "error": "primary broken",
+    }
     router = InferenceRouterService(inference_service=svc)
     monkeypatch.setattr(router, "primary_model_id", "model_qlib")
 
@@ -57,12 +65,18 @@ def test_router_primary_failure_does_not_fallback(monkeypatch):
 
 def test_router_non_primary_model_uses_primary_data_source(monkeypatch):
     svc = _FakeInferenceService()
-    svc._responses["alpha158"] = lambda _data: {"status": "success", "model_id": "alpha158", "predictions": [0.3]}
+    svc._responses["alpha158"] = lambda _data: {
+        "status": "success",
+        "model_id": "alpha158",
+        "predictions": [0.3],
+    }
     router = InferenceRouterService(inference_service=svc)
     monkeypatch.setattr(router, "primary_model_id", "model_qlib")
     monkeypatch.setattr(router, "primary_data_source", "db/qlib_data")
 
-    result = router.predict_with_fallback("alpha158", {"open": 1, "high": 2, "low": 1, "close": 2})
+    result = router.predict_with_fallback(
+        "alpha158", {"open": 1, "high": 2, "low": 1, "close": 2}
+    )
     assert result["status"] == "success"
     assert result["fallback_used"] is False
     assert result["active_model_id"] == "alpha158"
@@ -73,7 +87,11 @@ def test_router_sync_resolution_path_uses_sync_model_registry(monkeypatch, tmp_p
     svc = _FakeInferenceService()
     model_dir = tmp_path / "user_model"
     model_dir.mkdir()
-    svc._responses["user_model"] = lambda _data: {"status": "success", "model_id": "user_model", "predictions": [0.4]}
+    svc._responses["user_model"] = lambda _data: {
+        "status": "success",
+        "model_id": "user_model",
+        "predictions": [0.4],
+    }
 
     router = InferenceRouterService(inference_service=svc)
     monkeypatch.setattr(router, "primary_model_id", "model_qlib")

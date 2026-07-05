@@ -3,18 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import pandas as pd
 
 from backend.services.engine.services.fusion_config import FusionRulesConfig
 
-
 @dataclass
 class FusionExecutionResult:
     pred_path: Path
     report: dict[str, Any]
-
 
 def _load_pred_scores(pred_path: Path) -> tuple[pd.Timestamp, pd.DataFrame]:
     pred = pd.read_pickle(pred_path)
@@ -36,7 +34,6 @@ def _load_pred_scores(pred_path: Path) -> tuple[pd.Timestamp, pd.DataFrame]:
     daily = daily.rename(columns={"score": "lgbm_score"})
     return pd.Timestamp(latest_dt), daily
 
-
 def _build_tft_frame(tft_result: dict[str, Any] | None) -> pd.DataFrame | None:
     if not tft_result:
         return None
@@ -55,15 +52,15 @@ def _build_tft_frame(tft_result: dict[str, Any] | None) -> pd.DataFrame | None:
         {
             "instrument": [str(s) for s in symbols],
             "tft_score": [float(v) for v in predictions],
-            "tft_confidence": [float(v) if v is not None else None for v in confidences],
+            "tft_confidence": [
+                float(v) if v is not None else None for v in confidences
+            ],
         }
     ).drop_duplicates(subset=["instrument"], keep="last")
     return tft_df.set_index("instrument")
 
-
 def _rank_score(series: pd.Series) -> pd.Series:
     return series.rank(method="average", ascending=False, pct=True)
-
 
 def apply_fusion_rules(
     *,
@@ -111,7 +108,9 @@ def apply_fusion_rules(
             report["fallback_reason"] = "tft_result_unavailable"
 
         lgbm_rank = _rank_score(candidate["lgbm_score"])
-        tft_rank_raw = _rank_score(candidate["tft_score"].fillna(candidate["lgbm_score"]))
+        tft_rank_raw = _rank_score(
+            candidate["tft_score"].fillna(candidate["lgbm_score"])
+        )
         if merge_cfg.fallback == "lgbm_only":
             tft_rank = tft_rank_raw.fillna(lgbm_rank)
         else:
@@ -121,7 +120,9 @@ def apply_fusion_rules(
         confidence = candidate.get("tft_confidence")
         if confidence is None:
             confidence = pd.Series(1.0, index=candidate.index)
-        confidence = confidence.fillna(1.0 if merge_cfg.fallback == "lgbm_only" else 0.0)
+        confidence = confidence.fillna(
+            1.0 if merge_cfg.fallback == "lgbm_only" else 0.0
+        )
         if layer2.gate_mode == "hard":
             candidate = candidate[confidence >= layer2.min_confidence]
             merged = merged.loc[candidate.index]
@@ -129,7 +130,9 @@ def apply_fusion_rules(
             merged = merged * confidence.clip(lower=0.0, upper=1.0)
 
         candidate["fusion_score"] = merged
-        candidate = candidate.sort_values("fusion_score", ascending=False).head(layer2.final_top_n)
+        candidate = candidate.sort_values("fusion_score", ascending=False).head(
+            layer2.final_top_n
+        )
     else:
         candidate["fusion_score"] = _rank_score(candidate["lgbm_score"])
         candidate = candidate.head(layer1.output_top_n)
@@ -142,16 +145,20 @@ def apply_fusion_rules(
 
         if layer3.liquidity_gate.enabled and "avg_turnover_20d" in candidate.columns:
             candidate = candidate[
-                candidate["avg_turnover_20d"].fillna(0.0) >= layer3.liquidity_gate.min_avg_turnover_20d
+                candidate["avg_turnover_20d"].fillna(0.0)
+                >= layer3.liquidity_gate.min_avg_turnover_20d
             ]
         if layer3.volatility_gate.enabled and "volatility_20d" in candidate.columns:
             candidate = candidate[
-                candidate["volatility_20d"].fillna(float("inf")) <= layer3.volatility_gate.max_volatility_20d
+                candidate["volatility_20d"].fillna(float("inf"))
+                <= layer3.volatility_gate.max_volatility_20d
             ]
 
         if "industry" in candidate.columns:
             sorted_df = candidate.sort_values("fusion_score", ascending=False)
-            max_industry_count = max(1, int(layer2.final_top_n * layer3.max_industry_weight))
+            max_industry_count = max(
+                1, int(layer2.final_top_n * layer3.max_industry_weight)
+            )
             industry_counter: dict[str, int] = {}
             kept = []
             for inst, row in sorted_df.iterrows():

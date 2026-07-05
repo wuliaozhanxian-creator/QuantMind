@@ -36,7 +36,6 @@ from sqlalchemy.engine import Engine
 
 POOL_KEY_PATTERN = re.compile(r"^user_pools/(?P<user_id>[^/]+)/(?P<ts>[^/]+)/(?P<name>[^/]+)$")
 
-
 @dataclass
 class PoolObject:
     user_id: str
@@ -48,14 +47,12 @@ class PoolObject:
     last_modified: Optional[datetime]
     etag: str
 
-
 def _load_env() -> None:
     root_env = Path(__file__).resolve().parents[5] / ".env"
     if root_env.exists():
         load_dotenv(root_env, override=True)
     else:
         load_dotenv(override=True)
-
 
 def _db_url() -> str:
     url = os.getenv("DATABASE_URL", "").strip()
@@ -70,10 +67,8 @@ def _db_url() -> str:
     name = os.getenv("DB_NAME", "quantmind")
     return f"postgresql+psycopg2://{user}:{pwd}@{host}:{port}/{name}"
 
-
 def _make_engine() -> Engine:
     return create_engine(_db_url(), pool_pre_ping=True)
-
 
 def _ensure_table(engine: Engine) -> None:
     sql_path = Path(__file__).resolve().parents[1] / "migrations" / "create_stock_pool_files.sql"
@@ -94,7 +89,6 @@ def _ensure_table(engine: Engine) -> None:
         conn.execute(text(sql_path.read_text(encoding="utf-8")))
         print("已自动创建表: public.stock_pool_files")
 
-
 def _make_cos_client():
     from qcloud_cos import CosConfig, CosS3Client
 
@@ -108,13 +102,11 @@ def _make_cos_client():
     cfg = CosConfig(Region=region, SecretId=secret_id, SecretKey=secret_key, Scheme="https")
     return CosS3Client(cfg), str(bucket), str(region)
 
-
 def _cos_base_url(bucket: str, region: str) -> str:
     custom = (os.getenv("TENCENT_COS_URL") or os.getenv("COS_URL") or "").strip().rstrip("/")
     if custom:
         return custom
     return f"https://{bucket}.cos.{region}.myqcloud.com"
-
 
 def _iter_pool_objects(
     max_files: int,
@@ -178,7 +170,6 @@ def _iter_pool_objects(
         if not marker:
             break
 
-
 def _count_symbols_from_content(content: str, fmt: str) -> Optional[int]:
     try:
         if fmt == "txt":
@@ -221,12 +212,10 @@ def _count_symbols_from_content(content: str, fmt: str) -> Optional[int]:
         return None
     return None
 
-
 def _fetch_object_text(file_key: str) -> str:
     client, bucket, _region = _make_cos_client()
     resp = client.get_object(Bucket=bucket, Key=file_key)
     return resp["Body"].get_raw_stream().read().decode("utf-8")
-
 
 def _upsert_row(
     engine: Engine,
@@ -318,7 +307,6 @@ def _upsert_row(
         ).fetchone()
         return "insert", int(row[0]) if row else 0
 
-
 def _fix_active_flags(engine: Engine, apply: bool) -> int:
     """
     每个 user_id 至少保证一条 is_active=true（若该用户当前全为 false）。
@@ -352,7 +340,6 @@ def _fix_active_flags(engine: Engine, apply: bool) -> int:
                     {"sid": int(latest[0])},
                 )
     return changed
-
 
 def main() -> None:
     _load_env()
@@ -413,7 +400,6 @@ def main() -> None:
     print(
         f"seen={totals['seen']} insert={totals['insert']} update={totals['update']} error={totals['error']} active_fixed={active_changed}"
     )
-
 
 if __name__ == "__main__":
     main()

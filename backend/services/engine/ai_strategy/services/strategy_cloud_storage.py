@@ -5,7 +5,7 @@
 
 import json
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from ..models import StrategyGenerationResult
 
@@ -15,7 +15,6 @@ except ImportError:
 
     def get_cos_service():
         return None
-
 
 class StrategyCloudStorage:
     """策略文件云存储服务"""
@@ -42,7 +41,7 @@ class StrategyCloudStorage:
             user_description: 用户描述
 
         Returns:
-            Dict: 保存结果，包含文件信息
+            dict: 保存结果，包含文件信息
         """
         if not self.cos_service:
             return {"success": False, "error": "COS服务不可用", "files": []}
@@ -121,7 +120,7 @@ class StrategyCloudStorage:
 # 用户ID: {user_folder}
 # 用户描述: {user_description}
 # 生成时间: {datetime.now().isoformat()}
-# 生成来源: {raw_response.get('metadata', {}).get('provider', 'unknown')}
+# 生成来源: {raw_response.get("metadata", {}).get("provider", "unknown")}
 
 """
 
@@ -177,7 +176,7 @@ class StrategyCloudStorage:
             # 准备文件内容
             file_content = f"""# AI生成策略代码 - {datetime.now().isoformat()}
 # 策略ID: {strategy_id}
-# 生成时间: {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}
+# 生成时间: {datetime.now().strftime("%Y/%m/%d %H:%M:%S")}
 
 {strategy_code}
 
@@ -259,10 +258,14 @@ print("策略代码已生成并保存")
 
 """
 
-            file_content = file_header + "\n" + json.dumps(metadata, ensure_ascii=False, indent=2)
+            file_content = (
+                file_header + "\n" + json.dumps(metadata, ensure_ascii=False, indent=2)
+            )
 
             # 上传到COS
-            folder = f"strategies/{user_folder}/metadata/{datetime.now().strftime('%Y/%m')}"
+            folder = (
+                f"strategies/{user_folder}/metadata/{datetime.now().strftime('%Y/%m')}"
+            )
             result = self.cos_service.upload_file(
                 file_data=file_content,
                 file_name=filename,
@@ -303,7 +306,7 @@ print("策略代码已生成并保存")
             file_type: 文件类型过滤 (raw_responses, parsed-code, metadata)
 
         Returns:
-            Dict: 文件列表结果
+            dict: 文件列表结果
         """
         if not self.cos_service:
             return {"success": False, "error": "COS服务不可用", "files": []}
@@ -348,7 +351,9 @@ print("策略代码已生成并保存")
                     if "_" in filename:
                         parts = filename.split("_")
                         if len(parts) >= 3 and parts[0] in ["output"]:
-                            file_info["strategy_id"] = parts[2] if len(parts) > 2 else ""
+                            file_info["strategy_id"] = (
+                                parts[2] if len(parts) > 2 else ""
+                            )
 
                     file_info["file_type"] = self._detect_file_type(folder, filename)
 
@@ -380,7 +385,9 @@ print("策略代码已生成并保存")
             else:
                 return "unknown"
 
-    def get_strategy_file_urls(self, strategy_id: str, file_types: list | None = None) -> dict[str, Any]:
+    def get_strategy_file_urls(
+        self, strategy_id: str, file_types: list | None = None
+    ) -> dict[str, Any]:
         """
         获取策略相关文件的URL
 
@@ -389,7 +396,7 @@ print("策略代码已生成并保存")
             file_types: 要获取的文件类型列表，如果为None则获取所有类型
 
         Returns:
-            Dict: 文件URL信息
+            dict: 文件URL信息
         """
         if not self.cos_service:
             return {"success": False, "error": "COS服务不可用", "files": {}}
@@ -406,7 +413,9 @@ print("策略代码已生成并保存")
                 files = []
 
                 # 搜索策略相关的文件
-                search_result = self.cos_service.list_files(folder=f"strategies/*/{strategy_id}*", max_keys=50)
+                search_result = self.cos_service.list_files(
+                    folder=f"strategies/*/{strategy_id}*", max_keys=50
+                )
 
                 if search_result["success"]:
                     for file_info in search_result["files"]:
@@ -433,9 +442,7 @@ print("策略代码已生成并保存")
 
         # 创建全局策略云存储实例
 
-
 strategy_cloud_storage = StrategyCloudStorage()
-
 
 def get_strategy_cloud_storage() -> StrategyCloudStorage:
     """获取策略云存储服务实例"""

@@ -36,7 +36,14 @@ STRATEGY_CONFIG = {
 """
     request.strategy_params = MagicMock()
     # Mock attributes that builder looks for in request.strategy_params
-    for key in ["topk", "n_drop", "min_score", "max_weight", "stop_loss", "take_profit"]:
+    for key in [
+        "topk",
+        "n_drop",
+        "min_score",
+        "max_weight",
+        "stop_loss",
+        "take_profit",
+    ]:
         setattr(request.strategy_params, key, None)
 
     market_state_kwargs = {"market": "cn"}
@@ -45,7 +52,10 @@ STRATEGY_CONFIG = {
 
     # We need to mock _build_strategy_from_content to return our dict and namespace
     builder._build_strategy_from_content = MagicMock(
-        return_value=({"class": "MockStrategy", "kwargs": {"signal": "test_signal"}}, {"MockStrategy": MockStrategy})
+        return_value=(
+            {"class": "MockStrategy", "kwargs": {"signal": "test_signal"}},
+            {"MockStrategy": MockStrategy},
+        )
     )
 
     # We also need to bypass _validate_strategy_content which might fail on magicmock
@@ -110,7 +120,9 @@ def test_custom_strategy_builder_strict_filtering_with_kwargs():
         assert result.mandatory_param == "val"
 
 
-@pytest.mark.parametrize("strategy_type", ["custom", "CustomStrategy", "custom_strategy"])
+@pytest.mark.parametrize(
+    "strategy_type", ["custom", "CustomStrategy", "custom_strategy"]
+)
 def test_strategy_factory_maps_custom_aliases(strategy_type):
     builder = StrategyFactory.get_builder(strategy_type)
     assert isinstance(builder, CustomStrategyBuilder)
@@ -153,7 +165,9 @@ def test_custom_strategy_builder_sets_dynamic_module_path_for_local_class():
             },
             {
                 "__strategy_module_name__": "custom_strategy_test_module",
-                "MarginTopKLongShortStrategy": type("MarginTopKLongShortStrategy", (), {}),
+                "MarginTopKLongShortStrategy": type(
+                    "MarginTopKLongShortStrategy", (), {}
+                ),
             },
         )
     )

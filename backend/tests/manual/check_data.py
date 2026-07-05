@@ -22,5 +22,7 @@ if len(available_instruments) > 0:
 # Check data for one instrument from pred.pkl
 if pred_instruments:
     test_ins = pred_instruments[0]
-    df = D.features([test_ins], ["$close"], start_time="2025-01-01", end_time="2025-01-10")
+    df = D.features(
+        [test_ins], ["$close"], start_time="2025-01-01", end_time="2025-01-10"
+    )
     print(f"Data for {test_ins} in 2025: \n{df}")

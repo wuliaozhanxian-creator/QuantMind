@@ -31,7 +31,9 @@ except (ImportError, AttributeError, ModuleNotFoundError):
             DATABASE_URL = settings.database.postgres_url
             logger.info("使用旧配置系统的PostgreSQL配置")
         except (ImportError, AttributeError, ModuleNotFoundError):
-            DATABASE_URL = "postgresql+psycopg2://postgres:password@localhost:5432/quantmind"
+            DATABASE_URL = (
+                "postgresql+psycopg2://postgres:password@localhost:5432/quantmind"
+            )
             logger.warning("未找到配置文件，使用默认PostgreSQL数据库配置")
 
 # 创建数据库引擎

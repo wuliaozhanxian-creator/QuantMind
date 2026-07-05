@@ -13,13 +13,16 @@ from backend.services.trade.redis_client import RedisClient
 from backend.services.trade.trade_config import settings
 from backend.services.trade.simulation.models.order import OrderStatus
 from backend.services.trade.simulation.schemas.order import SimOrderCreate
-from backend.services.trade.simulation.services.execution_engine import SimulationExecutionEngine
+from backend.services.trade.simulation.services.execution_engine import (
+    SimulationExecutionEngine,
+)
 from backend.services.trade.simulation.services.order_service import SimOrderService
-from backend.services.trade.simulation.services.simulation_manager import SimulationAccountManager
+from backend.services.trade.simulation.services.simulation_manager import (
+    SimulationAccountManager,
+)
 from backend.shared.database_manager_v2 import get_db_manager
 
 logger = logging.getLogger(__name__)
-
 
 class SandboxSignalConsumer:
     """
@@ -75,7 +78,9 @@ class SandboxSignalConsumer:
             except (RedisTimeoutError, RedisConnectionError, OSError) as e:
                 await self._handle_redis_transport_error(e)
             except Exception as e:
-                logger.error("[SandboxSignalConsumer] 循环处理出错: %s", e, exc_info=True)
+                logger.error(
+                    "[SandboxSignalConsumer] 循环处理出错: %s", e, exc_info=True
+                )
                 await asyncio.sleep(1)
 
     def stop(self):
@@ -88,9 +93,14 @@ class SandboxSignalConsumer:
         self._retry_delay_seconds = 1.0
 
     def _build_listener_client(self) -> redis_lib.Redis:
-        socket_timeout = self._blpop_timeout_seconds + self._socket_timeout_margin_seconds
+        socket_timeout = (
+            self._blpop_timeout_seconds + self._socket_timeout_margin_seconds
+        )
         if settings.REDIS_SENTINEL_ENABLED:
-            sentinel_hosts = [tuple(host.split(":")) for host in settings.REDIS_SENTINEL_HOSTS.split(",")]
+            sentinel_hosts = [
+                tuple(host.split(":"))
+                for host in settings.REDIS_SENTINEL_HOSTS.split(",")
+            ]
             sentinel = Sentinel(
                 sentinel_hosts,
                 socket_timeout=socket_timeout,
@@ -123,7 +133,9 @@ class SandboxSignalConsumer:
             self._listener_client = client
             return True
         except Exception as exc:
-            logger.warning("[SandboxSignalConsumer] 初始化专用 Redis 监听连接失败: %s", exc)
+            logger.warning(
+                "[SandboxSignalConsumer] 初始化专用 Redis 监听连接失败: %s", exc
+            )
             self._listener_client = None
             return False
 
@@ -135,13 +147,19 @@ class SandboxSignalConsumer:
         try:
             client.close()
         except Exception:
-            logger.debug("[SandboxSignalConsumer] 关闭专用 Redis 监听连接时忽略异常", exc_info=True)
+            logger.debug(
+                "[SandboxSignalConsumer] 关闭专用 Redis 监听连接时忽略异常",
+                exc_info=True,
+            )
 
     async def _handle_redis_transport_error(self, error: Exception):
         """Redis 传输层异常时进行退避重连，避免日志刷屏。"""
         self._consecutive_redis_errors += 1
 
-        if self._consecutive_redis_errors == 1 or self._consecutive_redis_errors % 5 == 0:
+        if (
+            self._consecutive_redis_errors == 1
+            or self._consecutive_redis_errors % 5 == 0
+        ):
             logger.warning(
                 "[SandboxSignalConsumer] Redis 监听异常(%s 次)，准备退避重连: %s",
                 self._consecutive_redis_errors,
@@ -156,7 +174,9 @@ class SandboxSignalConsumer:
 
         await self._reconnect_redis_client()
         await asyncio.sleep(self._retry_delay_seconds)
-        self._retry_delay_seconds = min(self._retry_delay_seconds * 2, self._max_retry_delay_seconds)
+        self._retry_delay_seconds = min(
+            self._retry_delay_seconds * 2, self._max_retry_delay_seconds
+        )
 
     async def _reconnect_redis_client(self):
         """重建专用监听 Redis 连接，避免长时间持有失效 socket。"""
@@ -169,11 +189,20 @@ class SandboxSignalConsumer:
             self._close_listener_client()
             listener_ready = await asyncio.to_thread(self._ensure_listener_client)
             if listener_ready:
-                logger.info("[SandboxSignalConsumer] Redis 监听连接已重建，继续监听队列: %s", self.queue_name)
+                logger.info(
+                    "[SandboxSignalConsumer] Redis 监听连接已重建，继续监听队列: %s",
+                    self.queue_name,
+                )
             else:
-                logger.warning("[SandboxSignalConsumer] Redis 监听重连后仍未就绪，稍后继续重试")
+                logger.warning(
+                    "[SandboxSignalConsumer] Redis 监听重连后仍未就绪，稍后继续重试"
+                )
         except Exception as reconnect_error:
-            logger.warning("[SandboxSignalConsumer] Redis 监听重连失败: %s", reconnect_error, exc_info=True)
+            logger.warning(
+                "[SandboxSignalConsumer] Redis 监听重连失败: %s",
+                reconnect_error,
+                exc_info=True,
+            )
 
     async def _process_signal(self, signal: dict):
         """处理单个信号"""
@@ -184,7 +213,9 @@ class SandboxSignalConsumer:
             await self._handle_order_target_percent(signal)
         elif sig_type == "log":
             # 简单的日志处理，目前仅打印
-            logger.info("[Sandbox Log] %s: %s", signal.get("run_id"), signal.get("message"))
+            logger.info(
+                "[Sandbox Log] %s: %s", signal.get("run_id"), signal.get("message")
+            )
         else:
             logger.warning("[SandboxSignalConsumer] 收到未知信号类型: %s", sig_type)
 
@@ -194,7 +225,7 @@ class SandboxSignalConsumer:
         tenant_id = signal.get("tenant_id", "default")
         user_id = self._to_int(signal.get("user_id"))
         strategy_id = self._to_int(signal.get("strategy_id"))
-        
+
         if user_id is None:
             logger.error("[SandboxSignalConsumer] 信号缺失 user_id: %s", signal)
             return
@@ -207,7 +238,7 @@ class SandboxSignalConsumer:
             quantity=float(data.get("quantity", 0)),
             price=float(data.get("price")) if data.get("price") else None,
             strategy_id=strategy_id,
-            remarks=f"Sandbox auto-order: {signal.get('run_id')}"
+            remarks=f"Sandbox auto-order: {signal.get('run_id')}",
         )
 
         await self._create_and_execute_order(tenant_id, user_id, order_data)
@@ -216,9 +247,14 @@ class SandboxSignalConsumer:
         """处理目标比例下单信号（目前简化为按照当前价格下单，真实逻辑应计算仓位差值）"""
         # 注意：此处为保持链路通畅，暂不支持复杂的仓位计算，仅记录意图。
         # 实际生产中应在此处查询 SimulationAccountManager 获取当前仓位。
-        logger.info("[SandboxSignalConsumer] 收到 order_target_percent 信号，暂不支持实时调仓计算: %s", signal)
+        logger.info(
+            "[SandboxSignalConsumer] 收到 order_target_percent 信号，暂不支持实时调仓计算: %s",
+            signal,
+        )
 
-    async def _create_and_execute_order(self, tenant_id: str, user_id: int, data: SimOrderCreate):
+    async def _create_and_execute_order(
+        self, tenant_id: str, user_id: int, data: SimOrderCreate
+    ):
         """创建并执行模拟订单"""
         db_manager = get_db_manager()
         async with db_manager.get_master_session() as session:
@@ -241,16 +277,27 @@ class SandboxSignalConsumer:
                 result = await engine.execute_order(order)
                 if not result.success:
                     await engine.mark_rejected(order, result.message)
-                    logger.warning("[SandboxSignalConsumer] 模拟成交失败: %s, OrderID: %s", result.message, order.order_id)
+                    logger.warning(
+                        "[SandboxSignalConsumer] 模拟成交失败: %s, OrderID: %s",
+                        result.message,
+                        order.order_id,
+                    )
                 else:
                     await engine.apply_filled(order, result)
-                    logger.info("[SandboxSignalConsumer] 模拟成交成功: %s %s @ %s", order.symbol, order.side, result.price)
+                    logger.info(
+                        "[SandboxSignalConsumer] 模拟成交成功: %s %s @ %s",
+                        order.symbol,
+                        order.side,
+                        result.price,
+                    )
 
             except Exception as e:
-                logger.error("[SandboxSignalConsumer] 执行下单链路失败: %s", e, exc_info=True)
+                logger.error(
+                    "[SandboxSignalConsumer] 执行下单链路失败: %s", e, exc_info=True
+                )
 
     @staticmethod
-    def _to_int(val: Any) -> Optional[int]:
+    def _to_int(val: Any) -> int | None:
         """类型转换辅助"""
         if val is None or val == "":
             return None

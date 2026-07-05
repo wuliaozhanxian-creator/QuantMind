@@ -51,7 +51,9 @@ class SimulationPendingOrderWorker:
                         )
                         .limit(self.batch_size)
                     )
-                ).scalars().all()
+                )
+                .scalars()
+                .all()
             )
             if not rows:
                 return 0
@@ -78,14 +80,20 @@ class SimulationPendingOrderWorker:
 
                 session_decision = await engine.assess_execution_window(runtime_order)
                 if session_decision.target_trade_date is not None:
-                    runtime_order.trading_session_date = session_decision.target_trade_date
+                    runtime_order.trading_session_date = (
+                        session_decision.target_trade_date
+                    )
                 if not session_decision.can_execute:
                     if session_decision.final_state == "expired":
-                        await engine.mark_expired(runtime_order, session_decision.message)
+                        await engine.mark_expired(
+                            runtime_order, session_decision.message
+                        )
                         processed += 1
                         continue
                     if not session_decision.retryable:
-                        await engine.mark_rejected(runtime_order, session_decision.message)
+                        await engine.mark_rejected(
+                            runtime_order, session_decision.message
+                        )
                         processed += 1
                     else:
                         await order_service.queue_order(
@@ -153,10 +161,14 @@ async def run_simulation_pending_order_worker() -> None:
         try:
             count = await worker.run_once()
             if count:
-                logger.info("simulation pending order worker processed %s order(s)", count)
+                logger.info(
+                    "simulation pending order worker processed %s order(s)", count
+                )
         except asyncio.CancelledError:
             logger.info("simulation pending order worker cancelled")
             raise
         except Exception as exc:
-            logger.error("simulation pending order worker failed: %s", exc, exc_info=True)
+            logger.error(
+                "simulation pending order worker failed: %s", exc, exc_info=True
+            )
         await asyncio.sleep(worker.interval_seconds)

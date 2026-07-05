@@ -5,7 +5,6 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
-
 class QMTBridgeSessionRequest(BaseModel):
     access_key: str
     secret_key: str
@@ -19,7 +18,6 @@ class QMTBridgeSessionRequest(BaseModel):
         description="强制覆盖旧设备绑定（client_fingerprint 冲突时使用）",
     )
 
-
 class QMTBridgeSessionResponse(BaseModel):
     bridge_session_token: str
     expires_in: int
@@ -29,11 +27,9 @@ class QMTBridgeSessionResponse(BaseModel):
     permissions: list[str]
     binding: dict[str, Any]
 
-
 class QMTBridgeRefreshResponse(BaseModel):
     bridge_session_token: str
     expires_in: int
-
 
 class QMTPositionPayload(BaseModel):
     symbol: str
@@ -43,7 +39,6 @@ class QMTPositionPayload(BaseModel):
     cost_price: float = 0.0
     last_price: float = 0.0
     market_value: float = 0.0
-
 
 class QMTBridgeAccountPayload(BaseModel):
     account_id: str
@@ -71,7 +66,6 @@ class QMTBridgeAccountPayload(BaseModel):
     debug_version: str | None = None
     reported_at: datetime | None = None
 
-
 class QMTBridgeHeartbeatPayload(BaseModel):
     account_id: str
     client_version: str | None = None
@@ -80,7 +74,6 @@ class QMTBridgeHeartbeatPayload(BaseModel):
     qmt_connected: bool = True
     latency_ms: int | None = None
     reported_at: datetime | None = None
-
 
 class QMTBridgeExecutionPayload(BaseModel):
     client_order_id: str
@@ -96,7 +89,6 @@ class QMTBridgeExecutionPayload(BaseModel):
     message: str | None = None
     reported_at: datetime | None = None
 
-
 class QMTBindingStatusResponse(BaseModel):
     online: bool
     user_id: str
@@ -109,7 +101,6 @@ class QMTBindingStatusResponse(BaseModel):
     account_reported_at: str | None = None
     stale_reason: str | None = None
 
-
 class QMTAgentDownloadAssetInfo(BaseModel):
     asset: str
     key: str
@@ -118,7 +109,6 @@ class QMTAgentDownloadAssetInfo(BaseModel):
     sha256: str | None = None
     content_type: str | None = None
     expires_in: int
-
 
 class QMTAgentReleaseDownloadResponse(BaseModel):
     product: str = "QuantMindQMTAgent"

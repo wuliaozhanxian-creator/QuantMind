@@ -677,7 +677,7 @@
 - 现象：模拟盘结算器在容器内调用行情接口时，默认地址回退到 `http://127.0.0.1:8003`，会命中本容器而非 `quantmind-stream`；即使请求到 stream，未携带内部鉴权头也会被 `data_access` 拦截为 `403`。
 - 修复：
   - `simulation_settler.py` 的 `STREAM_SERVICE_URL` 默认值改为 `http://quantmind-stream:8003/api/v1/quotes`（容器内服务名可达）；
-  - 请求 `GET /api/v1/quotes/{symbol}` 时补充 `X-Internal-Call: INTERNAL_CALL_SECRET`，走 stream 内部调用放行分支；
+  - 请求 `GET /api/v1/quotes/{symbol}` 时补充 `X-Service-Token`（service JWT），走 stream 内部调用放行分支（T6.5-P4: 已从 `X-Internal-Call` 迁移）；
   - 新增非 200 响应的告警日志，便于定位行情链路异常。
 
 ## 修复记录（2026-05-18，模拟盘虚拟成交价格兜底）
@@ -1262,7 +1262,7 @@ docker build --platform linux/amd64 -f docker/Dockerfile.ml-runtime \
 ### 运行时关键说明
 - 镜像已包含 `backend/shared`，保证 runner 可正常导入 `backend.shared.event_bus.schemas`。
 - 旧 runner 入口 `/app/main.py` 已退役，仅保留兼容性警告；新的实盘执行必须通过手动任务或托管任务链路完成。
-- runner 会优先直接读取 `INTERNAL_CALL_SECRET/SECRET_KEY`，避免镜像因认证模块额外依赖导致启动失败。
+- runner 会优先直接读取 `SECRET_KEY`（签发 service JWT，T6.5-P3 后 `INTERNAL_CALL_SECRET` 已废弃），避免镜像因认证模块额外依赖导致启动失败。
 - 生产环境通过 `STRATEGY_RUNNER_IMAGE` 指向目标镜像 tag，当前主标签为 `quantmind-ml-runtime:latest`。
 - 当前统一镜像 `docker/Dockerfile.ml-runtime` 未定义通用 `HEALTHCHECK`；健康检查应由具体服务进程或编排层按入口职责单独配置。
 
@@ -1334,11 +1334,11 @@ pytest -q backend/services/tests
 
 - 现象：部分模拟盘成交均价异常接近 `100`，与真实行情偏离明显。
 - 根因：
-  - `simulation/execution_engine.py` 拉取行情时携带了 `X-Internal-Call: true`，被 stream 侧按匿名请求处理并返回 `403`；
+  - `simulation/execution_engine.py` 拉取行情时携带了 `X-Internal-Call: true`（旧方案，T6.5-P3 后已迁移为 `X-Service-Token`），被 stream 侧按匿名请求处理并返回 `403`；
   - 失败后查库仅按单一 symbol 格式查询 `stock_daily_latest`，后缀/前缀不一致时命中失败；
   - 旧版本两级都失败后会触发随机价格兜底，导致成交价异常接近 `100`。
 - 修复：
-  - 行情请求统一携带 `X-Internal-Call: INTERNAL_CALL_SECRET`（并透传 `X-User-Id/X-Tenant-Id`）；
+  - 行情请求统一携带 `X-Service-Token`（service JWT，由 `SECRET_KEY` 签发；T6.5-P4: 已从 `X-Internal-Call: INTERNAL_CALL_SECRET` 迁移），并透传 `X-User-Id/X-Tenant-Id`；
   - 行情查询与数据库兜底均支持 Prefix/Suffix 双格式尝试；
   - 同步修复 `routers/simulation.py` 账户估值链路的内部鉴权头，避免资产页估值也被 403 降级。
 

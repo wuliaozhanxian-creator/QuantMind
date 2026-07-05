@@ -6,12 +6,11 @@
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
-
 
 @dataclass
 class PositionSizingConfig:
@@ -25,7 +24,6 @@ class PositionSizingConfig:
     rebalance_threshold: float = 0.05  # 再平衡阈值
     volatility_lookback: int = 20  # 波动率回看期
     risk_adjustment_factor: float = 1.0  # 风险调整因子
-
 
 class PositionSizerBase(ABC):
     """仓位计算器基类"""
@@ -53,7 +51,6 @@ class PositionSizerBase(ABC):
 
         return portfolio_value * position_ratio
 
-
 class FixedPositionSizer(PositionSizerBase):
     """固定仓位计算器"""
 
@@ -61,7 +58,6 @@ class FixedPositionSizer(PositionSizerBase):
         """计算固定仓位大小"""
         position_value = portfolio_value * self.config.base_position_size
         return self.validate_position_size(position_value, portfolio_value)
-
 
 class PercentPositionSizer(PositionSizerBase):
     """百分比仓位计算器"""
@@ -75,12 +71,15 @@ class PercentPositionSizer(PositionSizerBase):
             "very_high": 0.2,
         }
 
-    def calculate_position_size(self, portfolio_value: float, confidence: str = "medium", **kwargs) -> float:
+    def calculate_position_size(
+        self, portfolio_value: float, confidence: str = "medium", **kwargs
+    ) -> float:
         """根据信心水平计算仓位大小"""
-        base_ratio = self.confidence_levels.get(confidence, self.config.base_position_size)
+        base_ratio = self.confidence_levels.get(
+            confidence, self.config.base_position_size
+        )
         position_value = portfolio_value * base_ratio
         return self.validate_position_size(position_value, portfolio_value)
-
 
 class VolatilityPositionSizer(PositionSizerBase):
     """波动率调整仓位计算器"""
@@ -105,7 +104,9 @@ class VolatilityPositionSizer(PositionSizerBase):
 
         # 根据波动率调整仓位
         if volatility > 0:
-            position_ratio = (target_volatility / volatility) * self.config.base_position_size
+            position_ratio = (
+                target_volatility / volatility
+            ) * self.config.base_position_size
         else:
             position_ratio = self.config.base_position_size
 
@@ -114,7 +115,6 @@ class VolatilityPositionSizer(PositionSizerBase):
 
         position_value = portfolio_value * position_ratio
         return self.validate_position_size(position_value, portfolio_value)
-
 
 class KellyPositionSizer(PositionSizerBase):
     """Kelly公式仓位计算器"""
@@ -151,7 +151,6 @@ class KellyPositionSizer(PositionSizerBase):
         position_value = portfolio_value * kelly_fraction
         return self.validate_position_size(position_value, portfolio_value)
 
-
 class RiskParityPositionSizer(PositionSizerBase):
     """风险平价仓位计算器"""
 
@@ -177,7 +176,9 @@ class RiskParityPositionSizer(PositionSizerBase):
 
         # 风险平价权重计算
         inv_volatility = 1.0 / symbol_volatility
-        total_inv_volatility = sum(1.0 / vol for vol in all_volatilities.values() if vol > 0)
+        total_inv_volatility = sum(
+            1.0 / vol for vol in all_volatilities.values() if vol > 0
+        )
 
         if total_inv_volatility > 0:
             risk_parity_weight = inv_volatility / total_inv_volatility
@@ -186,7 +187,6 @@ class RiskParityPositionSizer(PositionSizerBase):
 
         position_value = portfolio_value * risk_parity_weight
         return self.validate_position_size(position_value, portfolio_value)
-
 
 class AdaptivePositionSizer(PositionSizerBase):
     """自适应仓位计算器"""
@@ -233,11 +233,12 @@ class AdaptivePositionSizer(PositionSizerBase):
             volatility_multiplier = 1.0
 
         # 综合调整
-        adjusted_position = base_position * performance_multiplier * volatility_multiplier
+        adjusted_position = (
+            base_position * performance_multiplier * volatility_multiplier
+        )
 
         position_value = portfolio_value * adjusted_position
         return self.validate_position_size(position_value, portfolio_value)
-
 
 class PositionSizer:
     """仓位管理器主类"""
@@ -297,7 +298,9 @@ class PositionSizer:
 
         if method == "equal_weight":
             # 等权重分配
-            equal_weight = min(1.0 / len(available_symbols), self.config.max_position_size)
+            equal_weight = min(
+                1.0 / len(available_symbols), self.config.max_position_size
+            )
             for symbol in available_symbols:
                 positions[symbol] = portfolio_value * equal_weight
 
@@ -370,8 +373,14 @@ class PositionSizer:
 
         for symbol, target_value in target_positions.items():
             current_value = current_positions.get(symbol, 0)
-            current_weight = current_value / total_portfolio_value if total_portfolio_value > 0 else 0
-            target_weight = target_value / total_portfolio_value if total_portfolio_value > 0 else 0
+            current_weight = (
+                current_value / total_portfolio_value
+                if total_portfolio_value > 0
+                else 0
+            )
+            target_weight = (
+                target_value / total_portfolio_value if total_portfolio_value > 0 else 0
+            )
 
             weight_diff = abs(current_weight - target_weight)
 
@@ -387,7 +396,9 @@ class PositionSizer:
 
         return rebalance_needed, adjustments
 
-    def get_position_summary(self, positions: dict[str, float], portfolio_value: float) -> dict[str, any]:
+    def get_position_summary(
+        self, positions: dict[str, float], portfolio_value: float
+    ) -> dict[str, any]:
         """
         获取仓位摘要信息
 
@@ -408,7 +419,11 @@ class PositionSizer:
             }
 
         total_position_value = sum(positions.values())
-        cash_ratio = (portfolio_value - total_position_value) / portfolio_value if portfolio_value > 0 else 1.0
+        cash_ratio = (
+            (portfolio_value - total_position_value) / portfolio_value
+            if portfolio_value > 0
+            else 1.0
+        )
 
         position_details = {}
         for symbol, value in positions.items():

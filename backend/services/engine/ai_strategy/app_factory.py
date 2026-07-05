@@ -43,12 +43,10 @@ except ImportError as e:
     init_tracing = None
     init_service_logging = None
 
-
 def _get_app_settings():
     if not settings:
         return None
     return getattr(settings, "ai_strategy_app", None) or getattr(settings, "app", None)
-
 
 def create_app(logger: logging.Logger | None = None) -> FastAPI:
     """
@@ -103,7 +101,6 @@ def create_app(logger: logging.Logger | None = None) -> FastAPI:
 
     return app
 
-
 def _register_routes(app: FastAPI):
     """注册应用路由"""
 
@@ -123,7 +120,9 @@ def _register_routes(app: FastAPI):
         logger.warning(f"Could not import v1 routes: {e}")
         # 尝试绝对路径导入
         try:
-            from backend.services.engine.ai_strategy.api.v1.routes import router as v1_router
+            from backend.services.engine.ai_strategy.api.v1.routes import (
+                router as v1_router,
+            )
 
             app.include_router(v1_router, prefix="/api/v1")
             logger.info("V1 routes registered successfully (absolute)")
@@ -140,7 +139,9 @@ def _register_routes(app: FastAPI):
     except ImportError as e:
         logger.warning(f"Could not import wizard routes: {e}")
         try:
-            from backend.services.engine.ai_strategy.api.v1.wizard import router as wizard_router
+            from backend.services.engine.ai_strategy.api.v1.wizard import (
+                router as wizard_router,
+            )
 
             app.include_router(wizard_router, prefix="/api/v1")
             logger.info("Wizard routes registered successfully (absolute)")
@@ -150,7 +151,6 @@ def _register_routes(app: FastAPI):
     # 如果 v1 路由不可用，注册最小功能以保证可用性
     if not v1_registered:
         app.post("/api/v1/chat/stream")(chat_stream_handler)
-
 
 def _configure_middleware(app: FastAPI, logger: logging.Logger):
     """配置中间件"""
@@ -199,7 +199,6 @@ def _configure_middleware(app: FastAPI, logger: logging.Logger):
     request_logging_middleware = RequestLoggingMiddleware(logger)
     app.middleware("http")(request_logging_middleware)
 
-
 def _initialize_tracing(app: FastAPI):
     """初始化分布式追踪"""
     if init_tracing:
@@ -213,7 +212,6 @@ def _initialize_tracing(app: FastAPI):
             logger.warning(f"Tracing init failed for AI strategy service: {e}")
     else:
         logger.info("Tracing module not available")
-
 
 def _register_events(app: FastAPI):
     """注册应用事件"""
@@ -267,18 +265,15 @@ def _register_events(app: FastAPI):
     # 应用生命周期管理器
     app.router.lifespan_context = lifespan
 
-
 def get_service_port() -> int:
     """获取服务端口"""
     if settings:
         return settings.get_service_port("ai_strategy")
     return int(os.getenv("AI_STRATEGY_PORT", 8008))
 
-
 def get_port() -> int:
     """别名，供 main.py 使用"""
     return get_service_port()
-
 
 def get_host() -> str:
     """获取服务主机地址"""
@@ -287,7 +282,6 @@ def get_host() -> str:
         return getattr(app_settings, "api_host", "0.0.0.0")
     # 2026-02-14 默认 0.0.0.0 允许 Docker 容器访问
     return os.getenv("API_HOST", "0.0.0.0")
-
 
 def get_log_level() -> str:
     """获取日志级别"""

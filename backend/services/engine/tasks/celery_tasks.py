@@ -27,10 +27,8 @@ logger = logging.getLogger(__name__)
 _INFERENCE_LOCK_KEY_PREFIX = "qm:lock:inference:daily"
 _INFERENCE_LOCK_TTL_SEC = 1800  # 30 分钟
 
-
 def _run_async(coro: Any) -> Any:
     return asyncio.run(coro)
-
 
 def _get_sync_db_session():
     sync_db_url = str(os.getenv("DATABASE_URL", "")).strip()
@@ -50,7 +48,6 @@ def _get_sync_db_session():
     sync_engine = sa_create_engine(sync_db_url, pool_pre_ping=True)
     session_factory = sa_sessionmaker(bind=sync_engine)
     return session_factory()
-
 
 def _ensure_dispatch_log_table(db) -> None:
     db.execute(
@@ -91,7 +88,6 @@ def _ensure_dispatch_log_table(db) -> None:
         )
     )
     db.commit()
-
 
 def _write_dispatch_log(
     db,
@@ -138,7 +134,6 @@ def _write_dispatch_log(
     )
     db.commit()
 
-
 def _try_acquire_strategy_lock(strategy_id: str, trade_date: str, owner: str) -> bool:
     """尝试获取特定策略当日推理分布式锁。"""
     try:
@@ -151,9 +146,7 @@ def _try_acquire_strategy_lock(strategy_id: str, trade_date: str, owner: str) ->
         logger.warning("[InferenceLock] Redis 不可用，跳过策略锁检查: %s", e)
         return True
 
-
 from backend.services.engine.services.signal_generator import global_signal_generator
-
 
 @celery_app.task(
     name="engine.tasks.generate_global_signals",
@@ -191,7 +184,6 @@ def generate_global_signals(
         "trade_date": trade_date,
     }
 
-
 @celery_app.task(
     bind=True,
     name="engine.tasks.run_pipeline_run",
@@ -206,7 +198,6 @@ def run_pipeline_run(self, run_id: str) -> dict[str, Any]:
     service = PipelineService()
     result = _run_async(service.execute_run(run_id))
     return result.model_dump()
-
 
 @celery_app.task(
     name="engine.tasks.auto_inference_if_needed",
@@ -265,8 +256,7 @@ def auto_inference_if_needed() -> dict[str, Any]:
                 "FROM qm_model_inference_settings "
                 "WHERE enabled = TRUE "
                 "  AND (next_run_at IS NULL OR next_run_at <= :now_local)"
-            )
-            ,
+            ),
             {"now_local": now_local},
         ).all()
 
@@ -373,7 +363,6 @@ def auto_inference_if_needed() -> dict[str, Any]:
     finally:
         db.close()
 
-
 @celery_app.task(
     bind=True,
     name="engine.tasks.run_auto_inference_task",
@@ -419,10 +408,16 @@ def run_auto_inference_task(
                 reason_code="ALREADY_DONE",
                 reason_detail="engine_feature_runs already has signal_ready record for target trade date",
             )
-            return {"status": "skipped", "reason": "already_done", "task_id": self.request.id}
+            return {
+                "status": "skipped",
+                "reason": "already_done",
+                "task_id": self.request.id,
+            }
 
         lock_scope = f"{tenant_id}:{user_id}:{strategy_id or model_id or 'default'}"
-        if not _try_acquire_strategy_lock(lock_scope, prediction_trade_date, f"celery_auto:{self.request.id}"):
+        if not _try_acquire_strategy_lock(
+            lock_scope, prediction_trade_date, f"celery_auto:{self.request.id}"
+        ):
             _write_dispatch_log(
                 db,
                 trigger_source=trigger_source,
@@ -436,7 +431,11 @@ def run_auto_inference_task(
                 reason_code="LOCK_HELD",
                 reason_detail=f"lock scope conflict: {lock_scope}",
             )
-            return {"status": "skipped", "reason": "lock_held", "task_id": self.request.id}
+            return {
+                "status": "skipped",
+                "reason": "lock_held",
+                "task_id": self.request.id,
+            }
 
         try:
             _write_dispatch_log(
@@ -506,7 +505,9 @@ def run_auto_inference_task(
                 prediction_trade_date=prediction_trade_date,
                 status="success" if exec_res.success else "failed",
                 reason_code=None if exec_res.success else "EXECUTION_FAILED",
-                reason_detail=None if exec_res.success else str(getattr(exec_res, "message", "") or ""),
+                reason_detail=None
+                if exec_res.success
+                else str(getattr(exec_res, "message", "") or ""),
                 run_id=getattr(exec_res, "run_id", None),
             )
             return {
@@ -523,7 +524,7 @@ def run_auto_inference_task(
                     lock_key = f"{_INFERENCE_LOCK_KEY_PREFIX}:{lock_scope}:{prediction_trade_date}"
                     redis.delete(lock_key)
                 except Exception:
-                    pass
+                    logger.debug("ignored exception", exc_info=True)
     except Exception as exc:
         _write_dispatch_log(
             db,
@@ -541,7 +542,6 @@ def run_auto_inference_task(
         raise
     finally:
         db.close()
-
 
 @celery_app.task(
     bind=True,
@@ -717,7 +717,6 @@ def run_strategy_backtest_loop(
         )
         raise
 
-
 @celery_app.task(
     name="engine.tasks.sync_stock_daily_latest_task",
     max_retries=0,
@@ -734,7 +733,6 @@ def sync_stock_daily_latest_task(
         "message": "数据同步任务已废弃，数据由官方服务器统一推送",
         "deprecated": True,
     }
-
 
 @celery_app.task(name="engine.tasks.sync_market_data_daily_task")
 def sync_market_data_daily_task(
@@ -755,13 +753,43 @@ def sync_market_data_daily_task(
     processing = root / "scripts" / "data" / "processing"
 
     steps = [
-        ("Step 1: 源 PG -> parquet", [sys.executable, str(scripts / "sync_parquets_from_remote_pg.py")]),
-        ("Step 2: parquet -> stock_daily_latest", [sys.executable, str(scripts / "sync_stock_daily_latest_from_parquet.py")]),
-        ("Step 3: stock_daily_latest -> stock_strategy_latest", [sys.executable, str(scripts / "sync_strategy_latest_from_stock_daily.py")]),
-        ("Step 4: qlib features -> index_ohlcv_daily", [sys.executable, str(scripts / "sync_index_ohlcv_from_qlib_features.py")]),
-        ("Step 5: 回填连板字段", [sys.executable, str(scripts / "backfill_consecutive_limit_up_days.py"), "--apply"]),
-        ("Step 6: 回填收益率", [sys.executable, str(processing / "backfill_return_fields.py"), "--recent-days", "10"]),
-        ("Step 7: parquet -> qlib_data", [sys.executable, str(scripts / "sync_qlib_from_fundamental_parquet.py")]),
+        (
+            "Step 1: 源 PG -> parquet",
+            [sys.executable, str(scripts / "sync_parquets_from_remote_pg.py")],
+        ),
+        (
+            "Step 2: parquet -> stock_daily_latest",
+            [sys.executable, str(scripts / "sync_stock_daily_latest_from_parquet.py")],
+        ),
+        (
+            "Step 3: stock_daily_latest -> stock_strategy_latest",
+            [sys.executable, str(scripts / "sync_strategy_latest_from_stock_daily.py")],
+        ),
+        (
+            "Step 4: qlib features -> index_ohlcv_daily",
+            [sys.executable, str(scripts / "sync_index_ohlcv_from_qlib_features.py")],
+        ),
+        (
+            "Step 5: 回填连板字段",
+            [
+                sys.executable,
+                str(scripts / "backfill_consecutive_limit_up_days.py"),
+                "--apply",
+            ],
+        ),
+        (
+            "Step 6: 回填收益率",
+            [
+                sys.executable,
+                str(processing / "backfill_return_fields.py"),
+                "--recent-days",
+                "10",
+            ],
+        ),
+        (
+            "Step 7: parquet -> qlib_data",
+            [sys.executable, str(scripts / "sync_qlib_from_fundamental_parquet.py")],
+        ),
     ]
 
     results = []
@@ -769,7 +797,9 @@ def sync_market_data_daily_task(
     for label, cmd in steps:
         logger.info("[DataSync] %s", label)
         try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=900, cwd=str(root))
+            r = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=900, cwd=str(root)
+            )
         except subprocess.TimeoutExpired:
             logger.error("[DataSync] %s 超时", label)
             results.append({"step": label, "success": False, "error": "timeout"})
@@ -781,7 +811,12 @@ def sync_market_data_daily_task(
 
         ok = r.returncode == 0
         if not ok:
-            logger.error("[DataSync] %s 失败 exit=%s stderr=%s", label, r.returncode, r.stderr[-500:])
+            logger.error(
+                "[DataSync] %s 失败 exit=%s stderr=%s",
+                label,
+                r.returncode,
+                r.stderr[-500:],
+            )
         else:
             logger.info("[DataSync] %s 完成", label)
         results.append({"step": label, "success": ok, "rc": r.returncode})
@@ -795,7 +830,6 @@ def sync_market_data_daily_task(
         "message": "所有步骤完成" if all_ok else f"在 '{results[-1]['step']}' 失败",
         "steps": results,
     }
-
 
 @celery_app.task(name="engine.tasks.get_data_status_task")
 def get_data_status_task() -> dict[str, Any]:
@@ -963,9 +997,7 @@ def get_data_status_task() -> dict[str, Any]:
                             }
                         )
             except Exception as bin_exc:
-                logger.debug(
-                    "Invalid qlib bin data for symbol %s: %s", inst, bin_exc
-                )
+                logger.debug("Invalid qlib bin data for symbol %s: %s", inst, bin_exc)
                 invalid_count += 1
 
         qlib_info["latest_date_coverage"] = {
@@ -1032,7 +1064,6 @@ def get_data_status_task() -> dict[str, Any]:
         logger.warning("Failed to cache data status to Redis: %s", e)
 
     return result
-
 
 @celery_app.task(name="engine.tasks.warmup_stock_latest_cache")
 def warmup_stock_latest_cache_task():

@@ -1,7 +1,7 @@
 """Symbol service"""
 
 import logging
-from typing import List, Optional
+from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,7 +10,6 @@ from ..models import Symbol
 from ..schemas import SymbolCreate, SymbolResponse
 
 logger = logging.getLogger(__name__)
-
 
 class SymbolService:
     """交易标的服务"""
@@ -59,7 +58,9 @@ class SymbolService:
 
         return [SymbolResponse.model_validate(s) for s in symbols]
 
-    async def update_symbol(self, symbol: str, update_data: dict) -> SymbolResponse | None:
+    async def update_symbol(
+        self, symbol: str, update_data: dict
+    ) -> SymbolResponse | None:
         """更新交易标的"""
         query = select(Symbol).filter(Symbol.symbol == symbol)
         result = await self.db.execute(query)

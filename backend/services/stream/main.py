@@ -14,10 +14,16 @@ from backend.services.stream.market_app.api.v1 import (
     quotes_router,
     symbols_router,
 )
-from backend.services.stream.market_app.database import AsyncSessionLocal, close_db, init_db
+from backend.services.stream.market_app.database import (
+    AsyncSessionLocal,
+    close_db,
+    init_db,
+)
 from backend.services.stream.ws_core.manager import manager as ws_manager
 from backend.services.stream.ws_core.server import server as ws_server
-from backend.services.stream.ws_core.server import websocket_endpoint as core_ws_endpoint
+from backend.services.stream.ws_core.server import (
+    websocket_endpoint as core_ws_endpoint,
+)
 from backend.shared.auth import verify_service_token
 from backend.shared.config_manager import init_unified_config
 from backend.shared.cors import resolve_cors_origins
@@ -38,17 +44,14 @@ from backend.shared.service_health_metrics import set_service_health
 setup_logging("stream")
 logger = get_logger(__name__)
 
-
 def _as_bool(raw: str, default: bool = True) -> bool:
     value = (raw or "").strip().lower()
     if not value:
         return default
     return value in {"1", "true", "yes", "on"}
 
-
 def _quote_cleanup_enabled() -> bool:
     return _as_bool(os.getenv("QUOTE_CLEANUP_ENABLED", "true"), default=True)
-
 
 def _quote_cleanup_interval_seconds() -> int:
     raw = (os.getenv("QUOTE_CLEANUP_INTERVAL_SECONDS", "600") or "").strip()
@@ -58,21 +61,19 @@ def _quote_cleanup_interval_seconds() -> int:
         value = 600
     return max(60, value)
 
-
 def _quote_cleanup_keep_today_only() -> bool:
     return _as_bool(os.getenv("QUOTE_CLEANUP_KEEP_TODAY_ONLY", "true"), default=True)
 
-
 def _quote_daily_archive_enabled() -> bool:
     return _as_bool(os.getenv("QUOTE_DAILY_ARCHIVE_ENABLED", "true"), default=True)
-
 
 async def _archive_quotes_before_today(session) -> int:
     """
     将 quotes 中历史数据（日<今天）聚合写入 quote_daily_summaries。
     返回本次 upsert 影响的汇总行数。
     """
-    result = await session.execute(text("""
+    result = await session.execute(
+        text("""
             WITH base AS (
                 SELECT
                     q.id,
@@ -183,17 +184,18 @@ async def _archive_quotes_before_today(session) -> int:
                 RETURNING 1
             )
             SELECT COUNT(1) AS cnt FROM upserted
-            """))
+            """)
+    )
     return int(result.scalar() or 0)
-
 
 async def _cleanup_quotes_keep_today_only(session) -> int:
     """
     只保留 quotes 当天数据（按数据库 CURRENT_DATE 口径）。
     """
-    result = await session.execute(text("DELETE FROM quotes WHERE timestamp::date < CURRENT_DATE"))
+    result = await session.execute(
+        text("DELETE FROM quotes WHERE timestamp::date < CURRENT_DATE")
+    )
     return int(result.rowcount or 0)
-
 
 async def _quote_cleanup_loop(stop_event: asyncio.Event) -> None:
     interval = _quote_cleanup_interval_seconds()
@@ -234,7 +236,6 @@ async def _quote_cleanup_loop(stop_event: asyncio.Event) -> None:
         except asyncio.TimeoutError:
             continue
 
-
 try:
     from prometheus_client import CONTENT_TYPE_LATEST, REGISTRY, Gauge, generate_latest
 
@@ -259,7 +260,6 @@ except Exception:  # pragma: no cover - metrics is optional
 
     def generate_latest() -> bytes:
         return b"# metrics unavailable\n"
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -290,7 +290,9 @@ async def lifespan(app: FastAPI):
             STREAM_MARKET_DB_CONNECTED.set(0)
         if STREAM_SERVICE_DEGRADED is not None:
             STREAM_SERVICE_DEGRADED.set(1)
-        logger.warning(f"⚠️ Market Database initialization failed, continue in degraded mode: {e}")
+        logger.warning(
+            f"⚠️ Market Database initialization failed, continue in degraded mode: {e}"
+        )
 
     try:
         await ws_server.start()
@@ -303,7 +305,9 @@ async def lifespan(app: FastAPI):
     if _quote_cleanup_enabled():
         stop_event = asyncio.Event()
         app.state.quote_cleanup_stop = stop_event
-        app.state.quote_cleanup_task = asyncio.create_task(_quote_cleanup_loop(stop_event))
+        app.state.quote_cleanup_task = asyncio.create_task(
+            _quote_cleanup_loop(stop_event)
+        )
     else:
         logger.info("🧹 Quote cleanup disabled by QUOTE_CLEANUP_ENABLED=false")
 
@@ -322,7 +326,6 @@ async def lifespan(app: FastAPI):
     await ws_server.stop()
     await close_db()
     logger.info("🔚 QuantMind Stream shutdown complete")
-
 
 app = FastAPI(
     title="QuantMind Streaming Service",
@@ -349,13 +352,11 @@ app.include_router(quotes_router, prefix="/api/v1")
 app.include_router(klines_router, prefix="/api/v1")
 app.include_router(symbols_router, prefix="/api/v1")
 
-
 class BridgeOrderDispatchRequest(BaseModel):
     tenant_id: str = Field(default="default")
     user_id: str
     account_id: str | None = None
     payload: dict[str, Any]
-
 
 class BridgeCancelDispatchRequest(BaseModel):
     tenant_id: str = Field(default="default")
@@ -363,8 +364,9 @@ class BridgeCancelDispatchRequest(BaseModel):
     account_id: str | None = None
     payload: dict[str, Any]
 
-
-def _resolve_bridge_targets(tenant_id: str, user_id: str, account_id: str | None) -> list[str]:
+def _resolve_bridge_targets(
+    tenant_id: str, user_id: str, account_id: str | None
+) -> list[str]:
     normalized_tenant = str(tenant_id or "").strip() or "default"
     normalized_user_raw = str(user_id or "").strip()
     normalized_account = str(account_id or "").strip()
@@ -388,9 +390,15 @@ def _resolve_bridge_targets(tenant_id: str, user_id: str, account_id: str | None
             continue
         if str(metadata.get("tenant_id") or "").strip() != normalized_tenant:
             continue
-        if _normalize_user(str(metadata.get("user_id") or "").strip()) != normalized_user:
+        if (
+            _normalize_user(str(metadata.get("user_id") or "").strip())
+            != normalized_user
+        ):
             continue
-        if normalized_account and str(metadata.get("account_id") or "").strip() != normalized_account:
+        if (
+            normalized_account
+            and str(metadata.get("account_id") or "").strip() != normalized_account
+        ):
             continue
         connected_at = float(metadata.get("connected_at") or 0.0)
         candidates.append((connected_at, connection_id))
@@ -399,7 +407,6 @@ def _resolve_bridge_targets(tenant_id: str, user_id: str, account_id: str | None
         return []
     candidates.sort(reverse=True)
     return [candidates[0][1]]
-
 
 def _verify_internal_auth(
     x_service_token: str | None = None,
@@ -413,9 +420,8 @@ def _verify_internal_auth(
             verify_service_token(x_service_token, ["api", "engine", "trade", "stream"])
             return
         except Exception:
-            pass
+            logger.debug("ignored exception", exc_info=True)
     raise HTTPException(status_code=401, detail="Invalid internal credentials")
-
 
 @app.post("/api/v1/internal/bridge/order")
 async def dispatch_bridge_order(
@@ -432,7 +438,9 @@ async def dispatch_bridge_order(
     if not client_order_id or not symbol or not side or quantity <= 0:
         raise HTTPException(status_code=400, detail="invalid bridge order payload")
 
-    targets = _resolve_bridge_targets(payload.tenant_id, payload.user_id, payload.account_id)
+    targets = _resolve_bridge_targets(
+        payload.tenant_id, payload.user_id, payload.account_id
+    )
     if not targets:
         return {
             "ok": False,
@@ -457,7 +465,6 @@ async def dispatch_bridge_order(
         "user_id": payload.user_id,
     }
 
-
 @app.post("/api/v1/internal/bridge/cancel")
 async def dispatch_bridge_cancel(
     payload: BridgeCancelDispatchRequest,
@@ -469,9 +476,13 @@ async def dispatch_bridge_cancel(
     client_order_id = str(cancel_payload.get("client_order_id") or "").strip()
     exchange_order_id = str(cancel_payload.get("exchange_order_id") or "").strip()
     if not client_order_id and not exchange_order_id:
-        raise HTTPException(status_code=400, detail="client_order_id or exchange_order_id required")
+        raise HTTPException(
+            status_code=400, detail="client_order_id or exchange_order_id required"
+        )
 
-    targets = _resolve_bridge_targets(payload.tenant_id, payload.user_id, payload.account_id)
+    targets = _resolve_bridge_targets(
+        payload.tenant_id, payload.user_id, payload.account_id
+    )
     if not targets:
         return {
             "ok": False,
@@ -496,23 +507,19 @@ async def dispatch_bridge_cancel(
         "user_id": payload.user_id,
     }
 
-
 # 通用 WebSocket 主入口
 @app.websocket("/ws")
 async def main_websocket_endpoint(websocket: WebSocket):
     await core_ws_endpoint(websocket)
 
-
 @app.websocket("/ws/bridge")
 async def bridge_websocket_compat_endpoint(websocket: WebSocket):
     await core_ws_endpoint(websocket)
-
 
 # 行情专用 WebSocket（兼容旧客户端）- 共用 ws_core 统一协议
 @app.websocket("/api/v1/ws/market")
 async def market_websocket_compat_endpoint(websocket: WebSocket):
     await core_ws_endpoint(websocket)
-
 
 @app.get("/health")
 async def health_check():
@@ -546,7 +553,6 @@ async def health_check():
             "ws_connections": len(ws_manager.active_connections),
         },
     )
-
 
 @app.get("/readiness")
 async def readiness_check():
@@ -590,7 +596,6 @@ async def readiness_check():
     }
     return build_readiness_response(checks)
 
-
 @app.get("/api/v1/internal/debug/connections")
 async def debug_connections(
     x_service_token: str | None = Header(default=None, alias="X-Service-Token"),
@@ -599,28 +604,27 @@ async def debug_connections(
     _verify_internal_auth(x_service_token)
     connections = []
     for conn_id, meta in ws_manager.connection_metadata.items():
-        connections.append({
-            "connection_id": conn_id,
-            "active": conn_id in ws_manager.active_connections,
-            "auth_source": meta.get("auth_source"),
-            "tenant_id": meta.get("tenant_id"),
-            "user_id": meta.get("user_id"),
-            "authenticated": meta.get("authenticated"),
-            "account_id": meta.get("account_id"),
-            "binding_id": meta.get("binding_id"),
-        })
+        connections.append(
+            {
+                "connection_id": conn_id,
+                "active": conn_id in ws_manager.active_connections,
+                "auth_source": meta.get("auth_source"),
+                "tenant_id": meta.get("tenant_id"),
+                "user_id": meta.get("user_id"),
+                "authenticated": meta.get("authenticated"),
+                "account_id": meta.get("account_id"),
+                "binding_id": meta.get("binding_id"),
+            }
+        )
     return {"total": len(connections), "connections": connections}
-
 
 @app.get("/")
 async def root():
     return {"message": "QuantMind Stream Service V2 is running"}
 
-
 @app.get("/metrics")
 async def metrics():
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
-
 
 if __name__ == "__main__":
     import uvicorn

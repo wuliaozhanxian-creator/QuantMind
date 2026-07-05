@@ -10,7 +10,7 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, Optional, Union
+from typing import Any, Optional, Union
 from urllib.parse import urljoin
 
 import httpx
@@ -19,7 +19,6 @@ from .config import settings
 from .observability.logging import LoggerMixin
 
 logger = logging.getLogger(__name__)
-
 
 class HttpMethod(str, Enum):
     """HTTP方法枚举"""
@@ -32,7 +31,6 @@ class HttpMethod(str, Enum):
     HEAD = "HEAD"
     OPTIONS = "OPTIONS"
 
-
 class ResponseStatus(str, Enum):
     """响应状态枚举"""
 
@@ -41,7 +39,6 @@ class ResponseStatus(str, Enum):
     SERVER_ERROR = "server_error"
     TIMEOUT = "timeout"
     NETWORK_ERROR = "network_error"
-
 
 @dataclass
 class APIResponse:
@@ -53,7 +50,6 @@ class APIResponse:
     headers: dict[str, str] | None = None
     error: str | None = None
     elapsed_time: float | None = None
-
 
 @dataclass
 class RequestConfig:
@@ -67,14 +63,12 @@ class RequestConfig:
     log_requests: bool = True
     log_responses: bool = False
 
-
 class AuthProvider(ABC):
     """认证提供者抽象基类"""
 
     @abstractmethod
     def get_auth_headers(self) -> dict[str, str]:
         """获取认证头"""
-
 
 class BearerTokenAuth(AuthProvider):
     """Bearer Token认证"""
@@ -86,7 +80,6 @@ class BearerTokenAuth(AuthProvider):
     def get_auth_headers(self) -> dict[str, str]:
         return {self.header_name: f"Bearer {self.token}"}
 
-
 class APIKeyAuth(AuthProvider):
     """API Key认证"""
 
@@ -97,7 +90,6 @@ class APIKeyAuth(AuthProvider):
     def get_auth_headers(self) -> dict[str, str]:
         return {self.header_name: self.api_key}
 
-
 class CustomHeaderAuth(AuthProvider):
     """自定义头认证"""
 
@@ -106,7 +98,6 @@ class CustomHeaderAuth(AuthProvider):
 
     def get_auth_headers(self) -> dict[str, str]:
         return self.headers.copy()
-
 
 class HTTPClient(LoggerMixin):
     """统一HTTP客户端"""
@@ -160,7 +151,9 @@ class HTTPClient(LoggerMixin):
             return urljoin(self.base_url, endpoint)
         return endpoint
 
-    def _build_headers(self, extra_headers: dict[str, str] | None = None) -> dict[str, str]:
+    def _build_headers(
+        self, extra_headers: dict[str, str] | None = None
+    ) -> dict[str, str]:
         """构建请求头"""
         headers = self.default_headers.copy()
 
@@ -184,7 +177,9 @@ class HTTPClient(LoggerMixin):
         else:
             return ResponseStatus.NETWORK_ERROR
 
-    async def _make_request(self, method: HttpMethod | str, endpoint: str, **kwargs) -> APIResponse:
+    async def _make_request(
+        self, method: HttpMethod | str, endpoint: str, **kwargs
+    ) -> APIResponse:
         """执行HTTP请求"""
         method = HttpMethod(method) if isinstance(method, str) else method
         url = self._build_url(endpoint)
@@ -209,7 +204,9 @@ class HTTPClient(LoggerMixin):
         # 重试逻辑
         for attempt in range(self.config.retries + 1):
             try:
-                response = await self.client.request(method=method.value, url=url, headers=headers, **kwargs)
+                response = await self.client.request(
+                    method=method.value, url=url, headers=headers, **kwargs
+                )
 
                 elapsed_time = time.time() - start_time
                 self._request_count += 1
@@ -246,7 +243,10 @@ class HTTPClient(LoggerMixin):
                     api_response.data = response.text
 
                 # 验证响应状态
-                if self.config.validate_status and api_response.status != ResponseStatus.SUCCESS:
+                if (
+                    self.config.validate_status
+                    and api_response.status != ResponseStatus.SUCCESS
+                ):
                     api_response.error = f"HTTP {response.status_code} error"
                     self._error_count += 1
                     self.logger.warning(
@@ -255,7 +255,11 @@ class HTTPClient(LoggerMixin):
                             "status_code": response.status_code,
                             "url": url,
                             "method": method.value,
-                            "response_preview": (str(api_response.data)[:200] if api_response.data else None),
+                            "response_preview": (
+                                str(api_response.data)[:200]
+                                if api_response.data
+                                else None
+                            ),
                         },
                     )
 
@@ -267,7 +271,9 @@ class HTTPClient(LoggerMixin):
                 self._error_count += 1
 
                 if attempt < self.config.retries:
-                    retry_delay = self.config.retry_delay * (self.config.retry_backoff**attempt)
+                    retry_delay = self.config.retry_delay * (
+                        self.config.retry_backoff**attempt
+                    )
                     self.logger.warning(
                         f"Request timeout, retrying in {retry_delay}s (attempt {attempt + 1}/{self.config.retries + 1})",
                         extra={
@@ -301,7 +307,9 @@ class HTTPClient(LoggerMixin):
                 self._error_count += 1
 
                 if attempt < self.config.retries:
-                    retry_delay = self.config.retry_delay * (self.config.retry_backoff**attempt)
+                    retry_delay = self.config.retry_delay * (
+                        self.config.retry_backoff**attempt
+                    )
                     self.logger.warning(
                         f"Network error, retrying in {retry_delay}s (attempt {attempt + 1}/{self.config.retries + 1})",
                         extra={
@@ -359,25 +367,41 @@ class HTTPClient(LoggerMixin):
         )
 
     # 便捷方法
-    async def get(self, endpoint: str, params: dict | None = None, **kwargs) -> APIResponse:
+    async def get(
+        self, endpoint: str, params: dict | None = None, **kwargs
+    ) -> APIResponse:
         """GET请求"""
-        return await self._make_request(HttpMethod.GET, endpoint, params=params, **kwargs)
+        return await self._make_request(
+            HttpMethod.GET, endpoint, params=params, **kwargs
+        )
 
-    async def post(self, endpoint: str, data: Any = None, json: Any = None, **kwargs) -> APIResponse:
+    async def post(
+        self, endpoint: str, data: Any = None, json: Any = None, **kwargs
+    ) -> APIResponse:
         """POST请求"""
-        return await self._make_request(HttpMethod.POST, endpoint, data=data, json=json, **kwargs)
+        return await self._make_request(
+            HttpMethod.POST, endpoint, data=data, json=json, **kwargs
+        )
 
-    async def put(self, endpoint: str, data: Any = None, json: Any = None, **kwargs) -> APIResponse:
+    async def put(
+        self, endpoint: str, data: Any = None, json: Any = None, **kwargs
+    ) -> APIResponse:
         """PUT请求"""
-        return await self._make_request(HttpMethod.PUT, endpoint, data=data, json=json, **kwargs)
+        return await self._make_request(
+            HttpMethod.PUT, endpoint, data=data, json=json, **kwargs
+        )
 
     async def delete(self, endpoint: str, **kwargs) -> APIResponse:
         """DELETE请求"""
         return await self._make_request(HttpMethod.DELETE, endpoint, **kwargs)
 
-    async def patch(self, endpoint: str, data: Any = None, json: Any = None, **kwargs) -> APIResponse:
+    async def patch(
+        self, endpoint: str, data: Any = None, json: Any = None, **kwargs
+    ) -> APIResponse:
         """PATCH请求"""
-        return await self._make_request(HttpMethod.PATCH, endpoint, data=data, json=json, **kwargs)
+        return await self._make_request(
+            HttpMethod.PATCH, endpoint, data=data, json=json, **kwargs
+        )
 
     def get_stats(self) -> dict[str, Any]:
         """获取客户端统计信息"""
@@ -385,9 +409,9 @@ class HTTPClient(LoggerMixin):
             "total_requests": self._request_count,
             "total_errors": self._error_count,
             "error_rate": self._error_count / max(self._request_count, 1),
-            "success_rate": (self._request_count - self._error_count) / max(self._request_count, 1),
+            "success_rate": (self._request_count - self._error_count)
+            / max(self._request_count, 1),
         }
-
 
 class ServiceClient(HTTPClient):
     """服务客户端基类"""
@@ -417,7 +441,9 @@ class ServiceClient(HTTPClient):
             "Accept": "application/json",
         }
 
-        super().__init__(base_url=base_url, config=config, auth=auth, default_headers=default_headers)
+        super().__init__(
+            base_url=base_url, config=config, auth=auth, default_headers=default_headers
+        )
 
         self.service_name = service_name
 
@@ -438,7 +464,6 @@ class ServiceClient(HTTPClient):
         else:
             return {"error": response.error, "status": response.status}
 
-
 # 预定义的服务客户端
 class AIClient(ServiceClient):
     """AI策略服务客户端"""
@@ -452,8 +477,9 @@ class AIClient(ServiceClient):
 
     async def generate_strategy(self, description: str, **kwargs) -> APIResponse:
         """生成策略"""
-        return await self.post("/api/v1/strategy/generate", json={"description": description, **kwargs})
-
+        return await self.post(
+            "/api/v1/strategy/generate", json={"description": description, **kwargs}
+        )
 
 class MarketDataClient(ServiceClient):
     """市场数据服务客户端"""
@@ -469,13 +495,11 @@ class MarketDataClient(ServiceClient):
         """获取市场概览"""
         return await self.get("/api/v1/market/overview")
 
-
 class TradingClient(ServiceClient):
     """交易服务客户端"""
 
     def __init__(self):
         super().__init__(service_name="trading")
-
 
 # 客户端工厂
 class ClientFactory:
@@ -501,12 +525,10 @@ class ClientFactory:
         """创建通用服务客户端"""
         return ServiceClient(service_name, **kwargs)
 
-
 # 全局客户端实例（已弃用，建议使用ClientFactory）
 _ai_client: AIClient | None = None
 _market_data_client: MarketDataClient | None = None
 _trading_client: TradingClient | None = None
-
 
 def get_ai_client(api_key: str | None = None) -> AIClient:
     """获取AI客户端（已弃用，建议使用ClientFactory.create_ai_client）"""
@@ -515,14 +537,12 @@ def get_ai_client(api_key: str | None = None) -> AIClient:
         _ai_client = ClientFactory.create_ai_client(api_key)
     return _ai_client
 
-
 def get_market_data_client() -> MarketDataClient:
     """获取市场数据客户端（已弃用，建议使用ClientFactory.create_market_data_client）"""
     global _market_data_client
     if _market_data_client is None:
         _market_data_client = ClientFactory.create_market_data_client()
     return _market_data_client
-
 
 def get_trading_client() -> TradingClient:
     """获取交易客户端（已弃用，建议使用ClientFactory.create_trading_client）"""

@@ -53,7 +53,6 @@ DEFAULT_ZERO_VOLUME_PCT_THRESHOLD = float(os.getenv("ETL_ALIGN_ZERO_VOL_PCT", "0
 # 参考股票池路径（可选）
 REFERENCE_SYMBOLS_PATH = os.getenv("ETL_REFERENCE_SYMBOLS_PATH", "")
 
-
 # ============================================================
 # 异常检测结果数据结构
 # ============================================================
@@ -68,7 +67,6 @@ class AlignmentAnomaly:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
-
 
 # ============================================================
 # 参考股票池加载
@@ -118,10 +116,9 @@ def load_reference_symbols() -> set[str]:
             except Exception as exc:
                 logger.debug("margin_stock_pool 加载失败: %s", exc)
     except Exception:
-        pass
+        logger.debug("ignored exception", exc_info=True)
 
     return set()
-
 
 # ============================================================
 # 异常检测核心
@@ -139,7 +136,6 @@ async def _get_latest_trade_date() -> Optional[date]:
         logger.error("获取最新交易日失败: %s", exc)
         return None
 
-
 async def _get_latest_symbols(trade_date: date) -> set[str]:
     sql = text(
         "SELECT DISTINCT symbol FROM stock_daily_latest WHERE trade_date = :td"
@@ -151,7 +147,6 @@ async def _get_latest_symbols(trade_date: date) -> set[str]:
     except Exception as exc:
         logger.error("获取最新交易日股票列表失败: %s", exc)
         return set()
-
 
 async def _get_historical_max_symbols(lookback_days: int = 30) -> set[str]:
     """获取最近 N 天内出现过的所有股票（作为兜底基准）"""
@@ -172,7 +167,6 @@ async def _get_historical_max_symbols(lookback_days: int = 30) -> set[str]:
     except Exception as exc:
         logger.error("获取历史股票集合失败: %s", exc)
         return set()
-
 
 async def _detect_symbol_mismatch(
     latest_date: date, latest_symbols: set[str]
@@ -220,7 +214,6 @@ async def _detect_symbol_mismatch(
         detected_at=datetime.now(timezone.utc).isoformat(),
     )
 
-
 async def _detect_date_lag(latest_date: Optional[date]) -> Optional[AlignmentAnomaly]:
     """检测最新日期与当前交易日差异超过阈值"""
     if latest_date is None:
@@ -264,7 +257,6 @@ async def _detect_date_lag(latest_date: Optional[date]) -> Optional[AlignmentAno
         },
         detected_at=datetime.now(timezone.utc).isoformat(),
     )
-
 
 async def _detect_price_anomaly(latest_date: date) -> list[AlignmentAnomaly]:
     """检测价格异常（价格<0、成交量为0但价格变动）"""
@@ -362,7 +354,6 @@ async def _detect_price_anomaly(latest_date: date) -> list[AlignmentAnomaly]:
 
     return anomalies
 
-
 # ============================================================
 # 主检测入口
 # ============================================================
@@ -421,7 +412,6 @@ async def detect_alignment_anomalies() -> dict[str, Any]:
 
     return {"anomalies": anomaly_dicts, "summary": summary}
 
-
 # ============================================================
 # CLI 入口
 # ============================================================
@@ -444,7 +434,6 @@ def _cli() -> int:
         for a in result["anomalies"]:
             print(f"  [{a['level']}] {a['category']}: {a['title']}")
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(_cli())

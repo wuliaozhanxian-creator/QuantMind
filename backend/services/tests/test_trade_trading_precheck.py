@@ -164,7 +164,9 @@ async def test_trading_precheck_fails_when_model_missing(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_trading_precheck_fails_without_pg_snapshot_even_with_heartbeat(monkeypatch, tmp_path):
+async def test_trading_precheck_fails_without_pg_snapshot_even_with_heartbeat(
+    monkeypatch, tmp_path
+):
     model_dir = tmp_path / "model_qlib"
     model_dir.mkdir(parents=True)
     (model_dir / "model.pkl").write_bytes(b"fake_model")
@@ -196,12 +198,16 @@ async def test_trading_precheck_fails_without_pg_snapshot_even_with_heartbeat(mo
     result = await run_trading_readiness_precheck(
         fake_db,
         mode="REAL",
-        redis_client=_FakeRedisClient({"trade:agent:heartbeat:default:00001001": '{"timestamp": 9999999999}'}),
+        redis_client=_FakeRedisClient(
+            {"trade:agent:heartbeat:default:00001001": '{"timestamp": 9999999999}'}
+        ),
         user_id="1001",
         tenant_id="default",
     )
 
-    qmt_item = next(item for item in result["items"] if item["key"] == "qmt_agent_online")
+    qmt_item = next(
+        item for item in result["items"] if item["key"] == "qmt_agent_online"
+    )
     assert qmt_item["passed"] is False
     assert "PostgreSQL 实盘账户快照" in qmt_item["detail"]
 
@@ -225,6 +231,7 @@ async def test_trading_precheck_shadow_skips_qmt(monkeypatch, tmp_path):
         "backend.services.trade.services.trading_precheck_service.k8s_manager",
         real_preflight.k8s_manager,
     )
+
     # Mock signal readiness service to avoid database connection issues
     async def _fake_signal_readiness(*_args, **_kwargs):
         return {
@@ -234,6 +241,7 @@ async def test_trading_precheck_shadow_skips_qmt(monkeypatch, tmp_path):
             "trading_permission": "allowed",
             "blocking": False,
         }
+
     monkeypatch.setattr(
         "backend.services.trade.services.signal_readiness_service.signal_readiness_service.evaluate",
         _fake_signal_readiness,
@@ -288,13 +296,19 @@ async def test_fetch_latest_real_account_snapshot_returns_ledger_metrics():
 
     assert snapshot is not None
     assert snapshot["monthly_pnl"] == pytest.approx(1352149.35, rel=1e-6)
-    assert snapshot["daily_return"] == pytest.approx((21852149.35 - 21500000.0) / 21500000.0 * 100.0, rel=1e-6)
-    assert snapshot["total_return"] == pytest.approx((21852149.35 - 21000000.0) / 21000000.0 * 100.0, rel=1e-6)
+    assert snapshot["daily_return"] == pytest.approx(
+        (21852149.35 - 21500000.0) / 21500000.0 * 100.0, rel=1e-6
+    )
+    assert snapshot["total_return"] == pytest.approx(
+        (21852149.35 - 21000000.0) / 21000000.0 * 100.0, rel=1e-6
+    )
 
 
 @pytest.mark.asyncio
 async def test_account_daily_ledger_route_uses_current_account_id(monkeypatch):
-    auth = AuthContext(user_id="1001", tenant_id="default", raw_sub="1001", roles=["user"])
+    auth = AuthContext(
+        user_id="1001", tenant_id="default", raw_sub="1001", roles=["user"]
+    )
     captured = {}
 
     async def _fake_latest_snapshot(*_args, **_kwargs):
@@ -335,9 +349,15 @@ async def test_account_daily_ledger_route_uses_current_account_id(monkeypatch):
     async def _fake_backfill(*_args, **_kwargs):
         return 0
 
-    monkeypatch.setattr(real_ledger, "_fetch_latest_real_account_snapshot", _fake_latest_snapshot)
-    monkeypatch.setattr(real_ledger, "list_real_account_daily_ledgers", _fake_list_ledgers)
-    monkeypatch.setattr(real_ledger, "backfill_daily_ledgers_from_snapshots", _fake_backfill)
+    monkeypatch.setattr(
+        real_ledger, "_fetch_latest_real_account_snapshot", _fake_latest_snapshot
+    )
+    monkeypatch.setattr(
+        real_ledger, "list_real_account_daily_ledgers", _fake_list_ledgers
+    )
+    monkeypatch.setattr(
+        real_ledger, "backfill_daily_ledgers_from_snapshots", _fake_backfill
+    )
 
     # Pass account_id explicitly as a string to avoid Query object being passed
     result = await real_ledger.get_account_daily_ledger(
@@ -356,9 +376,13 @@ async def test_account_daily_ledger_route_uses_current_account_id(monkeypatch):
 @pytest.mark.asyncio
 async def test_start_trading_rejects_real_when_precheck_failed(monkeypatch):
     monkeypatch.setattr(
-        real_lifecycle, "_normalize_identity", lambda auth, user_id=None, tenant_id=None: ("1001", "default")
+        real_lifecycle,
+        "_normalize_identity",
+        lambda auth, user_id=None, tenant_id=None: ("1001", "default"),
     )
-    monkeypatch.setattr(real_lifecycle, "_schedule_user_notification", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        real_lifecycle, "_schedule_user_notification", lambda **_kwargs: None
+    )
 
     async def _fake_strategy_detail(strategy_id, user_id):
         return {
@@ -381,10 +405,16 @@ async def test_start_trading_rejects_real_when_precheck_failed(monkeypatch):
             ],
         }
 
-    monkeypatch.setattr(real_lifecycle, "_resolve_strategy_detail", _fake_strategy_detail)
-    monkeypatch.setattr(real_lifecycle, "run_trading_readiness_precheck", _fake_precheck)
+    monkeypatch.setattr(
+        real_lifecycle, "_resolve_strategy_detail", _fake_strategy_detail
+    )
+    monkeypatch.setattr(
+        real_lifecycle, "run_trading_readiness_precheck", _fake_precheck
+    )
 
-    auth = AuthContext(user_id="1001", tenant_id="default", raw_sub="1001", roles=["user"])
+    auth = AuthContext(
+        user_id="1001", tenant_id="default", raw_sub="1001", roles=["user"]
+    )
 
     with pytest.raises(HTTPException) as exc:
         await real_lifecycle.start_trading(
@@ -408,9 +438,13 @@ async def test_start_trading_rejects_real_when_precheck_failed(monkeypatch):
 @pytest.mark.asyncio
 async def test_start_trading_simulation_requires_readiness_precheck(monkeypatch):
     monkeypatch.setattr(
-        real_lifecycle, "_normalize_identity", lambda auth, user_id=None, tenant_id=None: ("1001", "default")
+        real_lifecycle,
+        "_normalize_identity",
+        lambda auth, user_id=None, tenant_id=None: ("1001", "default"),
     )
-    monkeypatch.setattr(real_lifecycle, "_schedule_user_notification", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        real_lifecycle, "_schedule_user_notification", lambda **_kwargs: None
+    )
 
     async def _fake_strategy_detail(strategy_id, user_id):
         return {
@@ -429,8 +463,12 @@ async def test_start_trading_simulation_requires_readiness_precheck(monkeypatch)
         def submit_strategy(self, **_kwargs):
             return "sandbox-run-id"
 
-    monkeypatch.setattr(real_lifecycle, "_resolve_strategy_detail", _fake_strategy_detail)
-    monkeypatch.setattr(real_lifecycle, "run_trading_readiness_precheck", _fake_precheck)
+    monkeypatch.setattr(
+        real_lifecycle, "_resolve_strategy_detail", _fake_strategy_detail
+    )
+    monkeypatch.setattr(
+        real_lifecycle, "run_trading_readiness_precheck", _fake_precheck
+    )
     monkeypatch.setitem(
         __import__("sys").modules,
         "backend.services.trade.sandbox.manager",
@@ -446,7 +484,9 @@ async def test_start_trading_simulation_requires_readiness_precheck(monkeypatch)
             self.writes[key] = value
 
     redis_wrapper = type("R", (), {"client": _FakeRedisClientWithSet()})()
-    auth = AuthContext(user_id="1001", tenant_id="default", raw_sub="1001", roles=["user"])
+    auth = AuthContext(
+        user_id="1001", tenant_id="default", raw_sub="1001", roles=["user"]
+    )
 
     with pytest.raises(HTTPException) as exc:
         await real_lifecycle.start_trading(
@@ -469,28 +509,54 @@ async def test_start_trading_simulation_requires_readiness_precheck(monkeypatch)
 @pytest.mark.asyncio
 async def test_start_trading_launches_runtime_container(monkeypatch, tmp_path):
     monkeypatch.setattr(
-        real_lifecycle, "_normalize_identity", lambda auth, user_id=None, tenant_id=None: ("1001", "default")
+        real_lifecycle,
+        "_normalize_identity",
+        lambda auth, user_id=None, tenant_id=None: ("1001", "default"),
     )
-    monkeypatch.setattr(real_lifecycle, "_schedule_user_notification", lambda **_kwargs: None)
-    monkeypatch.setattr(real_lifecycle, "_schedule_status_writeback", lambda **_kwargs: None)
-    monkeypatch.setattr(real_lifecycle, "get_strategy_path", lambda user_id: str(tmp_path / "strategies" / user_id))
+    monkeypatch.setattr(
+        real_lifecycle, "_schedule_user_notification", lambda **_kwargs: None
+    )
+    monkeypatch.setattr(
+        real_lifecycle, "_schedule_status_writeback", lambda **_kwargs: None
+    )
+    monkeypatch.setattr(
+        real_lifecycle,
+        "get_strategy_path",
+        lambda user_id: str(tmp_path / "strategies" / user_id),
+    )
 
     async def _fake_strategy_detail(strategy_id, user_id):
         return {
             "strategy_name": "demo_strategy",
             "execution_config": {"max_buy_drop": -0.03, "stop_loss": -0.08},
-            "live_trade_config": {"enabled_sessions": ["PM"], "sell_time": "14:30", "buy_time": "14:45"},
+            "live_trade_config": {
+                "enabled_sessions": ["PM"],
+                "sell_time": "14:30",
+                "buy_time": "14:45",
+            },
             "code": "print('demo')",
         }
 
     async def _fake_precheck(*_args, **_kwargs):
         return {"passed": True, "checked_at": "2026-03-10T15:30:00", "items": []}
 
-    monkeypatch.setattr(real_lifecycle, "_resolve_strategy_detail", _fake_strategy_detail)
-    monkeypatch.setattr(real_lifecycle, "run_trading_readiness_precheck", _fake_precheck)
+    monkeypatch.setattr(
+        real_lifecycle, "_resolve_strategy_detail", _fake_strategy_detail
+    )
+    monkeypatch.setattr(
+        real_lifecycle, "run_trading_readiness_precheck", _fake_precheck
+    )
     captured = {}
 
-    def _fake_create_deployment(user_id, strategy_file_path, run_id="default", exec_config=None, tenant_id="default", live_trade_config=None, strategy_id=None):
+    def _fake_create_deployment(
+        user_id,
+        strategy_file_path,
+        run_id="default",
+        exec_config=None,
+        tenant_id="default",
+        live_trade_config=None,
+        strategy_id=None,
+    ):
         captured["user_id"] = user_id
         captured["strategy_file_path"] = strategy_file_path
         captured["run_id"] = run_id
@@ -500,7 +566,9 @@ async def test_start_trading_launches_runtime_container(monkeypatch, tmp_path):
         captured["strategy_id"] = strategy_id
         return {"status": "success", "message": "Container demo started"}
 
-    monkeypatch.setattr(real_lifecycle.k8s_manager, "create_deployment", _fake_create_deployment)
+    monkeypatch.setattr(
+        real_lifecycle.k8s_manager, "create_deployment", _fake_create_deployment
+    )
 
     class _FakeRedisClientWithSet(_FakeRedisClient):
         def __init__(self):
@@ -514,7 +582,9 @@ async def test_start_trading_launches_runtime_container(monkeypatch, tmp_path):
             self.writes.pop(key, None)
 
     redis_wrapper = type("R", (), {"client": _FakeRedisClientWithSet()})()
-    auth = AuthContext(user_id="1001", tenant_id="default", raw_sub="1001", roles=["user"])
+    auth = AuthContext(
+        user_id="1001", tenant_id="default", raw_sub="1001", roles=["user"]
+    )
 
     result = await real_lifecycle.start_trading(
         user_id=None,
@@ -537,13 +607,17 @@ async def test_start_trading_launches_runtime_container(monkeypatch, tmp_path):
     assert captured["strategy_file_path"].endswith(".py")
     assert captured["strategy_id"] == "1"
 
-    stored = json.loads(redis_wrapper.client.writes[real_utils._active_strategy_key("default", "1001")])
+    stored = json.loads(
+        redis_wrapper.client.writes[real_utils._active_strategy_key("default", "1001")]
+    )
     assert stored["launch_result"]["status"] == "success"
     assert stored["strategy_name"] == "demo_strategy"
 
 
 def test_normalize_live_trade_config_accepts_defaults():
-    result = real_utils._normalize_live_trade_config({}, real_utils._default_live_trade_config())
+    result = real_utils._normalize_live_trade_config(
+        {}, real_utils._default_live_trade_config()
+    )
 
     assert result["rebalance_days"] == 3
     assert result["schedule_type"] == "interval"
@@ -584,7 +658,9 @@ def test_normalize_live_trade_config_rejects_invalid_rebalance_days():
 
 
 @pytest.mark.asyncio
-async def test_trading_precheck_simulation_keeps_base_checks_and_inference_database(monkeypatch, tmp_path):
+async def test_trading_precheck_simulation_keeps_base_checks_and_inference_database(
+    monkeypatch, tmp_path
+):
     model_dir = tmp_path / "model_qlib"
     model_dir.mkdir(parents=True)
     (model_dir / "model.pkl").write_bytes(b"fake_model")
@@ -594,6 +670,7 @@ async def test_trading_precheck_simulation_keeps_base_checks_and_inference_datab
         "backend.services.trade.services.trading_precheck_service._check_stream_series_freshness",
         lambda _redis: (True, "stream_ready"),
     )
+
     # Mock signal readiness service to avoid database connection issues
     async def _fake_signal_readiness(*_args, **_kwargs):
         return {
@@ -603,6 +680,7 @@ async def test_trading_precheck_simulation_keeps_base_checks_and_inference_datab
             "trading_permission": "allowed",
             "blocking": False,
         }
+
     monkeypatch.setattr(
         "backend.services.trade.services.signal_readiness_service.signal_readiness_service.evaluate",
         _fake_signal_readiness,
@@ -648,7 +726,11 @@ async def test_trading_precheck_simulation_keeps_base_checks_and_inference_datab
 
 @pytest.mark.asyncio
 async def test_preflight_simulation_includes_inference_database_check(monkeypatch):
-    monkeypatch.setattr(real_preflight, "_normalize_identity", lambda auth, user_id=None, tenant_id=None: ("1001", "default"))
+    monkeypatch.setattr(
+        real_preflight,
+        "_normalize_identity",
+        lambda auth, user_id=None, tenant_id=None: ("1001", "default"),
+    )
 
     async def _noop_snapshot(*_args, **_kwargs):
         return None
@@ -666,7 +748,9 @@ async def test_preflight_simulation_includes_inference_database_check(monkeypatc
         ]
     )
 
-    auth = AuthContext(user_id="1001", tenant_id="default", raw_sub="1001", roles=["user"])
+    auth = AuthContext(
+        user_id="1001", tenant_id="default", raw_sub="1001", roles=["user"]
+    )
     result = await real_preflight.preflight_check(
         trading_mode="SIMULATION",
         user_id=None,
@@ -692,41 +776,45 @@ async def test_get_account_uses_pg_snapshot_only(monkeypatch):
     monkeypatch.setattr(
         real_preflight,
         "_fetch_latest_real_account_snapshot",
-        AsyncMock(return_value={
-            "user_id": "00001001",
-            "tenant_id": "default",
-            "account_id": "8886664999",
-            "snapshot_at": datetime(2026, 4, 9, 12, 3, 4).isoformat(),
-            "snapshot_date": date(2026, 4, 9).isoformat(),
-            "snapshot_month": "2026-04",
-            "total_asset": 21852149.35,
-            "available_cash": 5356712.35,
-            "cash": 5356712.35,
-            "market_value": 16495437.0,
-            "today_pnl": 352149.35,
-            "daily_pnl": 352149.35,
-            "total_pnl": 852149.35,
-            "floating_pnl": 0.0,
-            "initial_equity": 21000000.0,
-            "day_open_equity": 21500000.0,
-            "month_open_equity": 20500000.0,
-            "is_online": True,
-            "source": "qmt_bridge",
-            "payload_json": {
+        AsyncMock(
+            return_value={
+                "user_id": "00001001",
+                "tenant_id": "default",
+                "account_id": "8886664999",
+                "snapshot_at": datetime(2026, 4, 9, 12, 3, 4).isoformat(),
+                "snapshot_date": date(2026, 4, 9).isoformat(),
+                "snapshot_month": "2026-04",
+                "total_asset": 21852149.35,
+                "available_cash": 5356712.35,
+                "cash": 5356712.35,
+                "market_value": 16495437.0,
+                "today_pnl": 352149.35,
+                "daily_pnl": 352149.35,
+                "total_pnl": 852149.35,
+                "floating_pnl": 0.0,
+                "initial_equity": 21000000.0,
+                "day_open_equity": 21500000.0,
+                "month_open_equity": 20500000.0,
+                "is_online": True,
+                "source": "qmt_bridge",
+                "payload_json": {
+                    "positions": [
+                        {"symbol": "000001.SZ", "volume": 100},
+                        {"symbol": "600000.SH", "volume": 200},
+                    ]
+                },
                 "positions": [
                     {"symbol": "000001.SZ", "volume": 100},
                     {"symbol": "600000.SH", "volume": 200},
-                ]
-            },
-            "positions": [
-                {"symbol": "000001.SZ", "volume": 100},
-                {"symbol": "600000.SH", "volume": 200},
-            ],
-            "position_count": 2,
-        }),
+                ],
+                "position_count": 2,
+            }
+        ),
     )
 
-    auth = AuthContext(user_id="1001", tenant_id="default", raw_sub="1001", roles=["user"])
+    auth = AuthContext(
+        user_id="1001", tenant_id="default", raw_sub="1001", roles=["user"]
+    )
 
     result = await real_preflight.get_account(
         tenant_id=None,
@@ -755,9 +843,15 @@ async def test_get_account_returns_404_without_pg_snapshot(monkeypatch):
         "_normalize_identity",
         lambda auth, user_id=None, tenant_id=None: ("00001001", "default"),
     )
-    monkeypatch.setattr(real_preflight, "_fetch_latest_real_account_snapshot", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        real_preflight,
+        "_fetch_latest_real_account_snapshot",
+        AsyncMock(return_value=None),
+    )
 
-    auth = AuthContext(user_id="1001", tenant_id="default", raw_sub="1001", roles=["user"])
+    auth = AuthContext(
+        user_id="1001", tenant_id="default", raw_sub="1001", roles=["user"]
+    )
     with pytest.raises(HTTPException) as exc:
         await real_preflight.get_account(
             tenant_id=None,
@@ -907,11 +1001,17 @@ async def test_get_account_marks_snapshot_offline_when_stale(monkeypatch):
         "_normalize_identity",
         lambda auth, user_id=None, tenant_id=None: ("00001001", "default"),
     )
-    monkeypatch.setattr(real_preflight, "_fetch_latest_real_account_snapshot", AsyncMock(return_value=old_snapshot))
+    monkeypatch.setattr(
+        real_preflight,
+        "_fetch_latest_real_account_snapshot",
+        AsyncMock(return_value=old_snapshot),
+    )
     monkeypatch.setattr(real_preflight.time, "time", lambda: fixed_now)
     monkeypatch.setenv("QMT_AGENT_ACCOUNT_STALE_THRESHOLD_SEC", "120")
 
-    auth = AuthContext(user_id="1001", tenant_id="default", raw_sub="1001", roles=["user"])
+    auth = AuthContext(
+        user_id="1001", tenant_id="default", raw_sub="1001", roles=["user"]
+    )
     result = await real_preflight.get_account(
         tenant_id=None,
         user_id=None,
@@ -939,7 +1039,11 @@ async def test_qmt_agent_online_treats_naive_snapshot_timestamp_as_utc(monkeypat
 
     ok, detail = await precheck_service._check_qmt_agent_online(
         _FakeDb([{"ok": 1}]),
-        _FakeRedisClient({"trade:agent:heartbeat:default:00001001": f'{{"timestamp": {heartbeat_ts}}}'}),
+        _FakeRedisClient(
+            {
+                "trade:agent:heartbeat:default:00001001": f'{{"timestamp": {heartbeat_ts}}}'
+            }
+        ),
         "default",
         "1001",
     )
@@ -949,7 +1053,9 @@ async def test_qmt_agent_online_treats_naive_snapshot_timestamp_as_utc(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_bridge_account_uses_latest_valid_snapshot_for_portfolio_sync_when_guard_rejects(monkeypatch):
+async def test_bridge_account_uses_latest_valid_snapshot_for_portfolio_sync_when_guard_rejects(
+    monkeypatch,
+):
     payload = bridge_router.QMTBridgeAccountPayload(
         account_id="8886664999",
         total_asset=0.0,
@@ -988,10 +1094,14 @@ async def test_bridge_account_uses_latest_valid_snapshot_for_portfolio_sync_when
             "day_open_equity": 21852149.35,
             "month_open_equity": 21000000.0,
         },
-        "positions": [{"symbol": "000001.SZ", "volume": 100, "symbol_name": "平安银行"}],
+        "positions": [
+            {"symbol": "000001.SZ", "volume": 100, "symbol_name": "平安银行"}
+        ],
         "position_count": 1,
         "payload_json": {
-            "positions": [{"symbol": "000001.SZ", "volume": 100, "symbol_name": "平安银行"}],
+            "positions": [
+                {"symbol": "000001.SZ", "volume": 100, "symbol_name": "平安银行"}
+            ],
             "liabilities": 123.0,
             "short_market_value": 45.0,
         },
@@ -999,10 +1109,22 @@ async def test_bridge_account_uses_latest_valid_snapshot_for_portfolio_sync_when
 
     captured_cache = {}
     sync_mock = AsyncMock()
-    monkeypatch.setattr(bridge_router, "_compute_account_metrics", AsyncMock(return_value=(metrics, metrics_meta)))
-    monkeypatch.setattr(bridge_router, "_fetch_latest_real_account_snapshot", AsyncMock(return_value=latest_snapshot))
+    monkeypatch.setattr(
+        bridge_router,
+        "_compute_account_metrics",
+        AsyncMock(return_value=(metrics, metrics_meta)),
+    )
+    monkeypatch.setattr(
+        bridge_router,
+        "_fetch_latest_real_account_snapshot",
+        AsyncMock(return_value=latest_snapshot),
+    )
     monkeypatch.setattr(bridge_router, "_sync_qmt_account_to_db", sync_mock)
-    monkeypatch.setattr(bridge_router, "write_trade_account_cache", lambda _redis, _tenant, _user, info: captured_cache.update(info))
+    monkeypatch.setattr(
+        bridge_router,
+        "write_trade_account_cache",
+        lambda _redis, _tenant, _user, info: captured_cache.update(info),
+    )
 
     class _FakeRedis:
         def publish_event(self, *_args, **_kwargs):
@@ -1012,7 +1134,9 @@ async def test_bridge_account_uses_latest_valid_snapshot_for_portfolio_sync_when
         async def commit(self):
             return None
 
-    ctx = SimpleNamespace(tenant_id="default", user_id="00001001", account_id="8886664999")
+    ctx = SimpleNamespace(
+        tenant_id="default", user_id="00001001", account_id="8886664999"
+    )
     result = await bridge_router.upsert_qmt_account_snapshot(
         payload=payload,
         ctx=ctx,
@@ -1025,14 +1149,21 @@ async def test_bridge_account_uses_latest_valid_snapshot_for_portfolio_sync_when
     sync_kwargs = sync_mock.await_args.kwargs
     assert sync_kwargs["total_asset"] == 21852149.35
     assert sync_kwargs["available_cash"] == 5356712.35
-    assert sync_kwargs["position_rows"] == [{"symbol": "000001.SZ", "volume": 100, "symbol_name": "平安银行"}]
+    assert sync_kwargs["position_rows"] == [
+        {"symbol": "000001.SZ", "volume": 100, "symbol_name": "平安银行"}
+    ]
     assert captured_cache["snapshot_guard_triggered"] is True
     assert captured_cache["metrics_meta"]["quality"] == "guard_rejected"
-    assert captured_cache["metrics_meta"]["snapshot_guard"]["fallback_sync_source"] == "latest_valid_snapshot"
+    assert (
+        captured_cache["metrics_meta"]["snapshot_guard"]["fallback_sync_source"]
+        == "latest_valid_snapshot"
+    )
 
 
 @pytest.mark.asyncio
-async def test_bridge_account_skips_portfolio_sync_when_guard_rejects_and_no_fallback(monkeypatch):
+async def test_bridge_account_skips_portfolio_sync_when_guard_rejects_and_no_fallback(
+    monkeypatch,
+):
     payload = bridge_router.QMTBridgeAccountPayload(
         account_id="8886664999",
         total_asset=0.0,
@@ -1057,8 +1188,16 @@ async def test_bridge_account_skips_portfolio_sync_when_guard_rejects_and_no_fal
     }
 
     sync_mock = AsyncMock()
-    monkeypatch.setattr(bridge_router, "_compute_account_metrics", AsyncMock(return_value=(metrics, metrics_meta)))
-    monkeypatch.setattr(bridge_router, "_fetch_latest_real_account_snapshot", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        bridge_router,
+        "_compute_account_metrics",
+        AsyncMock(return_value=(metrics, metrics_meta)),
+    )
+    monkeypatch.setattr(
+        bridge_router,
+        "_fetch_latest_real_account_snapshot",
+        AsyncMock(return_value=None),
+    )
     monkeypatch.setattr(bridge_router, "_sync_qmt_account_to_db", sync_mock)
     cache_mock = AsyncMock()
     monkeypatch.setattr(bridge_router, "write_trade_account_cache", cache_mock)
@@ -1071,7 +1210,9 @@ async def test_bridge_account_skips_portfolio_sync_when_guard_rejects_and_no_fal
         async def commit(self):
             return None
 
-    ctx = SimpleNamespace(tenant_id="default", user_id="00001001", account_id="8886664999")
+    ctx = SimpleNamespace(
+        tenant_id="default", user_id="00001001", account_id="8886664999"
+    )
     result = await bridge_router.upsert_qmt_account_snapshot(
         payload=payload,
         ctx=ctx,
@@ -1085,15 +1226,18 @@ async def test_bridge_account_skips_portfolio_sync_when_guard_rejects_and_no_fal
 
 
 def test_snapshot_guard_detects_suspicious_asset_jump_with_positions():
-    assert is_suspicious_asset_jump(
-        total_asset=2_000_000,
-        cash=500_000,
-        market_value=0.0,
-        prev_total_asset=21_000_000,
-        prev_cash=5_000_000,
-        prev_market_value=16_000_000,
-        payload_json={"positions": [{"symbol": "000001.SZ", "volume": 100}]},
-    ) is True
+    assert (
+        is_suspicious_asset_jump(
+            total_asset=2_000_000,
+            cash=500_000,
+            market_value=0.0,
+            prev_total_asset=21_000_000,
+            prev_cash=5_000_000,
+            prev_market_value=16_000_000,
+            payload_json={"positions": [{"symbol": "000001.SZ", "volume": 100}]},
+        )
+        is True
+    )
 
 
 def test_snapshot_guard_rejects_zero_total_with_nonempty_assets():
@@ -1118,15 +1262,18 @@ def test_snapshot_guard_rejects_zero_total_with_nonempty_assets():
 
 
 def test_snapshot_guard_allows_liquidation_into_cash():
-    assert is_suspicious_asset_jump(
-        total_asset=21_000_000,
-        cash=21_000_000,
-        market_value=0.0,
-        prev_total_asset=21_000_000,
-        prev_cash=5_000_000,
-        prev_market_value=16_000_000,
-        payload_json={"positions": []},
-    ) is False
+    assert (
+        is_suspicious_asset_jump(
+            total_asset=21_000_000,
+            cash=21_000_000,
+            market_value=0.0,
+            prev_total_asset=21_000_000,
+            prev_cash=5_000_000,
+            prev_market_value=16_000_000,
+            payload_json={"positions": []},
+        )
+        is False
+    )
 
 
 @pytest.mark.asyncio
@@ -1155,7 +1302,9 @@ async def test_account_daily_ledger_exposes_settlement_metadata(monkeypatch):
             "settlement_snapshot_count": 12,
         }
 
-    auth = AuthContext(user_id="1001", tenant_id="default", raw_sub="1001", roles=["user"])
+    auth = AuthContext(
+        user_id="1001", tenant_id="default", raw_sub="1001", roles=["user"]
+    )
     monkeypatch.setattr(
         real_ledger,
         "_normalize_identity",

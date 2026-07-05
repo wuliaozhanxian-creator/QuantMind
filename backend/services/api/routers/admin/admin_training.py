@@ -5,7 +5,7 @@ import os
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 from docker import DockerClient
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
@@ -14,15 +14,22 @@ from sqlalchemy import select, text
 
 from backend.services.api.routers.admin.db import TrainingJobRecord
 from backend.services.api.user_app.middleware.auth import require_admin
-from backend.services.engine.training.local_docker_orchestrator import LocalDockerOrchestrator
+from backend.services.engine.training.local_docker_orchestrator import (
+    LocalDockerOrchestrator,
+)
 from backend.services.engine.training.training_log_stream import TrainingRunLogStream
 from backend.shared.database_manager_v2 import get_session
 from backend.shared.model_registry import model_registry_service
 from .admin_training_utils import *
-from .admin_training_utils import _resolve_admin_scope, _SetDefaultModelRequest, _SetStrategyBindingRequest
+from .admin_training_utils import (
+    _resolve_admin_scope,
+    _SetDefaultModelRequest,
+    _SetStrategyBindingRequest,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
 @router.get("/user-models", summary="管理员查看用户模型列表（兼容别名）")
 async def admin_list_user_models(
     tenant_id: str | None = None,
@@ -40,8 +47,12 @@ async def admin_list_user_models(
         user_id=scope_user,
         include_archived=include_archived,
     )
-    return {"tenant_id": scope_tenant, "user_id": scope_user, "items": items, "total": len(items)}
-
+    return {
+        "tenant_id": scope_tenant,
+        "user_id": scope_user,
+        "items": items,
+        "total": len(items),
+    }
 
 @router.get("/user-models/default", summary="管理员查看用户默认模型（兼容别名）")
 async def admin_get_default_model(
@@ -54,11 +65,12 @@ async def admin_get_default_model(
         tenant_id=tenant_id,
         user_id=user_id,
     )
-    model = await model_registry_service.get_default_model(tenant_id=scope_tenant, user_id=scope_user)
+    model = await model_registry_service.get_default_model(
+        tenant_id=scope_tenant, user_id=scope_user
+    )
     if not model:
         raise HTTPException(status_code=404, detail="Default model not found")
     return model
-
 
 @router.patch("/user-models/default", summary="管理员设置用户默认模型（兼容别名）")
 async def admin_set_default_model(
@@ -81,7 +93,6 @@ async def admin_set_default_model(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-
 @router.get("/user-models/{model_id}", summary="管理员查看用户单模型（兼容别名）")
 async def admin_get_user_model(
     model_id: str,
@@ -94,13 +105,16 @@ async def admin_get_user_model(
         tenant_id=tenant_id,
         user_id=user_id,
     )
-    model = await model_registry_service.get_model(tenant_id=scope_tenant, user_id=scope_user, model_id=model_id)
+    model = await model_registry_service.get_model(
+        tenant_id=scope_tenant, user_id=scope_user, model_id=model_id
+    )
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
     return model
 
-
-@router.post("/user-models/{model_id}/archive", summary="管理员归档用户模型（兼容别名）")
+@router.post(
+    "/user-models/{model_id}/archive", summary="管理员归档用户模型（兼容别名）"
+)
 async def admin_archive_user_model(
     model_id: str,
     tenant_id: str | None = None,
@@ -120,7 +134,6 @@ async def admin_archive_user_model(
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-
 
 @router.get(
     "/user-models/strategy-bindings/{strategy_id}",
@@ -145,7 +158,6 @@ async def admin_get_strategy_binding(
     if not binding:
         raise HTTPException(status_code=404, detail="Strategy binding not found")
     return binding
-
 
 @router.put(
     "/user-models/strategy-bindings/{strategy_id}",
@@ -173,7 +185,6 @@ async def admin_set_strategy_binding(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-
 @router.delete(
     "/user-models/strategy-bindings/{strategy_id}",
     summary="管理员解除用户策略模型绑定（兼容别名）",
@@ -196,7 +207,6 @@ async def admin_delete_strategy_binding(
     )
     return {"deleted": bool(deleted), "strategy_id": strategy_id}
 
-
 @router.post("/run-training", summary="启动云端模型训练任务")
 async def run_training(
     payload: dict[str, Any],
@@ -205,7 +215,6 @@ async def run_training(
 ):
     return await submit_training_job(payload, background_tasks, current_user)
 
-
 @router.get("/training-runs/{run_id}", summary="获取训练任务状态")
 async def get_training_run(
     run_id: str,
@@ -213,7 +222,8 @@ async def get_training_run(
 ):
     return await get_training_run_for_owner(run_id, current_user)
 
-
+# T6.5-P3 residual, M4 migration: 训练容器回调接口仍接收 X-Internal-Call-Secret。
+# M4 迁移后将改为 X-Service-Token（service JWT）。
 @router.post("/training-runs/{run_id}/complete", summary="训练完成回调（内部接口）")
 async def training_complete_callback(
     run_id: str,
@@ -221,7 +231,6 @@ async def training_complete_callback(
     x_internal_call_secret: str = Header(default="", alias="X-Internal-Call-Secret"),
 ):
     return await complete_training_run(run_id, result, x_internal_call_secret)
-
 
 @router.get("/training-jobs", summary="管理员查看训练任务列表")
 async def list_training_jobs(
@@ -260,9 +269,10 @@ async def list_training_jobs(
         ).scalar_one()
 
         rows = (
-            await session.execute(
-                text(
-                    f"""
+            (
+                await session.execute(
+                    text(
+                        f"""
                     SELECT id, tenant_id, user_id, status, progress, instance_id,
                            logs, result, request_payload, created_at, updated_at
                     FROM admin_training_jobs
@@ -270,15 +280,20 @@ async def list_training_jobs(
                     ORDER BY created_at DESC
                     LIMIT :limit OFFSET :offset
                     """
-                ),
-                {**params, "limit": page_size, "offset": offset},
+                    ),
+                    {**params, "limit": page_size, "offset": offset},
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
 
     items = []
     for row in rows:
         result_json = row["result"] if isinstance(row["result"], dict) else {}
-        req_payload = row["request_payload"] if isinstance(row["request_payload"], dict) else {}
+        req_payload = (
+            row["request_payload"] if isinstance(row["request_payload"], dict) else {}
+        )
         model_reg = result_json.get("model_registration") or {}
         items.append(
             {

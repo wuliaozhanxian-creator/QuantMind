@@ -1,2 +1,1 @@
 """Stream market API package."""
-

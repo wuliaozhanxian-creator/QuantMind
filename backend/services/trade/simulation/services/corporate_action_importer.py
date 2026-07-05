@@ -144,8 +144,7 @@ def load_raw_corporate_action_csv(
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
         return [
-            map_raw_corporate_action_row(row, source=resolved_source)
-            for row in reader
+            map_raw_corporate_action_row(row, source=resolved_source) for row in reader
         ]
 
 
@@ -263,9 +262,7 @@ def map_standard_corp_action_row(
                     share_ratio=round(total_bonus_ratio, 6),
                     rights_price=0.0,
                     source=source,
-                    note=_note(
-                        f"stock_bonus={stock_bonus}; stock_gift={stock_gift}"
-                    ),
+                    note=_note(f"stock_bonus={stock_bonus}; stock_gift={stock_gift}"),
                 ),
             )
         )
@@ -288,9 +285,7 @@ def map_standard_corp_action_row(
                     share_ratio=round(allot_num, 6),
                     rights_price=round(allot_price, 6),
                     source=source,
-                    note=_note(
-                        f"allot_num={allot_num}; allot_price={allot_price}"
-                    ),
+                    note=_note(f"allot_num={allot_num}; allot_price={allot_price}"),
                 ),
             )
         )

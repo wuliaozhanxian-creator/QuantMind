@@ -35,6 +35,8 @@ export interface Trade {
 export interface StrategyParameter {
   name: string;
   type: 'number' | 'string' | 'boolean';
+  // TODO(T2.6 后续批次): value 为多态值，由 type 字段区分；
+  // 收敛为判别联合需要同步改造所有算术调用点，暂保留 any。
   value: any;
   min?: number;
   max?: number;
@@ -48,10 +50,10 @@ export interface Strategy {
   description?: string;
   parameters: StrategyParameter[];
   code?: string;
-  // 移除复杂的 context 和函数定义
-  initialize?: (context: any) => void;
-  onBar?: (bar: OHLCV, context: any) => void;
-  finalize?: (context: any) => void;
+  // 移除复杂的 context 和函数定义（复用文件下方定义的 StrategyContext）
+  initialize?: (context: StrategyContext) => void;
+  onBar?: (bar: OHLCV, context: StrategyContext) => void;
+  finalize?: (context: StrategyContext) => void;
 }
 
 /** 回测配置 */
@@ -66,9 +68,29 @@ export interface BacktestConfig {
   riskPerTrade?: number;
 }
 
+/** 权益曲线点 */
+export interface EquityCurvePoint {
+  timestamp: string | number;
+  equity: number;
+}
+
+/** 回测指标 */
+export interface BacktestMetrics {
+  totalReturn?: number;
+  annualizedReturn?: number;
+  maxDrawdown?: number;
+  sharpeRatio?: number;
+  winRate?: number;
+  profitFactor?: number;
+  [key: string]: unknown;
+}
+
 export interface BacktestResult {
   config: BacktestConfig;
   trades: Trade[];
+  // TODO(T2.6 后续批次): equity/metrics/drawdown 在引擎与面板间承载
+  // EquityCurve / PerformanceMetrics / DrawdownAnalysis 等多种结构，
+  // 需统一为单一规范类型后再去除 any。
   equity: any;
   metrics: any;
   drawdown?: any;

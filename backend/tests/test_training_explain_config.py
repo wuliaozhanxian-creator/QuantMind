@@ -1,7 +1,9 @@
 from fastapi import HTTPException
 
 from backend.services.api.training_explain import normalize_explain
-from backend.services.engine.training.local_docker_orchestrator import LocalDockerOrchestrator
+from backend.services.engine.training.local_docker_orchestrator import (
+    LocalDockerOrchestrator,
+)
 
 
 def test_normalize_explain_sets_defaults() -> None:
@@ -15,8 +17,10 @@ def test_normalize_explain_sets_defaults() -> None:
 
 def test_normalize_explain_rejects_invalid_shap_split() -> None:
     try:
-        normalize_explain({"enable_shap": True, "shap_split": "oops", "shap_sample_rows": 30000})
-        assert False, "expected HTTPException for invalid shap_split"
+        normalize_explain(
+            {"enable_shap": True, "shap_split": "oops", "shap_sample_rows": 30000}
+        )
+        raise AssertionError("expected HTTPException for invalid shap_split")
     except HTTPException as exc:
         assert exc.status_code == 422
         assert "explain.shap_split" in str(exc.detail)
@@ -24,8 +28,10 @@ def test_normalize_explain_rejects_invalid_shap_split() -> None:
 
 def test_normalize_explain_rejects_out_of_range_shap_sample_rows() -> None:
     try:
-        normalize_explain({"enable_shap": True, "shap_split": "valid", "shap_sample_rows": 999})
-        assert False, "expected HTTPException for out-of-range shap_sample_rows"
+        normalize_explain(
+            {"enable_shap": True, "shap_split": "valid", "shap_sample_rows": 999}
+        )
+        raise AssertionError("expected HTTPException for out-of-range shap_sample_rows")
     except HTTPException as exc:
         assert exc.status_code == 422
         assert "explain.shap_sample_rows" in str(exc.detail)

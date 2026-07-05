@@ -37,6 +37,7 @@ def warmup_stock_cache():
     """Warmup Redis cache with all stock names from file"""
     try:
         from backend.services.trade.redis_client import get_redis
+
         redis = get_redis()
         if not redis.client:
             logger.warning("Redis client not connected, skipping warmup")
@@ -67,6 +68,7 @@ def lookup_symbol_name(symbol: str) -> str | None:
     # 2. Redis Cache (Fast)
     try:
         from backend.services.trade.redis_client import get_redis
+
         redis = get_redis()
         if redis.client:
             name = redis.client.hget(STOCK_NAME_CACHE_KEY, symbol)
@@ -88,10 +90,11 @@ def lookup_symbol_name(symbol: str) -> str | None:
         if mapping:
             try:
                 from backend.services.trade.redis_client import get_redis
+
                 redis = get_redis()
                 if redis.client:
                     redis.client.hset(STOCK_NAME_CACHE_KEY, mapping=mapping)
             except Exception:
-                pass
+                logger.debug("ignored exception", exc_info=True)
 
     return _STOCK_SYMBOL_NAME_MAP.get(symbol)

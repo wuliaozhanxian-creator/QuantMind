@@ -121,7 +121,7 @@ const PositionOverview: React.FC<PositionOverviewProps> = ({ holdings, summary, 
                     <h3 className="text-base font-bold text-gray-800">{compact ? '持仓明细' : '持仓明细（按市值排序）'}</h3>
                 </div>
 
-                <div className="flex-1 overflow-y-auto overflow-x-auto custom-scrollbar pb-2">
+                <div className="flex-1 overflow-y-auto overflow-x-auto custom-scrollbar pb-2 qm-table-scroll">
                     {currentHoldings.length > 0 ? (
                         <table className="w-full min-w-[1160px] table-fixed">
                             <thead className="sticky top-0 bg-gray-100 border-b border-gray-200">

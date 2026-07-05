@@ -55,7 +55,9 @@ async def example_loader():
         return {"symbol": symbol, "price": 100.50}
 
     # 使用 loader
-    stock = await cache.get("stock:AAPL", loader=lambda: fetch_stock_data("AAPL"), ttl_l1=30, ttl_l2=120)
+    stock = await cache.get(
+        "stock:AAPL", loader=lambda: fetch_stock_data("AAPL"), ttl_l1=30, ttl_l2=120
+    )
     print(f"Stock: {stock}")
 
 

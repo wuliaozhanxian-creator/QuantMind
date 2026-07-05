@@ -8,5 +8,4 @@ from .qlib_strategy_generator import (
     QlibStrategyTemplates,
 )
 
-__all__ = ["QlibStrategyCodeGenerator",
-           "QlibStrategyConfig", "QlibStrategyTemplates"]
+__all__ = ["QlibStrategyCodeGenerator", "QlibStrategyConfig", "QlibStrategyTemplates"]

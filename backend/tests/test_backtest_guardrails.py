@@ -11,9 +11,13 @@ import pytest
 project_root = os.path.join(os.path.dirname(__file__), "../../")
 sys.path.append(project_root)
 
-from backend.services.engine.qlib_app.services.backtest_service import QlibBacktestService
+from backend.services.engine.qlib_app.services.backtest_service import (
+    QlibBacktestService,
+)
 from backend.services.engine.qlib_app.services.risk_analyzer import RiskAnalyzer
-from backend.services.engine.qlib_app.services import risk_analyzer as risk_analyzer_module
+from backend.services.engine.qlib_app.services import (
+    risk_analyzer as risk_analyzer_module,
+)
 
 
 def test_normalize_signal_config_rejects_module_path_only_dict():
@@ -26,7 +30,9 @@ def test_build_signal_data_rejects_module_path_only_signal_dict():
     service = QlibBacktestService()
     request = types.SimpleNamespace(
         strategy_params=types.SimpleNamespace(
-            signal={"module_path": "backend.services.engine.qlib_app.utils.simple_signal"}
+            signal={
+                "module_path": "backend.services.engine.qlib_app.utils.simple_signal"
+            }
         ),
         universe="all",
         start_date="2025-01-01",
@@ -126,7 +132,9 @@ def test_normalize_trades_for_display_backfills_factor_and_price(monkeypatch):
     monkeypatch.setattr(
         RiskAnalyzer,
         "_load_factor_map",
-        classmethod(lambda cls, pairs: {("SZ002822", "2025-01-02"): 0.14105364680290222}),
+        classmethod(
+            lambda cls, pairs: {("SZ002822", "2025-01-02"): 0.14105364680290222}
+        ),
     )
     trades = [
         {
@@ -147,11 +155,15 @@ def test_normalize_trades_for_display_backfills_factor_and_price(monkeypatch):
     assert row["quantity"] == pytest.approx(4900.0, rel=1e-6)
 
 
-def test_normalize_trades_for_display_snaps_cn_board_lot_under_factor_drift(monkeypatch):
+def test_normalize_trades_for_display_snaps_cn_board_lot_under_factor_drift(
+    monkeypatch,
+):
     monkeypatch.setattr(
         RiskAnalyzer,
         "_load_factor_map",
-        classmethod(lambda cls, pairs: {("SH600018", "2025-01-10"): 0.4312969446182251}),
+        classmethod(
+            lambda cls, pairs: {("SH600018", "2025-01-10"): 0.4312969446182251}
+        ),
     )
     trades = [
         {
@@ -189,7 +201,9 @@ def test_recording_strategy_drops_pool_file_local_before_super(monkeypatch):
         captured.update(kwargs)
 
     monkeypatch.setattr(rs.RedisRecordingStrategy, "init_redis", fake_init_redis)
-    monkeypatch.setattr(rs.RedisRecordingStrategy, "init_dynamic_risk", fake_init_dynamic_risk)
+    monkeypatch.setattr(
+        rs.RedisRecordingStrategy, "init_dynamic_risk", fake_init_dynamic_risk
+    )
     monkeypatch.setattr(rs.TopkDropoutStrategy, "__init__", fake_super_init)
 
     rs.RedisRecordingStrategy(
@@ -220,7 +234,9 @@ def test_recording_strategy_applies_f_prefix_fundamental_filter(monkeypatch):
         return None
 
     monkeypatch.setattr(rs.RedisRecordingStrategy, "init_redis", fake_init_redis)
-    monkeypatch.setattr(rs.RedisRecordingStrategy, "init_dynamic_risk", fake_init_dynamic_risk)
+    monkeypatch.setattr(
+        rs.RedisRecordingStrategy, "init_dynamic_risk", fake_init_dynamic_risk
+    )
     monkeypatch.setattr(rs.TopkDropoutStrategy, "__init__", fake_super_init)
     monkeypatch.setattr(
         rs.fundamental_aligner,
@@ -251,7 +267,9 @@ def test_recording_strategy_applies_f_prefix_fundamental_filter(monkeypatch):
 
 
 def test_normalize_trades_for_display_deduplicates_mixed_writers(monkeypatch):
-    monkeypatch.setattr(RiskAnalyzer, "_load_factor_map", classmethod(lambda cls, pairs: {}))
+    monkeypatch.setattr(
+        RiskAnalyzer, "_load_factor_map", classmethod(lambda cls, pairs: {})
+    )
     trades = [
         {
             "date": "2025-01-07",
@@ -287,7 +305,9 @@ def test_normalize_trades_for_display_deduplicates_mixed_writers(monkeypatch):
 
 
 def test_build_trades_list_deduplicates_redis_dupes(monkeypatch):
-    monkeypatch.setattr(RiskAnalyzer, "_load_factor_map", classmethod(lambda cls, pairs: {}))
+    monkeypatch.setattr(
+        RiskAnalyzer, "_load_factor_map", classmethod(lambda cls, pairs: {})
+    )
 
     class _FakeRedis:
         def lrange(self, key, start, end):
@@ -315,7 +335,9 @@ def test_build_trades_list_deduplicates_redis_dupes(monkeypatch):
             }
             return [json.dumps(exchange_trade), json.dumps(strategy_trade)]
 
-    monkeypatch.setattr(risk_analyzer_module, "get_redis_sentinel_client", lambda: _FakeRedis())
+    monkeypatch.setattr(
+        risk_analyzer_module, "get_redis_sentinel_client", lambda: _FakeRedis()
+    )
     trades = RiskAnalyzer._build_trades_list({}, backtest_id="bt-dup")
     assert len(trades) == 1
     assert trades[0]["totalAmount"] == pytest.approx(15768.0, rel=1e-6)
@@ -323,12 +345,28 @@ def test_build_trades_list_deduplicates_redis_dupes(monkeypatch):
 
 def test_advanced_trade_stats_handles_missing_pnl_columns():
     trades = [
-        {"date": "2025-01-02", "symbol": "SH600000", "action": "buy", "price": 10.0, "quantity": 100},
-        {"date": "2025-01-03", "symbol": "SH600001", "action": "sell", "price": 11.0, "quantity": 100},
+        {
+            "date": "2025-01-02",
+            "symbol": "SH600000",
+            "action": "buy",
+            "price": 10.0,
+            "quantity": 100,
+        },
+        {
+            "date": "2025-01-03",
+            "symbol": "SH600001",
+            "action": "sell",
+            "price": 11.0,
+            "quantity": 100,
+        },
     ]
 
-    daily_returns = pd.Series([0.01, -0.01], index=pd.to_datetime(["2025-01-02", "2025-01-03"]))
-    stats = RiskAnalyzer._calculate_advanced_trade_stats(trades, daily_returns=daily_returns)
+    daily_returns = pd.Series(
+        [0.01, -0.01], index=pd.to_datetime(["2025-01-02", "2025-01-03"])
+    )
+    stats = RiskAnalyzer._calculate_advanced_trade_stats(
+        trades, daily_returns=daily_returns
+    )
 
     assert stats["pnl_distribution"]["counts"]
     assert stats["trade_frequency_series"]["values"] == []
@@ -342,20 +380,31 @@ def test_advanced_trade_stats_handles_missing_pnl_columns():
 def test_risk_metrics_uses_geometric_benchmark_annualization(monkeypatch):
     import pandas as pd
 
-    dates = pd.to_datetime(["2025-01-02", "2025-01-03", "2025-01-06", "2025-01-07", "2025-01-08"])
+    dates = pd.to_datetime(
+        ["2025-01-02", "2025-01-03", "2025-01-06", "2025-01-07", "2025-01-08"]
+    )
     daily_returns = pd.Series([0.01, 0.02, -0.01, 0.0, 0.03], index=dates)
-    prices = pd.Series([100.0, 101.0, 103.02, 101.9898, 101.9898, 105.049494], index=pd.to_datetime([
-        "2025-01-01",
-        "2025-01-02",
-        "2025-01-03",
-        "2025-01-06",
-        "2025-01-07",
-        "2025-01-08",
-    ]))
-    idx = pd.MultiIndex.from_product([["SH000300"], prices.index], names=["instrument", "datetime"])
+    prices = pd.Series(
+        [100.0, 101.0, 103.02, 101.9898, 101.9898, 105.049494],
+        index=pd.to_datetime(
+            [
+                "2025-01-01",
+                "2025-01-02",
+                "2025-01-03",
+                "2025-01-06",
+                "2025-01-07",
+                "2025-01-08",
+            ]
+        ),
+    )
+    idx = pd.MultiIndex.from_product(
+        [["SH000300"], prices.index], names=["instrument", "datetime"]
+    )
     bm_df = pd.DataFrame({"$close": prices.to_numpy()}, index=idx)
 
-    monkeypatch.setattr(risk_analyzer_module.D, "features", lambda *args, **kwargs: bm_df, raising=False)
+    monkeypatch.setattr(
+        risk_analyzer_module.D, "features", lambda *args, **kwargs: bm_df, raising=False
+    )
 
     metrics = RiskAnalyzer._compute_risk_metrics(
         daily_returns=daily_returns,
@@ -370,8 +419,12 @@ def test_risk_metrics_uses_geometric_benchmark_annualization(monkeypatch):
     aligned = pd.concat([daily_returns, bm_returns], axis=1, join="inner")
     aligned.columns = ["portfolio", "benchmark"]
     beta = aligned["portfolio"].cov(aligned["benchmark"]) / aligned["benchmark"].var()
-    expected_port_annual = (1.0 + aligned["portfolio"]).prod() ** (252 / len(aligned)) - 1
+    expected_port_annual = (1.0 + aligned["portfolio"]).prod() ** (
+        252 / len(aligned)
+    ) - 1
     expected_bm_annual = (1.0 + aligned["benchmark"]).prod() ** (252 / len(aligned)) - 1
 
     assert metrics["beta"] == pytest.approx(beta)
-    assert metrics["alpha"] == pytest.approx(expected_port_annual - beta * expected_bm_annual)
+    assert metrics["alpha"] == pytest.approx(
+        expected_port_annual - beta * expected_bm_annual
+    )

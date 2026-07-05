@@ -60,10 +60,10 @@ npm run dashboard:build  # Production build
 **认证体系：用户 JWT + Service JWT 双轨制。**
 
 - **用户 JWT**: `backend/shared/auth.py` — `create_access_token` / `verify_token`，用于前端用户认证
-- **Service JWT**: `backend/shared/auth.py` — `create_service_token`，用于服务间内部调用认证
+- **Service JWT**: `backend/shared/auth.py` — `create_service_token` / `verify_service_token` / `require_service_token`，用于服务间内部调用认证，通过专用 `X-Service-Token` header 传递（由 `SECRET_KEY` 签发）
 - **认证流程图**: `T6.5_service_jwt_flow.md` — 含 15 处调用点矩阵 + 迁移路径
-- **Hard constraint**: `INTERNAL_CALL_SECRET` 未配置时 fail-fast，不得降级
-- **迁移状态**: Phase 1 已完成（死代码清理 + flow doc），Phase 2-4 计划于 M3 执行
+- **Hard constraint**: `SECRET_KEY` 未配置时 fail-fast，不得降级；`X-Internal-Call` header 已从代码中完全移除
+- **迁移状态**: Phase 1-3 已完成（死代码清理 + 17 文件迁移至 X-Service-Token + 33 文件清理删除 get_internal_call_secret/X-Internal-Call deprecated 代码），Phase 4 文档同步已完成。仅训练容器回调路径（`docker/training/train.py` → `admin_training_utils.py`）保留 `INTERNAL_CALL_SECRET`/`X-Internal-Call-Secret`，标注为 T6.5-P3 residual，纳入 M4 迁移。
 
 ## Order Chain Architecture (M2 Robustness)
 
@@ -107,10 +107,10 @@ npm run dashboard:build  # Production build
 **强制约束：所有密钥/密码必须通过环境变量注入，严禁硬编码。**
 
 - **环境变量清单**（`.env` 文件配置，`.env.example` 为模板）:
-  - `SECRET_KEY` — 应用密钥（空默认值，未配置时 fail-fast 抛 RuntimeError）
-  - `JWT_SECRET_KEY` — JWT 签名密钥（空默认值，未配置时 fail-fast）
+  - `SECRET_KEY` — 应用主密钥，签发 service JWT（服务间认证）+ 用户 JWT（空默认值，未配置时 fail-fast 抛 RuntimeError）
+  - `JWT_SECRET_KEY` — 用户 JWT 签名密钥（兼容保留，空默认值，未配置时 fail-fast）
   - `DB_PASSWORD` — 本地数据库密码
-  - `INTERNAL_CALL_SECRET` — 内部服务调用密钥（空默认值，未配置时 fail-fast）
+  - `INTERNAL_CALL_SECRET` — 已废弃（DEPRECATED），仅保留用于训练容器回调（T6.5-P3 residual，纳入 M4 迁移）
   - `REMOTE_MARKET_DB_HOST/PORT/USER/PASSWORD` — 远程行情 DB 连接
   - `REMOTE_QUOTE_REDIS_HOST/PORT/USER/PASSWORD` — 远程行情 Redis 连接
 - **Fernet 加密**: `backend/shared/encryption.py` 已标记 deprecated，新代码不得使用

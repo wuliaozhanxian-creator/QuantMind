@@ -55,7 +55,11 @@ class TestAPIRouterRegistration:
     def test_auth_routes_registered(self):
         """验证认证路由已注册"""
         paths = self._get_route_paths()
-        auth_paths = [p for p in paths if "/api/v1/" in p and ("login" in p or "register" in p or "auth" in p)]
+        auth_paths = [
+            p
+            for p in paths
+            if "/api/v1/" in p and ("login" in p or "register" in p or "auth" in p)
+        ]
         assert len(auth_paths) > 0, f"未找到认证路由，当前路由: {paths}"
 
     def test_user_routes_registered(self):

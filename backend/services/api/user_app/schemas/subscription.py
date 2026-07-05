@@ -1,9 +1,8 @@
 from datetime import datetime
 from decimal import Decimal
-from typing import List, Optional
+from typing import Optional
 
 from pydantic import BaseModel, ConfigDict
-
 
 class SubscriptionPlanBase(BaseModel):
     name: str
@@ -14,10 +13,8 @@ class SubscriptionPlanBase(BaseModel):
     interval: str = "month"
     features: list[str] = []
 
-
 class SubscriptionPlanCreate(SubscriptionPlanBase):
     pass
-
 
 class SubscriptionPlanResponse(SubscriptionPlanBase):
     model_config = ConfigDict(from_attributes=True)
@@ -27,10 +24,8 @@ class SubscriptionPlanResponse(SubscriptionPlanBase):
     created_at: datetime
     updated_at: datetime | None = None
 
-
 class SubscriptionCreate(BaseModel):
     plan_code: str
-
 
 class UserSubscriptionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)

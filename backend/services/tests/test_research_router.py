@@ -108,7 +108,9 @@ def test_format_candidate_record_falls_back_to_stock_index_json(tmp_path, monkey
     assert payload["name"] == "阳光电源"
 
 
-def test_format_candidate_record_falls_back_to_stock_index_industry(tmp_path, monkeypatch):
+def test_format_candidate_record_falls_back_to_stock_index_industry(
+    tmp_path, monkeypatch
+):
     stock_index = tmp_path / "stocks_index.json"
     stock_index.write_text(
         '{"items": [{"symbol": "SZ300274", "code": "300274", "name": "阳光电源", "csrc1_industry":"制造业"}]}',
@@ -214,18 +216,26 @@ async def test_do_get_overview_uses_run_date_market_snapshot(monkeypatch):
     assert item["latestChange"] == pytest.approx(10.0)
     assert item["nextDayReturn"] == pytest.approx(-1.96443007)
     assert item["day3Return"] == pytest.approx(-4.34)
-    assert "(sdl_run.close_next_1d / NULLIF(sdl_run.close, 0) - 1) * 100" in research._research_service._SDL_SELECT_BY_RUN_DATE  # noqa: SLF001
-    assert "(sdl_run.close_next_3d / NULLIF(sdl_run.close, 0) - 1) * 100" in research._research_service._SDL_SELECT_BY_RUN_DATE  # noqa: SLF001
+    assert (
+        "(sdl_run.close_next_1d / NULLIF(sdl_run.close, 0) - 1) * 100"
+        in research._research_service._SDL_SELECT_BY_RUN_DATE
+    )  # noqa: SLF001
+    assert (
+        "(sdl_run.close_next_3d / NULLIF(sdl_run.close, 0) - 1) * 100"
+        in research._research_service._SDL_SELECT_BY_RUN_DATE
+    )  # noqa: SLF001
 
 
 def test_invalid_sdl_symbols_cache_detects_decimal_returns():
     trade_date = date(2026, 6, 11)
     symbol_map = {
-        f"SH600{i:03d}": {"return_1d": 0.02, "return_3d": 0.08}
-        for i in range(25)
+        f"SH600{i:03d}": {"return_1d": 0.02, "return_3d": 0.08} for i in range(25)
     }
 
-    assert research._research_service._is_invalid_sdl_symbols_cache(trade_date, symbol_map) is True  # noqa: SLF001
+    assert (
+        research._research_service._is_invalid_sdl_symbols_cache(trade_date, symbol_map)
+        is True
+    )  # noqa: SLF001
 
 
 @pytest.mark.asyncio
@@ -242,9 +252,13 @@ async def test_load_sdl_day_map_does_not_fallback_trade_date(monkeypatch):
     async def _fake_market_session():
         yield _FakeMarketSession()
 
-    monkeypatch.setattr(research_service, "_load_sdl_from_remote_redis", lambda trade_date: {})
+    monkeypatch.setattr(
+        research_service, "_load_sdl_from_remote_redis", lambda trade_date: {}
+    )
     monkeypatch.setattr(research_service, "_redis_get_json", lambda key: None)
-    monkeypatch.setattr(research_service, "_redis_set_json", lambda key, value, ttl_seconds: None)
+    monkeypatch.setattr(
+        research_service, "_redis_set_json", lambda key, value, ttl_seconds: None
+    )
     monkeypatch.setattr(research_service, "get_market_session", _fake_market_session)
 
     result = await research_service._load_sdl_day_map(None, date(2026, 6, 11))  # noqa: SLF001
@@ -263,10 +277,18 @@ async def test_get_research_universe_uses_short_ttl_cache(monkeypatch):
         calls["count"] += 1
         return {"items": [{"runId": "run_demo"}], "summary": {"total": 1}}
 
-    monkeypatch.setattr(research_service, "_do_get_universe_with_sdl_redis", _fake_do_get_universe_with_sdl_redis)
+    monkeypatch.setattr(
+        research_service,
+        "_do_get_universe_with_sdl_redis",
+        _fake_do_get_universe_with_sdl_redis,
+    )
 
-    payload_1 = await research_service.get_research_universe("default", "u1", "run_demo", 1000)
-    payload_2 = await research_service.get_research_universe("default", "u1", "run_demo", 1000)
+    payload_1 = await research_service.get_research_universe(
+        "default", "u1", "run_demo", 1000
+    )
+    payload_2 = await research_service.get_research_universe(
+        "default", "u1", "run_demo", 1000
+    )
 
     assert calls["count"] == 1
     assert payload_1 == payload_2

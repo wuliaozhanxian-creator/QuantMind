@@ -9,7 +9,7 @@ import zipfile
 from datetime import datetime, timedelta, timezone
 from datetime import time as dt_time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
@@ -48,7 +48,9 @@ from backend.services.trade.schemas.qmt_agent import (
     QMTBridgeSessionResponse,
 )
 from backend.services.trade.services.order_service import OrderService
-from backend.services.trade.services.real_account_ledger_service import upsert_real_account_daily_ledger
+from backend.services.trade.services.real_account_ledger_service import (
+    upsert_real_account_daily_ledger,
+)
 from backend.services.trade.services.real_account_snapshot_guard import (
     extract_positions_count,
     is_effectively_empty_snapshot,
@@ -75,9 +77,10 @@ from backend.services.trade.utils.stock_lookup import lookup_symbol_name
 from backend.shared.cos_service import get_cos_service
 from backend.shared.auth import verify_service_token
 
-router = APIRouter(prefix="/api/v1/internal/strategy", tags=["Internal Strategy Gateway"])
+router = APIRouter(
+    prefix="/api/v1/internal/strategy", tags=["Internal Strategy Gateway"]
+)
 logger = logging.getLogger(__name__)
-
 
 async def verify_internal_call(
     x_service_token: str | None = Header(default=None, alias="X-Service-Token"),
@@ -91,22 +94,20 @@ async def verify_internal_call(
             verify_service_token(x_service_token, ["api", "engine", "trade", "stream"])
             return
         except Exception:
-            pass
+            logger.debug("ignored exception", exc_info=True)
     logger.warning("Unauthorized internal call attempt")
     raise HTTPException(status_code=401, detail="Invalid internal secret")
-
 
 def _bridge_ws_url() -> str:
     return os.getenv("BRIDGE_SERVER_URL", "wss://api.quantmind.cloud/ws/bridge")
 
-
 def _agent_template_root() -> str:
     return str(Path(__file__).resolve().parents[3] / "static" / "templates" / "bridge")
 
-
 def _qmt_agent_release_manifest_key() -> str:
-    return os.getenv("QMT_AGENT_RELEASE_MANIFEST_KEY", "qmt-agent/windows/release/latest.json")
-
+    return os.getenv(
+        "QMT_AGENT_RELEASE_MANIFEST_KEY", "qmt-agent/windows/release/latest.json"
+    )
 
 def _qmt_agent_release_asset_ttl() -> int:
     try:
@@ -114,13 +115,11 @@ def _qmt_agent_release_asset_ttl() -> int:
     except Exception:
         return 1800
 
-
 def _qmt_agent_release_local_manifest_path() -> Path:
     override = str(os.getenv("QMT_AGENT_RELEASE_MANIFEST_LOCAL_PATH") or "").strip()
     if override:
         return Path(override)
     return Path(__file__).resolve().parents[4] / "dist" / "qmt_agent" / "latest.json"
-
 
 def _load_qmt_agent_release_manifest() -> tuple[dict[str, Any], str]:
     cos = get_cos_service()
@@ -139,8 +138,9 @@ def _load_qmt_agent_release_manifest() -> tuple[dict[str, Any], str]:
         except Exception as exc:
             logger.warning("load local qmt agent release manifest failed: %s", exc)
 
-    raise HTTPException(status_code=503, detail="QMT Agent release manifest unavailable")
-
+    raise HTTPException(
+        status_code=503, detail="QMT Agent release manifest unavailable"
+    )
 
 def _build_qmt_agent_release_asset(
     asset_name: str,
@@ -151,19 +151,25 @@ def _build_qmt_agent_release_asset(
     if not key:
         raise HTTPException(status_code=500, detail=f"Missing COS key for {asset_name}")
 
-    file_name = str(asset_payload.get("file_name") or os.path.basename(key) or key).strip()
+    file_name = str(
+        asset_payload.get("file_name") or os.path.basename(key) or key
+    ).strip()
     sha256 = str(asset_payload.get("sha256") or "").strip() or None
     content_type = str(asset_payload.get("content_type") or "").strip() or None
 
     download_url = ""
     if cos.client and cos.bucket_name:
-        download_url = str(cos.get_presigned_url(key, expired=_qmt_agent_release_asset_ttl()) or "").strip()
+        download_url = str(
+            cos.get_presigned_url(key, expired=_qmt_agent_release_asset_ttl()) or ""
+        ).strip()
     if not download_url:
         download_url = str(asset_payload.get("download_url") or "").strip()
     if not download_url and cos.base_url:
         download_url = f"{cos.base_url.rstrip('/')}/{key}"
     if not download_url:
-        raise HTTPException(status_code=503, detail=f"Cannot resolve download URL for {asset_name}")
+        raise HTTPException(
+            status_code=503, detail=f"Cannot resolve download URL for {asset_name}"
+        )
 
     return QMTAgentDownloadAssetInfo(
         asset=asset_name,
@@ -174,7 +180,6 @@ def _build_qmt_agent_release_asset(
         content_type=content_type,
         expires_in=_qmt_agent_release_asset_ttl(),
     )
-
 
 def _iso_or_none(value: Any) -> str | None:
     if isinstance(value, datetime):
@@ -187,9 +192,7 @@ def _iso_or_none(value: Any) -> str | None:
         return value.astimezone(shanghai).isoformat()
     return None
 
-
 _SH_TZ = ZoneInfo("Asia/Shanghai")
-
 
 def _to_float(value: Any, default: float = 0.0) -> float:
     try:
@@ -197,9 +200,8 @@ def _to_float(value: Any, default: float = 0.0) -> float:
         if parsed == parsed:
             return parsed
     except Exception:
-        pass
+        logger.debug("ignored exception", exc_info=True)
     return float(default)
-
 
 def _compute_floating_from_positions(positions: list[dict[str, Any]]) -> float:
     floating = 0.0
@@ -211,7 +213,6 @@ def _compute_floating_from_positions(positions: list[dict[str, Any]]) -> float:
             continue
         floating += (last_price - cost_price) * vol
     return floating
-
 
 def _compute_position_win_rate(positions: list[dict[str, Any]]) -> float:
     wins = 0
@@ -230,7 +231,6 @@ def _compute_position_win_rate(positions: list[dict[str, Any]]) -> float:
     if total <= 0:
         return 0.0
     return float(wins) * 100.0 / float(total)
-
 
 async def _query_real_account_baseline(
     db: AsyncSession,
@@ -268,7 +268,6 @@ async def _query_real_account_baseline(
         "first_snapshot_at": row.get("first_snapshot_at"),
         "source": row.get("source") or "qmt_bridge_first_report",
     }
-
 
 async def _upsert_real_account_baseline(
     db: AsyncSession,
@@ -312,13 +311,14 @@ async def _upsert_real_account_baseline(
             "user_id": user_id,
             "account_id": account_id,
             "initial_equity": float(initial_equity),
-            "first_snapshot_at": first_snapshot_at.astimezone(timezone.utc).replace(tzinfo=None)
+            "first_snapshot_at": first_snapshot_at.astimezone(timezone.utc).replace(
+                tzinfo=None
+            )
             if first_snapshot_at.tzinfo is not None
             else first_snapshot_at,
             "source": source,
         },
     )
-
 
 async def _persist_real_account_snapshot(
     *,
@@ -404,7 +404,9 @@ async def _persist_real_account_snapshot(
                 RealAccountSnapshot.account_id == account_id,
                 valid_asset_filter,
             )
-            .order_by(RealAccountSnapshot.snapshot_at.desc(), RealAccountSnapshot.id.desc())
+            .order_by(
+                RealAccountSnapshot.snapshot_at.desc(), RealAccountSnapshot.id.desc()
+            )
             .limit(1)
         )
         result = await db.execute(stmt)
@@ -430,7 +432,11 @@ async def _persist_real_account_snapshot(
     )
     latest_valid_result = await db.execute(latest_valid_stmt)
     has_previous_valid_snapshot = latest_valid_result.scalar_one_or_none() is not None
-    latest_valid_assets = await _query_latest_valid_snapshot_assets() if has_previous_valid_snapshot else None
+    latest_valid_assets = (
+        await _query_latest_valid_snapshot_assets()
+        if has_previous_valid_snapshot
+        else None
+    )
 
     if is_inconsistent_zero_total_snapshot(
         total_asset=total_asset,
@@ -438,11 +444,19 @@ async def _persist_real_account_snapshot(
         market_value=market_value,
         payload_json=payload_json,
     ):
-        initial_equity = baseline_initial_equity if baseline_initial_equity is not None else await _query_first_asset()
+        initial_equity = (
+            baseline_initial_equity
+            if baseline_initial_equity is not None
+            else await _query_first_asset()
+        )
         day_open_equity = await _query_prev_close_asset()
         if day_open_equity is None:
-            day_open_equity = await _query_first_asset(RealAccountSnapshot.snapshot_date == snapshot_date)
-        month_open_equity = await _query_first_asset(RealAccountSnapshot.snapshot_month == snapshot_month)
+            day_open_equity = await _query_first_asset(
+                RealAccountSnapshot.snapshot_date == snapshot_date
+            )
+        month_open_equity = await _query_first_asset(
+            RealAccountSnapshot.snapshot_month == snapshot_month
+        )
         logger.warning(
             "Rejected inconsistent zero-total real-account snapshot: tenant=%s user=%s account=%s snapshot_at=%s "
             "total_asset=%.2f cash=%.2f market_value=%.2f positions=%d",
@@ -463,17 +477,28 @@ async def _persist_real_account_snapshot(
             "rejected_inconsistent_zero_total_snapshot",
         )
 
-    if is_effectively_empty_snapshot(
-        total_asset=total_asset,
-        cash=cash,
-        market_value=market_value,
-        payload_json=payload_json,
-    ) and has_previous_valid_snapshot:
-        initial_equity = baseline_initial_equity if baseline_initial_equity is not None else await _query_first_asset()
+    if (
+        is_effectively_empty_snapshot(
+            total_asset=total_asset,
+            cash=cash,
+            market_value=market_value,
+            payload_json=payload_json,
+        )
+        and has_previous_valid_snapshot
+    ):
+        initial_equity = (
+            baseline_initial_equity
+            if baseline_initial_equity is not None
+            else await _query_first_asset()
+        )
         day_open_equity = await _query_prev_close_asset()
         if day_open_equity is None:
-            day_open_equity = await _query_first_asset(RealAccountSnapshot.snapshot_date == snapshot_date)
-        month_open_equity = await _query_first_asset(RealAccountSnapshot.snapshot_month == snapshot_month)
+            day_open_equity = await _query_first_asset(
+                RealAccountSnapshot.snapshot_date == snapshot_date
+            )
+        month_open_equity = await _query_first_asset(
+            RealAccountSnapshot.snapshot_month == snapshot_month
+        )
         logger.warning(
             "Rejected suspicious empty real-account snapshot: tenant=%s user=%s account=%s snapshot_at=%s",
             tenant_id,
@@ -498,11 +523,19 @@ async def _persist_real_account_snapshot(
         prev_market_value=latest_valid_assets.get("market_value"),
         payload_json=payload_json,
     ):
-        initial_equity = baseline_initial_equity if baseline_initial_equity is not None else await _query_first_asset()
+        initial_equity = (
+            baseline_initial_equity
+            if baseline_initial_equity is not None
+            else await _query_first_asset()
+        )
         day_open_equity = await _query_prev_close_asset()
         if day_open_equity is None:
-            day_open_equity = await _query_first_asset(RealAccountSnapshot.snapshot_date == snapshot_date)
-        month_open_equity = await _query_first_asset(RealAccountSnapshot.snapshot_month == snapshot_month)
+            day_open_equity = await _query_first_asset(
+                RealAccountSnapshot.snapshot_date == snapshot_date
+            )
+        month_open_equity = await _query_first_asset(
+            RealAccountSnapshot.snapshot_month == snapshot_month
+        )
         logger.warning(
             "Rejected suspicious asset-jump real-account snapshot: tenant=%s user=%s account=%s snapshot_at=%s "
             "prev(total_asset=%.2f cash=%.2f market_value=%.2f) current(total_asset=%.2f cash=%.2f market_value=%.2f)",
@@ -544,8 +577,12 @@ async def _persist_real_account_snapshot(
         inferred_prev_close = total_asset - payload_today_pnl
         if inferred_prev_close > 0:
             prev_trade_date = _previous_business_day(snapshot_date)
-            prev_close_local = datetime.combine(prev_trade_date, dt_time(15, 0, 0), tzinfo=_SH_TZ)
-            prev_close_utc = prev_close_local.astimezone(timezone.utc).replace(tzinfo=None)
+            prev_close_local = datetime.combine(
+                prev_trade_date, dt_time(15, 0, 0), tzinfo=_SH_TZ
+            )
+            prev_close_utc = prev_close_local.astimezone(timezone.utc).replace(
+                tzinfo=None
+            )
             synthetic_row = RealAccountSnapshot(
                 tenant_id=tenant_id,
                 user_id=user_id,
@@ -592,7 +629,9 @@ async def _persist_real_account_snapshot(
                 RealAccountSnapshot.account_id == account_id,
                 RealAccountSnapshot.source == "qmt_bridge",
             )
-            .order_by(RealAccountSnapshot.snapshot_at.asc(), RealAccountSnapshot.id.asc())
+            .order_by(
+                RealAccountSnapshot.snapshot_at.asc(), RealAccountSnapshot.id.asc()
+            )
             .limit(1)
         )
         first_report_result = await db.execute(first_report_stmt)
@@ -605,7 +644,9 @@ async def _persist_real_account_snapshot(
                     RealAccountSnapshot.user_id == user_id,
                     RealAccountSnapshot.account_id == account_id,
                 )
-                .order_by(RealAccountSnapshot.snapshot_at.asc(), RealAccountSnapshot.id.asc())
+                .order_by(
+                    RealAccountSnapshot.snapshot_at.asc(), RealAccountSnapshot.id.asc()
+                )
                 .limit(1)
             )
             first_report_result = await db.execute(first_report_stmt)
@@ -623,13 +664,23 @@ async def _persist_real_account_snapshot(
             )
             baseline_initial_equity = first_initial_equity
 
-    initial_equity = baseline_initial_equity if baseline_initial_equity is not None else await _query_first_asset()
+    initial_equity = (
+        baseline_initial_equity
+        if baseline_initial_equity is not None
+        else await _query_first_asset()
+    )
     # 今日基线优先取“上一交易日最后权益”；若不存在才退化到“今日首条快照”。
     prev_close_equity = await _query_prev_close_asset()
-    day_open_equity = prev_close_equity if prev_close_equity is not None else await _query_first_asset(
-        RealAccountSnapshot.snapshot_date == snapshot_date
+    day_open_equity = (
+        prev_close_equity
+        if prev_close_equity is not None
+        else await _query_first_asset(
+            RealAccountSnapshot.snapshot_date == snapshot_date
+        )
     )
-    month_open_equity = await _query_first_asset(RealAccountSnapshot.snapshot_month == snapshot_month)
+    month_open_equity = await _query_first_asset(
+        RealAccountSnapshot.snapshot_month == snapshot_month
+    )
 
     ledger_position_count = extract_positions_count(payload_json)
 
@@ -645,7 +696,9 @@ async def _persist_real_account_snapshot(
         market_value=market_value,
         initial_equity=initial_equity if initial_equity is not None else total_asset,
         day_open_equity=day_open_equity if day_open_equity is not None else total_asset,
-        month_open_equity=month_open_equity if month_open_equity is not None else total_asset,
+        month_open_equity=month_open_equity
+        if month_open_equity is not None
+        else total_asset,
         today_pnl=payload_today_pnl,
         total_pnl=payload_total_pnl,
         floating_pnl=payload_floating_pnl,
@@ -661,7 +714,6 @@ async def _persist_real_account_snapshot(
         True,
         None,
     )
-
 
 async def _compute_account_metrics(
     *,
@@ -679,8 +731,16 @@ async def _compute_account_metrics(
     positions: list[dict[str, Any]],
     payload_json: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    now_local = snapshot_at.astimezone(_SH_TZ) if snapshot_at.tzinfo else datetime.now(_SH_TZ)
-    initial_equity, day_open_equity, month_open_equity, snapshot_persisted, snapshot_reject_reason = await _persist_real_account_snapshot(
+    now_local = (
+        snapshot_at.astimezone(_SH_TZ) if snapshot_at.tzinfo else datetime.now(_SH_TZ)
+    )
+    (
+        initial_equity,
+        day_open_equity,
+        month_open_equity,
+        snapshot_persisted,
+        snapshot_reject_reason,
+    ) = await _persist_real_account_snapshot(
         db=db,
         tenant_id=tenant_id,
         user_id=user_id,
@@ -705,8 +765,12 @@ async def _compute_account_metrics(
 
     final_today_pnl = payload_today_pnl if use_payload_today else derived_today_pnl
     final_total_pnl = payload_total_pnl if use_payload_total else derived_total_pnl
-    final_floating_pnl = payload_floating_pnl if use_payload_floating else derived_floating_pnl
-    final_total_return = (final_total_pnl / initial_equity * 100.0) if initial_equity > 0 else 0.0
+    final_floating_pnl = (
+        payload_floating_pnl if use_payload_floating else derived_floating_pnl
+    )
+    final_total_return = (
+        (final_total_pnl / initial_equity * 100.0) if initial_equity > 0 else 0.0
+    )
     win_rate = _compute_position_win_rate(positions)
 
     metrics = {
@@ -718,11 +782,19 @@ async def _compute_account_metrics(
         "win_rate": float(win_rate),
     }
     metrics_meta = {
-        "today_pnl_source": "broker_raw" if use_payload_today else "computed_from_db_snapshot",
-        "total_pnl_source": "broker_raw" if use_payload_total else "computed_from_db_snapshot",
-        "floating_pnl_source": "broker_raw" if use_payload_floating else "computed_from_positions",
+        "today_pnl_source": "broker_raw"
+        if use_payload_today
+        else "computed_from_db_snapshot",
+        "total_pnl_source": "broker_raw"
+        if use_payload_total
+        else "computed_from_db_snapshot",
+        "floating_pnl_source": "broker_raw"
+        if use_payload_floating
+        else "computed_from_positions",
         "monthly_pnl_source": "computed_from_db_snapshot",
-        "total_return_source": "broker_raw" if use_payload_total else "computed_from_db_snapshot",
+        "total_return_source": "broker_raw"
+        if use_payload_total
+        else "computed_from_db_snapshot",
         "today_pnl_available": True,
         "total_pnl_available": True,
         "floating_pnl_available": True,
@@ -742,7 +814,6 @@ async def _compute_account_metrics(
         },
     }
     return metrics, metrics_meta
-
 
 async def _get_bridge_session_context(
     authorization: str | None = Header(None),

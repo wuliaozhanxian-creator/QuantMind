@@ -3,12 +3,11 @@ import logging
 import os
 import random
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Optional
 
 from backend.shared.redis_sentinel_client import get_redis_sentinel_client
 
 logger = logging.getLogger(__name__)
-
 
 class GlobalSignalGenerator:
     """
@@ -55,7 +54,9 @@ class GlobalSignalGenerator:
             # 2. 发布信号更新事件，通知 quantmind-trade 触发批量匹配
             self.redis.publish("quantmind:events:signal_updated", json.dumps(metadata))
 
-            logger.info(f"全局信号已广播: 标的数量={len(scores)}, Key={self.SIGNAL_KEY}")
+            logger.info(
+                f"全局信号已广播: 标的数量={len(scores)}, Key={self.SIGNAL_KEY}"
+            )
             return True
 
         except Exception as e:
@@ -92,8 +93,13 @@ class GlobalSignalGenerator:
 
             symbols = result["symbols"]
             scores = result["predictions"]
-            logger.info(f"[SignalGen] 模型推理完成: {len(symbols)} 个标的，model={model_id}")
-            return {sym: round(float(score), 4) for sym, score in zip(symbols, scores)}
+            logger.info(
+                f"[SignalGen] 模型推理完成: {len(symbols)} 个标的，model={model_id}"
+            )
+            return {
+                sym: round(float(score), 4)
+                for sym, score in zip(symbols, scores, strict=False)
+            }
 
         except Exception as e:
             logger.error(f"[SignalGen] Qlib 推理失败: {e}", exc_info=True)
@@ -115,7 +121,6 @@ class GlobalSignalGenerator:
             scores[sym] = round(random.uniform(0, 1), 4)
 
         return scores
-
 
 # 单例
 global_signal_generator = GlobalSignalGenerator()

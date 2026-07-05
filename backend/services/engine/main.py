@@ -31,11 +31,11 @@ from backend.shared.service_health_metrics import (
 
 logger = get_logger(__name__)
 
-
 # 兼容 qlib_app 内部裸导入路径（from qlib_app.*）
 if "qlib_app" not in sys.modules:
-    sys.modules["qlib_app"] = importlib.import_module("backend.services.engine.qlib_app")
-
+    sys.modules["qlib_app"] = importlib.import_module(
+        "backend.services.engine.qlib_app"
+    )
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -68,16 +68,21 @@ async def lifespan(app: FastAPI):
         app.state.startup_healthy = False
         logger.error(f"❌ Model registry table ensure failed: {e}")
 
-    set_service_health("quantmind-engine", bool(getattr(app.state, "startup_healthy", True)))
+    set_service_health(
+        "quantmind-engine", bool(getattr(app.state, "startup_healthy", True))
+    )
 
     # 启动 VectorizedMatcher（受 ENABLE_VECTORIZED_MATCHER 环境变量控制）
     vm_task: asyncio.Task | None = None
     try:
         from backend.services.trade.services.vectorized_matcher import VectorizedMatcher
+
         _vm = VectorizedMatcher()
         vm_task = asyncio.create_task(_vm.start(), name="vectorized_matcher")
         app.state.vectorized_matcher = _vm
-        logger.info("✅ VectorizedMatcher task created (active if ENABLE_VECTORIZED_MATCHER=true)")
+        logger.info(
+            "✅ VectorizedMatcher task created (active if ENABLE_VECTORIZED_MATCHER=true)"
+        )
     except Exception as e:
         logger.warning(f"⚠️ VectorizedMatcher startup skipped: {e}")
 
@@ -85,10 +90,18 @@ async def lifespan(app: FastAPI):
     yield
 
     # 启动预热向量解析/字段检索（2026-05-03：暂时关闭强制预热以加快启动速度）
-    warmup_enabled = os.getenv("AI_STRATEGY_WARMUP", "false").strip().lower() not in ("0", "false", "no", "off")
+    warmup_enabled = os.getenv("AI_STRATEGY_WARMUP", "false").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
+    )
     if warmup_enabled:
         try:
-            from backend.services.engine.ai_strategy.services.startup_health import run_startup_health_checks
+            from backend.services.engine.ai_strategy.services.startup_health import (
+                run_startup_health_checks,
+            )
+
             await run_startup_health_checks()
             logger.info("✅ AI Strategy Warmup completed successfully")
         except Exception as e:
@@ -106,7 +119,6 @@ async def lifespan(app: FastAPI):
             vm_task.cancel()
     logger.info("🔚 QuantMind Engine shutdown complete")
 
-
 def _run_ai_strategy_warmup_sync() -> None:
     from backend.services.engine.ai_strategy.services.selection.schema_retriever import (
         get_schema_retriever,
@@ -117,7 +129,6 @@ def _run_ai_strategy_warmup_sync() -> None:
 
     asyncio.run(get_strategy_vector_parser())
     asyncio.run(get_schema_retriever())
-
 
 async def _bootstrap_qlib_runtime() -> None:
     """在 engine 生命周期内补齐 qlib 初始化与回测表检查。"""
@@ -134,7 +145,6 @@ async def _bootstrap_qlib_runtime() -> None:
     await BacktestPersistence().ensure_tables()
     await OptimizationPersistence().ensure_tables()
 
-
 app = FastAPI(
     title="QuantMind Computational Engine",
     version="2.0.0",
@@ -146,7 +156,6 @@ app = FastAPI(
 install_request_id_middleware(app)
 install_error_contract_handlers(app)
 install_access_log_middleware(app, service_name="quantmind-engine")
-
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
@@ -171,7 +180,7 @@ async def auth_middleware(request: Request, call_next):
             user_id = str(payload.get("sub") or payload.get("user_id") or "")
             tenant_id = str(payload.get("tenant_id") or "default")
         except Exception:
-            pass
+            logger.debug("ignored exception", exc_info=True)
 
     # 2. 内部路径认证（T6.5-P3: 仅接受 X-Service-Token service JWT）
     is_internal_path = path.startswith("/api/v1/internal/")
@@ -186,22 +195,27 @@ async def auth_middleware(request: Request, call_next):
                 user_id = request.headers.get("X-User-Id") or "internal"
                 tenant_id = request.headers.get("X-Tenant-Id") or tenant_id
             except Exception:
-                pass
+                logger.debug("ignored exception", exc_info=True)
 
     # 3. 所有 /api/v1/* 业务路由必须通过有效用户身份（OPTIONS 放行）
     if method != "OPTIONS" and path.startswith("/api/v1/"):
         if not user_id:
             return JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                content={"detail": "Authentication required (valid JWT or internal secret for internal paths)"},
+                content={
+                    "detail": "Authentication required (valid JWT or internal secret for internal paths)"
+                },
             )
 
     if user_id:
-        request.state.user = {"user_id": user_id, "tenant_id": tenant_id, "sub": user_id}
+        request.state.user = {
+            "user_id": user_id,
+            "tenant_id": tenant_id,
+            "sub": user_id,
+        }
 
     response = await call_next(request)
     return response
-
 
 app.add_middleware(
     CORSMiddleware,
@@ -213,9 +227,15 @@ app.add_middleware(
 
 # 1. AI 策略生成
 try:
-    from backend.services.engine.ai_strategy.api.routes.strategy_backtest_loop import router as strategy_loop_router
-    from backend.services.engine.ai_strategy.api.v1.routes import router as ai_strat_router
-    from backend.services.engine.ai_strategy.api.v1.wizard import router as wizard_router
+    from backend.services.engine.ai_strategy.api.routes.strategy_backtest_loop import (
+        router as strategy_loop_router,
+    )
+    from backend.services.engine.ai_strategy.api.v1.routes import (
+        router as ai_strat_router,
+    )
+    from backend.services.engine.ai_strategy.api.v1.wizard import (
+        router as wizard_router,
+    )
 
     app.include_router(ai_strat_router, prefix="/api/v1", tags=["AI Strategy"])
     app.include_router(wizard_router, prefix="/api/v1", tags=["Strategy Wizard"])
@@ -223,12 +243,13 @@ try:
 except ImportError as e:
     logger.error(f"❌ Failed to load AI Strategy routers: {e}")
 
-
 # 2. 模型推理
 try:
     from backend.services.engine.routers.inference import router as inference_router
 
-    app.include_router(inference_router, prefix="/api/v1/inference", tags=["AI Inference"])
+    app.include_router(
+        inference_router, prefix="/api/v1/inference", tags=["AI Inference"]
+    )
 except ImportError as e:
     logger.error(f"❌ Failed to load AI Inference router: {e}")
 
@@ -242,7 +263,9 @@ except ImportError as e:
 
 # 3.1 实盘E2E最小契约接口
 try:
-    from backend.services.engine.routers.realtime_contract import router as realtime_contract_router
+    from backend.services.engine.routers.realtime_contract import (
+        router as realtime_contract_router,
+    )
 
     app.include_router(realtime_contract_router, prefix="/api/v1")
 except ImportError as e:
@@ -267,15 +290,21 @@ except ImportError as e:
 
 # 5. 用户策略管理
 try:
-    from backend.services.engine.qlib_app.api.user_strategies import router as strategies_router
+    from backend.services.engine.qlib_app.api.user_strategies import (
+        router as strategies_router,
+    )
 
-    app.include_router(strategies_router, prefix="/api/v1/strategies", tags=["Strategies"])
+    app.include_router(
+        strategies_router, prefix="/api/v1/strategies", tags=["Strategies"]
+    )
 except ImportError as e:
     logger.error(f"❌ Failed to load Strategies router: {e}")
 
 # 5.1 管理员策略模板管理
 try:
-    from backend.services.engine.qlib_app.api.admin_templates import router as admin_templates_router
+    from backend.services.engine.qlib_app.api.admin_templates import (
+        router as admin_templates_router,
+    )
 
     app.include_router(
         admin_templates_router,
@@ -289,7 +318,9 @@ except ImportError as e:
 # 6. 股票查询与智能选股
 try:
     from backend.services.engine.stock_query_app.routes import router as stock_router
-    from backend.services.engine.stock_query_app.smart_screener_api import router as smart_screener_router
+    from backend.services.engine.stock_query_app.smart_screener_api import (
+        router as smart_screener_router,
+    )
 
     app.include_router(stock_router)
     app.include_router(smart_screener_router)
@@ -297,21 +328,31 @@ try:
 except ImportError as e:
     logger.warning(f"⚠️ Stock Query router not available: {e}")
 
-
 try:
     from backend.services.engine.routers.ai_ide.chat import router as ai_chat_router
     from backend.services.engine.routers.ai_ide.config import router as ai_config_router
-    from backend.services.engine.routers.ai_ide.executor import router as ai_executor_router
-    from backend.services.engine.routers.ai_ide.workspace import router as ai_workspace_router
+    from backend.services.engine.routers.ai_ide.executor import (
+        router as ai_executor_router,
+    )
+    from backend.services.engine.routers.ai_ide.workspace import (
+        router as ai_workspace_router,
+    )
 
-    app.include_router(ai_chat_router, prefix="/api/v1/ai-ide/ai", tags=["Cloud IDE-AI"])
-    app.include_router(ai_config_router, prefix="/api/v1/ai-ide/config", tags=["Cloud IDE-Config"])
-    app.include_router(ai_executor_router, prefix="/api/v1/ai-ide/execute", tags=["Cloud IDE-Executor"])
-    app.include_router(ai_workspace_router, prefix="/api/v1/ai-ide/files", tags=["Cloud IDE-Workspace"])
+    app.include_router(
+        ai_chat_router, prefix="/api/v1/ai-ide/ai", tags=["Cloud IDE-AI"]
+    )
+    app.include_router(
+        ai_config_router, prefix="/api/v1/ai-ide/config", tags=["Cloud IDE-Config"]
+    )
+    app.include_router(
+        ai_executor_router, prefix="/api/v1/ai-ide/execute", tags=["Cloud IDE-Executor"]
+    )
+    app.include_router(
+        ai_workspace_router, prefix="/api/v1/ai-ide/files", tags=["Cloud IDE-Workspace"]
+    )
     logger.info("✅ Cloud AI-IDE routers loaded")
 except ImportError as e:
     logger.error(f"❌ Failed to load Cloud AI-IDE routers: {e}")
-
 
 @app.get("/health")
 async def health_check():
@@ -332,7 +373,6 @@ async def health_check():
         "service": "quantmind-engine",
         "components": components,
     }
-
 
 @app.get("/readiness")
 async def readiness_check():
@@ -358,16 +398,13 @@ async def readiness_check():
     app.state.last_readiness_checks = checks
     return build_readiness_response(checks)
 
-
 @app.get("/")
 async def root():
     return {"message": "QuantMind Engine Core V2 is running"}
 
-
 @app.get("/metrics")
 async def metrics():
     return build_metrics_response()
-
 
 if __name__ == "__main__":
     import uvicorn

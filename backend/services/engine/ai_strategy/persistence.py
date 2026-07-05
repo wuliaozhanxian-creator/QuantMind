@@ -2,7 +2,7 @@ import json
 import logging
 import os
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import httpx
 from sqlalchemy import Column, DateTime, Integer, String, Text, create_engine
@@ -16,13 +16,13 @@ except ImportError:
     def get_cos_service():
         return None
 
-
 logger = logging.getLogger(__name__)
-
 
 DB_URL = os.getenv(
     "DATABASE_URL",
-    os.getenv("AI_STRATEGY_DB_URL", "postgresql+psycopg2://postgres:@localhost:5432/quantmind"),
+    os.getenv(
+        "AI_STRATEGY_DB_URL", "postgresql+psycopg2://postgres:@localhost:5432/quantmind"
+    ),
 )
 if DB_URL.startswith("postgresql+psycopg2://"):
     DB_URL = DB_URL.replace("postgresql+psycopg2://", "postgresql+psycopg2://", 1)
@@ -36,7 +36,6 @@ engine = create_engine(
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
-
 
 class StrategyRecord(Base):
     __tablename__ = "ai_strategies"
@@ -57,10 +56,8 @@ class StrategyRecord(Base):
     notes = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
-
 # 注释掉自动创建表,避免在导入时连接数据库
 # Base.metadata.create_all(bind=engine)
-
 
 def save_strategy_to_cos(
     strategy_code: str, strategy_name: str, strategy_id: str, user_id: str | None
@@ -75,7 +72,7 @@ def save_strategy_to_cos(
         user_id: 用户ID
 
     Returns:
-        Dict: 保存结果，包含file_key和file_url
+        dict: 保存结果，包含file_key和file_url
     """
     try:
         cos_service = get_cos_service()
@@ -120,8 +117,9 @@ def save_strategy_to_cos(
         logger.error("保存策略到COS失败: %s", str(e))
         return {"success": False, "error": str(e)}
 
-
-def save_strategy(result, request_desc: str, market: str, risk_level: str, user_id: str | None):
+def save_strategy(
+    result, request_desc: str, market: str, risk_level: str, user_id: str | None
+):
     from .models import StrategyGenerationResult
 
     if not isinstance(result, StrategyGenerationResult):
@@ -151,8 +149,12 @@ def save_strategy(result, request_desc: str, market: str, risk_level: str, user_
             risk_level=risk_level,
             provider=result.provider,
             code=code,  # 保留数据库中的代码副本作为备份
-            cos_file_key=(cos_result.get("file_key", "") if cos_result.get("success") else ""),
-            cos_file_url=(cos_result.get("file_url", "") if cos_result.get("success") else ""),
+            cos_file_key=(
+                cos_result.get("file_key", "") if cos_result.get("success") else ""
+            ),
+            cos_file_url=(
+                cos_result.get("file_url", "") if cos_result.get("success") else ""
+            ),
             factors=json.dumps(result.metadata.factors or []),
             risk_controls=json.dumps(result.metadata.risk_controls or []),
             assumptions=json.dumps(result.metadata.assumptions or []),
@@ -191,12 +193,13 @@ def save_strategy(result, request_desc: str, market: str, risk_level: str, user_
             if sync_result.get("success"):
                 logger.info("策略 %s 已同步到 strategy_service", strategy_id)
         except Exception as sync_err:
-            logger.warning("策略 %s 同步到 strategy_service 失败: %s", strategy_id, sync_err)
+            logger.warning(
+                "策略 %s 同步到 strategy_service 失败: %s", strategy_id, sync_err
+            )
 
         return strategy_id
     finally:
         session.close()
-
 
 def save_strategy_record(data: dict[str, Any]) -> dict[str, Any]:
     """
@@ -204,7 +207,9 @@ def save_strategy_record(data: dict[str, Any]) -> dict[str, Any]:
     """
     session = SessionLocal()
     try:
-        strategy_id = data.get("strategy_id") or f"{int(datetime.now().timestamp()*1000)}"
+        strategy_id = (
+            data.get("strategy_id") or f"{int(datetime.now().timestamp() * 1000)}"
+        )
         rec = StrategyRecord(
             strategy_id=strategy_id,
             user_id=data.get("user_id"),
@@ -232,7 +237,6 @@ def save_strategy_record(data: dict[str, Any]) -> dict[str, Any]:
     finally:
         session.close()
 
-
 def list_strategies(
     offset: int = 0,
     limit: int = 20,
@@ -246,7 +250,9 @@ def list_strategies(
             q = q.filter(StrategyRecord.user_id == user_id)
         if keyword:
             like = f"%{keyword}%"
-            q = q.filter(StrategyRecord.name.like(like) | StrategyRecord.description.like(like))
+            q = q.filter(
+                StrategyRecord.name.like(like) | StrategyRecord.description.like(like)
+            )
         total = q.count()
         rows = q.offset(offset).limit(limit).all()
         data = []
@@ -269,7 +275,6 @@ def list_strategies(
     finally:
         session.close()
 
-
 def get_strategy_code(strategy_id: str) -> dict[str, Any]:
     """
     获取策略代码
@@ -278,12 +283,16 @@ def get_strategy_code(strategy_id: str) -> dict[str, Any]:
         strategy_id: 策略ID
 
     Returns:
-        Dict: 包含策略代码和文件信息的字典
+        dict: 包含策略代码和文件信息的字典
     """
     session = SessionLocal()
     try:
         # 从数据库获取策略信息
-        strategy = session.query(StrategyRecord).filter(StrategyRecord.strategy_id == strategy_id).first()
+        strategy = (
+            session.query(StrategyRecord)
+            .filter(StrategyRecord.strategy_id == strategy_id)
+            .first()
+        )
 
         if not strategy:
             return {"success": False, "error": "策略不存在"}
@@ -310,7 +319,9 @@ def get_strategy_code(strategy_id: str) -> dict[str, Any]:
                         # 找到代码开始位置（在文档字符串之后的部分）
                         code_start = file_content.find('"""\n\n')
                         if code_start != -1:
-                            code_from_cos = file_content[code_start + 5 :]  # +5 跳过'"""\n\n'
+                            code_from_cos = file_content[
+                                code_start + 5 :
+                            ]  # +5 跳过'"""\n\n'
                             result["code_from_cos"] = code_from_cos
                             result["cos_updated"] = True
                         else:
@@ -327,7 +338,6 @@ def get_strategy_code(strategy_id: str) -> dict[str, Any]:
     finally:
         session.close()
 
-
 def get_strategy_by_id(strategy_id: str) -> dict[str, Any]:
     """
     根据策略ID获取完整策略信息
@@ -336,11 +346,15 @@ def get_strategy_by_id(strategy_id: str) -> dict[str, Any]:
         strategy_id: 策略ID
 
     Returns:
-        Dict: 策略信息
+        dict: 策略信息
     """
     session = SessionLocal()
     try:
-        strategy = session.query(StrategyRecord).filter(StrategyRecord.strategy_id == strategy_id).first()
+        strategy = (
+            session.query(StrategyRecord)
+            .filter(StrategyRecord.strategy_id == strategy_id)
+            .first()
+        )
 
         if not strategy:
             return {"success": False, "error": "策略不存在"}
@@ -358,8 +372,12 @@ def get_strategy_by_id(strategy_id: str) -> dict[str, Any]:
                 "cos_file_url": strategy.cos_file_url,
                 "cos_file_key": strategy.cos_file_key,
                 "factors": json.loads(strategy.factors) if strategy.factors else [],
-                "risk_controls": (json.loads(strategy.risk_controls) if strategy.risk_controls else []),
-                "assumptions": (json.loads(strategy.assumptions) if strategy.assumptions else []),
+                "risk_controls": (
+                    json.loads(strategy.risk_controls) if strategy.risk_controls else []
+                ),
+                "assumptions": (
+                    json.loads(strategy.assumptions) if strategy.assumptions else []
+                ),
                 "notes": strategy.notes,
                 "created_at": strategy.created_at.isoformat(),
             },
@@ -367,7 +385,6 @@ def get_strategy_by_id(strategy_id: str) -> dict[str, Any]:
 
     finally:
         session.close()
-
 
 def update_strategy_by_id(strategy_id: str, updates: dict[str, Any]) -> dict[str, Any]:
     """
@@ -378,11 +395,15 @@ def update_strategy_by_id(strategy_id: str, updates: dict[str, Any]) -> dict[str
         updates: 更新字段字典
 
     Returns:
-        Dict: 更新结果
+        dict: 更新结果
     """
     session = SessionLocal()
     try:
-        strategy = session.query(StrategyRecord).filter(StrategyRecord.strategy_id == strategy_id).first()
+        strategy = (
+            session.query(StrategyRecord)
+            .filter(StrategyRecord.strategy_id == strategy_id)
+            .first()
+        )
 
         if not strategy:
             return {"success": False, "error": "策略不存在"}
@@ -408,8 +429,12 @@ def update_strategy_by_id(strategy_id: str, updates: dict[str, Any]) -> dict[str
                 "cos_file_url": strategy.cos_file_url,
                 "cos_file_key": strategy.cos_file_key,
                 "factors": json.loads(strategy.factors) if strategy.factors else [],
-                "risk_controls": (json.loads(strategy.risk_controls) if strategy.risk_controls else []),
-                "assumptions": (json.loads(strategy.assumptions) if strategy.assumptions else []),
+                "risk_controls": (
+                    json.loads(strategy.risk_controls) if strategy.risk_controls else []
+                ),
+                "assumptions": (
+                    json.loads(strategy.assumptions) if strategy.assumptions else []
+                ),
                 "notes": strategy.notes,
                 "created_at": strategy.created_at.isoformat(),
             },
@@ -421,7 +446,6 @@ def update_strategy_by_id(strategy_id: str, updates: dict[str, Any]) -> dict[str
     finally:
         session.close()
 
-
 def delete_strategy_by_id(strategy_id: str) -> dict[str, Any]:
     """
     根据策略ID删除策略
@@ -430,11 +454,15 @@ def delete_strategy_by_id(strategy_id: str) -> dict[str, Any]:
         strategy_id: 策略ID
 
     Returns:
-        Dict: 删除结果
+        dict: 删除结果
     """
     session = SessionLocal()
     try:
-        strategy = session.query(StrategyRecord).filter(StrategyRecord.strategy_id == strategy_id).first()
+        strategy = (
+            session.query(StrategyRecord)
+            .filter(StrategyRecord.strategy_id == strategy_id)
+            .first()
+        )
 
         if not strategy:
             return {"success": False, "error": "策略不存在"}
@@ -448,7 +476,9 @@ def delete_strategy_by_id(strategy_id: str) -> dict[str, Any]:
                     if cos_result["success"]:
                         print(f"已从COS删除文件: {strategy.cos_file_key}")
                     else:
-                        print(f"COS文件删除失败: {cos_result.get('error', 'Unknown error')}")
+                        print(
+                            f"COS文件删除失败: {cos_result.get('error', 'Unknown error')}"
+                        )
             except Exception as e:
                 print(f"删除COS文件时出错: {str(e)}")
 
@@ -464,8 +494,9 @@ def delete_strategy_by_id(strategy_id: str) -> dict[str, Any]:
     finally:
         session.close()
 
-
-def duplicate_strategy_by_id(strategy_id: str, new_name: str | None = None) -> dict[str, Any]:
+def duplicate_strategy_by_id(
+    strategy_id: str, new_name: str | None = None
+) -> dict[str, Any]:
     """
     根据策略ID复制策略
 
@@ -474,11 +505,15 @@ def duplicate_strategy_by_id(strategy_id: str, new_name: str | None = None) -> d
         new_name: 新策略名称（可选）
 
     Returns:
-        Dict: 复制结果
+        dict: 复制结果
     """
     session = SessionLocal()
     try:
-        original_strategy = session.query(StrategyRecord).filter(StrategyRecord.strategy_id == strategy_id).first()
+        original_strategy = (
+            session.query(StrategyRecord)
+            .filter(StrategyRecord.strategy_id == strategy_id)
+            .first()
+        )
 
         if not original_strategy:
             return {"success": False, "error": "原策略不存在"}
@@ -519,9 +554,19 @@ def duplicate_strategy_by_id(strategy_id: str, new_name: str | None = None) -> d
                 "provider": new_strategy.provider,
                 "cos_file_url": new_strategy.cos_file_url,
                 "cos_file_key": new_strategy.cos_file_key,
-                "factors": (json.loads(new_strategy.factors) if new_strategy.factors else []),
-                "risk_controls": (json.loads(new_strategy.risk_controls) if new_strategy.risk_controls else []),
-                "assumptions": (json.loads(new_strategy.assumptions) if new_strategy.assumptions else []),
+                "factors": (
+                    json.loads(new_strategy.factors) if new_strategy.factors else []
+                ),
+                "risk_controls": (
+                    json.loads(new_strategy.risk_controls)
+                    if new_strategy.risk_controls
+                    else []
+                ),
+                "assumptions": (
+                    json.loads(new_strategy.assumptions)
+                    if new_strategy.assumptions
+                    else []
+                ),
                 "notes": new_strategy.notes,
                 "created_at": new_strategy.created_at.isoformat(),
             },
@@ -533,13 +578,12 @@ def duplicate_strategy_by_id(strategy_id: str, new_name: str | None = None) -> d
     finally:
         session.close()
 
-
 def get_strategy_statistics() -> dict[str, Any]:
     """
     获取策略统计信息
 
     Returns:
-        Dict: 统计信息
+        dict: 统计信息
     """
     session = SessionLocal()
     try:
@@ -560,7 +604,6 @@ def get_strategy_statistics() -> dict[str, Any]:
         return {"error": f"获取统计信息失败: {str(e)}"}
     finally:
         session.close()
-
 
 def register_to_strategy_service(
     strategy_id: str,
@@ -587,7 +630,7 @@ def register_to_strategy_service(
         provider: LLM 提供商
 
     Returns:
-        Dict: 注册结果，包含 strategy_service 中的新 ID
+        dict: 注册结果，包含 strategy_service 中的新 ID
     """
     from .ai_strategy_config import get_config
     from backend.shared.auth import create_service_token
@@ -623,7 +666,7 @@ def register_to_strategy_service(
     # 用 user_id 构造 internal auth header
     # T6.5-P3: service JWT（专用 X-Service-Token header）
     headers = {
-        "Content-Type": "application/json",
+        "Content-type": "application/json",
         "X-User-Id": str(user_id) if user_id else "0",
         "X-Internal-Service": "ai_strategy",
         "X-Service-Token": create_service_token("engine"),
@@ -664,5 +707,7 @@ def register_to_strategy_service(
                 }
 
     except Exception as e:
-        logger.warning("策略 %s 同步到 strategy_service 异常（不影响主流程）: %s", strategy_id, e)
+        logger.warning(
+            "策略 %s 同步到 strategy_service 异常（不影响主流程）: %s", strategy_id, e
+        )
         return {"success": False, "error": str(e)}

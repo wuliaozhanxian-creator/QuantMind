@@ -6,7 +6,9 @@ from uuid import uuid4
 import pytest
 
 from backend.services.trade.models.enums import OrderSide, OrderStatus, TradingMode
-from backend.services.trade.services.execution_stream_consumer import ExecutionStreamConsumer
+from backend.services.trade.services.execution_stream_consumer import (
+    ExecutionStreamConsumer,
+)
 
 
 class _ScalarResult:
@@ -51,7 +53,9 @@ class _FakeSessionContext:
 
 
 @pytest.mark.asyncio
-async def test_order_filled_matches_by_client_order_id_and_uses_exchange_trade_id(monkeypatch):
+async def test_order_filled_matches_by_client_order_id_and_uses_exchange_trade_id(
+    monkeypatch,
+):
     order = SimpleNamespace(
         order_id=uuid4(),
         tenant_id="default",
@@ -75,8 +79,10 @@ async def test_order_filled_matches_by_client_order_id_and_uses_exchange_trade_i
         "backend.services.trade.services.execution_stream_consumer.get_session",
         lambda: _FakeSessionContext(session),
     )
+
     async def _noop_notification(**_kwargs):
         return None
+
     monkeypatch.setattr(
         "backend.services.trade.services.execution_stream_consumer.publish_notification_async",
         _noop_notification,
@@ -103,7 +109,9 @@ async def test_order_filled_matches_by_client_order_id_and_uses_exchange_trade_i
 
 
 @pytest.mark.asyncio
-async def test_order_submitted_matches_by_exchange_order_id_when_broker_order_id_is_not_uuid(monkeypatch):
+async def test_order_submitted_matches_by_exchange_order_id_when_broker_order_id_is_not_uuid(
+    monkeypatch,
+):
     order = SimpleNamespace(
         order_id=uuid4(),
         tenant_id="default",

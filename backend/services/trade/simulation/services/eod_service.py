@@ -36,7 +36,10 @@ from backend.services.trade.simulation.services.projection_service import (
     SimulationProjectionService,
 )
 from backend.shared.database_manager_v2 import get_session
-from backend.shared.trade_account_cache import write_json_cache, write_trade_account_cache
+from backend.shared.trade_account_cache import (
+    write_json_cache,
+    write_trade_account_cache,
+)
 from backend.shared.trading_calendar import calendar_service
 
 logger = logging.getLogger(__name__)
@@ -75,7 +78,8 @@ def _past_trigger_window(now: datetime | None = None) -> bool:
 
 async def run_simulation_eod_worker() -> None:
     logger.info(
-        "Simulation EOD worker started: trigger_time=%s", _TRIGGER_TIME.strftime("%H:%M")
+        "Simulation EOD worker started: trigger_time=%s",
+        _TRIGGER_TIME.strftime("%H:%M"),
     )
     last_run_date: date | None = None
 
@@ -113,7 +117,9 @@ async def _execute_eod(trade_date: date) -> bool:
                             SimulationAccount.status == "active"
                         )
                     )
-                ).scalars().all()
+                )
+                .scalars()
+                .all()
             )
 
             if not accounts:
@@ -163,12 +169,10 @@ async def _execute_eod(trade_date: date) -> bool:
                         )
                     projection_account.last_projected_at = datetime.utcnow()
 
-                    account_payload = (
-                        SimulationProjectionService.build_cache_payload(
-                            account=projection_account,
-                            positions=positions,
-                            source="eod_remarking",
-                        )
+                    account_payload = SimulationProjectionService.build_cache_payload(
+                        account=projection_account,
+                        positions=positions,
+                        source="eod_remarking",
                     )
 
                     await snapshot_svc.replace_daily_snapshot(
@@ -210,9 +214,7 @@ async def _execute_eod(trade_date: date) -> bool:
                     await check_session.execute(
                         select(func.count())
                         .select_from(SimulationFundSnapshot)
-                        .where(
-                            SimulationFundSnapshot.snapshot_date == trade_date
-                        )
+                        .where(SimulationFundSnapshot.snapshot_date == trade_date)
                     )
                 ).scalar_one_or_none()
         except Exception:
@@ -244,7 +246,9 @@ async def _check_pending_orders() -> int:
     try:
         async with get_session(read_only=True) as session:
             result = await session.execute(
-                select(func.count()).select_from(SimulationOrderV2).where(
+                select(func.count())
+                .select_from(SimulationOrderV2)
+                .where(
                     SimulationOrderV2.status == OrderStatus.PENDING.value,
                 )
             )

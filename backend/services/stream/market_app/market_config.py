@@ -10,10 +10,11 @@ ROOT_ENV = Path(__file__).resolve().parents[4] / ".env"
 # 加载 .env，确保模块级常量能读到本地配置
 try:
     from dotenv import load_dotenv
+
     if ROOT_ENV.exists():
         load_dotenv(ROOT_ENV, override=False)
 except Exception:
-    pass
+    pass  # noqa: BLE001 - None
 
 # ============================================================
 # 行情 Redis 配置 — 默认使用本地 Redis（通过环境变量覆盖）
@@ -146,7 +147,7 @@ class Settings(BaseSettings):
                 if out:
                     return out
         except Exception:
-            pass
+            pass  # noqa: BLE001 - None
         pairs = []
         for item in text.split(","):
             seg = item.strip()

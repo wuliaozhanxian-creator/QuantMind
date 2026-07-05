@@ -4,14 +4,17 @@ import ast
 import logging
 import os
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 from backend.services.engine.qlib_app.schemas.backtest import QlibBacktestRequest
-from backend.services.engine.qlib_app.services.strategy_formatter import StrategyFormatterService
-from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
+from backend.services.engine.qlib_app.services.strategy_formatter import (
+    StrategyFormatterService,
+)
+from backend.services.engine.qlib_app.utils.structured_logger import (
+    StructuredTaskLogger,
+)
 
 logger = StructuredTaskLogger(logging.getLogger(__name__), "StrategyBuilder")
-
 
 # 平台内置策略类 → 模块路径映射，供 CustomStrategyBuilder 自动补全 module_path
 _BUILTIN_CLASS_MODULE_MAP: dict[str, str] = {
@@ -25,7 +28,6 @@ _BUILTIN_CLASS_MODULE_MAP: dict[str, str] = {
     "RedisFullAlphaStrategy": "backend.services.engine.qlib_app.utils.extended_strategies",
     "SimpleWeightStrategy": "backend.services.engine.qlib_app.utils.recording_strategy",
 }
-
 
 class StrategyBuilder(ABC):
     """Abstract Base Class for Strategy Builders"""
@@ -57,7 +59,9 @@ class StrategyBuilder(ABC):
             return {k: v for k, v in params.items() if v is not None}
         return {}
 
-    def _get_fundamental_filter_kwargs(self, request: QlibBacktestRequest) -> dict[str, Any]:
+    def _get_fundamental_filter_kwargs(
+        self, request: QlibBacktestRequest
+    ) -> dict[str, Any]:
         """仅在请求显式要求时注入 ST 基本面过滤参数。"""
         params = self._strategy_params_to_dict(request)
         exclude_st = params.get("exclude_st", False)
@@ -70,7 +74,12 @@ class StrategyBuilder(ABC):
             kwargs["f_is_st_not"] = int(f_is_st_not)
         return kwargs
 
-    def _get_strategy_kwargs(self, request: QlibBacktestRequest, market_state_kwargs: dict[str, Any], backtest_id: str) -> dict[str, Any]:
+    def _get_strategy_kwargs(
+        self,
+        request: QlibBacktestRequest,
+        market_state_kwargs: dict[str, Any],
+        backtest_id: str,
+    ) -> dict[str, Any]:
         kwargs = self._strategy_params_to_dict(request)
 
         # 兼容风控模板原始参数名，统一映射到 FundamentalFilterMixin 识别的 f_* 字段。
@@ -85,17 +94,17 @@ class StrategyBuilder(ABC):
             raw_val = kwargs.pop(raw_key, None)
             if raw_val is not None and normalized_key not in kwargs:
                 kwargs[normalized_key] = raw_val
-        
+
         # Override signal if necessary (signal_data is handled separately or we pass "<PRED>")
         # The base dict already contains 'signal': '<PRED>' from the default
-        
+
         # Merge fundamental filter explicitly if the strategy needs it handled (usually it is dumped directly now)
-        # We can just keep the ones dumped from model_dump, so _get_fundamental_filter_kwargs is redundant for built-in, 
+        # We can just keep the ones dumped from model_dump, so _get_fundamental_filter_kwargs is redundant for built-in,
         # but let's just make sure.
-        
+
         # Remove any n_drop=0 special logic if needed, or handle it here
-        if kwargs.get('n_drop') == 0:
-            kwargs['n_drop'] = kwargs.get('topk', 50)
+        if kwargs.get("n_drop") == 0:
+            kwargs["n_drop"] = kwargs.get("topk", 50)
 
         kwargs.update(self._get_fundamental_filter_kwargs(request))
         kwargs.update(market_state_kwargs)
@@ -108,7 +117,11 @@ class StrategyBuilder(ABC):
             module_path = value.get("module_path")
             class_name = value.get("class")
             # 若 module_path 为空且 class 是内置类，自动补全
-            if not module_path and class_name and class_name in _BUILTIN_CLASS_MODULE_MAP:
+            if (
+                not module_path
+                and class_name
+                and class_name in _BUILTIN_CLASS_MODULE_MAP
+            ):
                 module_path = _BUILTIN_CLASS_MODULE_MAP[class_name]
             if "class" in value or "module_path" in value:
                 # 只有在有有效路径时才写入，避免将 None/空串传给 qlib
@@ -126,7 +139,6 @@ class StrategyBuilder(ABC):
             return tuple(self._sanitize_module_path_config(item) for item in value)
         return value
 
-
 class TopkDropoutBuilder(StrategyBuilder):
     def build(
         self,
@@ -138,15 +150,16 @@ class TopkDropoutBuilder(StrategyBuilder):
         logger.info(
             "build_topk_dropout",
             "Building TopkDropout strategy",
-            topk=getattr(request.strategy_params, 'topk', None),
+            topk=getattr(request.strategy_params, "topk", None),
         )
         strategy = {
             "class": "RedisRecordingStrategy",
             "module_path": "backend.services.engine.qlib_app.utils.recording_strategy",
-            "kwargs": self._get_strategy_kwargs(request, market_state_kwargs, backtest_id),
+            "kwargs": self._get_strategy_kwargs(
+                request, market_state_kwargs, backtest_id
+            ),
         }
         return self._sanitize_module_path_config(strategy)
-
 
 class WeightStrategyBuilder(StrategyBuilder):
     def build(
@@ -160,10 +173,11 @@ class WeightStrategyBuilder(StrategyBuilder):
         strategy = {
             "class": "RedisWeightStrategy",
             "module_path": "backend.services.engine.qlib_app.utils.recording_strategy",
-            "kwargs": self._get_strategy_kwargs(request, market_state_kwargs, backtest_id),
+            "kwargs": self._get_strategy_kwargs(
+                request, market_state_kwargs, backtest_id
+            ),
         }
         return self._sanitize_module_path_config(strategy)
-
 
 class SimpleTopkBuilder(StrategyBuilder):
     def build(
@@ -177,10 +191,11 @@ class SimpleTopkBuilder(StrategyBuilder):
         strategy = {
             "class": "RedisTopkStrategy",
             "module_path": "backend.services.engine.qlib_app.utils.extended_strategies",
-            "kwargs": self._get_strategy_kwargs(request, market_state_kwargs, backtest_id),
+            "kwargs": self._get_strategy_kwargs(
+                request, market_state_kwargs, backtest_id
+            ),
         }
         return self._sanitize_module_path_config(strategy)
-
 
 class DeepTimeSeriesBuilder(StrategyBuilder):
     def build(
@@ -194,12 +209,11 @@ class DeepTimeSeriesBuilder(StrategyBuilder):
         strategy = {
             "class": "RedisRecordingStrategy",
             "module_path": "backend.services.engine.qlib_app.utils.recording_strategy",
-            "kwargs": self._get_strategy_kwargs(request, market_state_kwargs, backtest_id),
+            "kwargs": self._get_strategy_kwargs(
+                request, market_state_kwargs, backtest_id
+            ),
         }
         return self._sanitize_module_path_config(strategy)
-
-
-
 
 class AdaptiveDriftBuilder(StrategyBuilder):
     def build(
@@ -212,16 +226,15 @@ class AdaptiveDriftBuilder(StrategyBuilder):
         logger.info("build_adaptive_drift", "Building AdaptiveDrift strategy")
         if not market_state_kwargs:
             market_state_kwargs = {"dynamic_position": True}
-            
+
         kwargs = self._get_strategy_kwargs(request, market_state_kwargs, backtest_id)
-        
+
         strategy = {
             "class": "RedisRecordingStrategy",
             "module_path": "backend.services.engine.qlib_app.utils.recording_strategy",
             "kwargs": kwargs,
         }
         return self._sanitize_module_path_config(strategy)
-
 
 class CustomStrategyBuilder(StrategyBuilder):
     def build(
@@ -240,7 +253,9 @@ class CustomStrategyBuilder(StrategyBuilder):
         clean_content = formatter.format_and_repair(request.strategy_content)
 
         # 2. 解析并获取配置/对象
-        strategy, namespace = self._build_strategy_from_content(clean_content, request=request)
+        strategy, namespace = self._build_strategy_from_content(
+            clean_content, request=request
+        )
         strategy_module_name = namespace.get("__strategy_module_name__")
 
         # 2. 如果已经是实例化的 BaseStrategy 对象，直接返回
@@ -250,7 +265,11 @@ class CustomStrategyBuilder(StrategyBuilder):
             return strategy
 
         # 3. 如果是字典配置，尝试合并业务参数
-        if isinstance(strategy, dict) and "kwargs" in strategy and isinstance(strategy["kwargs"], dict):
+        if (
+            isinstance(strategy, dict)
+            and "kwargs" in strategy
+            and isinstance(strategy["kwargs"], dict)
+        ):
             kwargs = strategy["kwargs"]
             # Track original user-specified kwargs BEFORE any injection
             original_kwargs = set(kwargs.keys())
@@ -272,14 +291,21 @@ class CustomStrategyBuilder(StrategyBuilder):
                     # All parameters the class explicitly accepts
                     explicit_params = set(sig.parameters.keys())
                     # Does it have **kwargs?
-                    has_var_kwargs = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+                    has_var_kwargs = any(
+                        p.kind == inspect.Parameter.VAR_KEYWORD
+                        for p in sig.parameters.values()
+                    )
 
                     # 1. Proactive Repair (Mandatory params)
                     mandatory_params = [
                         p.name
                         for p in sig.parameters.values()
                         if p.default == inspect.Parameter.empty
-                        and p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.POSITIONAL_ONLY)
+                        and p.kind
+                        in (
+                            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                            inspect.Parameter.POSITIONAL_ONLY,
+                        )
                         and p.name != "self"
                     ]
                     safe_defaults = {
@@ -331,17 +357,20 @@ class CustomStrategyBuilder(StrategyBuilder):
                             val = request.strategy_params.get(key)
                         else:
                             val = None
-                        
+
                         if val is not None:
                             if (
                                 key in explicit_params
                                 or key in kwargs
-                                or (has_var_kwargs and key in force_passthrough_ui_params)
+                                or (
+                                    has_var_kwargs
+                                    and key in force_passthrough_ui_params
+                                )
                             ):
                                 # 特殊处理：n_drop=0 表示不限调仓即全速调仓
                                 if key == "n_drop" and val == 0:
                                     if hasattr(request.strategy_params, "topk"):
-                                        val = getattr(request.strategy_params, "topk")
+                                        val = request.strategy_params.topk
                                     elif isinstance(request.strategy_params, dict):
                                         val = request.strategy_params.get("topk", 50)
                                     else:
@@ -356,7 +385,13 @@ class CustomStrategyBuilder(StrategyBuilder):
 
                     # 3. Final Filtering
                     # System params to be careful about
-                    system_params = {"backtest_id", "redis_host", "redis_port", "redis_password", "dynamic_position"}
+                    system_params = {
+                        "backtest_id",
+                        "redis_host",
+                        "redis_port",
+                        "redis_password",
+                        "dynamic_position",
+                    }
 
                     final_kwargs = {}
                     for k, v in kwargs.items():
@@ -412,7 +447,11 @@ class CustomStrategyBuilder(StrategyBuilder):
                         val = None
                     if val is None:
                         continue
-                    if key == "rebalance_days" or key in kwargs or key in original_kwargs:
+                    if (
+                        key == "rebalance_days"
+                        or key in kwargs
+                        or key in original_kwargs
+                    ):
                         logger.info(
                             "fallback_merge_ui_param",
                             "CustomStrategyBuilder fallback merge UI param",
@@ -447,10 +486,11 @@ class CustomStrategyBuilder(StrategyBuilder):
                     # 信号兼容性处理：解决 Qlib SignalStrategy 不支持字典配置导致的 NotImplementedError
                     if "signal" in kwargs and isinstance(kwargs["signal"], dict):
                         from qlib.utils import init_instance_by_config
+
                         try:
                             kwargs["signal"] = init_instance_by_config(kwargs["signal"])
                         except Exception:
-                            pass
+                            logger.debug("ignored exception", exc_info=True)
                     return cls(**kwargs)
                 except TypeError:
                     import inspect
@@ -460,7 +500,11 @@ class CustomStrategyBuilder(StrategyBuilder):
                         p.name
                         for p in sig.parameters.values()
                         if p.default == inspect.Parameter.empty
-                        and p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.POSITIONAL_ONLY)
+                        and p.kind
+                        in (
+                            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                            inspect.Parameter.POSITIONAL_ONLY,
+                        )
                     ]
                     missing = [p for p in params if p not in strategy.get("kwargs", {})]
                     if missing:
@@ -471,7 +515,7 @@ class CustomStrategyBuilder(StrategyBuilder):
                             class_name=class_name,
                             missing=missing,
                         )
-                        raise ValueError(msg)
+                        raise ValueError(msg) from None
                     raise
                 except Exception as e:
                     logger.error(
@@ -498,7 +542,7 @@ class CustomStrategyBuilder(StrategyBuilder):
         try:
             tree = ast.parse(content)
         except SyntaxError as e:
-            raise ValueError(f"Syntax error in strategy code: {e}")
+            raise ValueError(f"Syntax error in strategy code: {e}") from e
 
         blacklist = {
             "os",
@@ -570,11 +614,15 @@ class CustomStrategyBuilder(StrategyBuilder):
                         names = [node.module.split(".")[0]]
                 for name in names:
                     if name in blacklist:
-                        raise ValueError(f"Importing dangerous module '{name}' is forbidden")
+                        raise ValueError(
+                            f"Importing dangerous module '{name}' is forbidden"
+                        )
 
             if isinstance(node, ast.Attribute):
                 if node.attr in dangerous_dunders:
-                    raise ValueError(f"Accessing dangerous attribute '{node.attr}' is forbidden")
+                    raise ValueError(
+                        f"Accessing dangerous attribute '{node.attr}' is forbidden"
+                    )
 
     def _build_strategy_from_content(
         self, content: str, request: QlibBacktestRequest | None = None
@@ -628,12 +676,18 @@ class CustomStrategyBuilder(StrategyBuilder):
             strategy_classes = [
                 name
                 for name, obj in namespace.items()
-                if isinstance(obj, type) and issubclass(obj, BaseStrategy) and obj is not BaseStrategy
+                if isinstance(obj, type)
+                and issubclass(obj, BaseStrategy)
+                and obj is not BaseStrategy
             ]
 
             if len(strategy_classes) == 1:
                 class_name = strategy_classes[0]
-                logger.info("inferred_strategy_class", "Inferred strategy class", class_name=class_name)
+                logger.info(
+                    "inferred_strategy_class",
+                    "Inferred strategy class",
+                    class_name=class_name,
+                )
                 strategy = {"class": class_name, "module_path": "", "kwargs": {}}
             elif len(strategy_classes) > 1:
                 raise ValueError(
@@ -670,7 +724,9 @@ class CustomStrategyBuilder(StrategyBuilder):
             strategy_classes = [
                 name
                 for name, obj in namespace.items()
-                if isinstance(obj, type) and issubclass(obj, BaseStrategy) and obj is not BaseStrategy
+                if isinstance(obj, type)
+                and issubclass(obj, BaseStrategy)
+                and obj is not BaseStrategy
             ]
             if len(strategy_classes) == 1:
                 strategy["class"] = strategy_classes[0]
@@ -680,10 +736,11 @@ class CustomStrategyBuilder(StrategyBuilder):
                     class_name=strategy["class"],
                 )
             else:
-                raise ValueError("STRATEGY_CONFIG missing 'class' key and could not be inferred.")
+                raise ValueError(
+                    "STRATEGY_CONFIG missing 'class' key and could not be inferred."
+                )
 
         return strategy, namespace
-
 
 class StopLossBuilder(StrategyBuilder):
     def build(
@@ -697,10 +754,11 @@ class StopLossBuilder(StrategyBuilder):
         strategy = {
             "class": "RedisStopLossStrategy",
             "module_path": "backend.services.engine.qlib_app.utils.extended_strategies",
-            "kwargs": self._get_strategy_kwargs(request, market_state_kwargs, backtest_id),
+            "kwargs": self._get_strategy_kwargs(
+                request, market_state_kwargs, backtest_id
+            ),
         }
         return self._sanitize_module_path_config(strategy)
-
 
 class VolatilityWeightedBuilder(StrategyBuilder):
     def build(
@@ -714,10 +772,11 @@ class VolatilityWeightedBuilder(StrategyBuilder):
         strategy = {
             "class": "RedisVolatilityWeightedStrategy",
             "module_path": "backend.services.engine.qlib_app.utils.extended_strategies",
-            "kwargs": self._get_strategy_kwargs(request, market_state_kwargs, backtest_id),
+            "kwargs": self._get_strategy_kwargs(
+                request, market_state_kwargs, backtest_id
+            ),
         }
         return self._sanitize_module_path_config(strategy)
-
 
 class RiskGuardTopkBuilder(StrategyBuilder):
     def build(
@@ -734,14 +793,13 @@ class RiskGuardTopkBuilder(StrategyBuilder):
             kwargs["market_state_symbol"] = request.market_state_symbol
         if request.market_state_window:
             kwargs["market_state_window"] = request.market_state_window
-            
+
         strategy = {
             "class": "RedisRiskGuardTopkStrategy",
             "module_path": "backend.services.engine.qlib_app.utils.extended_strategies",
             "kwargs": kwargs,
         }
         return self._sanitize_module_path_config(strategy)
-
 
 class LongShortTopkBuilder(StrategyBuilder):
     """多空 TopK 策略 Builder"""
@@ -788,7 +846,6 @@ class LongShortTopkBuilder(StrategyBuilder):
         }
         return self._sanitize_module_path_config(strategy)
 
-
 class FullAlphaCrossSectionBuilder(StrategyBuilder):
     """全量截面 Alpha 策略 Builder"""
 
@@ -813,7 +870,13 @@ class FullAlphaCrossSectionBuilder(StrategyBuilder):
             **market_state_kwargs,
             **self._get_redis_config(backtest_id),
         }
-        for key in ("topk", "max_weight", "rebalance_days", "account_stop_loss", "max_leverage"):
+        for key in (
+            "topk",
+            "max_weight",
+            "rebalance_days",
+            "account_stop_loss",
+            "max_leverage",
+        ):
             if key in params and params[key] is not None:
                 strategy_kwargs[key] = params[key]
 
@@ -823,7 +886,6 @@ class FullAlphaCrossSectionBuilder(StrategyBuilder):
             "kwargs": strategy_kwargs,
         }
         return self._sanitize_module_path_config(strategy)
-
 
 class StrategyFactory:
     _builders = {

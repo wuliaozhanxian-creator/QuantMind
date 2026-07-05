@@ -1,14 +1,15 @@
 import logging
-from typing import Any, Dict, List
+from typing import Any
 
 import numpy as np
 import pandas as pd
 
-from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
+from backend.services.engine.qlib_app.utils.structured_logger import (
+    StructuredTaskLogger,
+)
 
 logger = logging.getLogger(__name__)
 task_logger = StructuredTaskLogger(logger, "FactorAnalysisService")
-
 
 class FactorAnalysisService:
     """
@@ -31,12 +32,18 @@ class FactorAnalysisService:
 
             cols = data.columns
             # 计算每日 Rank IC
-            ic_series = data.groupby(level="datetime").apply(lambda x: x[cols[0]].corr(x[cols[1]], method="spearman"))
+            ic_series = data.groupby(level="datetime").apply(
+                lambda x: x[cols[0]].corr(x[cols[1]], method="spearman")
+            )
 
             metrics = {
                 "rank_ic": float(ic_series.mean()),
                 "rank_ic_std": float(ic_series.std()),
-                "icir": (float(ic_series.mean() / ic_series.std()) if ic_series.std() != 0 else 0.0),
+                "icir": (
+                    float(ic_series.mean() / ic_series.std())
+                    if ic_series.std() != 0
+                    else 0.0
+                ),
                 "ic_decay": [],  # 可扩展：计算滞后 IC
             }
 
@@ -64,7 +71,9 @@ class FactorAnalysisService:
             data["group"] = data.groupby(level="datetime")[pred_col].transform(
                 lambda x: pd.qcut(x.rank(method="first"), n_groups, labels=False)
             )
-            stratified = data.groupby(["datetime", "group"])[label_col].mean().unstack("group")
+            stratified = (
+                data.groupby(["datetime", "group"])[label_col].mean().unstack("group")
+            )
 
             res = []
             for i in range(n_groups):
@@ -75,10 +84,16 @@ class FactorAnalysisService:
                             "group": i + 1,
                             "avg_return": float(group_data.mean()),
                             "total_return": float((group_data + 1).prod() - 1),
-                            "volatility": (float(group_data.std() * np.sqrt(252)) if len(group_data) > 1 else 0.0),
+                            "volatility": (
+                                float(group_data.std() * np.sqrt(252))
+                                if len(group_data) > 1
+                                else 0.0
+                            ),
                         }
                     )
             return res
         except Exception as e:
-            task_logger.error("calculate_stratified_returns_failed", "分层收益计算失败", error=str(e))
+            task_logger.error(
+                "calculate_stratified_returns_failed", "分层收益计算失败", error=str(e)
+            )
             return []

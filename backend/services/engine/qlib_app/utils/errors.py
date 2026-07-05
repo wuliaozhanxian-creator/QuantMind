@@ -8,10 +8,9 @@
 """
 
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel
-
 
 class ErrorCode(str, Enum):
     """错误码枚举"""
@@ -64,7 +63,6 @@ class ErrorCode(str, Enum):
 
     # 错误消息映射（中文）
 
-
 ERROR_MESSAGES = {
     # 通用错误
     ErrorCode.UNKNOWN_ERROR: "未知错误，请联系技术支持",
@@ -107,7 +105,6 @@ ERROR_MESSAGES = {
     ErrorCode.ACCESS_DENIED: "访问被拒绝",
 }
 
-
 class BacktestError(Exception):
     """回测业务异常基类"""
 
@@ -130,7 +127,6 @@ class BacktestError(Exception):
             "details": self.details,
         }
 
-
 class ErrorResponse(BaseModel):
     """统一错误响应格式"""
 
@@ -152,7 +148,6 @@ class ErrorResponse(BaseModel):
             timestamp=datetime.now().isoformat(),
         )
 
-
 def get_error_message(code: ErrorCode, **kwargs) -> str:
     """获取错误消息（支持格式化）"""
     message = ERROR_MESSAGES.get(code, "未知错误")
@@ -160,27 +155,23 @@ def get_error_message(code: ErrorCode, **kwargs) -> str:
         try:
             message = message.format(**kwargs)
         except KeyError:
-            pass
+            pass  # noqa: BLE001 - 已知键缺失，预期静默
     return message
 
     # 便捷异常类
-
 
 class QlibNotInitializedError(BacktestError):
     def __init__(self, details=None):
         super().__init__(ErrorCode.QLIB_NOT_INITIALIZED, details=details)
 
-
 class QlibDataNotAvailableError(BacktestError):
     def __init__(self, details=None):
         super().__init__(ErrorCode.QLIB_DATA_NOT_AVAILABLE, details=details)
-
 
 class StrategyNotFoundError(BacktestError):
     def __init__(self, strategy_id: str = None, details=None):
         msg = f"策略不存在: {strategy_id}" if strategy_id else None
         super().__init__(ErrorCode.STRATEGY_NOT_FOUND, message=msg, details=details)
-
 
 class StrategyValidationError(BacktestError):
     def __init__(self, errors: list, details=None):
@@ -188,12 +179,10 @@ class StrategyValidationError(BacktestError):
         details["validation_errors"] = errors
         super().__init__(ErrorCode.STRATEGY_VALIDATION_FAILED, details=details)
 
-
 class BacktestNotFoundError(BacktestError):
     def __init__(self, backtest_id: str, details=None):
         msg = f"回测记录不存在: {backtest_id}"
         super().__init__(ErrorCode.BACKTEST_NOT_FOUND, message=msg, details=details)
-
 
 class DataRangeInvalidError(BacktestError):
     def __init__(self, start_date: str, end_date: str, details=None):

@@ -27,8 +27,16 @@ if "slowapi" not in sys.modules:
     sys.modules["slowapi"] = slowapi_module
     sys.modules["slowapi.util"] = slowapi_util_module
 
-from backend.services.trade.models.enums import OrderSide, OrderStatus, TradeAction, TradingMode
-from backend.services.trade.routers import internal_strategy_bridge, internal_strategy_lifecycle
+from backend.services.trade.models.enums import (
+    OrderSide,
+    OrderStatus,
+    TradeAction,
+    TradingMode,
+)
+from backend.services.trade.routers import (
+    internal_strategy_bridge,
+    internal_strategy_lifecycle,
+)
 from backend.services.trade.schemas.qmt_agent import QMTBridgeExecutionPayload
 from backend.services.trade.services.qmt_agent_auth import BridgeSessionContext
 from backend.services.trade.services import internal_strategy_dispatcher
@@ -115,7 +123,11 @@ async def test_internal_strategy_order_sell_to_open_success(monkeypatch):
 
     monkeypatch.setattr(internal_strategy_dispatcher, "OrderService", _FakeOrderService)
     monkeypatch.setattr(internal_strategy_dispatcher, "TradingEngine", _FakeEngine)
-    monkeypatch.setattr(internal_strategy_dispatcher, "_fetch_active_portfolio_snapshot", _fake_portfolio_snapshot)
+    monkeypatch.setattr(
+        internal_strategy_dispatcher,
+        "_fetch_active_portfolio_snapshot",
+        _fake_portfolio_snapshot,
+    )
 
     db = _SequenceDb([12345, None])
     res = await internal_strategy_lifecycle.strategy_order(
@@ -172,7 +184,9 @@ async def test_internal_strategy_order_sell_to_open_rejected_by_risk(monkeypatch
         async def check_order_risk(self, _uid, _order):
             return {
                 "passed": False,
-                "violations": [{"rule": "SHORT_QUOTA_INSUFFICIENT", "message": "quota not enough"}],
+                "violations": [
+                    {"rule": "SHORT_QUOTA_INSUFFICIENT", "message": "quota not enough"}
+                ],
             }
 
         async def submit_order(self, *_args, **_kwargs):
@@ -180,7 +194,11 @@ async def test_internal_strategy_order_sell_to_open_rejected_by_risk(monkeypatch
 
     monkeypatch.setattr(internal_strategy_dispatcher, "OrderService", _FakeOrderService)
     monkeypatch.setattr(internal_strategy_dispatcher, "TradingEngine", _FakeEngine)
-    monkeypatch.setattr(internal_strategy_dispatcher, "_fetch_active_portfolio_snapshot", _fake_portfolio_snapshot)
+    monkeypatch.setattr(
+        internal_strategy_dispatcher,
+        "_fetch_active_portfolio_snapshot",
+        _fake_portfolio_snapshot,
+    )
 
     db = _SequenceDb([12345, None])
     res = await internal_strategy_lifecycle.strategy_order(
@@ -246,7 +264,11 @@ async def test_internal_strategy_order_buy_to_close_success(monkeypatch):
 
     monkeypatch.setattr(internal_strategy_dispatcher, "OrderService", _FakeOrderService)
     monkeypatch.setattr(internal_strategy_dispatcher, "TradingEngine", _FakeEngine)
-    monkeypatch.setattr(internal_strategy_dispatcher, "_fetch_active_portfolio_snapshot", _fake_portfolio_snapshot)
+    monkeypatch.setattr(
+        internal_strategy_dispatcher,
+        "_fetch_active_portfolio_snapshot",
+        _fake_portfolio_snapshot,
+    )
 
     db = _SequenceDb([12345, None])
     res = await internal_strategy_lifecycle.strategy_order(
@@ -337,7 +359,9 @@ async def test_bridge_execution_reconcile_replay_not_duplicate_trade():
     )
 
     first = await internal_strategy_bridge.report_qmt_execution(payload, ctx=ctx, db=db)
-    second = await internal_strategy_bridge.report_qmt_execution(payload, ctx=ctx, db=db)
+    second = await internal_strategy_bridge.report_qmt_execution(
+        payload, ctx=ctx, db=db
+    )
 
     assert first["ok"] is True
     assert second["ok"] is True
@@ -400,8 +424,12 @@ async def test_bridge_execution_order_callback_without_trade_id_does_not_double_
         message="trade callback filled",
     )
 
-    first = await internal_strategy_bridge.report_qmt_execution(order_payload, ctx=ctx, db=db)
-    second = await internal_strategy_bridge.report_qmt_execution(trade_payload, ctx=ctx, db=db)
+    first = await internal_strategy_bridge.report_qmt_execution(
+        order_payload, ctx=ctx, db=db
+    )
+    second = await internal_strategy_bridge.report_qmt_execution(
+        trade_payload, ctx=ctx, db=db
+    )
 
     assert first["ok"] is True
     assert second["ok"] is True

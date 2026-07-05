@@ -1,5 +1,5 @@
 import logging
-from typing import Optional, List, Dict, Any
+from typing import Optional, Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
@@ -37,14 +37,18 @@ async def list_files(request: Request, path: str = ""):
         # 将策略项映射为 IDE 文件项
         ide_items = []
         for s in items:
-            ide_items.append({
-                "id": s["id"],
-                "name": s["name"] + ".py" if not s["name"].endswith(".py") else s["name"],
-                "path": s["id"], # 在云端，路径即 ID
-                "type": "file",
-                "size": 0, # TODO: 优化获取大小
-                "last_modified": s.get("updated_at"),
-            })
+            ide_items.append(
+                {
+                    "id": s["id"],
+                    "name": s["name"] + ".py"
+                    if not s["name"].endswith(".py")
+                    else s["name"],
+                    "path": s["id"],  # 在云端，路径即 ID
+                    "type": "file",
+                    "size": 0,  # TODO: 优化获取大小
+                    "last_modified": s.get("updated_at"),
+                }
+            )
 
         return {
             "items": ide_items,
@@ -54,7 +58,7 @@ async def list_files(request: Request, path: str = ""):
         }
     except Exception as e:
         logger.error(f"Failed to list cloud files: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @router.post("/create/file")
 async def create_file(request: Request, item: CreateItemRequest):
@@ -71,12 +75,12 @@ async def create_file(request: Request, item: CreateItemRequest):
             user_id=user_id,
             name=name,
             code="# New Strategy\n",
-            metadata={"status": "DRAFT", "description": "Created via Cloud IDE"}
+            metadata={"status": "DRAFT", "description": "Created via Cloud IDE"},
         )
         return {"status": "success", "id": res["id"]}
     except Exception as e:
         logger.error(f"Failed to create cloud file: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @router.get("/{file_id:path}")
 async def get_content(request: Request, file_id: str):
@@ -86,8 +90,8 @@ async def get_content(request: Request, file_id: str):
 
         # 兼容带 .py 的请求
         sid = file_id
-        if sid.endswith(".py") and "-" in sid: # UUID-like
-             sid = sid[:-3]
+        if sid.endswith(".py") and "-" in sid:  # UUID-like
+            sid = sid[:-3]
 
         strategy = await svc.get(sid, user_id=user_id)
         if not strategy:
@@ -98,7 +102,7 @@ async def get_content(request: Request, file_id: str):
         raise
     except Exception as e:
         logger.error(f"Failed to get strategy content: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @router.post("/{file_id:path}")
 async def save_content(request: Request, file_id: str, item: SaveRequest):
@@ -112,17 +116,17 @@ async def save_content(request: Request, file_id: str, item: SaveRequest):
 
         # 针对 422 调试：记录请求详情
         if not item.content:
-             logger.warning(f"Empty content received for sid={sid}")
+            logger.warning(f"Empty content received for sid={sid}")
 
         # 先获取元数据以保留
         try:
             existing = await svc.get(sid, user_id=user_id)
         except Exception as e:
             logger.error(f"Failed to fetch strategy {sid} before save: {e}")
-            raise HTTPException(status_code=404, detail="Strategy not found")
+            raise HTTPException(status_code=404, detail="Strategy not found") from e
 
         if not existing:
-             raise HTTPException(status_code=404, detail="Strategy not found")
+            raise HTTPException(status_code=404, detail="Strategy not found")
 
         await svc.save(
             user_id=user_id,
@@ -133,15 +137,15 @@ async def save_content(request: Request, file_id: str, item: SaveRequest):
                 "description": existing.get("description"),
                 "tags": existing.get("tags"),
                 "parameters": existing.get("parameters"),
-                "is_verified": existing.get("is_verified", False)
-            }
+                "is_verified": existing.get("is_verified", False),
+            },
         )
         return {"status": "success"}
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to save strategy content: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @router.delete("/{file_id:path}")
 async def delete_item(request: Request, file_id: str):
@@ -161,4 +165,4 @@ async def delete_item(request: Request, file_id: str):
         raise
     except Exception as e:
         logger.error(f"Failed to delete strategy: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e

@@ -8,7 +8,7 @@ import asyncio
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Optional
 from collections.abc import Iterable
 
 from backend.services.stream.market_app.database import AsyncSessionLocal
@@ -25,13 +25,11 @@ logger = logging.getLogger(__name__)
 # 全局数据源实例（延迟初始化）
 _remote_redis_source: RemoteRedisDataSource | None = None
 
-
 def get_remote_redis_source() -> RemoteRedisDataSource:
     global _remote_redis_source
     if _remote_redis_source is None:
         _remote_redis_source = RemoteRedisDataSource()
     return _remote_redis_source
-
 
 def _as_utc_aware(dt: datetime | None) -> datetime:
     if dt is None:
@@ -39,7 +37,6 @@ def _as_utc_aware(dt: datetime | None) -> datetime:
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)
-
 
 class QuotePusher:
     """实时行情推送器
@@ -57,7 +54,9 @@ class QuotePusher:
         self.persist_to_db = True
         self.write_series = False  # 远程 Redis 只读，不写入时序数据
         self.warmup_symbols: set[str] = {
-            s.strip() for s in (settings.STREAM_WARMUP_SYMBOLS or "").split(",") if s.strip()
+            s.strip()
+            for s in (settings.STREAM_WARMUP_SYMBOLS or "").split(",")
+            if s.strip()
         }
         logger.info("实时行情推送器初始化")
 
@@ -77,14 +76,16 @@ class QuotePusher:
             try:
                 await self.push_task
             except asyncio.CancelledError:
-                pass
+                pass  # noqa: BLE001 - asyncio 任务取消信号，预期静默处理
         self.push_task = None
         logger.info("实时行情推送器停止")
 
     async def subscribe_quote(self, stock_code: str):
         """订阅股票行情"""
         self.subscribed_stocks.add(stock_code)
-        logger.info(f"订阅列表增加: {stock_code}, 当前共 {len(self.subscribed_stocks)} 只")
+        logger.info(
+            f"订阅列表增加: {stock_code}, 当前共 {len(self.subscribed_stocks)} 只"
+        )
 
     async def unsubscribe_quote(self, stock_code: str):
         """取消订阅股票行情"""
@@ -95,7 +96,9 @@ class QuotePusher:
     async def reconcile_subscriptions(self, topics: Iterable[str]):
         """根据连接管理器中的主题重算股票订阅集合。"""
         stock_topics = {
-            topic.split("stock.", 1)[1] for topic in topics if isinstance(topic, str) and topic.startswith("stock.")
+            topic.split("stock.", 1)[1]
+            for topic in topics
+            if isinstance(topic, str) and topic.startswith("stock.")
         }
         if stock_topics != self.subscribed_stocks:
             self.subscribed_stocks = stock_topics
@@ -116,7 +119,11 @@ class QuotePusher:
                     continue
 
                 # 1. 批量抓取行情
-                stock_list = list(self.subscribed_stocks) if self.subscribed_stocks else list(self.warmup_symbols)
+                stock_list = (
+                    list(self.subscribed_stocks)
+                    if self.subscribed_stocks
+                    else list(self.warmup_symbols)
+                )
                 results = await source.fetch_quotes(stock_list)
 
                 if self.write_series and results:
@@ -170,7 +177,9 @@ class QuotePusher:
                 logger.error(f"中心化推送循环错误: {e}")
                 await asyncio.sleep(2.0)
 
-    async def _append_series_points(self, source: RemoteRedisDataSource, quotes: list[dict[str, Any]]) -> None:
+    async def _append_series_points(
+        self, source: RemoteRedisDataSource, quotes: list[dict[str, Any]]
+    ) -> None:
         """将 WS 推送使用的同一批行情写入 Redis 时序集合。"""
         try:
             for quote in quotes:
@@ -296,7 +305,6 @@ class QuotePusher:
             "cached_stocks": len(self.cache),
             "push_interval": self.push_interval,
         }
-
 
 # 全局推送器实例
 quote_pusher = QuotePusher()

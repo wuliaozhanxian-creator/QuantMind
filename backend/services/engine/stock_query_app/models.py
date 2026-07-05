@@ -8,8 +8,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
-
+from typing import Any, Optional
 
 class MarketType(Enum):
     """市场类型枚举"""
@@ -19,7 +18,6 @@ class MarketType(Enum):
     BJ = "BJ"  # 北京证券交易所
     HK = "HK"  # 香港证券交易所
     US = "US"  # 美国证券交易所
-
 
 class TradeStatus(Enum):
     """交易状态枚举"""
@@ -31,14 +29,12 @@ class TradeStatus(Enum):
     AFTER_MARKET = "after_market"  # 盘后
     CLOSED = "closed"  # 休市
 
-
 class AdjustType(Enum):
     """复权类型枚举"""
 
     NONE = "none"  # 不复权
     FORWARD = "qfq"  # 前复权
     BACKWARD = "hfq"  # 后复权
-
 
 class DataFrequency(Enum):
     """数据频率枚举"""
@@ -51,7 +47,6 @@ class DataFrequency(Enum):
     DAILY = "D"  # 日线
     WEEKLY = "W"  # 周线
     MONTHLY = "M"  # 月线
-
 
 @dataclass
 class StockInfo:
@@ -112,7 +107,9 @@ class StockInfo:
             market=MarketType(data["market"]),
             industry=data.get("industry"),
             sector=data.get("sector"),
-            list_date=(date.fromisoformat(data["list_date"]) if data.get("list_date") else None),
+            list_date=(
+                date.fromisoformat(data["list_date"]) if data.get("list_date") else None
+            ),
             total_shares=data.get("total_shares"),
             float_shares=data.get("float_shares"),
             pe_ttm=data.get("pe_ttm"),
@@ -128,10 +125,13 @@ class StockInfo:
             company_name=data.get("company_name"),
             exchange=data.get("exchange"),
             currency=data.get("currency", "CNY"),
-            created_at=datetime.fromisoformat(data.get("created_at", datetime.now().isoformat())),
-            updated_at=datetime.fromisoformat(data.get("updated_at", datetime.now().isoformat())),
+            created_at=datetime.fromisoformat(
+                data.get("created_at", datetime.now().isoformat())
+            ),
+            updated_at=datetime.fromisoformat(
+                data.get("updated_at", datetime.now().isoformat())
+            ),
         )
-
 
 @dataclass
 class RealtimeQuote:
@@ -212,7 +212,6 @@ class RealtimeQuote:
             ask1_size=data.get("ask1_size"),
         )
 
-
 @dataclass
 class HistoricalQuote:
     """历史行情数据"""
@@ -271,7 +270,6 @@ class HistoricalQuote:
             pb=data.get("pb"),
         )
 
-
 @dataclass
 class TechnicalIndicator:
     """技术指标数据"""
@@ -300,7 +298,6 @@ class TechnicalIndicator:
             values=data["values"],
         )
 
-
 @dataclass
 class QueryRequest:
     """查询请求基类"""
@@ -318,7 +315,6 @@ class QueryRequest:
             "end_date": self.end_date.isoformat() if self.end_date else None,
             "limit": self.limit,
         }
-
 
 @dataclass
 class RealtimeQueryRequest(QueryRequest):
@@ -341,7 +337,6 @@ class RealtimeQueryRequest(QueryRequest):
         ]
     )
 
-
 @dataclass
 class HistoricalQueryRequest(QueryRequest):
     """历史数据查询请求"""
@@ -360,7 +355,6 @@ class HistoricalQueryRequest(QueryRequest):
         ]
     )
 
-
 @dataclass
 class TechnicalIndicatorRequest(QueryRequest):
     """技术指标查询请求"""
@@ -368,7 +362,6 @@ class TechnicalIndicatorRequest(QueryRequest):
     indicators: list[str] = field(default_factory=lambda: ["MA5", "MA10", "MA20"])
     frequency: DataFrequency = DataFrequency.DAILY
     parameters: dict[str, Any] = field(default_factory=dict)  # 指标参数
-
 
 @dataclass
 class SearchRequest:
@@ -389,7 +382,6 @@ class SearchRequest:
             "limit": self.limit,
             "offset": self.offset,
         }
-
 
 @dataclass
 class QueryResponse:
@@ -423,9 +415,10 @@ class QueryResponse:
             message=data.get("message", ""),
             data=data.get("data"),
             total=data.get("total", 0),
-            timestamp=datetime.fromisoformat(data.get("timestamp", datetime.now().isoformat())),
+            timestamp=datetime.fromisoformat(
+                data.get("timestamp", datetime.now().isoformat())
+            ),
         )
-
 
 # 常用指标映射
 INDICATOR_MAPPING = {
@@ -459,7 +452,6 @@ INDICATOR_MAPPING = {
     "VOL": "成交量",
 }
 
-
 # 市场代码映射
 MARKET_CODE_MAPPING = {
     "SZ": "深圳证券交易所",
@@ -468,7 +460,6 @@ MARKET_CODE_MAPPING = {
     "HK": "香港证券交易所",
     "US": "美国证券交易所",
 }
-
 
 def parse_stock_code(code: str) -> tuple[str, MarketType]:
     """解析股票代码，返回代码和市场类型
@@ -514,7 +505,6 @@ def parse_stock_code(code: str) -> tuple[str, MarketType]:
         market = MarketType.SZ  # 默认深圳
 
     return stock_code, market
-
 
 def format_stock_code(code: str, market: MarketType) -> str:
     """格式化股票代码

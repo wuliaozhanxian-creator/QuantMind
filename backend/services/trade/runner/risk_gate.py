@@ -11,12 +11,11 @@
 
 import hashlib
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import redis
 
 logger = logging.getLogger(__name__)
-
 
 # ─── 内部辅助 ────────────────────────────────────────────────────────────────
 
@@ -28,7 +27,6 @@ def _to_float(value: Any) -> float | None:
     except Exception:
         return None
 
-
 def _extract_live_price(snapshot: dict[str, Any]) -> float | None:
     for key in ("Now", "last_price", "current_price", "price", "close"):
         parsed = _to_float(snapshot.get(key))
@@ -36,9 +34,15 @@ def _extract_live_price(snapshot: dict[str, Any]) -> float | None:
             return parsed
     return None
 
-
 def _extract_market_pct_change(snapshot: dict[str, Any]) -> float | None:
-    for key in ("pct_chg", "pct_change", "change_percent", "change_pct", "pct", "ChgRatio"):
+    for key in (
+        "pct_chg",
+        "pct_change",
+        "change_percent",
+        "change_pct",
+        "pct",
+        "ChgRatio",
+    ):
         parsed = _to_float(snapshot.get(key))
         if parsed is None:
             continue
@@ -49,7 +53,6 @@ def _extract_market_pct_change(snapshot: dict[str, Any]) -> float | None:
     if live_price is not None and prev_close and prev_close > 0:
         return (live_price - prev_close) / prev_close
     return None
-
 
 # ─── 公开接口 ─────────────────────────────────────────────────────────────────
 
@@ -84,13 +87,17 @@ class RiskGate:
         # 1. 配置加载
         max_turnover = float(exec_config.get("max_turnover_ratio_per_cycle", 0.20))
         stop_loss_threshold = float(
-            exec_config.get("stop_loss", exec_config.get("global_stop_loss_drawdown", -0.08))
+            exec_config.get(
+                "stop_loss", exec_config.get("global_stop_loss_drawdown", -0.08)
+            )
         )
         max_buy_drop = float(exec_config.get("max_buy_drop", -0.03))
         max_single_stock_ratio = float(exec_config.get("max_single_stock_ratio", 0.15))
         max_order_value = float(exec_config.get("max_order_value_absolute", 500000))
         max_price_dev = float(
-            live_trade_config.get("max_price_deviation", exec_config.get("max_price_deviation", 0.02))
+            live_trade_config.get(
+                "max_price_deviation", exec_config.get("max_price_deviation", 0.02)
+            )
         )
 
         total_value = float(account.get("total_value") or 0)
@@ -104,7 +111,11 @@ class RiskGate:
                 current_drawdown,
                 stop_loss_threshold,
             )
-            signals = [s for s in signals if s.get("trade_action") in {"SELL_TO_CLOSE", "BUY_TO_CLOSE"}]
+            signals = [
+                s
+                for s in signals
+                if s.get("trade_action") in {"SELL_TO_CLOSE", "BUY_TO_CLOSE"}
+            ]
 
         # 3. 逐单合规性检查
         passed_signals = []
@@ -123,7 +134,10 @@ class RiskGate:
                     if dev > max_price_dev:
                         logger.warning(
                             "[Risk] %s 信号价(%.2f) 与市价(%.2f) 偏离 %.2f%%，拦截",
-                            symbol, price, live_price, dev * 100,
+                            symbol,
+                            price,
+                            live_price,
+                            dev * 100,
                         )
                         continue
 
@@ -135,14 +149,20 @@ class RiskGate:
                     if trade_action == "BUY_TO_OPEN" and pct_change <= max_buy_drop:
                         logger.warning(
                             "[Risk] %s 涨跌幅 %.2f%% 触发多头大跌拦截，动作=%s",
-                            symbol, pct_change * 100, trade_action,
+                            symbol,
+                            pct_change * 100,
+                            trade_action,
                         )
                         continue
                     # C. 空头大涨拦截
-                    elif trade_action == "SELL_TO_OPEN" and pct_change >= abs(max_buy_drop):
+                    elif trade_action == "SELL_TO_OPEN" and pct_change >= abs(
+                        max_buy_drop
+                    ):
                         logger.warning(
                             "[Risk] %s 涨跌幅 %.2f%% 触发空头大涨拦截，动作=%s",
-                            symbol, pct_change * 100, trade_action,
+                            symbol,
+                            pct_change * 100,
+                            trade_action,
                         )
                         continue
 
@@ -150,22 +170,32 @@ class RiskGate:
             if notional > max_order_value:
                 logger.warning(
                     "[Risk] %s 订单金额 %.2f 超过限制 %.2f，自动缩减数量",
-                    symbol, notional, max_order_value,
+                    symbol,
+                    notional,
+                    max_order_value,
                 )
                 volume = (max_order_value / price) // 100 * 100
                 s["volume"] = int(volume)
                 notional = price * volume
 
             # E. 单票持仓上限
-            current_pos_value = float(existing_positions.get(symbol, {}).get("market_value") or 0)
-            if total_value > 0 and (current_pos_value + notional) / total_value > max_single_stock_ratio:
+            current_pos_value = float(
+                existing_positions.get(symbol, {}).get("market_value") or 0
+            )
+            if (
+                total_value > 0
+                and (current_pos_value + notional) / total_value
+                > max_single_stock_ratio
+            ):
                 logger.warning(
                     "[Risk] %s 预期持仓比 %.2f%% 超过上限 %.2f%%，缩减",
                     symbol,
                     (current_pos_value + notional) / total_value * 100,
                     max_single_stock_ratio * 100,
                 )
-                allowed_notional = (total_value * max_single_stock_ratio) - current_pos_value
+                allowed_notional = (
+                    total_value * max_single_stock_ratio
+                ) - current_pos_value
                 if allowed_notional <= 0:
                     continue
                 s["volume"] = int((allowed_notional / price) // 100 * 100)
@@ -175,7 +205,9 @@ class RiskGate:
 
         # 4. 换手率拦截（等比例缩减）
         final_signals = passed_signals
-        estimated_turnover = sum(float(s["volume"]) * float(s["price"]) for s in final_signals)
+        estimated_turnover = sum(
+            float(s["volume"]) * float(s["price"]) for s in final_signals
+        )
         if total_value > 0 and (estimated_turnover / total_value) > max_turnover:
             logger.warning(
                 "[Risk] 本轮换手率 (%.2f) 超过限制 (%.2f)，等比例缩减",
@@ -200,7 +232,9 @@ class RiskGate:
     def fingerprint(signals: list[dict[str, Any]]) -> str:
         """计算信号批次指纹，用于幂等锁键。"""
         sorted_sigs = sorted(signals, key=lambda x: x["symbol"] + x["action"])
-        raw = "|".join([f"{s['symbol']}:{s['action']}:{s['volume']}" for s in sorted_sigs])
+        raw = "|".join(
+            [f"{s['symbol']}:{s['action']}:{s['volume']}" for s in sorted_sigs]
+        )
         return hashlib.sha256(raw.encode()).hexdigest()
 
     @staticmethod

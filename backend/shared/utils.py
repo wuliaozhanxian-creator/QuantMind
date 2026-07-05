@@ -4,7 +4,7 @@ import asyncio
 import functools
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, TypeVar
+from typing import Any, Optional, TypeVar
 from collections.abc import Callable
 
 from fastapi import HTTPException, status
@@ -16,7 +16,6 @@ logger = get_logger(__name__)
 
 T = TypeVar("T")
 
-
 class APIResponse(BaseModel):
     """标准API响应模型"""
 
@@ -24,7 +23,6 @@ class APIResponse(BaseModel):
     message: str = "操作成功"
     data: Any | None = None
     timestamp: datetime = datetime.now(timezone.utc)
-
 
 class ErrorResponse(BaseModel):
     """错误响应模型"""
@@ -34,7 +32,6 @@ class ErrorResponse(BaseModel):
     error_code: str | None = None
     details: dict[str, Any] | None = None
     timestamp: datetime = datetime.now(timezone.utc)
-
 
 def success_response(data: Any = None, message: str = "操作成功") -> APIResponse:
     """创建成功响应
@@ -47,7 +44,6 @@ def success_response(data: Any = None, message: str = "操作成功") -> APIResp
         标准API响应
     """
     return APIResponse(data=data, message=message)
-
 
 def error_response(
     message: str,
@@ -65,7 +61,6 @@ def error_response(
         错误响应
     """
     return ErrorResponse(message=message, error_code=error_code, details=details)
-
 
 def retry(max_attempts: int = 3, delay: float = 1.0, backoff: float = 2.0):
     """重试装饰器
@@ -95,14 +90,15 @@ def retry(max_attempts: int = 3, delay: float = 1.0, backoff: float = 2.0):
                         time.sleep(current_delay)
                         current_delay *= backoff
                     else:
-                        logger.error(f"All {max_attempts} attempts failed for {func.__name__}: {e}")
+                        logger.error(
+                            f"All {max_attempts} attempts failed for {func.__name__}: {e}"
+                        )
 
             raise last_exception
 
         return wrapper
 
     return decorator
-
 
 def async_retry(max_attempts: int = 3, delay: float = 1.0, backoff: float = 2.0):
     """异步重试装饰器
@@ -132,14 +128,15 @@ def async_retry(max_attempts: int = 3, delay: float = 1.0, backoff: float = 2.0)
                         await asyncio.sleep(current_delay)
                         current_delay *= backoff
                     else:
-                        logger.error(f"All {max_attempts} attempts failed for {func.__name__}: {e}")
+                        logger.error(
+                            f"All {max_attempts} attempts failed for {func.__name__}: {e}"
+                        )
 
             raise last_exception
 
         return wrapper
 
     return decorator
-
 
 def timing(func: Callable[..., T]) -> Callable[..., T]:
     """性能计时装饰器
@@ -161,13 +158,16 @@ def timing(func: Callable[..., T]) -> Callable[..., T]:
             return result
         except Exception as e:
             execution_time = time.time() - start_time
-            logger.error(f"{func.__name__} failed after {execution_time:.4f} seconds: {e}")
+            logger.error(
+                f"{func.__name__} failed after {execution_time:.4f} seconds: {e}"
+            )
             raise
 
     return wrapper
 
-
-def validate_pagination(page: int = 1, size: int = 20, max_size: int = 100) -> tuple[int, int]:
+def validate_pagination(
+    page: int = 1, size: int = 20, max_size: int = 100
+) -> tuple[int, int]:
     """验证分页参数
 
     Args:
@@ -182,10 +182,14 @@ def validate_pagination(page: int = 1, size: int = 20, max_size: int = 100) -> t
         HTTPException: 参数无效时抛出
     """
     if page < 1:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="页码必须大于0")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="页码必须大于0"
+        )
 
     if size < 1:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="每页大小必须大于0")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="每页大小必须大于0"
+        )
 
     if size > max_size:
         raise HTTPException(
@@ -194,7 +198,6 @@ def validate_pagination(page: int = 1, size: int = 20, max_size: int = 100) -> t
         )
 
     return page, size
-
 
 def calculate_offset(page: int, size: int) -> int:
     """计算数据库查询偏移量
@@ -207,7 +210,6 @@ def calculate_offset(page: int, size: int) -> int:
         偏移量
     """
     return (page - 1) * size
-
 
 def format_currency(amount: float, currency: str = "CNY") -> str:
     """格式化货币金额
@@ -226,7 +228,6 @@ def format_currency(amount: float, currency: str = "CNY") -> str:
     else:
         return f"{amount:,.2f} {currency}"
 
-
 def safe_divide(numerator: float, denominator: float, default: float = 0.0) -> float:
     """安全除法，避免除零错误
 
@@ -241,7 +242,6 @@ def safe_divide(numerator: float, denominator: float, default: float = 0.0) -> f
     if denominator == 0:
         return default
     return numerator / denominator
-
 
 def truncate_string(text: str, max_length: int = 100, suffix: str = "...") -> str:
     """截断字符串
@@ -258,7 +258,6 @@ def truncate_string(text: str, max_length: int = 100, suffix: str = "...") -> st
         return text
     return text[: max_length - len(suffix)] + suffix
 
-
 def batch_process(items: list[T], batch_size: int = 100) -> list[list[T]]:
     """批量处理数据
 
@@ -273,7 +272,6 @@ def batch_process(items: list[T], batch_size: int = 100) -> list[list[T]]:
     for i in range(0, len(items), batch_size):
         batches.append(items[i : i + batch_size])
     return batches
-
 
 def normalize_user_id(user_id: Any) -> str:
     """标准化 UserID 为 8 位数格式

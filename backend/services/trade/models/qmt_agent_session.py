@@ -34,7 +34,9 @@ class QMTAgentSession(Base):
     last_used_at = Column(DateTime(timezone=True), nullable=True)
 
     # 时间戳
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, default=datetime.utcnow
+    )
     updated_at = Column(
         DateTime(timezone=True),
         nullable=False,

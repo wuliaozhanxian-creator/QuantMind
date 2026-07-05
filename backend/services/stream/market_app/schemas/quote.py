@@ -1,10 +1,9 @@
 """Quote schemas"""
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
-
 
 class QuoteBase(BaseModel):
     """实时行情基础模型"""
@@ -48,10 +47,8 @@ class QuoteBase(BaseModel):
     data_source: str | None = Field(None, description="数据源")
     is_stale: bool = Field(False, description="数据是否陈旧(超过更新频率)")
 
-
 class QuoteCreate(QuoteBase):
     """创建行情"""
-
 
 class QuoteResponse(QuoteBase):
     """行情响应"""
@@ -60,7 +57,6 @@ class QuoteResponse(QuoteBase):
 
     id: int
     created_at: datetime
-
 
 class QuoteListResponse(BaseModel):
     """行情列表响应"""

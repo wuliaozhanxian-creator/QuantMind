@@ -13,7 +13,6 @@ from sqlalchemy.orm import Mapped, mapped_column
 from backend.services.trade.simulation.models import Base, TimestampMixin
 from backend.services.trade.simulation.models.order import OrderSide, TradingMode
 
-
 class SimTrade(Base, TimestampMixin):
     """[DEPRECATED] Legacy simulation trade model. Use SimulationFill instead.
 
@@ -24,10 +23,10 @@ class SimTrade(Base, TimestampMixin):
 
     Runtime trade recording must use SimulationFill via SimulationLedgerService.
     """
+
     __tablename__ = "sim_trades"
 
-    id: Mapped[int] = mapped_column(
-        Integer, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     trade_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), unique=True, nullable=False, default=uuid.uuid4, index=True
     )
@@ -61,25 +60,21 @@ class SimTrade(Base, TimestampMixin):
     quantity: Mapped[float] = mapped_column(Float, nullable=False)
     price: Mapped[float] = mapped_column(Float, nullable=False)
     trade_value: Mapped[float] = mapped_column(Float, nullable=False)
-    commission: Mapped[float] = mapped_column(
-        Float, nullable=False, default=0.0)
-    stamp_duty: Mapped[float] = mapped_column(
-        Float, nullable=False, default=0.0)
-    transfer_fee: Mapped[float] = mapped_column(
-        Float, nullable=False, default=0.0)
-    total_fee: Mapped[float] = mapped_column(
-        Float, nullable=False, default=0.0)
+    commission: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    stamp_duty: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    transfer_fee: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    total_fee: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     executed_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=datetime.utcnow
     )
-    price_source: Mapped[Optional[str]] = mapped_column(
-        String(64), nullable=True)
-    trade_action: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    position_side: Mapped[Optional[str]] = mapped_column(String(16), nullable=True, default="long")
+    price_source: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    trade_action: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    position_side: Mapped[str | None] = mapped_column(
+        String(16), nullable=True, default="long"
+    )
     is_margin_trade: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     __table_args__ = (
-        Index("idx_sim_trade_tenant_user_symbol",
-              "tenant_id", "user_id", "symbol"),
+        Index("idx_sim_trade_tenant_user_symbol", "tenant_id", "user_id", "symbol"),
         Index("idx_sim_trade_order", "order_id"),
     )

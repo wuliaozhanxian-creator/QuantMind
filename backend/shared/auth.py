@@ -21,7 +21,7 @@
 
 import os
 from datetime import datetime, timedelta
-from typing import Any, Dict
+from typing import Any
 
 import jwt
 from fastapi import Depends, Header, HTTPException, status
@@ -35,7 +35,6 @@ from .logging_config import get_logger
 logger = get_logger(__name__)
 security = HTTPBearer()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
 
 class AuthManager:
     """认证管理器"""
@@ -98,14 +97,14 @@ class AuthManager:
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Token has expired",
                 headers={"WWW-Authenticate": "Bearer"},
-            )
+            ) from None
         except jwt.JWTError as e:
             logger.warning(f"Invalid token: {e}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Could not validate credentials",
                 headers={"WWW-Authenticate": "Bearer"},
-            )
+            ) from e
 
     def hash_password(self, password: str) -> str:
         """哈希密码
@@ -130,15 +129,12 @@ class AuthManager:
         """
         return pwd_context.verify(plain_password, hashed_password)
 
-
 # 全局认证管理器实例
 auth_manager = AuthManager()
-
 
 # ---------------------------------------------------------------------------
 # 微服务通用 JWT 解码工具（从环境变量读取密钥，供各服务统一使用）
 # ---------------------------------------------------------------------------
-
 
 def create_service_token(service_name: str, expire_seconds: int = 300) -> str:
     """生成短期 service JWT，用于服务间调用认证（T6.2 临时方案）。
@@ -156,14 +152,20 @@ def create_service_token(service_name: str, expire_seconds: int = 300) -> str:
     Raises:
         RuntimeError: SECRET_KEY 未配置时抛出
     """
-    secret_key = os.getenv("SECRET_KEY") or os.getenv("JWT_SECRET_KEY") or os.getenv("JWT_SECRET")
+    secret_key = (
+        os.getenv("SECRET_KEY")
+        or os.getenv("JWT_SECRET_KEY")
+        or os.getenv("JWT_SECRET")
+    )
     if not secret_key:
         raise RuntimeError("SECRET_KEY 未配置，无法签发 service token")
     algorithm = os.getenv("ALGORITHM") or os.getenv("JWT_ALGORITHM") or "HS256"
     try:
         from jose import jwt as jose_jwt
     except ImportError:
-        raise RuntimeError("python-jose 未安装，请执行: pip install python-jose[cryptography]")
+        raise RuntimeError(
+            "python-jose 未安装，请执行: pip install python-jose[cryptography]"
+        ) from None
     now = datetime.utcnow()
     payload = {
         "service": service_name,
@@ -171,7 +173,6 @@ def create_service_token(service_name: str, expire_seconds: int = 300) -> str:
         "exp": now + timedelta(seconds=expire_seconds),
     }
     return jose_jwt.encode(payload, secret_key, algorithm=algorithm)
-
 
 def decode_jwt_token(token: str) -> dict:
     """解码并验证 JWT Token，返回 payload 字典。
@@ -190,9 +191,15 @@ def decode_jwt_token(token: str) -> dict:
         from jose import JWTError
         from jose import jwt as jose_jwt
     except ImportError:  # pragma: no cover
-        raise RuntimeError("python-jose 未安装，请执行: pip install python-jose[cryptography]")
+        raise RuntimeError(
+            "python-jose 未安装，请执行: pip install python-jose[cryptography]"
+        ) from None
 
-    secret_key = os.getenv("SECRET_KEY") or os.getenv("JWT_SECRET_KEY") or os.getenv("JWT_SECRET")
+    secret_key = (
+        os.getenv("SECRET_KEY")
+        or os.getenv("JWT_SECRET_KEY")
+        or os.getenv("JWT_SECRET")
+    )
     if not secret_key:
         # 安全变更 (T6.2): 移除 ``or "dev-secret"`` 硬编码回退，未配置时 fail-fast，
         # 与 create_service_token 风格保持一致。
@@ -207,8 +214,7 @@ def decode_jwt_token(token: str) -> dict:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication credentials",
             headers={"WWW-Authenticate": "Bearer"},
-        )
-
+        ) from exc
 
 # ---------------------------------------------------------------------------
 # Service JWT 验证层（T6.5-P2 新增）
@@ -228,7 +234,6 @@ def decode_jwt_token(token: str) -> dict:
 
 # 允许签发 service JWT 的服务名白名单（防止伪造未登记服务名）
 _VALID_SERVICE_NAMES = frozenset({"api", "engine", "trade", "stream"})
-
 
 def verify_service_token(token: str, allowed_services: list[str]) -> dict:
     """验证 service JWT 并校验调用方服务是否在允许列表内。
@@ -274,7 +279,6 @@ def verify_service_token(token: str, allowed_services: list[str]) -> dict:
             detail=f"Service '{service}' not allowed for this endpoint",
         )
     return payload
-
 
 def require_service_token(*allowed_services: str):
     """FastAPI 依赖：要求请求携带合法 service JWT 且调用方在允许列表内。

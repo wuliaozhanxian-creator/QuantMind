@@ -77,7 +77,7 @@ export interface ValidationRule {
   min?: number;
   max?: number;
   pattern?: RegExp;
-  custom?: (value: any) => boolean | string;
+  custom?: (value: unknown) => boolean | string;
 }
 
 // 策略组件验证
@@ -96,7 +96,7 @@ export interface StrategyComponent {
   validation: ComponentValidation;
   description: string;
   required?: boolean;
-  parameters?: Record<string, any>;
+  parameters?: Record<string, unknown>;
 }
 
 // 策略模板
@@ -143,6 +143,15 @@ export interface StrategyTemplate {
   };
 }
 
+// 股票池配置
+export interface StockPoolConfig {
+  poolType?: 'custom' | 'index' | 'industry' | 'concept';
+  symbols?: string[];
+  indexCode?: string;
+  industry?: string;
+  filters?: Record<string, unknown>;
+}
+
 // 策略参数
 export interface StrategyParams {
   description: string;
@@ -164,7 +173,7 @@ export interface StrategyParams {
   benchmark?: string;
 
   // 新增属性
-  stockPoolConfig?: any;
+  stockPoolConfig?: StockPoolConfig;
   framework?: string;
   outputFormat?: string;
 }
@@ -207,7 +216,7 @@ export interface ValidationResult {
 
 // 参数验证结果
 export interface ParameterValidationResult extends ValidationResult {
-  parameters?: Record<string, any>;
+  parameters?: Record<string, unknown>;
   issues?: Array<{
     parameter: string;
     issue: string;
@@ -253,7 +262,7 @@ export interface FileInfo {
   type: string;
   uploadTime: string;
   url?: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 // 验证上下文
@@ -298,7 +307,7 @@ export interface Suggestion {
   priority: 'high' | 'medium' | 'low';
   description: string;
   template?: string;
-  parameters?: Record<string, any>;
+  parameters?: Record<string, unknown>;
 }
 
 // 反馈模板

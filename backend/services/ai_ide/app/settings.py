@@ -29,13 +29,17 @@ def _load_config_api_key() -> str:
                 if config.get("qwen_api_key"):
                     return config["qwen_api_key"]
         except Exception:
-            pass
+            pass  # noqa: BLE001 - None
     return ""
 
 
 def get_effective_api_key() -> str:
     """按优先级获取 API Key：config.json > AI_IDE_API_KEY > OPENAI_API_KEY。"""
-    return _load_config_api_key() or os.getenv("AI_IDE_API_KEY") or os.getenv("OPENAI_API_KEY", "")
+    return (
+        _load_config_api_key()
+        or os.getenv("AI_IDE_API_KEY")
+        or os.getenv("OPENAI_API_KEY", "")
+    )
 
 
 class Settings(BaseSettings):
@@ -45,7 +49,10 @@ class Settings(BaseSettings):
     api_key: str = get_effective_api_key()
     # UI 当前主文案是 Qwen API Key，这里默认走 DashScope OpenAI 兼容地址
     # 可通过 AI_IDE_BASE_URL / AI_IDE_MODEL 覆盖。
-    base_url: str = os.getenv("AI_IDE_BASE_URL") or "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    base_url: str = (
+        os.getenv("AI_IDE_BASE_URL")
+        or "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    )
     model: str = os.getenv("AI_IDE_MODEL") or "qwen-plus"
 
 

@@ -24,5 +24,7 @@ MODEL_TIMEOUT_SECONDS = int(os.getenv("MODEL_TIMEOUT_SECONDS", "30"))
 HISTORY_WINDOW_SIZE = int(os.getenv("HISTORY_WINDOW_SIZE", "30"))
 
 # Qlib Configuration
-QLIB_PROVIDER_URI = os.getenv("QLIB_PROVIDER_URI", str(PROJECT_ROOT / "db" / "qlib_data"))
+QLIB_PROVIDER_URI = os.getenv(
+    "QLIB_PROVIDER_URI", str(PROJECT_ROOT / "db" / "qlib_data")
+)
 QLIB_REGION = os.getenv("QLIB_REGION", "cn")

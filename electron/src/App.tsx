@@ -1,6 +1,5 @@
 import React, { useState, useCallback, lazy, Suspense } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
-import { RecoilRoot } from 'recoil';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Spin, notification, Button, ConfigProvider } from 'antd';
@@ -379,14 +378,13 @@ export default function App() {
   const shouldShowNavigation = isAuthenticated && !isPublicRoute;
 
   return (
-    <RecoilRoot>
-      <QueryProvider>
-        <WebSocketProvider>
-          <ConfigProvider locale={zhCN}>
-            <div className="app-root">
-            <TitleBar />
-            <ErrorBoundary>
-              <Suspense
+    <QueryProvider>
+      <WebSocketProvider>
+        <ConfigProvider locale={zhCN}>
+          <div className="app-root">
+          <TitleBar />
+          <ErrorBoundary>
+            <Suspense
                 fallback={<DashboardSkeleton />}
               >
                 {/* 使用路由系统，包含认证守卫 */}
@@ -524,9 +522,8 @@ export default function App() {
               {shouldShowNavigation && ExportModal}
             </ErrorBoundary>
           </div>
-          </ConfigProvider>
-        </WebSocketProvider>
-      </QueryProvider>
-    </RecoilRoot>
+        </ConfigProvider>
+      </WebSocketProvider>
+    </QueryProvider>
   );
 }

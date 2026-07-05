@@ -15,13 +15,11 @@ from backend.services.trade.simulation.models.account import SimulationAccount
 from backend.services.trade.simulation.models.cash_ledger import SimulationCashLedger
 from backend.services.trade.simulation.models.position_lot import SimulationPositionLot
 
-
 @dataclass
 class CashLedgerEntry:
     event_type: str
     amount: float
     note: str | None = None
-
 
 class SimulationLedgerService:
     def __init__(self, db: AsyncSession):
@@ -32,17 +30,38 @@ class SimulationLedgerService:
         return f"sim:{str(tenant_id or 'default').strip() or 'default'}:{str(user_id).strip()}"
 
     @staticmethod
-    def build_cash_entries(*, side: str, trade_value: float, commission: float, stamp_duty: float, transfer_fee: float) -> list[CashLedgerEntry]:
+    def build_cash_entries(
+        *,
+        side: str,
+        trade_value: float,
+        commission: float,
+        stamp_duty: float,
+        transfer_fee: float,
+    ) -> list[CashLedgerEntry]:
         normalized_side = str(side or "").strip().lower()
-        principal_event = "BUY_SETTLEMENT" if normalized_side == "buy" else "SELL_PROCEEDS"
-        principal_amount = -abs(float(trade_value or 0.0)) if normalized_side == "buy" else abs(float(trade_value or 0.0))
+        principal_event = (
+            "BUY_SETTLEMENT" if normalized_side == "buy" else "SELL_PROCEEDS"
+        )
+        principal_amount = (
+            -abs(float(trade_value or 0.0))
+            if normalized_side == "buy"
+            else abs(float(trade_value or 0.0))
+        )
         entries = [CashLedgerEntry(event_type=principal_event, amount=principal_amount)]
         if commission:
-            entries.append(CashLedgerEntry(event_type="COMMISSION", amount=-abs(float(commission))))
+            entries.append(
+                CashLedgerEntry(event_type="COMMISSION", amount=-abs(float(commission)))
+            )
         if stamp_duty:
-            entries.append(CashLedgerEntry(event_type="STAMP_DUTY", amount=-abs(float(stamp_duty))))
+            entries.append(
+                CashLedgerEntry(event_type="STAMP_DUTY", amount=-abs(float(stamp_duty)))
+            )
         if transfer_fee:
-            entries.append(CashLedgerEntry(event_type="TRANSFER_FEE", amount=-abs(float(transfer_fee))))
+            entries.append(
+                CashLedgerEntry(
+                    event_type="TRANSFER_FEE", amount=-abs(float(transfer_fee))
+                )
+            )
         return entries
 
     @staticmethod
@@ -58,9 +77,20 @@ class SimulationLedgerService:
         liabilities = float(snapshot.get("liabilities") or 0.0)
         short_market_value = float(snapshot.get("short_market_value") or 0.0)
 
-        side = str(getattr(getattr(trade, "side", None), "value", getattr(trade, "side", "")) or "").strip().lower()
+        side = (
+            str(
+                getattr(
+                    getattr(trade, "side", None), "value", getattr(trade, "side", "")
+                )
+                or ""
+            )
+            .strip()
+            .lower()
+        )
         trade_action = str(getattr(trade, "trade_action", None) or "").strip().lower()
-        position_side = str(getattr(trade, "position_side", None) or "long").strip().lower()
+        position_side = (
+            str(getattr(trade, "position_side", None) or "long").strip().lower()
+        )
         gross = float(getattr(trade, "trade_value", 0.0) or 0.0)
         total_fee = float(getattr(trade, "total_fee", 0.0) or 0.0)
 
@@ -100,13 +130,20 @@ class SimulationLedgerService:
         trade: Any,
         account_snapshot: dict[str, Any] | None,
     ) -> None:
-        tenant_id = str(getattr(order, "tenant_id", None) or "default").strip() or "default"
+        tenant_id = (
+            str(getattr(order, "tenant_id", None) or "default").strip() or "default"
+        )
         user_id = str(getattr(order, "user_id", None) or "").strip()
         if not user_id:
             return
         account_id = self.build_account_id(tenant_id, user_id)
         before_snapshot = dict(account_snapshot or {})
-        account = await self._ensure_account(account_id=account_id, tenant_id=tenant_id, user_id=user_id, account_snapshot=before_snapshot)
+        account = await self._ensure_account(
+            account_id=account_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            account_snapshot=before_snapshot,
+        )
         after_snapshot = self.apply_trade_to_account_snapshot(
             trade=trade,
             account_snapshot=before_snapshot,
@@ -151,7 +188,11 @@ class SimulationLedgerService:
         if account is None:
             initial_equity = float(
                 account_snapshot.get("initial_equity")
-                or ((account_snapshot.get("baseline") or {}).get("initial_equity") if isinstance(account_snapshot.get("baseline"), dict) else 0.0)
+                or (
+                    (account_snapshot.get("baseline") or {}).get("initial_equity")
+                    if isinstance(account_snapshot.get("baseline"), dict)
+                    else 0.0
+                )
                 or account_snapshot.get("total_asset")
                 or account_snapshot.get("cash")
                 or 0.0
@@ -162,13 +203,25 @@ class SimulationLedgerService:
                 user_id=user_id,
                 initial_equity=initial_equity,
                 cash=float(account_snapshot.get("cash") or 0.0),
-                available_cash=float(account_snapshot.get("available_cash") or account_snapshot.get("cash") or 0.0),
-                total_asset=float(account_snapshot.get("total_asset") or initial_equity),
+                available_cash=float(
+                    account_snapshot.get("available_cash")
+                    or account_snapshot.get("cash")
+                    or 0.0
+                ),
+                total_asset=float(
+                    account_snapshot.get("total_asset") or initial_equity
+                ),
                 equity=float(account_snapshot.get("total_asset") or initial_equity),
-                long_market_value=max(0.0, float(account_snapshot.get("market_value") or 0.0)),
-                short_market_value=max(0.0, float(account_snapshot.get("short_market_value") or 0.0)),
+                long_market_value=max(
+                    0.0, float(account_snapshot.get("market_value") or 0.0)
+                ),
+                short_market_value=max(
+                    0.0, float(account_snapshot.get("short_market_value") or 0.0)
+                ),
                 liabilities=float(account_snapshot.get("liabilities") or 0.0),
-                maintenance_margin_ratio=float(account_snapshot.get("maintenance_margin_ratio") or 0.0),
+                maintenance_margin_ratio=float(
+                    account_snapshot.get("maintenance_margin_ratio") or 0.0
+                ),
             )
             self.db.add(account)
             await self.db.flush()
@@ -223,9 +276,20 @@ class SimulationLedgerService:
             return
         price = float(getattr(trade, "price", 0.0) or 0.0)
         total_fee = float(getattr(trade, "total_fee", 0.0) or 0.0)
-        side = str(getattr(getattr(order, "side", None), "value", getattr(order, "side", "")) or "").strip().lower()
+        side = (
+            str(
+                getattr(
+                    getattr(order, "side", None), "value", getattr(order, "side", "")
+                )
+                or ""
+            )
+            .strip()
+            .lower()
+        )
         trade_action = str(getattr(order, "trade_action", None) or "").strip().lower()
-        position_side = str(getattr(order, "position_side", None) or "long").strip().lower()
+        position_side = (
+            str(getattr(order, "position_side", None) or "long").strip().lower()
+        )
         occurred_at = getattr(trade, "executed_at", None) or datetime.utcnow()
         fill_id = str(getattr(trade, "trade_id", "") or "")
 
@@ -270,7 +334,9 @@ class SimulationLedgerService:
                     open_date=occurred_at,
                     quantity_open=quantity,
                     quantity_remaining=quantity,
-                    cost_price=((price * quantity) + total_fee) / quantity if quantity > 0 else price,
+                    cost_price=((price * quantity) + total_fee) / quantity
+                    if quantity > 0
+                    else price,
                     cost_amount=(price * quantity) + total_fee,
                     status="open",
                 )
@@ -343,9 +409,15 @@ class SimulationLedgerService:
         account.frozen_cash = max(0.0, account.cash - account.available_cash)
         account.long_market_value = max(0.0, market_value)
         account.short_market_value = max(0.0, short_market_value)
-        account.total_asset = float(account_snapshot.get("total_asset") or account.total_asset or 0.0)
-        account.liabilities = float(account_snapshot.get("liabilities") or account.liabilities or 0.0)
-        account.equity = float(account_snapshot.get("total_asset") or account.equity or 0.0)
+        account.total_asset = float(
+            account_snapshot.get("total_asset") or account.total_asset or 0.0
+        )
+        account.liabilities = float(
+            account_snapshot.get("liabilities") or account.liabilities or 0.0
+        )
+        account.equity = float(
+            account_snapshot.get("total_asset") or account.equity or 0.0
+        )
         account.maintenance_margin_ratio = float(
             account_snapshot.get("maintenance_margin_ratio")
             or account.maintenance_margin_ratio

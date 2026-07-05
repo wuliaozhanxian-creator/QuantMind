@@ -14,7 +14,6 @@ if str(ROOT) not in sys.path:
 
 from backend.services.trade.redis_client import get_redis
 
-
 def _load_event(fields: Dict[str, Any]) -> Dict[str, Any]:
     raw_event_json = fields.get("raw_event_json")
     if raw_event_json:
@@ -23,7 +22,7 @@ def _load_event(fields: Dict[str, Any]) -> Dict[str, Any]:
             if isinstance(obj, dict):
                 return obj
         except Exception:
-            pass
+            pass  # noqa: BLE001 - None
 
     # fallback: 从 DLQ 字段恢复最小事件
     event: Dict[str, Any] = {}
@@ -43,7 +42,6 @@ def _load_event(fields: Dict[str, Any]) -> Dict[str, Any]:
             event[key] = fields.get(key)
     return event
 
-
 def _iter_filtered_entries(
     entries: Iterable[Tuple[str, Dict[str, Any]]],
     *,
@@ -62,7 +60,6 @@ def _iter_filtered_entries(
                 continue
         result.append((message_id, fields))
     return result
-
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Replay execution DLQ events back to stream")
@@ -137,7 +134,6 @@ def main() -> int:
 
     print(f"Replay completed: replayed={replayed}, deleted={deleted}, dry_run={args.dry_run}")
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

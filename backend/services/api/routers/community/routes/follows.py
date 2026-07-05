@@ -25,7 +25,8 @@ async def _ensure_follow_table(session: AsyncSession) -> None:
     async with _FOLLOW_TABLE_LOCK:
         if _FOLLOW_TABLE_READY:
             return
-        await session.execute(text("""
+        await session.execute(
+            text("""
                 CREATE TABLE IF NOT EXISTS community_author_follows (
                     id BIGSERIAL PRIMARY KEY,
                     tenant_id VARCHAR(64) NOT NULL,
@@ -35,15 +36,20 @@ async def _ensure_follow_table(session: AsyncSession) -> None:
                     CONSTRAINT uq_community_author_follows UNIQUE
                     (tenant_id, follower_user_id, author_user_id)
                 )
-                """))
-        await session.execute(text("""
+                """)
+        )
+        await session.execute(
+            text("""
                 CREATE INDEX IF NOT EXISTS idx_comm_follow_tenant_author
                 ON community_author_follows (tenant_id, author_user_id)
-                """))
-        await session.execute(text("""
+                """)
+        )
+        await session.execute(
+            text("""
                 CREATE INDEX IF NOT EXISTS idx_comm_follow_tenant_follower
                 ON community_author_follows (tenant_id, follower_user_id)
-                """))
+                """)
+        )
         await session.flush()
         _FOLLOW_TABLE_READY = True
 

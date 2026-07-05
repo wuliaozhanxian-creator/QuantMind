@@ -4,7 +4,7 @@
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,7 +12,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.services.api.user_app.models.rbac import UserAuditLog
 
 logger = logging.getLogger(__name__)
-
 
 class EnhancedAuditService:
     """增强的审计日志服务"""
@@ -66,8 +65,12 @@ class EnhancedAuditService:
             resource=resource,
             resource_id=resource_id,
             description=description,
-            request_data=(json.dumps(request_data, ensure_ascii=False) if request_data else None),
-            response_data=(json.dumps(response_data, ensure_ascii=False) if response_data else None),
+            request_data=(
+                json.dumps(request_data, ensure_ascii=False) if request_data else None
+            ),
+            response_data=(
+                json.dumps(response_data, ensure_ascii=False) if response_data else None
+            ),
             ip_address=ip_address,
             user_agent=user_agent,
             request_method=request_method,
@@ -190,7 +193,9 @@ class EnhancedAuditService:
         result = await self.db.execute(stmt)
         return result.scalars().all()
 
-    async def get_recent_logins(self, user_id: str, tenant_id: str, limit: int = 10) -> list[UserAuditLog]:
+    async def get_recent_logins(
+        self, user_id: str, tenant_id: str, limit: int = 10
+    ) -> list[UserAuditLog]:
         """获取最近的登录记录"""
         return await self.get_user_audit_logs(
             user_id=user_id,
@@ -215,7 +220,9 @@ class EnhancedAuditService:
         anomalies = []
 
         # 检测失败登录次数
-        recent_failed_logins = [log for log in logs[:20] if log.action == "login" and not log.success]
+        recent_failed_logins = [
+            log for log in logs[:20] if log.action == "login" and not log.success
+        ]
         if len(recent_failed_logins) > 5:
             anomalies.append(
                 {

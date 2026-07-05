@@ -3,7 +3,7 @@
 import logging
 from datetime import datetime
 from functools import partial
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,6 @@ PAGE_QUERY = Query(1, ge=1)
 PAGE_SIZE_QUERY = Query(20, alias="pageSize", ge=1, le=100)
 SORT_QUERY = Query("latest")
 
-
 def _normalize_sort(sort: str) -> str:
     # Frontend uses Chinese sort labels; normalize for internal ordering.
     mapping = {
@@ -43,10 +42,8 @@ def _normalize_sort(sort: str) -> str:
     }
     return mapping.get(sort, "latest")
 
-
 _author_block = author_block
 _ts = ts_ms
-
 
 @router.get("/posts")
 async def list_posts(
@@ -59,7 +56,7 @@ async def list_posts(
     session: AsyncSession = Depends(get_readonly_db_session),
     principal: Principal = Depends(get_principal),
 ):
-    """List posts with pagination and filtering."""
+    """list posts with pagination and filtering."""
     sort = _normalize_sort(sort)
     tenant_id = principal.tenant_id
     base = select(PostRecord).where(PostRecord.tenant_id == tenant_id)
@@ -69,7 +66,9 @@ async def list_posts(
         base = base.where(PostRecord.category == category)
     if search:
         ilike = f"%{search}%"
-        base = base.where(PostRecord.title.ilike(ilike) | PostRecord.content.ilike(ilike))
+        base = base.where(
+            PostRecord.title.ilike(ilike) | PostRecord.content.ilike(ilike)
+        )
 
     count_stmt = select(func.count()).select_from(base.subquery())
     total = (await session.execute(count_stmt)).scalar_one() or 0
@@ -131,7 +130,9 @@ async def list_posts(
         summary = await fetch_user_summary(
             db_post.author_id,
             tenant_id=tenant_id,
-            fallback_name=principal.username if db_post.author_id == principal.user_id else None,
+            fallback_name=principal.username
+            if db_post.author_id == principal.user_id
+            else None,
         )
         author = _author_block(db_post.author_id, summary)
         normalized["author"] = author["name"]
@@ -151,7 +152,6 @@ async def list_posts(
         "promo": None,
     }
 
-
 @router.get("/posts/recommendations")
 async def get_recommendations(
     limit: int = Query(5, ge=1, le=20),
@@ -163,7 +163,11 @@ async def get_recommendations(
     stmt = (
         select(PostRecord)
         .where(PostRecord.tenant_id == tenant_id)
-        .order_by(desc(PostRecord.featured), desc(PostRecord.likes), desc(PostRecord.created_at))
+        .order_by(
+            desc(PostRecord.featured),
+            desc(PostRecord.likes),
+            desc(PostRecord.created_at),
+        )
         .limit(limit)
     )
     result = await session.execute(stmt)
@@ -181,7 +185,6 @@ async def get_recommendations(
         )
     return out
 
-
 @router.get("/posts/{post_id}")
 async def get_post(
     post_id: int,
@@ -190,7 +193,9 @@ async def get_post(
 ):
     """Get post detail by ID."""
     tenant_id = principal.tenant_id
-    stmt = select(PostRecord).where(PostRecord.id == post_id, PostRecord.tenant_id == tenant_id)
+    stmt = select(PostRecord).where(
+        PostRecord.id == post_id, PostRecord.tenant_id == tenant_id
+    )
     db_post = (await session.execute(stmt)).scalar_one_or_none()
     if not db_post:
         raise HTTPException(status_code=404, detail="Post not found")
@@ -215,7 +220,9 @@ async def get_post(
     summary = await fetch_user_summary(
         db_post.author_id,
         tenant_id=tenant_id,
-        fallback_name=principal.username if db_post.author_id == principal.user_id else None,
+        fallback_name=principal.username
+        if db_post.author_id == principal.user_id
+        else None,
     )
     author = _author_block(db_post.author_id, summary)
     return {
@@ -241,7 +248,6 @@ async def get_post(
         "authorAvatar": author.get("avatar"),
         "authorInfo": author,
     }
-
 
 @router.post("/posts", status_code=201)
 async def create_post(
@@ -284,7 +290,9 @@ async def create_post(
             metadata={"category": post.category},
             request=request,
         )
-        summary = await fetch_user_summary(current_user, tenant_id=tenant_id, fallback_name=principal.username)
+        summary = await fetch_user_summary(
+            current_user, tenant_id=tenant_id, fallback_name=principal.username
+        )
         author = _author_block(current_user, summary)
 
         await session.commit()
@@ -317,8 +325,9 @@ async def create_post(
         if isinstance(e, HTTPException):
             raise e
         logger.error(f"Error creating post: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
-
+        raise HTTPException(
+            status_code=500, detail=f"Internal server error: {str(e)}"
+        ) from e
 
 @router.put("/posts/{post_id}")
 async def update_post(
@@ -331,7 +340,9 @@ async def update_post(
     """Update a post (requires authentication and ownership)."""
     tenant_id = principal.tenant_id
     current_user = principal.user_id or ""
-    stmt = select(PostRecord).where(PostRecord.id == post_id, PostRecord.tenant_id == tenant_id)
+    stmt = select(PostRecord).where(
+        PostRecord.id == post_id, PostRecord.tenant_id == tenant_id
+    )
     db_post = (await session.execute(stmt)).scalar_one_or_none()
     if not db_post:
         raise HTTPException(status_code=404, detail="Post not found")
@@ -358,7 +369,9 @@ async def update_post(
     summary = await fetch_user_summary(
         db_post.author_id,
         tenant_id=tenant_id,
-        fallback_name=principal.username if db_post.author_id == principal.user_id else None,
+        fallback_name=principal.username
+        if db_post.author_id == principal.user_id
+        else None,
     )
     author = _author_block(db_post.author_id, summary)
     data = to_dict_post(db_post)
@@ -386,7 +399,6 @@ async def update_post(
         "authorInfo": author,
     }
 
-
 @router.delete("/posts/{post_id}", status_code=204)
 async def delete_post(
     post_id: int,
@@ -397,7 +409,9 @@ async def delete_post(
     """Delete a post (requires authentication and ownership)."""
     tenant_id = principal.tenant_id
     current_user = principal.user_id or ""
-    stmt = select(PostRecord).where(PostRecord.id == post_id, PostRecord.tenant_id == tenant_id)
+    stmt = select(PostRecord).where(
+        PostRecord.id == post_id, PostRecord.tenant_id == tenant_id
+    )
     db_post = (await session.execute(stmt)).scalar_one_or_none()
     if not db_post:
         raise HTTPException(status_code=404, detail="Post not found")

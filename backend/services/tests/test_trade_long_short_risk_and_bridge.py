@@ -47,10 +47,16 @@ class _DummyHttpClient:
 
 @pytest.mark.asyncio
 async def test_qmt_bridge_broker_passes_margin_fields():
-    broker = QMTBridgeBroker(stream_base_url="http://stream:8003", internal_secret="secret", redis_client=None)
+    broker = QMTBridgeBroker(
+        stream_base_url="http://stream:8003",
+        internal_secret="secret",
+        redis_client=None,
+    )
     dummy_client = _DummyHttpClient()
+
     async def _fake_get_session():
         return dummy_client
+
     broker._get_session = _fake_get_session
 
     result = await broker.place_order(
@@ -140,7 +146,9 @@ async def test_qmt_bridge_broker_manual_market_order_keeps_native_market(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_risk_service_rejects_sell_to_open_when_long_short_not_enabled(monkeypatch):
+async def test_risk_service_rejects_sell_to_open_when_long_short_not_enabled(
+    monkeypatch,
+):
     redis = _FakeRedis()
     svc = RiskService(db=None, redis=redis)
 
@@ -152,9 +160,18 @@ async def test_risk_service_rejects_sell_to_open_when_long_short_not_enabled(mon
         "backend.services.trade.services.risk_service.get_margin_stock_pool_service",
         lambda _path: SimpleNamespace(is_margin_eligible=lambda _symbol: True),
     )
-    monkeypatch.setattr("backend.services.trade.services.risk_service.settings.ENABLE_MARGIN_TRADING", True)
-    monkeypatch.setattr("backend.services.trade.services.risk_service.settings.ENABLE_LONG_SHORT_REAL", False)
-    monkeypatch.setattr("backend.services.trade.services.risk_service.settings.LONG_SHORT_WHITELIST_USERS", "1001")
+    monkeypatch.setattr(
+        "backend.services.trade.services.risk_service.settings.ENABLE_MARGIN_TRADING",
+        True,
+    )
+    monkeypatch.setattr(
+        "backend.services.trade.services.risk_service.settings.ENABLE_LONG_SHORT_REAL",
+        False,
+    )
+    monkeypatch.setattr(
+        "backend.services.trade.services.risk_service.settings.LONG_SHORT_WHITELIST_USERS",
+        "1001",
+    )
 
     order = SimpleNamespace(
         symbol="600000.SH",
@@ -165,14 +182,18 @@ async def test_risk_service_rejects_sell_to_open_when_long_short_not_enabled(mon
         is_margin_trade=True,
         tenant_id="default",
     )
-    result = await svc.check_order_risk(user_id=1001, order=order, portfolio_value=100000.0, available_cash=50000.0)
+    result = await svc.check_order_risk(
+        user_id=1001, order=order, portfolio_value=100000.0, available_cash=50000.0
+    )
 
     assert result["passed"] is False
     assert any(v["rule"] == "LONG_SHORT_NOT_ENABLED" for v in result["violations"])
 
 
 @pytest.mark.asyncio
-async def test_risk_service_rejects_sell_to_open_when_credit_snapshot_unavailable(monkeypatch):
+async def test_risk_service_rejects_sell_to_open_when_credit_snapshot_unavailable(
+    monkeypatch,
+):
     redis = _FakeRedis()
     svc = RiskService(db=object(), redis=redis)
 
@@ -184,10 +205,22 @@ async def test_risk_service_rejects_sell_to_open_when_credit_snapshot_unavailabl
         "backend.services.trade.services.risk_service.get_margin_stock_pool_service",
         lambda _path: SimpleNamespace(is_margin_eligible=lambda _symbol: True),
     )
-    monkeypatch.setattr("backend.services.trade.services.risk_service.settings.ENABLE_MARGIN_TRADING", True)
-    monkeypatch.setattr("backend.services.trade.services.risk_service.settings.ENABLE_LONG_SHORT_REAL", True)
-    monkeypatch.setattr("backend.services.trade.services.risk_service.settings.LONG_SHORT_WHITELIST_USERS", "1001")
-    monkeypatch.setattr("backend.services.trade.services.risk_service.settings.SHORT_ADMISSION_STRICT", True)
+    monkeypatch.setattr(
+        "backend.services.trade.services.risk_service.settings.ENABLE_MARGIN_TRADING",
+        True,
+    )
+    monkeypatch.setattr(
+        "backend.services.trade.services.risk_service.settings.ENABLE_LONG_SHORT_REAL",
+        True,
+    )
+    monkeypatch.setattr(
+        "backend.services.trade.services.risk_service.settings.LONG_SHORT_WHITELIST_USERS",
+        "1001",
+    )
+    monkeypatch.setattr(
+        "backend.services.trade.services.risk_service.settings.SHORT_ADMISSION_STRICT",
+        True,
+    )
     monkeypatch.setattr(
         "backend.services.trade.routers.real_trading_utils._fetch_latest_real_account_snapshot",
         AsyncMock(return_value=None),
@@ -202,7 +235,9 @@ async def test_risk_service_rejects_sell_to_open_when_credit_snapshot_unavailabl
         is_margin_trade=True,
         tenant_id="default",
     )
-    result = await svc.check_order_risk(user_id=1001, order=order, portfolio_value=100000.0, available_cash=50000.0)
+    result = await svc.check_order_risk(
+        user_id=1001, order=order, portfolio_value=100000.0, available_cash=50000.0
+    )
 
     assert result["passed"] is False
     assert any(v["rule"] == "CREDIT_ACCOUNT_UNAVAILABLE" for v in result["violations"])
@@ -228,10 +263,22 @@ async def test_risk_service_passes_sell_to_open_when_all_checks_ready(monkeypatc
         "backend.services.trade.services.risk_service.get_margin_stock_pool_service",
         lambda _path: SimpleNamespace(is_margin_eligible=lambda _symbol: True),
     )
-    monkeypatch.setattr("backend.services.trade.services.risk_service.settings.ENABLE_MARGIN_TRADING", True)
-    monkeypatch.setattr("backend.services.trade.services.risk_service.settings.ENABLE_LONG_SHORT_REAL", True)
-    monkeypatch.setattr("backend.services.trade.services.risk_service.settings.LONG_SHORT_WHITELIST_USERS", "1001")
-    monkeypatch.setattr("backend.services.trade.services.risk_service.settings.SHORT_ADMISSION_STRICT", True)
+    monkeypatch.setattr(
+        "backend.services.trade.services.risk_service.settings.ENABLE_MARGIN_TRADING",
+        True,
+    )
+    monkeypatch.setattr(
+        "backend.services.trade.services.risk_service.settings.ENABLE_LONG_SHORT_REAL",
+        True,
+    )
+    monkeypatch.setattr(
+        "backend.services.trade.services.risk_service.settings.LONG_SHORT_WHITELIST_USERS",
+        "1001",
+    )
+    monkeypatch.setattr(
+        "backend.services.trade.services.risk_service.settings.SHORT_ADMISSION_STRICT",
+        True,
+    )
     monkeypatch.setattr(
         "backend.services.trade.routers.real_trading_utils._fetch_latest_real_account_snapshot",
         AsyncMock(return_value=snapshot),
@@ -246,7 +293,9 @@ async def test_risk_service_passes_sell_to_open_when_all_checks_ready(monkeypatc
         is_margin_trade=True,
         tenant_id="default",
     )
-    result = await svc.check_order_risk(user_id=1001, order=order, portfolio_value=100000.0, available_cash=50000.0)
+    result = await svc.check_order_risk(
+        user_id=1001, order=order, portfolio_value=100000.0, available_cash=50000.0
+    )
 
     assert result["passed"] is True
     assert result["violations"] == []
@@ -299,7 +348,9 @@ async def test_redis_broker_query_account_uses_pg_snapshot(monkeypatch):
         redis_password="",
         hmac_secret="secret",
     )
-    monkeypatch.setattr("backend.services.trade.services.broker_client.get_session", _fake_get_session)
+    monkeypatch.setattr(
+        "backend.services.trade.services.broker_client.get_session", _fake_get_session
+    )
     result = await broker.query_account("1001", tenant_id="default")
 
     assert result["total_asset"] == 100000
@@ -326,7 +377,9 @@ async def test_risk_service_rejects_star_board_buy_lot_less_than_200(monkeypatch
         is_margin_trade=False,
         tenant_id="default",
     )
-    result = await svc.check_order_risk(user_id=1001, order=order, portfolio_value=100000.0, available_cash=50000.0)
+    result = await svc.check_order_risk(
+        user_id=1001, order=order, portfolio_value=100000.0, available_cash=50000.0
+    )
     assert result["passed"] is False
     assert any(v["rule"] == "min_lot_size" for v in result["violations"])
 

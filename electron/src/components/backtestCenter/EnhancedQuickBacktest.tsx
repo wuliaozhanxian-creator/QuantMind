@@ -174,9 +174,14 @@ export const EnhancedQuickBacktest: React.FC = () => {
     {
       enabled: isRunning && !!backtestId.current,
       onMessage: (msg) => {
+        const data = msg.data as {
+          progress?: number;
+          status?: string;
+          message?: string;
+        };
         if (msg.type === 'progress') {
-          const normalized = (msg.data.progress || 0) * 100;
-          updateProgressMonotonic(normalized, msg.data.status || 'running', msg.data.message);
+          const normalized = (data.progress || 0) * 100;
+          updateProgressMonotonic(normalized, data.status || 'running', data.message);
         } else if (msg.type === 'completed') {
           stopSimulatedProgress();
           setProgress(100);
@@ -185,7 +190,7 @@ export const EnhancedQuickBacktest: React.FC = () => {
           handleLoadResult(backtestId.current);
         } else if (msg.type === 'error') {
           stopSimulatedProgress();
-          setError(msg.data.message || '回测失败');
+          setError(data.message || '回测失败');
           setIsRunning(false);
         }
       },

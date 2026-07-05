@@ -14,7 +14,10 @@ logger = logging.getLogger(__name__)
 class SQLGenerator:
     def __init__(self):
         api_key = os.getenv("QWEN_API_KEY") or os.getenv("DASHSCOPE_API_KEY")
-        base_url = os.getenv("DASHSCOPE_BASE_URL") or "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        base_url = (
+            os.getenv("DASHSCOPE_BASE_URL")
+            or "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        )
 
         self.client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         self.model = os.getenv("QWEN_MODEL", "qwen-max")
@@ -23,8 +26,14 @@ class SQLGenerator:
         try:
             target_table = parsed_intent.get("target_table") or "stock_selection"
             retriever = await get_schema_retriever()
-            schema_info = await retriever.retrieve(parsed_intent.get("query", ""), top_k=30)
-            allowed_fields = parsed_intent.get("allowed_fields") or schema_info.get("allowed_fields") or []
+            schema_info = await retriever.retrieve(
+                parsed_intent.get("query", ""), top_k=30
+            )
+            allowed_fields = (
+                parsed_intent.get("allowed_fields")
+                or schema_info.get("allowed_fields")
+                or []
+            )
 
             fields_used = parsed_intent.get("fields_used", [])
             required_select = self._build_required_select(target_table, fields_used)

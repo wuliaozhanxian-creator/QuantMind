@@ -11,13 +11,12 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 from uuid import uuid4
 
 from .http_client import ClientFactory, HTTPClient, ResponseStatus
 
 logger = logging.getLogger(__name__)
-
 
 class MessageFormat(str, Enum):
     """消息格式枚举"""
@@ -25,7 +24,6 @@ class MessageFormat(str, Enum):
     JSON = "json"
     PROTOBUF = "protobu"
     XML = "xml"
-
 
 class CommunicationProtocol(str, Enum):
     """通信协议枚举"""
@@ -35,7 +33,6 @@ class CommunicationProtocol(str, Enum):
     WEBSOCKET = "websocket"
     MESSAGE_QUEUE = "message_queue"
 
-
 class Priority(str, Enum):
     """消息优先级"""
 
@@ -43,7 +40,6 @@ class Priority(str, Enum):
     NORMAL = "normal"
     HIGH = "high"
     URGENT = "urgent"
-
 
 @dataclass
 class ServiceMessage:
@@ -92,7 +88,6 @@ class ServiceMessage:
             return False
         return time.time() > self.expires_at
 
-
 @dataclass
 class ServiceResponse:
     """服务响应"""
@@ -130,7 +125,6 @@ class ServiceResponse:
         """检查是否错误"""
         return self.status == "error"
 
-
 class ServiceCommunicator(ABC):
     """服务通信器抽象基类"""
 
@@ -139,13 +133,16 @@ class ServiceCommunicator(ABC):
         """发送消息"""
 
     @abstractmethod
-    async def send_request(self, service_name: str, endpoint: str, data: dict[str, Any]) -> ServiceResponse:
+    async def send_request(
+        self, service_name: str, endpoint: str, data: dict[str, Any]
+    ) -> ServiceResponse:
         """发送请求"""
 
     @abstractmethod
-    async def broadcast_message(self, message: ServiceMessage, services: list[str]) -> list[ServiceResponse]:
+    async def broadcast_message(
+        self, message: ServiceMessage, services: list[str]
+    ) -> list[ServiceResponse]:
         """广播消息"""
-
 
 class HTTPServiceCommunicator(ServiceCommunicator):
     """HTTP服务通信器"""
@@ -165,7 +162,9 @@ class HTTPServiceCommunicator(ServiceCommunicator):
     async def send_message(self, message: ServiceMessage) -> ServiceResponse:
         """发送消息"""
         if message.is_expired():
-            return ServiceResponse(message_id=message.message_id, status="error", error="Message expired")
+            return ServiceResponse(
+                message_id=message.message_id, status="error", error="Message expired"
+            )
 
         client = self._get_client(message.target_service)
         start_time = time.time()
@@ -204,7 +203,9 @@ class HTTPServiceCommunicator(ServiceCommunicator):
                 processing_time=processing_time,
             )
 
-    async def send_request(self, service_name: str, endpoint: str, data: dict[str, Any]) -> ServiceResponse:
+    async def send_request(
+        self, service_name: str, endpoint: str, data: dict[str, Any]
+    ) -> ServiceResponse:
         """发送请求"""
         message = ServiceMessage(
             source_service=self.source_service,
@@ -224,7 +225,9 @@ class HTTPServiceCommunicator(ServiceCommunicator):
 
         return response
 
-    async def broadcast_message(self, message: ServiceMessage, services: list[str]) -> list[ServiceResponse]:
+    async def broadcast_message(
+        self, message: ServiceMessage, services: list[str]
+    ) -> list[ServiceResponse]:
         """广播消息"""
         tasks = []
         for service_name in services:
@@ -242,7 +245,7 @@ class HTTPServiceCommunicator(ServiceCommunicator):
 
         # 处理异常结果
         result = []
-        for i, response in enumerate(responses):
+        for _i, response in enumerate(responses):
             if isinstance(response, Exception):
                 result.append(
                     ServiceResponse(
@@ -255,7 +258,6 @@ class HTTPServiceCommunicator(ServiceCommunicator):
                 result.append(response)
 
         return result
-
 
 class MessageQueueCommunicator(ServiceCommunicator):
     """消息队列通信器"""
@@ -279,7 +281,9 @@ class MessageQueueCommunicator(ServiceCommunicator):
             data={"queue": "message_queued"},
         )
 
-    async def send_request(self, service_name: str, endpoint: str, data: dict[str, Any]) -> ServiceResponse:
+    async def send_request(
+        self, service_name: str, endpoint: str, data: dict[str, Any]
+    ) -> ServiceResponse:
         """发送请求到队列"""
         message = ServiceMessage(
             source_service=self.source_service,
@@ -289,7 +293,9 @@ class MessageQueueCommunicator(ServiceCommunicator):
         )
         return await self.send_message(message)
 
-    async def broadcast_message(self, message: ServiceMessage, services: list[str]) -> list[ServiceResponse]:
+    async def broadcast_message(
+        self, message: ServiceMessage, services: list[str]
+    ) -> list[ServiceResponse]:
         """广播消息到队列"""
         responses = []
         for service_name in services:
@@ -302,7 +308,6 @@ class MessageQueueCommunicator(ServiceCommunicator):
             response = await self.send_message(service_message)
             responses.append(response)
         return responses
-
 
 class ServiceCommunicationManager:
     """服务通信管理器"""
@@ -319,8 +324,12 @@ class ServiceCommunicationManager:
 
     def _initialize_communicators(self):
         """初始化通信器"""
-        self._communicators[CommunicationProtocol.HTTP] = HTTPServiceCommunicator(self.service_name)
-        self._communicators[CommunicationProtocol.MESSAGE_QUEUE] = MessageQueueCommunicator(self.service_name)
+        self._communicators[CommunicationProtocol.HTTP] = HTTPServiceCommunicator(
+            self.service_name
+        )
+        self._communicators[CommunicationProtocol.MESSAGE_QUEUE] = (
+            MessageQueueCommunicator(self.service_name)
+        )
 
     def register_message_handler(self, message_type: str, handler: callable):
         """注册消息处理器"""
@@ -349,7 +358,9 @@ class ServiceCommunicationManager:
             return await communicator.send_message(message)
         except Exception as e:
             logger.error(f"发送消息失败: {e}")
-            return ServiceResponse(message_id=message.message_id, status="error", error=str(e))
+            return ServiceResponse(
+                message_id=message.message_id, status="error", error=str(e)
+            )
 
     async def send_request(
         self,
@@ -361,7 +372,9 @@ class ServiceCommunicationManager:
         """发送请求"""
         communicator = self.get_communicator(protocol)
         if not communicator:
-            return ServiceResponse(message_id="", status="error", error=f"Unsupported protocol: {protocol}")
+            return ServiceResponse(
+                message_id="", status="error", error=f"Unsupported protocol: {protocol}"
+            )
 
         return await communicator.send_request(service_name, endpoint, data)
 
@@ -388,7 +401,9 @@ class ServiceCommunicationManager:
         """处理接收到的消息"""
         # 检查消息是否过期
         if message.is_expired():
-            return ServiceResponse(message_id=message.message_id, status="error", error="Message expired")
+            return ServiceResponse(
+                message_id=message.message_id, status="error", error="Message expired"
+            )
 
         # 查找消息处理器
         handler = self._message_handlers.get(message.message_type)
@@ -412,7 +427,9 @@ class ServiceCommunicationManager:
                 )
         except Exception as e:
             logger.error(f"消息处理失败: {e}")
-            return ServiceResponse(message_id=message.message_id, status="error", error=str(e))
+            return ServiceResponse(
+                message_id=message.message_id, status="error", error=str(e)
+            )
 
     def _add_to_history(self, message: ServiceMessage):
         """添加到消息历史"""
@@ -434,17 +451,16 @@ class ServiceCommunicationManager:
             "handlers": list(self._message_handlers.keys()),
         }
 
-
 # 全局通信管理器实例
 _communication_managers: dict[str, ServiceCommunicationManager] = {}
-
 
 def get_communication_manager(service_name: str) -> ServiceCommunicationManager:
     """获取通信管理器实例"""
     if service_name not in _communication_managers:
-        _communication_managers[service_name] = ServiceCommunicationManager(service_name)
+        _communication_managers[service_name] = ServiceCommunicationManager(
+            service_name
+        )
     return _communication_managers[service_name]
-
 
 # 标准消息类型定义
 class StandardMessageTypes:
@@ -481,7 +497,6 @@ class StandardMessageTypes:
     SERVICE_UNREGISTERED = "service.unregistered"
     SERVICE_HEALTH_UPDATE = "service.health_update"
 
-
 class StandardErrorCodes:
     """标准错误码"""
 
@@ -508,7 +523,6 @@ class StandardErrorCodes:
     INSUFFICIENT_PERMISSIONS = "insufficient_permissions"
     QUOTA_EXCEEDED = "quota_exceeded"
 
-
 def create_standard_message(
     message_type: str,
     source_service: str,
@@ -525,11 +539,11 @@ def create_standard_message(
         **kwargs,
     )
 
-
-def create_success_response(message_id: str, data: dict[str, Any] = None) -> ServiceResponse:
+def create_success_response(
+    message_id: str, data: dict[str, Any] = None
+) -> ServiceResponse:
     """创建成功响应"""
     return ServiceResponse(message_id=message_id, status="success", data=data or {})
-
 
 def create_error_response(
     message_id: str,

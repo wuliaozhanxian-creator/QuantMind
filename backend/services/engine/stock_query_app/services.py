@@ -14,7 +14,7 @@ import json
 import os
 from datetime import datetime
 from functools import lru_cache
-from typing import List, Optional
+from typing import Optional
 
 from sqlalchemy import or_
 
@@ -38,7 +38,6 @@ except ImportError:
     SessionLocal = None
 
 logger = logging.getLogger(__name__)
-
 
 @lru_cache(maxsize=1)
 def _load_stock_index_items() -> list[dict]:
@@ -64,12 +63,13 @@ def _load_stock_index_items() -> list[dict]:
                 payload = json.load(f)
             items = payload.get("items")
             if isinstance(items, list):
-                logger.info("Loaded stock index from %s, items=%s", abs_path, len(items))
+                logger.info(
+                    "Loaded stock index from %s, items=%s", abs_path, len(items)
+                )
                 return items
         except Exception:
             continue
     return []
-
 
 def _lookup_stock_from_index(code: str) -> dict | None:
     text = str(code or "").strip().upper()
@@ -94,11 +94,14 @@ def _lookup_stock_from_index(code: str) -> dict | None:
 
         if candidates & item_candidates:
             exchange = str(item.get("exchange") or "").strip().upper()
-            formatted = symbol or (f"{exchange}{item_code}" if item_code and exchange else item_code)
+            formatted = symbol or (
+                f"{exchange}{item_code}" if item_code and exchange else item_code
+            )
             return {
                 "code": formatted,
                 "name": str(item.get("name") or formatted),
-                "market": exchange or (formatted.split(".", 1)[1] if "." in formatted else ""),
+                "market": exchange
+                or (formatted.split(".", 1)[1] if "." in formatted else ""),
                 "industry": None,
                 "sector": None,
                 "list_date": None,
@@ -112,7 +115,6 @@ def _lookup_stock_from_index(code: str) -> dict | None:
                 "updated_at": datetime.now().isoformat(),
             }
     return None
-
 
 class StockQueryService:
     """股票查询服务
@@ -147,7 +149,9 @@ class StockQueryService:
 
         # 本地数据库配置
         self.session_factory = session_factory or SessionLocal
-        self.use_local_db = self.session_factory is not None and StockBasicInfo is not None
+        self.use_local_db = (
+            self.session_factory is not None and StockBasicInfo is not None
+        )
 
     async def search_stocks(self, request: SearchRequest) -> QueryResponse:
         """搜索股票
@@ -159,13 +163,17 @@ class StockQueryService:
             QueryResponse: 搜索结果
         """
         if not self.use_local_db:
-            return QueryResponse(success=False, message="本地数据库不可用", data=[], total=0)
+            return QueryResponse(
+                success=False, message="本地数据库不可用", data=[], total=0
+            )
 
         try:
             return await self._search_local_stocks(request)
         except Exception as error:
             logger.error("股票搜索失败: %s", error, exc_info=True)
-            return QueryResponse(success=False, message=f"搜索失败: {str(error)}", data=[], total=0)
+            return QueryResponse(
+                success=False, message=f"搜索失败: {str(error)}", data=[], total=0
+            )
 
     async def _search_local_stocks(self, request: SearchRequest) -> QueryResponse:
         """基于本地股票主表执行模糊搜索"""
@@ -215,7 +223,12 @@ class StockQueryService:
             total = query.count()
 
             # 分页查询
-            results = query.order_by(StockBasicInfo.stock_code).offset(request.offset).limit(request.limit).all()
+            results = (
+                query.order_by(StockBasicInfo.stock_code)
+                .offset(request.offset)
+                .limit(request.limit)
+                .all()
+            )
 
         # 转换为StockInfo对象
         stocks = [self._convert_to_stock_info(record) for record in results]
@@ -229,7 +242,9 @@ class StockQueryService:
         )
 
         # 缓存结果
-        await self.cache_manager.set(cache_key, response.to_dict(), ttl_l1=self.cache_config["search"])
+        await self.cache_manager.set(
+            cache_key, response.to_dict(), ttl_l1=self.cache_config["search"]
+        )
 
         return response
 
@@ -261,12 +276,26 @@ class StockQueryService:
             pe_ttm=(float(record.pe_ttm) if record.pe_ttm is not None else None),
             pb=(float(record.pb) if record.pb is not None else None),
             ps_ttm=(float(record.ps_ttm) if record.ps_ttm is not None else None),
-            pcf_ncf_ttm=(float(record.pcf_ncf_ttm) if record.pcf_ncf_ttm is not None else None),
+            pcf_ncf_ttm=(
+                float(record.pcf_ncf_ttm) if record.pcf_ncf_ttm is not None else None
+            ),
             roe=(float(record.roe) if record.roe is not None else None),
-            net_profit_margin=(float(record.net_profit_margin) if record.net_profit_margin is not None else None),
-            gross_profit_margin=(float(record.gross_profit_margin) if record.gross_profit_margin is not None else None),
+            net_profit_margin=(
+                float(record.net_profit_margin)
+                if record.net_profit_margin is not None
+                else None
+            ),
+            gross_profit_margin=(
+                float(record.gross_profit_margin)
+                if record.gross_profit_margin is not None
+                else None
+            ),
             is_st=bool(record.is_st),
-            turnover_rate=(float(record.turnover_rate) if record.turnover_rate is not None else None),
+            turnover_rate=(
+                float(record.turnover_rate)
+                if record.turnover_rate is not None
+                else None
+            ),
             status=status,
             exchange=exchange,
             created_at=record.created_at or datetime.now(),
@@ -344,7 +373,9 @@ class StockQueryService:
             logger.error("获取股票信息失败: %s", e)
             return QueryResponse(success=False, message=f"获取股票信息失败: {str(e)}")
 
-    def _fetch_local_stock_info(self, stock_code: str, market: MarketType) -> StockInfo | None:
+    def _fetch_local_stock_info(
+        self, stock_code: str, market: MarketType
+    ) -> StockInfo | None:
         """从本地数据库查询股票信息"""
         if not self.session_factory or StockBasicInfo is None:
             return None
@@ -364,7 +395,6 @@ class StockQueryService:
                 return None
 
             return self._convert_to_stock_info(record)
-
 
 class StockSearchService:
     """股票搜索专用服务"""

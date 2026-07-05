@@ -6,13 +6,12 @@
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 
 import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
-
 
 @dataclass
 class RiskMetricsResult:
@@ -56,7 +55,6 @@ class RiskMetricsResult:
     lookback_period: int
     data_points: int
 
-
 class RiskMetrics:
     """风险指标计算器"""
 
@@ -90,7 +88,9 @@ class RiskMetrics:
         total_return = self._calculate_total_return(returns_array)
         annual_return = self._calculate_annual_return(returns_array, lookback_period)
         volatility = self._calculate_volatility(returns_array, lookback_period)
-        downside_volatility = self._calculate_downside_volatility(returns_array, lookback_period)
+        downside_volatility = self._calculate_downside_volatility(
+            returns_array, lookback_period
+        )
 
         # 风险价值指标
         var_95, var_99 = self._calculate_var(returns_array)
@@ -103,7 +103,9 @@ class RiskMetrics:
 
         # 风险调整收益指标
         sharpe_ratio = self._calculate_sharpe_ratio(annual_return, volatility)
-        sortino_ratio = self._calculate_sortino_ratio(annual_return, returns_array, lookback_period)
+        sortino_ratio = self._calculate_sortino_ratio(
+            annual_return, returns_array, lookback_period
+        )
 
         # 基准相关指标
         beta = 0.0
@@ -115,8 +117,12 @@ class RiskMetrics:
             benchmark_array = np.array(benchmark_returns)
             if len(benchmark_array) == len(returns_array):
                 beta, alpha = self._calculate_beta_alpha(returns_array, benchmark_array)
-                tracking_error = self._calculate_tracking_error(returns_array, benchmark_array, lookback_period)
-                information_ratio = self._calculate_information_ratio(annual_return, tracking_error)
+                tracking_error = self._calculate_tracking_error(
+                    returns_array, benchmark_array, lookback_period
+                )
+                information_ratio = self._calculate_information_ratio(
+                    annual_return, tracking_error
+                )
 
         # 其他指标
         treynor_ratio = self._calculate_treynor_ratio(annual_return, beta)
@@ -154,7 +160,9 @@ class RiskMetrics:
         """计算总收益率"""
         return np.prod(1 + returns) - 1
 
-    def _calculate_annual_return(self, returns: np.ndarray, lookback_period: int) -> float:
+    def _calculate_annual_return(
+        self, returns: np.ndarray, lookback_period: int
+    ) -> float:
         """计算年化收益率"""
         total_return = self._calculate_total_return(returns)
         years = len(returns) / lookback_period
@@ -166,7 +174,9 @@ class RiskMetrics:
         """计算年化波动率"""
         return np.std(returns, ddof=1) * np.sqrt(lookback_period)
 
-    def _calculate_downside_volatility(self, returns: np.ndarray, lookback_period: int) -> float:
+    def _calculate_downside_volatility(
+        self, returns: np.ndarray, lookback_period: int
+    ) -> float:
         """计算下行波动率"""
         downside_returns = returns[returns < 0]
         if len(downside_returns) > 0:
@@ -179,7 +189,9 @@ class RiskMetrics:
         var_99 = np.percentile(returns, 1)
         return var_95, var_99
 
-    def _calculate_cvar(self, returns: np.ndarray, var_95: float, var_99: float) -> tuple[float, float]:
+    def _calculate_cvar(
+        self, returns: np.ndarray, var_95: float, var_99: float
+    ) -> tuple[float, float]:
         """计算CVaR (Conditional Value at Risk)"""
         # 95% CVaR
         cvar_95 = np.mean(returns[returns <= var_95]) if var_95 is not None else 0.0
@@ -218,13 +230,17 @@ class RiskMetrics:
 
         return max_drawdown, max_duration
 
-    def _calculate_recovery_factor(self, total_return: float, max_drawdown: float) -> float:
+    def _calculate_recovery_factor(
+        self, total_return: float, max_drawdown: float
+    ) -> float:
         """计算恢复因子"""
         if max_drawdown != 0:
             return total_return / abs(max_drawdown)
         return float("in") if total_return > 0 else 0.0
 
-    def _calculate_calmar_ratio(self, annual_return: float, max_drawdown: float) -> float:
+    def _calculate_calmar_ratio(
+        self, annual_return: float, max_drawdown: float
+    ) -> float:
         """计算卡尔玛比率"""
         if max_drawdown != 0:
             return annual_return / abs(max_drawdown)
@@ -237,7 +253,9 @@ class RiskMetrics:
             return excess_return / volatility
         return 0.0
 
-    def _calculate_sortino_ratio(self, annual_return: float, returns: np.ndarray, lookback_period: int) -> float:
+    def _calculate_sortino_ratio(
+        self, annual_return: float, returns: np.ndarray, lookback_period: int
+    ) -> float:
         """计算索提诺比率（下行基于 MAR=无风险利率）"""
         daily_rf = self.risk_free_rate / lookback_period
         downside_returns = returns[returns < daily_rf]
@@ -249,7 +267,9 @@ class RiskMetrics:
             return excess_return / downside_deviation
         return 0.0
 
-    def _calculate_beta_alpha(self, returns: np.ndarray, benchmark_returns: np.ndarray) -> tuple[float, float]:
+    def _calculate_beta_alpha(
+        self, returns: np.ndarray, benchmark_returns: np.ndarray
+    ) -> tuple[float, float]:
         """计算Beta和Alpha"""
         if len(returns) != len(benchmark_returns) or len(returns) < 2:
             return 0.0, 0.0
@@ -266,7 +286,9 @@ class RiskMetrics:
         # 计算Alpha
         benchmark_mean = np.mean(benchmark_returns) * 252  # 年化
         strategy_mean = np.mean(returns) * 252  # 年化
-        alpha = strategy_mean - (self.risk_free_rate + beta * (benchmark_mean - self.risk_free_rate))
+        alpha = strategy_mean - (
+            self.risk_free_rate + beta * (benchmark_mean - self.risk_free_rate)
+        )
 
         return beta, alpha
 
@@ -280,7 +302,9 @@ class RiskMetrics:
         excess_returns = returns - benchmark_returns
         return np.std(excess_returns, ddof=1) * np.sqrt(lookback_period)
 
-    def _calculate_information_ratio(self, annual_return: float, tracking_error: float) -> float:
+    def _calculate_information_ratio(
+        self, annual_return: float, tracking_error: float
+    ) -> float:
         """计算信息比率"""
         if tracking_error != 0:
             excess_return = annual_return - self.risk_free_rate
@@ -294,7 +318,9 @@ class RiskMetrics:
             return excess_return / beta
         return 0.0
 
-    def _calculate_omega_ratio(self, returns: np.ndarray, threshold: float = 0.0) -> float:
+    def _calculate_omega_ratio(
+        self, returns: np.ndarray, threshold: float = 0.0
+    ) -> float:
         """计算Omega比率"""
         gains = returns[returns > threshold] - threshold
         losses = threshold - returns[returns <= threshold]
@@ -317,7 +343,9 @@ class RiskMetrics:
             return avg_gain / avg_loss if avg_loss != 0 else float("in")
         return 0.0
 
-    def calculate_rolling_metrics(self, returns: list[float], window: int = 30) -> dict[str, list[float]]:
+    def calculate_rolling_metrics(
+        self, returns: list[float], window: int = 30
+    ) -> dict[str, list[float]]:
         """
         计算滚动风险指标
 
@@ -366,7 +394,9 @@ class RiskMetrics:
             "rolling_max_drawdown": rolling_max_drawdown,
         }
 
-    def calculate_stress_test(self, returns: list[float], stress_scenarios: dict[str, list[float]]) -> dict[str, float]:
+    def calculate_stress_test(
+        self, returns: list[float], stress_scenarios: dict[str, list[float]]
+    ) -> dict[str, float]:
         """
         压力测试
 
@@ -396,7 +426,9 @@ class RiskMetrics:
 
         return results
 
-    def calculate_correlation_matrix(self, returns_dict: dict[str, list[float]]) -> pd.DataFrame:
+    def calculate_correlation_matrix(
+        self, returns_dict: dict[str, list[float]]
+    ) -> pd.DataFrame:
         """
         计算收益率相关性矩阵
 
@@ -424,7 +456,9 @@ class RiskMetrics:
         df = pd.DataFrame(data)
         return df.corr()
 
-    def calculate_risk_contribution(self, returns: list[float], weights: list[float]) -> dict[str, float]:
+    def calculate_risk_contribution(
+        self, returns: list[float], weights: list[float]
+    ) -> dict[str, float]:
         """
         计算风险贡献度
 

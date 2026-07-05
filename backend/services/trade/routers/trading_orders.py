@@ -3,7 +3,7 @@ Order API Routes
 """
 
 import logging
-from typing import List, Optional
+from typing import Optional
 from uuid import UUID
 from datetime import datetime
 
@@ -27,13 +27,13 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-
 def _require_int_user_id(raw_user_id: str) -> int:
     try:
         return int(raw_user_id)
     except (TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="Invalid user_id in token")
-
+        raise HTTPException(
+            status_code=400, detail="Invalid user_id in token"
+        ) from None
 
 @router.post("/", response_model=OrderResponse, status_code=status.HTTP_201_CREATED)
 async def create_order(
@@ -45,7 +45,9 @@ async def create_order(
     """Create a new order"""
     try:
         user_id = _require_int_user_id(auth.user_id)
-        if (order_data.trading_mode or TradingMode.SIMULATION) == TradingMode.SIMULATION:
+        if (
+            order_data.trading_mode or TradingMode.SIMULATION
+        ) == TradingMode.SIMULATION:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Simulation orders are handled by simulation-service",
@@ -61,7 +63,9 @@ async def create_order(
         risk_check = await trading_engine.check_order_risk(user_id, order)
         if not risk_check["passed"]:
             # Reject order
-            await order_service.cancel_order(order.order_id, reason=f"Risk check failed: {risk_check['violations']}")
+            await order_service.cancel_order(
+                order.order_id, reason=f"Risk check failed: {risk_check['violations']}"
+            )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={
@@ -85,8 +89,7 @@ async def create_order(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create order: {str(e)}",
-        )
-
+        ) from e
 
 @router.get("/{order_id}", response_model=OrderResponse)
 async def get_order(
@@ -98,13 +101,16 @@ async def get_order(
     """Get order by ID"""
     user_id = _require_int_user_id(auth.user_id)
     order_service = OrderService(db, redis)
-    order = await order_service.get_order(order_id, tenant_id=auth.tenant_id, user_id=user_id)
+    order = await order_service.get_order(
+        order_id, tenant_id=auth.tenant_id, user_id=user_id
+    )
 
     if not order:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Order {order_id} not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Order {order_id} not found"
+        )
 
     return order
-
 
 @router.put("/{order_id}", response_model=OrderResponse)
 async def update_order(
@@ -118,27 +124,32 @@ async def update_order(
     try:
         user_id = _require_int_user_id(auth.user_id)
         order_service = OrderService(db, redis)
-        existing = await order_service.get_order(order_id, tenant_id=auth.tenant_id, user_id=user_id)
+        existing = await order_service.get_order(
+            order_id, tenant_id=auth.tenant_id, user_id=user_id
+        )
         if not existing:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Order {order_id} not found",
             )
-        order = await order_service.update_order(order_id, update_data, tenant_id=auth.tenant_id, user_id=user_id)
+        order = await order_service.update_order(
+            order_id, update_data, tenant_id=auth.tenant_id, user_id=user_id
+        )
 
         return order
 
     except HTTPException:
         raise
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        ) from e
     except Exception as e:
         logger.error(f"Failed to update order: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update order: {str(e)}",
-        )
-
+        ) from e
 
 @router.post("/{order_id}/cancel", response_model=OrderResponse)
 async def cancel_order(
@@ -152,7 +163,9 @@ async def cancel_order(
     try:
         user_id = _require_int_user_id(auth.user_id)
         order_service = OrderService(db, redis)
-        existing = await order_service.get_order(order_id, tenant_id=auth.tenant_id, user_id=user_id)
+        existing = await order_service.get_order(
+            order_id, tenant_id=auth.tenant_id, user_id=user_id
+        )
         if not existing:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -160,7 +173,12 @@ async def cancel_order(
             )
 
         # 终态订单无需撤单
-        terminal = {OrderStatus.FILLED, OrderStatus.CANCELLED, OrderStatus.REJECTED, OrderStatus.EXPIRED}
+        terminal = {
+            OrderStatus.FILLED,
+            OrderStatus.CANCELLED,
+            OrderStatus.REJECTED,
+            OrderStatus.EXPIRED,
+        }
         if existing.status in terminal:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -182,7 +200,9 @@ async def cancel_order(
                 side=str(getattr(existing.side, "value", existing.side) or ""),
             )
         except Exception as broker_exc:
-            logger.warning("broker cancel_order failed (continuing local cancel): %s", broker_exc)
+            logger.warning(
+                "broker cancel_order failed (continuing local cancel): %s", broker_exc
+            )
 
         order = await order_service.cancel_order(
             order_id,
@@ -196,14 +216,15 @@ async def cancel_order(
     except HTTPException:
         raise
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        ) from e
     except Exception as e:
         logger.error(f"Failed to cancel order: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to cancel order: {str(e)}",
-        )
-
+        ) from e
 
 @router.get("/", response_model=list[OrderResponse])
 async def list_orders(
@@ -219,7 +240,7 @@ async def list_orders(
     db: AsyncSession = Depends(get_db),
     redis: RedisClient = Depends(get_redis),
 ):
-    """List orders with filters"""
+    """list orders with filters"""
     user_id = _require_int_user_id(auth.user_id)
     normalized_trading_mode = None
     if trading_mode is not None:
@@ -259,7 +280,6 @@ async def list_orders(
 
     return orders
 
-
 @router.get("/stats/summary")
 async def get_order_statistics(
     portfolio_id: int = None,
@@ -270,6 +290,8 @@ async def get_order_statistics(
     """Get order statistics"""
     user_id = _require_int_user_id(auth.user_id)
     order_service = OrderService(db, redis)
-    stats = await order_service.get_order_statistics(auth.tenant_id, user_id, portfolio_id)
+    stats = await order_service.get_order_statistics(
+        auth.tenant_id, user_id, portfolio_id
+    )
 
     return stats

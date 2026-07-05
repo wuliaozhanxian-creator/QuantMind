@@ -3,7 +3,7 @@
 import logging
 import os
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import anyio
 from fastapi import APIRouter, Body, Request
@@ -20,7 +20,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-
 def _legacy_routes_enabled() -> bool:
     return os.getenv("AI_STRATEGY_ENABLE_LEGACY_ROUTES", "false").strip().lower() in (
         "1",
@@ -28,7 +27,6 @@ def _legacy_routes_enabled() -> bool:
         "yes",
         "on",
     )
-
 
 @router.post("/legacy/strategy/save-pool-file")
 async def save_pool_file(
@@ -50,7 +48,11 @@ async def save_pool_file(
             if not s:
                 return ""
             u = s.upper()
-            if len(u) == 8 and (u.startswith("SZ") or u.startswith("SH")) and u[2:].isdigit():
+            if (
+                len(u) == 8
+                and (u.startswith("SZ") or u.startswith("SH"))
+                and u[2:].isdigit()
+            ):
                 return u
             if "." in u:
                 base, suffix = u.split(".", 1)
@@ -200,7 +202,6 @@ async def save_pool_file(
         logger.error("保存股票池失败: %s", e)
         return error(ErrorCode.INTERNAL_ERROR, str(e))
 
-
 @router.post("/legacy/strategy/get-active-pool-file")
 async def get_active_pool_file_endpoint(
     request: Request,
@@ -220,6 +221,7 @@ async def get_active_pool_file_endpoint(
         return error(ErrorCode.PARAM_REQUIRED, "user_id 不能为空")
 
     try:
+
         def _sync_read_active() -> dict[str, Any] | None:
             try:
                 try:

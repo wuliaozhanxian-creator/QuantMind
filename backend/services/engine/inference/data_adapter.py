@@ -15,7 +15,6 @@ from backend.shared.stock_utils import StockCodeUtil
 
 logger = logging.getLogger(__name__)
 
-
 class DataAdapter:
     """Adapts real-time market data to Qlib model input format."""
 
@@ -71,7 +70,9 @@ class DataAdapter:
             # Process each row: append to history buffer and compute indicators
             for idx in range(len(df)):
                 row = df.iloc[idx]
-                symbol = StockCodeUtil.to_prefix(row.get("instrument") or row.get("symbol", "unknown"))
+                symbol = StockCodeUtil.to_prefix(
+                    row.get("instrument") or row.get("symbol", "unknown")
+                )
 
                 # Build bar dict for history buffer
                 bar = {}
@@ -97,7 +98,9 @@ class DataAdapter:
             logger.error(f"Failed to convert data: {e}")
             raise
 
-    def prepare_features(self, df: pd.DataFrame, feature_columns: list[str]) -> pd.DataFrame:
+    def prepare_features(
+        self, df: pd.DataFrame, feature_columns: list[str]
+    ) -> pd.DataFrame:
         """
         Prepare feature DataFrame for model prediction.
 

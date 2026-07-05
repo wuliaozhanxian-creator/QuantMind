@@ -21,14 +21,14 @@ from backend.services.engine.qlib_app.services.risk_monitor_service import (
 )
 from backend.services.engine.qlib_app.websocket.connection_manager import ws_manager
 from backend.shared.auth import decode_jwt_token
-from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
+from backend.services.engine.qlib_app.utils.structured_logger import (
+    StructuredTaskLogger,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-
 # ============ Schemas ============
-
 
 class RiskControlConfigRequest(BaseModel):
     """风控配置请求"""
@@ -37,9 +37,10 @@ class RiskControlConfigRequest(BaseModel):
     sharpe_threshold: float = Field(0.5, ge=0, le=10, description="夏普比率阈值")
     volatility_threshold: float = Field(0.30, ge=0, le=1, description="波动率阈值")
     var_threshold: float = Field(-0.05, ge=-1, le=0, description="VaR阈值")
-    position_concentration_threshold: float = Field(0.30, ge=0, le=1, description="单股持仓比例阈值")
+    position_concentration_threshold: float = Field(
+        0.30, ge=0, le=1, description="单股持仓比例阈值"
+    )
     enable_auto_stop: bool = Field(False, description="是否启用自动停止")
-
 
 class StartMonitoringRequest(BaseModel):
     """启动监控请求"""
@@ -47,7 +48,6 @@ class StartMonitoringRequest(BaseModel):
     backtest_id: str = Field(..., description="回测ID")
     config: RiskControlConfigRequest | None = Field(None, description="风控配置")
     update_interval: int = Field(5, ge=1, le=60, description="更新间隔（秒）")
-
 
 class MonitorStatusResponse(BaseModel):
     """监控状态响应"""
@@ -57,9 +57,7 @@ class MonitorStatusResponse(BaseModel):
     config: dict
     alerts_summary: dict
 
-
 # ============ HTTP Endpoints ============
-
 
 @router.post("/risk-monitor/start", response_model=dict)
 async def start_monitoring(request: StartMonitoringRequest):
@@ -90,11 +88,10 @@ async def start_monitoring(request: StartMonitoringRequest):
         }
 
     except Exception as e:
-        StructuredTaskLogger(logger, "risk-monitor-api", {"backtest_id": request.backtest_id}).exception(
-            "start_failed", "启动监控失败", error=e
-        )
-        raise HTTPException(status_code=500, detail=f"启动监控失败: {str(e)}")
-
+        StructuredTaskLogger(
+            logger, "risk-monitor-api", {"backtest_id": request.backtest_id}
+        ).exception("start_failed", "启动监控失败", error=e)
+        raise HTTPException(status_code=500, detail=f"启动监控失败: {str(e)}") from e
 
 @router.post("/risk-monitor/stop/{backtest_id}")
 async def stop_monitoring_endpoint(backtest_id: str):
@@ -110,11 +107,10 @@ async def stop_monitoring_endpoint(backtest_id: str):
         }
 
     except Exception as e:
-        StructuredTaskLogger(logger, "risk-monitor-api", {"backtest_id": backtest_id}).exception(
-            "stop_failed", "停止监控失败", error=e
-        )
-        raise HTTPException(status_code=500, detail=f"停止监控失败: {str(e)}")
-
+        StructuredTaskLogger(
+            logger, "risk-monitor-api", {"backtest_id": backtest_id}
+        ).exception("stop_failed", "停止监控失败", error=e)
+        raise HTTPException(status_code=500, detail=f"停止监控失败: {str(e)}") from e
 
 @router.get("/risk-monitor/status/{backtest_id}", response_model=MonitorStatusResponse)
 async def get_monitor_status(backtest_id: str):
@@ -140,7 +136,6 @@ async def get_monitor_status(backtest_id: str):
         alerts_summary=monitor.get_alerts_summary(),
     )
 
-
 @router.get("/risk-monitor/active", response_model=list)
 async def get_active_monitors():
     """
@@ -156,9 +151,7 @@ async def get_active_monitors():
         for backtest_id, monitor in monitors.items()
     ]
 
-
 # ============ WebSocket Endpoint ============
-
 
 @router.websocket("/ws/risk-monitor/{backtest_id}")
 async def risk_monitor_websocket(
@@ -206,13 +199,19 @@ async def risk_monitor_websocket(
     """
     try:
         raw_auth_header = websocket.headers.get("authorization", "")
-        header_token = raw_auth_header.split(" ", 1)[1].strip() if raw_auth_header.lower().startswith("bearer ") else ""
+        header_token = (
+            raw_auth_header.split(" ", 1)[1].strip()
+            if raw_auth_header.lower().startswith("bearer ")
+            else ""
+        )
         candidate_token = (token or header_token or "").strip()
         if not candidate_token:
             await websocket.close(code=1008, reason="missing websocket auth token")
             return
         payload = decode_jwt_token(candidate_token)
-        auth_user_id = str(payload.get("user_id") or payload.get("id") or payload.get("sub") or "").strip()
+        auth_user_id = str(
+            payload.get("user_id") or payload.get("id") or payload.get("sub") or ""
+        ).strip()
         auth_tenant_id = str(payload.get("tenant_id") or "default").strip() or "default"
         if not auth_user_id:
             await websocket.close(code=1008, reason="invalid websocket token")
@@ -220,7 +219,11 @@ async def risk_monitor_websocket(
         if user_id and str(user_id).strip() != auth_user_id:
             await websocket.close(code=1008, reason="websocket identity mismatch")
             return
-        if tenant_id and str(tenant_id).strip() and str(tenant_id).strip() != auth_tenant_id:
+        if (
+            tenant_id
+            and str(tenant_id).strip()
+            and str(tenant_id).strip() != auth_tenant_id
+        ):
             await websocket.close(code=1008, reason="websocket tenant mismatch")
             return
 
@@ -233,9 +236,9 @@ async def risk_monitor_websocket(
             await websocket.close(code=1008, reason="websocket access denied")
             return
     except Exception as exc:
-        StructuredTaskLogger(logger, "risk-monitor-api", {"backtest_id": backtest_id}).warning(
-            "ws_rejected", "拒绝风控 WebSocket 连接", error=exc
-        )
+        StructuredTaskLogger(
+            logger, "risk-monitor-api", {"backtest_id": backtest_id}
+        ).warning("ws_rejected", "拒绝风控 WebSocket 连接", error=exc)
         await websocket.close(code=1008, reason="websocket access denied")
         return
 
@@ -298,9 +301,9 @@ async def risk_monitor_websocket(
             except WebSocketDisconnect:
                 break
             except Exception as e:
-                StructuredTaskLogger(logger, "risk-monitor-api", {"backtest_id": backtest_id}).exception(
-                    "ws_message_failed", "WebSocket消息处理错误", error=e
-                )
+                StructuredTaskLogger(
+                    logger, "risk-monitor-api", {"backtest_id": backtest_id}
+                ).exception("ws_message_failed", "WebSocket消息处理错误", error=e)
                 break
 
     finally:

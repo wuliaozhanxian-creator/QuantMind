@@ -13,7 +13,6 @@ from ...services import QuoteService
 
 router = APIRouter(prefix="/quotes", tags=["quotes"])
 
-
 @router.get("/{symbol}", response_model=QuoteResponse)
 async def get_quote(
     symbol: str,
@@ -27,13 +26,14 @@ async def get_quote(
     try:
         quote = await service.get_quote(symbol, source, use_cache)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
     if not quote:
-        raise HTTPException(status_code=404, detail=f"Quote not found for symbol: {symbol}")
+        raise HTTPException(
+            status_code=404, detail=f"Quote not found for symbol: {symbol}"
+        )
 
     return quote
-
 
 @router.get("/", response_model=QuoteListResponse)
 async def list_quotes(
@@ -50,7 +50,6 @@ async def list_quotes(
 
     return QuoteListResponse(total=len(quotes), quotes=quotes)
 
-
 @router.get("/{symbol}/latest", response_model=QuoteResponse)
 async def get_latest_quote(symbol: str, db: AsyncSession = Depends(get_db)):
     """获取最新行情"""
@@ -58,10 +57,11 @@ async def get_latest_quote(symbol: str, db: AsyncSession = Depends(get_db)):
     quote = await service.get_latest_quote(symbol)
 
     if not quote:
-        raise HTTPException(status_code=404, detail=f"No quote found for symbol: {symbol}")
+        raise HTTPException(
+            status_code=404, detail=f"No quote found for symbol: {symbol}"
+        )
 
     return quote
-
 
 @router.get("/{symbol}/series")
 async def get_quote_series(
@@ -77,7 +77,9 @@ async def get_quote_series(
     # 直接调用 RemoteRedisSource 的时序拉取能力
     source = service.data_sources.get("remote_redis")
     if not source:
-        raise HTTPException(status_code=500, detail="Remote Redis source not initialized")
+        raise HTTPException(
+            status_code=500, detail="Remote Redis source not initialized"
+        )
 
     series = await source.fetch_series(symbol, seconds)
     return {"symbol": symbol, "seconds": seconds, "count": len(series), "data": series}

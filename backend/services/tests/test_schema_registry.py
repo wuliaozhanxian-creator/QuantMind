@@ -21,6 +21,8 @@ def test_schema_registry_has_no_duplicate_table_names():
 
 
 def test_trade_schemas_load_with_tables():
-    schemas = load_registered_schemas(("trade.core", "trade.simulation", "trade.portfolio"))
+    schemas = load_registered_schemas(
+        ("trade.core", "trade.simulation", "trade.portfolio")
+    )
     table_count = sum(len(schema.metadata.tables) for schema in schemas)
     assert table_count > 0

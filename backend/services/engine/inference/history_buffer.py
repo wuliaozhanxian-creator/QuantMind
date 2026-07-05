@@ -13,7 +13,7 @@ History Buffer - Per-symbol sliding window for real-time technical indicator cal
 import logging
 import threading
 from collections import deque
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
@@ -22,7 +22,6 @@ logger = logging.getLogger(__name__)
 
 # 默认窗口大小：至少能计算 MA20 + volatility_10
 DEFAULT_WINDOW_SIZE = 30
-
 
 class SymbolBuffer:
     """单个 symbol 的环形缓冲区"""
@@ -46,7 +45,6 @@ class SymbolBuffer:
         if not self._buffer:
             return pd.DataFrame()
         return pd.DataFrame(list(self._buffer))
-
 
 class HistoryBuffer:
     """
@@ -97,7 +95,7 @@ class HistoryBuffer:
         基于历史窗口计算真实技术指标。
 
         Returns:
-            Dict 包含: ma5, ma10, ma20, returns, volatility_5, volatility_10,
+            dict 包含: ma5, ma10, ma20, returns, volatility_5, volatility_10,
                        high_low_ratio, close_open_ratio, volume_change, log_volume
         """
         df = self.get_window(symbol)
@@ -107,7 +105,11 @@ class HistoryBuffer:
             return self._default_indicators()
 
         close = df["close"].astype(float)
-        volume = df["volume"].astype(float) if "volume" in df.columns else pd.Series([0.0] * n)
+        volume = (
+            df["volume"].astype(float)
+            if "volume" in df.columns
+            else pd.Series([0.0] * n)
+        )
 
         result = {}
 
@@ -119,7 +121,9 @@ class HistoryBuffer:
         # Returns (daily)
         if n >= 2:
             result["returns"] = (
-                float((close.iloc[-1] - close.iloc[-2]) / close.iloc[-2]) if close.iloc[-2] != 0 else 0.0
+                float((close.iloc[-1] - close.iloc[-2]) / close.iloc[-2])
+                if close.iloc[-2] != 0
+                else 0.0
             )
         else:
             result["returns"] = 0.0
@@ -128,29 +132,47 @@ class HistoryBuffer:
         if n >= 3:
             returns_series = close.pct_change().dropna()
             result["volatility_5"] = (
-                float(returns_series.tail(min(5, len(returns_series))).std()) if len(returns_series) >= 2 else 0.01
+                float(returns_series.tail(min(5, len(returns_series))).std())
+                if len(returns_series) >= 2
+                else 0.01
             )
             result["volatility_10"] = (
-                float(returns_series.tail(min(10, len(returns_series))).std()) if len(returns_series) >= 2 else 0.01
+                float(returns_series.tail(min(10, len(returns_series))).std())
+                if len(returns_series) >= 2
+                else 0.01
             )
         else:
             result["volatility_5"] = 0.01
             result["volatility_10"] = 0.01
 
         # High-Low ratio (latest bar)
-        high_val = float(df["high"].iloc[-1]) if "high" in df.columns else float(close.iloc[-1])
-        low_val = float(df["low"].iloc[-1]) if "low" in df.columns else float(close.iloc[-1])
+        high_val = (
+            float(df["high"].iloc[-1])
+            if "high" in df.columns
+            else float(close.iloc[-1])
+        )
+        low_val = (
+            float(df["low"].iloc[-1]) if "low" in df.columns else float(close.iloc[-1])
+        )
         result["high_low_ratio"] = high_val / low_val if low_val != 0 else 1.0
 
         # Close-Open ratio (latest bar)
-        open_val = float(df["open"].iloc[-1]) if "open" in df.columns else float(close.iloc[-1])
-        result["close_open_ratio"] = float(close.iloc[-1]) / open_val if open_val != 0 else 1.0
+        open_val = (
+            float(df["open"].iloc[-1])
+            if "open" in df.columns
+            else float(close.iloc[-1])
+        )
+        result["close_open_ratio"] = (
+            float(close.iloc[-1]) / open_val if open_val != 0 else 1.0
+        )
 
         # Volume change
         if n >= 2 and "volume" in df.columns:
             prev_vol = float(volume.iloc[-2])
             curr_vol = float(volume.iloc[-1])
-            result["volume_change"] = (curr_vol - prev_vol) / prev_vol if prev_vol != 0 else 0.0
+            result["volume_change"] = (
+                (curr_vol - prev_vol) / prev_vol if prev_vol != 0 else 0.0
+            )
         else:
             result["volume_change"] = 0.0
 

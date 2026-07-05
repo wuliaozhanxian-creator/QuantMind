@@ -2,14 +2,12 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 import pandas as pd
 
-
 class PredictionArtifactError(RuntimeError):
     """Raised when inference output cannot be converted to backtest artifact."""
-
 
 def _as_list(value: Any) -> list[Any]:
     if value is None:
@@ -17,7 +15,6 @@ def _as_list(value: Any) -> list[Any]:
     if isinstance(value, list):
         return value
     return [value]
-
 
 def build_pred_pkl_from_inference(
     *,
@@ -36,7 +33,9 @@ def build_pred_pkl_from_inference(
         raise PredictionArtifactError("inference result missing predictions")
 
     if symbols and len(symbols) != len(predictions):
-        raise PredictionArtifactError(f"symbols/predictions length mismatch: {len(symbols)} != {len(predictions)}")
+        raise PredictionArtifactError(
+            f"symbols/predictions length mismatch: {len(symbols)} != {len(predictions)}"
+        )
 
     if not symbols:
         symbols = [f"UNKNOWN_{idx:04d}" for idx in range(len(predictions))]
@@ -46,11 +45,13 @@ def build_pred_pkl_from_inference(
 
     tuples: list[tuple[pd.Timestamp, str]] = []
     scores: list[float] = []
-    for symbol, score in zip(symbols, predictions):
+    for symbol, score in zip(symbols, predictions, strict=False):
         try:
             score_val = float(score)
         except Exception as exc:  # pragma: no cover
-            raise PredictionArtifactError(f"invalid prediction value {score!r}: {exc}")
+            raise PredictionArtifactError(
+                f"invalid prediction value {score!r}: {exc}"
+            ) from exc
         tuples.append((dt_index, str(symbol)))
         scores.append(score_val)
 

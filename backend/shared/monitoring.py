@@ -10,10 +10,9 @@ import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List
+from typing import Any
 
 logger = logging.getLogger(__name__)
-
 
 def _create_placeholder_class(name):
     """创建单个占位类."""
@@ -39,7 +38,6 @@ def _create_placeholder_class(name):
     PlaceholderClass.__name__ = name
     return PlaceholderClass
 
-
 def _create_placeholder_classes():
     """创建占位类."""
     Counter = _create_placeholder_class("Counter")
@@ -47,7 +45,6 @@ def _create_placeholder_classes():
     Gauge = _create_placeholder_class("Gauge")
     Summary = _create_placeholder_class("Summary")
     return Counter, Histogram, Gauge, Summary
-
 
 # 尝试导入可选依赖
 try:
@@ -58,14 +55,12 @@ except ImportError:
     PROMETHEUS_AVAILABLE = False
     Counter, Histogram, Gauge, Summary = _create_placeholder_classes()
 
-
 try:
     import structlog
 
     STRUCTLOG_AVAILABLE = True
 except ImportError:
     STRUCTLOG_AVAILABLE = False
-
 
 try:
     from opentelemetry import trace
@@ -99,7 +94,6 @@ except ImportError:
         def get_tracer(*args, **kwargs):
             return None
 
-
 # 日志级别
 class LogLevel(Enum):
     DEBUG = "DEBUG"
@@ -107,7 +101,6 @@ class LogLevel(Enum):
     WARNING = "WARNING"
     ERROR = "ERROR"
     CRITICAL = "CRITICAL"
-
 
 @dataclass
 class MetricData:
@@ -118,7 +111,6 @@ class MetricData:
     labels: dict[str, str] = field(default_factory=dict)
     timestamp: float = field(default_factory=time.time)
     metric_type: str = "gauge"  # gauge, counter, histogram
-
 
 class MetricsCollector:
     """指标收集器"""
@@ -144,15 +136,23 @@ class MetricsCollector:
         )
 
         # 请求耗时直方图
-        self.http_request_duration = Histogram("http_request_duration_seconds", "HTTP request duration")
+        self.http_request_duration = Histogram(
+            "http_request_duration_seconds", "HTTP request duration"
+        )
 
         # 活跃连接数
-        self.active_connections = Gauge("active_connections", "Number of active connections")
+        self.active_connections = Gauge(
+            "active_connections", "Number of active connections"
+        )
 
         # 服务健康状态
-        self.service_health = Gauge("service_health", "Service health status", ["service"])
+        self.service_health = Gauge(
+            "service_health", "Service health status", ["service"]
+        )
 
-    def increment_counter(self, name: str, value: float = 1.0, labels: dict[str, str] = None):
+    def increment_counter(
+        self, name: str, value: float = 1.0, labels: dict[str, str] = None
+    ):
         """增加计数器值"""
         with self._lock:
             if labels:
@@ -254,7 +254,6 @@ class MetricsCollector:
 
         return metrics
 
-
 class Logger:
     """增强的日志记录器"""
 
@@ -272,7 +271,9 @@ class Logger:
         ch = logging.StreamHandler()
         ch.setLevel(logging.DEBUG)
 
-        formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+        formatter = logging.Formatter(
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        )
         ch.setFormatter(formatter)
 
         self._logger.addHandler(ch)
@@ -311,7 +312,6 @@ class Logger:
             self._logger.critical(message, **kwargs)
         else:
             self._logger.critical(message)
-
 
 class DistributedTracer:
     """分布式追踪器"""
@@ -367,7 +367,6 @@ class DistributedTracer:
             return trace.get_current_span()
         return None
 
-
 class MonitoringService:
     """监控服务"""
 
@@ -383,7 +382,9 @@ class MonitoringService:
         # 健康状态
         self._health_status = "healthy"
 
-    def record_request(self, method: str, endpoint: str, status_code: int, duration: float):
+    def record_request(
+        self, method: str, endpoint: str, status_code: int, duration: float
+    ):
         """记录请求指标"""
         # 记录计数器
         self.metrics.increment_counter(
@@ -430,16 +431,25 @@ class MonitoringService:
                 "avg_duration": sum(durations) / len(durations),
                 "max_duration": max(durations),
                 "min_duration": min(durations),
-                "status_distribution": {str(status): statuses.count(status) for status in set(statuses)},
+                "status_distribution": {
+                    str(status): statuses.count(status) for status in set(statuses)
+                },
             }
 
         # 计算总体请求统计
         total_requests = sum([data["count"] for data in summary["endpoints"].values()])
-        total_duration = sum([data["avg_duration"] * data["count"] for data in summary["endpoints"].values()])
+        total_duration = sum(
+            [
+                data["avg_duration"] * data["count"]
+                for data in summary["endpoints"].values()
+            ]
+        )
 
         summary["requests"] = {
             "total": total_requests,
-            "avg_duration": (total_duration / total_requests if total_requests > 0 else 0),
+            "avg_duration": (
+                total_duration / total_requests if total_requests > 0 else 0
+            ),
         }
 
         return summary
@@ -470,10 +480,8 @@ class MonitoringService:
             return span
         return None
 
-
 # 全局监控服务实例
 _monitoring_services: dict[str, MonitoringService] = {}
-
 
 def get_monitoring_service(service_name: str) -> MonitoringService:
     """获取监控服务实例"""

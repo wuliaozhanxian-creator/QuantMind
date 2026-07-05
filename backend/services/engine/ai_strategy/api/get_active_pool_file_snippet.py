@@ -5,7 +5,7 @@
 """
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -25,16 +25,13 @@ except ImportError:
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-
 class GetActivePoolFileRequest(BaseModel):
     user_id: str
-
 
 class GetActivePoolFileResponse(BaseModel):
     success: bool
     pool_file: dict[str, Any] | None = None
     error: str | None = None
-
 
 @router.post("/get-active-pool-file", response_model=GetActivePoolFileResponse)
 async def get_active_pool_file(body: GetActivePoolFileRequest):
@@ -45,13 +42,15 @@ async def get_active_pool_file(body: GetActivePoolFileRequest):
         # 查询最新的活跃记录
         pool_file = (
             db.query(StockPoolFile)
-            .filter(StockPoolFile.user_id == body.user_id, StockPoolFile.is_active == True)
+            .filter(StockPoolFile.user_id == body.user_id, StockPoolFile.is_active)
             .order_by(StockPoolFile.created_at.desc())
             .first()
         )
 
         if pool_file:
-            return GetActivePoolFileResponse(success=True, pool_file=pool_file.to_dict())
+            return GetActivePoolFileResponse(
+                success=True, pool_file=pool_file.to_dict()
+            )
         else:
             return GetActivePoolFileResponse(success=True, pool_file=None)
     except Exception as e:

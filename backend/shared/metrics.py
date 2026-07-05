@@ -48,9 +48,13 @@ REQUEST_IN_PROGRESS = create_metric(
     ["method", "endpoint"],
 )
 
-DB_POOL_SIZE = create_metric(Gauge, "db_pool_size", "Database connection pool size", ["database"])
+DB_POOL_SIZE = create_metric(
+    Gauge, "db_pool_size", "Database connection pool size", ["database"]
+)
 
-DB_POOL_ACTIVE = create_metric(Gauge, "db_pool_active_connections", "Active database connections", ["database"])
+DB_POOL_ACTIVE = create_metric(
+    Gauge, "db_pool_active_connections", "Active database connections", ["database"]
+)
 
 
 class PrometheusMiddleware(BaseHTTPMiddleware):
@@ -154,7 +158,9 @@ ROUTER_CALL_DURATION = create_metric(
     buckets=(0.01, 0.05, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0),
 )
 
-ROUTER_FAILURE_RATE = create_metric(Gauge, "router_failure_rate", "Service failure rate (0.0-1.0)", ["provider"])
+ROUTER_FAILURE_RATE = create_metric(
+    Gauge, "router_failure_rate", "Service failure rate (0.0-1.0)", ["provider"]
+)
 
 # 活跃请求指标
 ROUTER_ACTIVE_REQUESTS = create_metric(

@@ -13,10 +13,11 @@ import redis
 from redis import ConnectionPool
 
 logger = logging.getLogger(__name__)
-from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
+from backend.services.engine.qlib_app.utils.structured_logger import (
+    StructuredTaskLogger,
+)
 
 task_logger = StructuredTaskLogger(logger, "CacheManager")
-
 
 class CacheManager:
     """Redis缓存管理器"""
@@ -97,10 +98,14 @@ class CacheManager:
             task_logger.debug("cache_miss", "缓存未命中", key=key)
             return None
         except Exception as e:
-            task_logger.error("get_backtest_result_failed", "获取缓存失败", error=str(e))
+            task_logger.error(
+                "get_backtest_result_failed", "获取缓存失败", error=str(e)
+            )
             return None
 
-    def set_backtest_result(self, backtest_id: str, result: dict, ttl: int | None = None):
+    def set_backtest_result(
+        self, backtest_id: str, result: dict, ttl: int | None = None
+    ):
         """设置回测结果缓存"""
         try:
             self._ensure_connection()
@@ -113,7 +118,9 @@ class CacheManager:
             self.client.setex(key, ttl, data)
             task_logger.debug("cache_set", "缓存已设置", key=key, ttl=ttl)
         except Exception as e:
-            task_logger.error("set_backtest_result_failed", "设置缓存失败", error=str(e))
+            task_logger.error(
+                "set_backtest_result_failed", "设置缓存失败", error=str(e)
+            )
 
     def delete_backtest_result(self, backtest_id: str):
         """删除回测结果缓存"""
@@ -123,7 +130,9 @@ class CacheManager:
             self.client.delete(key)
             task_logger.debug("cache_deleted", "缓存已删除", key=key)
         except Exception as e:
-            task_logger.error("delete_backtest_result_failed", "删除缓存失败", error=str(e))
+            task_logger.error(
+                "delete_backtest_result_failed", "删除缓存失败", error=str(e)
+            )
 
     # ==================== 回测状态缓存 ====================
 
@@ -138,10 +147,14 @@ class CacheManager:
                 return json.loads(data)
             return None
         except Exception as e:
-            task_logger.error("get_backtest_status_failed", "获取状态缓存失败", error=str(e))
+            task_logger.error(
+                "get_backtest_status_failed", "获取状态缓存失败", error=str(e)
+            )
             return None
 
-    def set_backtest_status(self, backtest_id: str, status: dict, ttl: int | None = None):
+    def set_backtest_status(
+        self, backtest_id: str, status: dict, ttl: int | None = None
+    ):
         """设置回测状态缓存"""
         try:
             self._ensure_connection()
@@ -153,7 +166,9 @@ class CacheManager:
 
             self.client.setex(key, ttl, data)
         except Exception as e:
-            task_logger.error("set_backtest_status_failed", "设置状态缓存失败", error=str(e))
+            task_logger.error(
+                "set_backtest_status_failed", "设置状态缓存失败", error=str(e)
+            )
 
     # ==================== 用户历史缓存 ====================
 
@@ -168,7 +183,9 @@ class CacheManager:
                 return pickle.loads(data)
             return None
         except Exception as e:
-            task_logger.error("get_user_history_failed", "获取历史缓存失败", error=str(e))
+            task_logger.error(
+                "get_user_history_failed", "获取历史缓存失败", error=str(e)
+            )
             return None
 
     def set_user_history(self, user_id: str, history: list, ttl: int | None = None):
@@ -183,7 +200,9 @@ class CacheManager:
 
             self.client.setex(key, ttl, data)
         except Exception as e:
-            task_logger.error("set_user_history_failed", "设置历史缓存失败", error=str(e))
+            task_logger.error(
+                "set_user_history_failed", "设置历史缓存失败", error=str(e)
+            )
 
     def invalidate_user_history(self, user_id: str):
         """使用户历史缓存失效（当有新回测时调用）"""
@@ -192,7 +211,9 @@ class CacheManager:
             key = self._make_key(self.PREFIX_USER_HISTORY, user_id)
             self.client.delete(key)
         except Exception as e:
-            task_logger.error("invalidate_user_history_failed", "清除历史缓存失败", error=str(e))
+            task_logger.error(
+                "invalidate_user_history_failed", "清除历史缓存失败", error=str(e)
+            )
 
     # ==================== 热点数据缓存 ====================
 
@@ -206,7 +227,9 @@ class CacheManager:
                 return json.loads(data)
             return None
         except Exception as e:
-            task_logger.error("get_hot_strategies_failed", "获取热门策略缓存失败", error=str(e))
+            task_logger.error(
+                "get_hot_strategies_failed", "获取热门策略缓存失败", error=str(e)
+            )
             return None
 
     def set_hot_strategies(self, strategies: list, ttl: int | None = None):
@@ -220,7 +243,9 @@ class CacheManager:
 
             self.client.setex(self.PREFIX_HOT_STRATEGIES, ttl, data)
         except Exception as e:
-            task_logger.error("set_hot_strategies_failed", "设置热门策略缓存失败", error=str(e))
+            task_logger.error(
+                "set_hot_strategies_failed", "设置热门策略缓存失败", error=str(e)
+            )
 
     # ==================== 通用方法 ====================
 
@@ -261,10 +286,8 @@ class CacheManager:
         except Exception as e:
             task_logger.error("close_failed", "关闭连接池失败", error=str(e))
 
-
 # 全局缓存管理器实例
 _cache_manager: CacheManager | None = None
-
 
 def get_cache_manager() -> CacheManager:
     """获取全局缓存管理器实例（单例）"""

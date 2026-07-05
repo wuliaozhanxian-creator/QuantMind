@@ -7,7 +7,7 @@ import sys
 import traceback
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 from collections.abc import Callable
 
 import numpy as np
@@ -17,7 +17,6 @@ from ..observability.logging import get_logger
 from .compiler import CompiledStrategy
 
 logger = get_logger(__name__)
-
 
 @dataclass
 class ExecutionContext:
@@ -44,7 +43,6 @@ class ExecutionContext:
         """获取函数"""
         return self.functions.get(name, default)
 
-
 @dataclass
 class ExecutionResult:
     """执行结果"""
@@ -57,7 +55,6 @@ class ExecutionResult:
     execution_time: float = 0.0
     metadata: dict[str, Any] = field(default_factory=dict)
 
-
 class DSLExecutor:
     """DSL执行器"""
 
@@ -65,7 +62,9 @@ class DSLExecutor:
         self.logger = get_logger(f"{__name__}.{self.__class__.__name__}")
         self._compiled_modules = {}
 
-    def execute(self, compiled_strategy: CompiledStrategy, context: ExecutionContext) -> ExecutionResult:
+    def execute(
+        self, compiled_strategy: CompiledStrategy, context: ExecutionContext
+    ) -> ExecutionResult:
         """执行编译后的策略"""
         import time
 
@@ -87,7 +86,9 @@ class DSLExecutor:
             # 执行策略函数
             strategy_func_name = f"{compiled_strategy.name}_strategy"
             if not hasattr(module, strategy_func_name):
-                raise AttributeError(f"Strategy function '{strategy_func_name}' not found")
+                raise AttributeError(
+                    f"Strategy function '{strategy_func_name}' not found"
+                )
 
             strategy_func = getattr(module, strategy_func_name)
             result = strategy_func(context.data)
@@ -139,7 +140,9 @@ class DSLExecutor:
 
         if module_key not in self._compiled_modules:
             # 创建新模块
-            spec = importlib.util.spec_from_loader(f"strategy_{compiled_strategy.name}", loader=None)
+            spec = importlib.util.spec_from_loader(
+                f"strategy_{compiled_strategy.name}", loader=None
+            )
             module = importlib.util.module_from_spec(spec)
 
             # 执行策略代码（在受控环境中）
@@ -176,7 +179,9 @@ class DSLExecutor:
 
         return globals_dict
 
-    def _calculate_performance(self, result: dict[str, Any], data: pd.DataFrame) -> dict[str, float]:
+    def _calculate_performance(
+        self, result: dict[str, Any], data: pd.DataFrame
+    ) -> dict[str, float]:
         """计算性能指标"""
         performance = {}
 
@@ -192,11 +197,15 @@ class DSLExecutor:
 
                     # 基本性能指标
                     performance["total_return"] = (1 + strategy_returns).prod() - 1
-                    performance["annual_return"] = performance["total_return"] * (252 / len(data))
+                    performance["annual_return"] = performance["total_return"] * (
+                        252 / len(data)
+                    )
                     performance["volatility"] = strategy_returns.std() * np.sqrt(252)
 
                     if performance["volatility"] > 0:
-                        performance["sharpe_ratio"] = performance["annual_return"] / performance["volatility"]
+                        performance["sharpe_ratio"] = (
+                            performance["annual_return"] / performance["volatility"]
+                        )
                     else:
                         performance["sharpe_ratio"] = 0
 
@@ -211,7 +220,9 @@ class DSLExecutor:
                     loss_trades = strategy_returns[strategy_returns < 0]
 
                     if len(win_trades) + len(loss_trades) > 0:
-                        performance["win_rate"] = len(win_trades) / (len(win_trades) + len(loss_trades))
+                        performance["win_rate"] = len(win_trades) / (
+                            len(win_trades) + len(loss_trades)
+                        )
                     else:
                         performance["win_rate"] = 0
 
@@ -221,7 +232,9 @@ class DSLExecutor:
 
                     # 盈亏比
                     if len(loss_trades) > 0 and win_trades.mean() > 0:
-                        performance["profit_loss_ratio"] = abs(win_trades.mean() / loss_trades.mean())
+                        performance["profit_loss_ratio"] = abs(
+                            win_trades.mean() / loss_trades.mean()
+                        )
                     else:
                         performance["profit_loss_ratio"] = 0
 
@@ -262,20 +275,26 @@ class DSLExecutor:
             strategy_func_name = f"{compiled_strategy.name}_strategy"
 
             if not hasattr(module, strategy_func_name):
-                validation_result["errors"].append(f"Missing strategy function: {strategy_func_name}")
+                validation_result["errors"].append(
+                    f"Missing strategy function: {strategy_func_name}"
+                )
                 validation_result["valid"] = False
 
                 # 检查导入
             required_imports = ["pandas", "numpy"]
             for imp in required_imports:
                 if imp not in compiled_strategy.imports:
-                    validation_result["warnings"].append(f"Missing recommended import: {imp}")
+                    validation_result["warnings"].append(
+                        f"Missing recommended import: {imp}"
+                    )
 
                     # 检查函数签名
             if hasattr(module, strategy_func_name):
                 func = getattr(module, strategy_func_name)
                 if not callable(func):
-                    validation_result["errors"].append(f"Strategy function is not callable: {strategy_func_name}")
+                    validation_result["errors"].append(
+                        f"Strategy function is not callable: {strategy_func_name}"
+                    )
                     validation_result["valid"] = False
 
             validation_result["metadata"] = {

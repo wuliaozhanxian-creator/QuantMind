@@ -14,7 +14,6 @@ from backend.shared.trade_account_cache import write_json_cache
 
 logger = logging.getLogger(__name__)
 
-
 class SimulationAccountManager:
     """
     Manage simulation accounts state in Redis.
@@ -232,7 +231,9 @@ return cjson.encode({success=true, reason="OK", account=account})
     def _get_settings_key(self, user_id: str | int, tenant_id: str) -> str:
         return f"simulation:settings:{tenant_id}:{self._normalize_user_id(user_id)}"
 
-    def _account_key_candidates(self, user_id: str | int, tenant_id: str) -> tuple[str, ...]:
+    def _account_key_candidates(
+        self, user_id: str | int, tenant_id: str
+    ) -> tuple[str, ...]:
         normalized = self._normalize_user_id(user_id)
         raw = str(user_id or "").strip()
         keys = [f"simulation:account:{tenant_id}:{normalized}"]
@@ -244,7 +245,9 @@ return cjson.encode({success=true, reason="OK", account=account})
                 keys.append(f"simulation:account:{tenant_id}:{compact}")
         return tuple(dict.fromkeys(keys))
 
-    def _settings_key_candidates(self, user_id: str | int, tenant_id: str) -> tuple[str, ...]:
+    def _settings_key_candidates(
+        self, user_id: str | int, tenant_id: str
+    ) -> tuple[str, ...]:
         normalized = self._normalize_user_id(user_id)
         raw = str(user_id or "").strip()
         keys = [f"simulation:settings:{tenant_id}:{normalized}"]
@@ -288,7 +291,9 @@ return cjson.encode({success=true, reason="OK", account=account})
             timestamp = timestamp.replace(tzinfo=timezone.utc)
         return 1, timestamp.timestamp()
 
-    def _load_candidate_payloads(self, candidates: tuple[str, ...]) -> dict[str, dict[str, Any]]:
+    def _load_candidate_payloads(
+        self, candidates: tuple[str, ...]
+    ) -> dict[str, dict[str, Any]]:
         if not self.redis.client:
             return {}
         payloads: dict[str, dict[str, Any]] = {}
@@ -311,7 +316,9 @@ return cjson.encode({success=true, reason="OK", account=account})
         tenant_id: str,
     ) -> tuple[str, dict[str, Any] | None]:
         normalized_key = self._get_key(user_id, tenant_id)
-        payloads = self._load_candidate_payloads(self._account_key_candidates(user_id, tenant_id))
+        payloads = self._load_candidate_payloads(
+            self._account_key_candidates(user_id, tenant_id)
+        )
         if not payloads:
             return normalized_key, None
 
@@ -333,7 +340,9 @@ return cjson.encode({success=true, reason="OK", account=account})
         tenant_id: str,
     ) -> tuple[str, dict[str, Any] | None]:
         normalized_key = self._get_settings_key(user_id, tenant_id)
-        payloads = self._load_candidate_payloads(self._settings_key_candidates(user_id, tenant_id))
+        payloads = self._load_candidate_payloads(
+            self._settings_key_candidates(user_id, tenant_id)
+        )
         if not payloads:
             return normalized_key, None
 
@@ -408,12 +417,16 @@ return cjson.encode({success=true, reason="OK", account=account})
             last_modified_at = data.get("last_modified_at")
             if last_modified_at:
                 try:
-                    last_dt = datetime.fromisoformat(last_modified_at.replace("Z", "+00:00"))
+                    last_dt = datetime.fromisoformat(
+                        last_modified_at.replace("Z", "+00:00")
+                    )
                     next_dt = last_dt + timedelta(days=cooldown_days)
                     next_allowed_modified_at = next_dt.isoformat()
                     can_modify = self._utc_now() >= next_dt
                 except Exception:
-                    logger.warning("Failed to parse simulation settings timestamp for key=%s", key)
+                    logger.warning(
+                        "Failed to parse simulation settings timestamp for key=%s", key
+                    )
 
         return {
             "initial_cash": initial_cash,
@@ -448,7 +461,6 @@ return cjson.encode({success=true, reason="OK", account=account})
 
     # set_settings removed as initial cash modification is deprecated.
 
-
     async def init_account(
         self,
         user_id: str | int,
@@ -474,7 +486,9 @@ return cjson.encode({success=true, reason="OK", account=account})
 
         return account_data
 
-    async def get_account(self, user_id: str | int, tenant_id: str = "default") -> dict[str, Any] | None:
+    async def get_account(
+        self, user_id: str | int, tenant_id: str = "default"
+    ) -> dict[str, Any] | None:
         """Get simulation account state. Returns None if account not initialized."""
         if not self.redis.client:
             return None
@@ -502,7 +516,9 @@ return cjson.encode({success=true, reason="OK", account=account})
             return {"success": False, "reason": "REDIS_UNAVAILABLE"}
 
         tenant_id = self._normalize_tenant(tenant_id)
-        key, account_data = self._reconcile_account_cache(user_id=user_id, tenant_id=tenant_id)
+        key, account_data = self._reconcile_account_cache(
+            user_id=user_id, tenant_id=tenant_id
+        )
 
         # 如果账户不存在，先初始化（交易时需要账户存在）
         if account_data is None:
@@ -514,14 +530,19 @@ return cjson.encode({success=true, reason="OK", account=account})
             key = self._get_key(user_id, tenant_id)
             await self.init_account(
                 user_id,
-                initial_cash=float(settings.get("initial_cash", 1_000_000.0) or 1_000_000.0),
+                initial_cash=float(
+                    settings.get("initial_cash", 1_000_000.0) or 1_000_000.0
+                ),
                 tenant_id=tenant_id,
             )
 
         if (
             is_margin_trade
             or str(position_side).lower() == "short"
-            or (trade_action and trade_action.lower() in {"sell_to_open", "buy_to_close"})
+            or (
+                trade_action
+                and trade_action.lower() in {"sell_to_open", "buy_to_close"}
+            )
         ):
             return await self._update_balance_margin(
                 user_id=user_id,

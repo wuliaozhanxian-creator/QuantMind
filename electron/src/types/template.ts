@@ -92,7 +92,7 @@ export interface TemplatePlaceholder {
   description: string;
   type: 'string' | 'number' | 'boolean' | 'array' | 'object';
   required: boolean;
-  defaultValue?: any;
+  defaultValue?: string | number | boolean | unknown[] | Record<string, unknown>;
   validation?: ValidationRule;
 }
 
@@ -102,10 +102,10 @@ export interface TemplateParameter {
   type: string;
   description: string;
   required: boolean;
-  defaultValue?: any;
+  defaultValue?: string | number | boolean | unknown[] | Record<string, unknown>;
   validation?: ValidationRule;
   mapping?: {
-    [key: string]: any;
+    [key: string]: unknown;
   };
 }
 
@@ -146,7 +146,7 @@ export interface GeneratedComponent {
   type: ComponentType;
   name: string;
   code: string;
-  parameters: Record<string, any>;
+  parameters: Record<string, unknown>;
   validation: {
     isValid: boolean;
     errors: string[];

@@ -5,7 +5,7 @@ Notification Service
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from typing import Optional
 
 from sqlalchemy import delete, desc, func, or_, select, text, update
 from sqlalchemy.exc import ProgrammingError
@@ -17,7 +17,6 @@ from backend.shared.notification_metrics import (
 )
 
 logger = logging.getLogger(__name__)
-
 
 class NotificationService:
     _indexes_ensured = False
@@ -60,7 +59,9 @@ class NotificationService:
         offset: int = 0,
     ) -> tuple[list[Notification], int, int, dict[str, int]]:
         """获取用户通知"""
-        active_filter = (Notification.expires_at.is_(None)) | (Notification.expires_at > func.now())
+        active_filter = (Notification.expires_at.is_(None)) | (
+            Notification.expires_at > func.now()
+        )
         filters = [
             Notification.user_id == user_id,
             Notification.tenant_id == tenant_id,
@@ -85,34 +86,52 @@ class NotificationService:
         if is_read is not None:
             filters.append(Notification.is_read.is_(True) if is_read else unread_filter)
 
-        stmt = select(Notification).where(*filters).order_by(desc(Notification.created_at)).limit(limit).offset(offset)
+        stmt = (
+            select(Notification)
+            .where(*filters)
+            .order_by(desc(Notification.created_at))
+            .limit(limit)
+            .offset(offset)
+        )
         total_stmt = select(func.count(Notification.id)).where(*filters)
         unread_stmt = select(func.count(Notification.id)).where(*unread_filters)
 
         # 统计未读分类分布 (确保分类图标总和 = 未读总数)
-        stats_stmt = select(Notification.type, func.count(Notification.id)).where(*unread_filters).group_by(Notification.type)
+        stats_stmt = (
+            select(Notification.type, func.count(Notification.id))
+            .where(*unread_filters)
+            .group_by(Notification.type)
+        )
 
         with timer(notification_unread_query_duration_seconds):
             try:
                 result = await self.session.execute(stmt)
                 notifications = result.scalars().all()
                 total = int((await self.session.execute(total_stmt)).scalar() or 0)
-                unread_count = int((await self.session.execute(unread_stmt)).scalar() or 0)
+                unread_count = int(
+                    (await self.session.execute(unread_stmt)).scalar() or 0
+                )
 
                 # 获取未读分类汇总结果
                 stats_res = await self.session.execute(stats_stmt)
-                unread_type_counts = {str(row[0]): int(row[1]) for row in stats_res.all()}
+                unread_type_counts = {
+                    str(row[0]): int(row[1]) for row in stats_res.all()
+                }
 
             except ProgrammingError as e:
                 # 兼容开发环境未执行通知表 migration 的场景，避免前端 500 风暴
                 if self._is_missing_notifications_table_error(e):
-                    logger.warning("notifications table missing, return empty list as fallback")
+                    logger.warning(
+                        "notifications table missing, return empty list as fallback"
+                    )
                     return [], 0, 0, {}
                 raise
 
         return notifications, total, unread_count, unread_type_counts
 
-    async def mark_as_read(self, notification_id: int, user_id: str, tenant_id: str) -> bool:
+    async def mark_as_read(
+        self, notification_id: int, user_id: str, tenant_id: str
+    ) -> bool:
         """标记已读"""
         unread_filter = or_(
             Notification.is_read.is_(False),
@@ -143,14 +162,18 @@ class NotificationService:
         if NotificationService._indexes_ensured:
             return
         try:
-            await self.session.execute(text("""
+            await self.session.execute(
+                text("""
                     CREATE INDEX IF NOT EXISTS idx_notifications_tenant_user_created_at
                     ON notifications (tenant_id, user_id, created_at DESC)
-                    """))
-            await self.session.execute(text("""
+                    """)
+            )
+            await self.session.execute(
+                text("""
                     CREATE INDEX IF NOT EXISTS idx_notifications_tenant_user_read_created_at
                     ON notifications (tenant_id, user_id, is_read, created_at DESC)
-                    """))
+                    """)
+            )
             await self.session.commit()
             NotificationService._indexes_ensured = True
         except ProgrammingError as e:
@@ -195,7 +218,9 @@ class NotificationService:
         days: int | None = None,
     ) -> int:
         """删除通知（支持按天数窗口删除）"""
-        active_filter = (Notification.expires_at.is_(None)) | (Notification.expires_at > func.now())
+        active_filter = (Notification.expires_at.is_(None)) | (
+            Notification.expires_at > func.now()
+        )
         filters = [
             Notification.user_id == user_id,
             Notification.tenant_id == tenant_id,
@@ -221,4 +246,6 @@ class NotificationService:
     @staticmethod
     def _is_missing_notifications_table_error(error: ProgrammingError) -> bool:
         msg = str(error).lower()
-        return "notifications" in msg and ("undefinedtable" in msg or "does not exist" in msg or "relation" in msg)
+        return "notifications" in msg and (
+            "undefinedtable" in msg or "does not exist" in msg or "relation" in msg
+        )

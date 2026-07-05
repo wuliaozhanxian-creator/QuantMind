@@ -5,13 +5,11 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-
 class NumericCondition(BaseModel):
     type: Literal["numeric"] = "numeric"
     factor: str
     operator: str
     threshold: float
-
 
 class TrendCondition(BaseModel):
     type: Literal["trend"] = "trend"
@@ -19,19 +17,15 @@ class TrendCondition(BaseModel):
     window: int
     direction: str
 
-
 class CompositeCondition(BaseModel):
     type: Literal["composite"] = "composite"
     op: str
     children: list[dict[str, Any]]
 
-
 Condition = dict[str, Any]
-
 
 class ParseRequest(BaseModel):
     conditions: Condition
-
 
 class ParseResponse(BaseModel):
     dsl: str
@@ -41,22 +35,18 @@ class ParseResponse(BaseModel):
     suggestions: list[str] = []
     version: str = "1.0.0"
 
-
 class QueryPoolRequest(BaseModel):
     dsl: str
-
 
 class PoolItem(BaseModel):
     symbol: str
     name: str | None = None
     metrics: dict[str, float] = {}
 
-
 class QueryPoolResponse(BaseModel):
     items: list[PoolItem]
     summary: dict[str, Any] = {}
     charts: dict[str, Any] = {}
-
 
 class SavePoolFileRequest(BaseModel):
     tenant_id: str | None = None
@@ -64,7 +54,6 @@ class SavePoolFileRequest(BaseModel):
     pool_name: str
     format: Literal["json", "txt", "csv"] = "txt"
     pool: list[dict[str, Any]]
-
 
 class SavePoolFileResponse(BaseModel):
     success: bool
@@ -76,23 +65,19 @@ class SavePoolFileResponse(BaseModel):
     code_hash: str | None = None
     error: str | None = None
 
-
 class DeletePoolFileRequest(BaseModel):
     user_id: str | None = None
     file_url: str | None = None
     file_key: str | None = None
 
-
 class DeletePoolFileResponse(BaseModel):
     success: bool
     error: str | None = None
-
 
 class ListPoolFilesRequest(BaseModel):
     tenant_id: str | None = None
     user_id: str
     limit: int = Field(default=100, ge=1, le=200)
-
 
 class PoolFileSummary(BaseModel):
     id: int
@@ -109,19 +94,16 @@ class PoolFileSummary(BaseModel):
     created_at: str | None = None
     is_active: bool | None = None
 
-
 class ListPoolFilesResponse(BaseModel):
     success: bool
     pools: list[PoolFileSummary] = []
     error: str | None = None
-
 
 class PreviewPoolFileRequest(BaseModel):
     tenant_id: str | None = None
     user_id: str
     file_key: str
     lite: bool = False
-
 
 class PreviewPoolFileResponse(BaseModel):
     success: bool
@@ -131,17 +113,14 @@ class PreviewPoolFileResponse(BaseModel):
     pool_file: dict[str, Any] | None = None
     error: str | None = None
 
-
 class GetActivePoolFileRequest(BaseModel):
     tenant_id: str | None = None
     user_id: str
-
 
 class GetActivePoolFileResponse(BaseModel):
     success: bool
     pool_file: dict[str, Any] | None = None
     error: str | None = None
-
 
 # --- Phase A: New Pool Refactoring Schemas ---
 
@@ -150,15 +129,12 @@ class WorkingPool(BaseModel):
     items: list[PoolItem]
     updated_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
 
-
 class SaveWorkingPoolRequest(BaseModel):
     items: list[PoolItem]
-
 
 class SaveWorkingPoolVersionRequest(BaseModel):
     pool_name: str | None = None
     items: list[PoolItem] | None = None
-
 
 class ActivatePoolVersionRequest(BaseModel):
     version_id: int

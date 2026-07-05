@@ -169,7 +169,9 @@ def test_dr_anomaly_not_flagged_when_within_tolerance():
 def test_dr_anomaly_not_flagged_for_precise_small_event():
     # 001211.SZ: stock_gift=0.39462, dr=1.394679. Expected 1.39462, diff <0.0001.
     decisions = map_standard_corp_action_row(
-        _row(symbol="001211.SZ", stock_gift="0.39462", event_type="转增", dr="1.394679"),
+        _row(
+            symbol="001211.SZ", stock_gift="0.39462", event_type="转增", dr="1.394679"
+        ),
         source="standard_csv:test.csv",
     )
     assert len(decisions) == 1

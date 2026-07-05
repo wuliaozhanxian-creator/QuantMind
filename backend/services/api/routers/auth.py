@@ -33,6 +33,7 @@ from backend.shared.database_manager_v2 import get_session
 
 from config.settings import settings
 
+
 class RefreshTokenRequest(BaseModel):
     refresh_token: str
 
@@ -40,20 +41,27 @@ class RefreshTokenRequest(BaseModel):
 router = APIRouter(prefix="/auth")
 is_oss = settings.edition == "oss"
 
+
 def get_auth_service() -> AuthService:
     """获取认证服务"""
     return AuthService()
 
 
-@router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
-async def register(user_data: UserRegister, auth_service: AuthService = Depends(get_auth_service)):
+@router.post(
+    "/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED
+)
+async def register(
+    user_data: UserRegister, auth_service: AuthService = Depends(get_auth_service)
+):
     """
     用户注册
     """
     try:
         return await auth_service.register(user_data)
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        ) from e
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -70,7 +78,9 @@ async def login(
         user_agent = request.headers.get("User-Agent")
         return await auth_service.login(credentials, ip_address, user_agent)
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e)
+        ) from e
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
@@ -83,7 +93,9 @@ async def logout(
     用户登出
     """
     if not token and request:
-        auth_header = request.headers.get("Authorization") or request.headers.get("authorization")
+        auth_header = request.headers.get("Authorization") or request.headers.get(
+            "authorization"
+        )
         if auth_header and auth_header.startswith("Bearer "):
             token = auth_header[7:]
 
@@ -104,12 +116,18 @@ async def refresh(
     ip_address = request.client.host if request.client else None
     user_agent = request.headers.get("User-Agent")
     try:
-        return await auth_service.refresh_tokens(payload.refresh_token, ip_address, user_agent)
+        return await auth_service.refresh_tokens(
+            payload.refresh_token, ip_address, user_agent
+        )
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)
+        ) from exc
+
 
 # 仅在非 OSS 模式下保留高级功能
 if not is_oss:
+
     @router.post("/send-verification")
     async def send_verification(verification: VerificationRequest, request: Request):
         # ... (implementation kept for other editions)
@@ -127,6 +145,7 @@ if not is_oss:
     async def login_by_phone(request: PhoneLoginRequest):
         pass
 
+
 @router.post("/check-availability")
 async def check_availability(
     request: CheckAvailabilityRequest,
@@ -142,7 +161,6 @@ async def check_availability(
         exists = user is not None
 
     return {"code": 200, "message": "success", "data": {"available": not exists}}
-
 
 
 @router.post("/change-password")
@@ -163,6 +181,6 @@ async def change_password(
         )
         return {"code": 200, "message": "密码修改成功"}
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"修改密码失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"修改密码失败: {str(e)}") from e

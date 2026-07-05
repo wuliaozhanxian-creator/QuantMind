@@ -29,13 +29,17 @@ async def run_manual_execution_worker(poll_interval: float = 1.0) -> None:
                         error_stage="duplicate_suppressed",
                         error_message="同批次已有更早提交的手动任务完成，本任务已自动取消以避免重复报单",
                     )
-                    logger.warning("suppressed duplicate queued manual execution task: %s", task_id)
+                    logger.warning(
+                        "suppressed duplicate queued manual execution task: %s", task_id
+                    )
                     continue
                 await manual_execution_service.process_task(task)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                logger.error("manual execution worker loop failed: %s", exc, exc_info=True)
+                logger.error(
+                    "manual execution worker loop failed: %s", exc, exc_info=True
+                )
                 await asyncio.sleep(interval)
     except asyncio.CancelledError:
         logger.info("manual execution worker cancelled")

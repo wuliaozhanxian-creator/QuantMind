@@ -11,7 +11,7 @@ import sys
 import time as time_module
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -19,6 +19,7 @@ import yaml
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, text
+
 try:
     import exchange_calendars as xcals
 except Exception:
@@ -32,6 +33,7 @@ from backend.services.engine.inference.script_runner import InferenceScriptRunne
 from backend.shared.database_manager_v2 import get_session
 from backend.shared.redis_sentinel_client import get_redis_sentinel_client
 from backend.shared.trading_calendar import calendar_service
+
 try:
     from backend.services.engine.qlib_app.celery_config import celery_app
 except ImportError:
@@ -52,17 +54,21 @@ _INFERENCE_LOCK_TTL_SEC = int(os.getenv("INFERENCE_LOCK_TTL_SEC", "1800"))
 _INFERENCE_LOCK_KEY_PREFIX = "qm:lock:inference:daily"
 # 生产模型目录（兼容旧逻辑）
 MODELS_PRODUCTION = os.path.join(MODELS_ROOT, "production", "model_qlib")
-FEATURE_CATALOG_FALLBACK = os.path.join(os.getcwd(), "config", "features", "model_training_feature_catalog_v1.json")
-FEATURE_SNAPSHOT_DIR = Path(
-    os.getenv("TRAINING_LOCAL_DATA_PATH", str(Path(os.getcwd()) / "db" / "feature_snapshots"))
+FEATURE_CATALOG_FALLBACK = os.path.join(
+    os.getcwd(), "config", "features", "model_training_feature_catalog_v1.json"
 )
-FEATURE_COVERAGE_CACHE_TTL_SEC = max(5, int(os.getenv("FEATURE_COVERAGE_CACHE_TTL_SEC", "300")))
+FEATURE_SNAPSHOT_DIR = Path(
+    os.getenv(
+        "TRAINING_LOCAL_DATA_PATH", str(Path(os.getcwd()) / "db" / "feature_snapshots")
+    )
+)
+FEATURE_COVERAGE_CACHE_TTL_SEC = max(
+    5, int(os.getenv("FEATURE_COVERAGE_CACHE_TTL_SEC", "300"))
+)
 _feature_coverage_cache_data: dict[str, Any] | None = None
 _feature_coverage_cache_expires_at: float = 0.0
 
-
 # ---------- 目录扫描工具函数 ----------
-
 
 def _read_yaml_safe(path: str) -> dict | None:
     """安全读取 YAML 文件，失败返回 None"""
@@ -72,7 +78,6 @@ def _read_yaml_safe(path: str) -> dict | None:
     except Exception:
         return None
 
-
 def _read_json_safe(path: str) -> dict | None:
     """安全读取 JSON 文件，失败返回 None"""
     try:
@@ -80,7 +85,6 @@ def _read_json_safe(path: str) -> dict | None:
             return json.load(f)
     except Exception:
         return None
-
 
 def _file_sha256(path: str) -> str | None:
     """计算文件 SHA256（用于完整性核验）"""
@@ -93,8 +97,9 @@ def _file_sha256(path: str) -> str | None:
     except Exception:
         return None
 
-
-def _load_feature_catalog_from_file(path: str = FEATURE_CATALOG_FALLBACK) -> dict[str, Any] | None:
+def _load_feature_catalog_from_file(
+    path: str = FEATURE_CATALOG_FALLBACK,
+) -> dict[str, Any] | None:
     """从本地 JSON 回退加载特征字典（用于 DB 未初始化场景）。"""
     raw = _read_json_safe(path)
     if not isinstance(raw, dict):
@@ -112,7 +117,9 @@ def _load_feature_catalog_from_file(path: str = FEATURE_CATALOG_FALLBACK) -> dic
             continue
         c_name = str(cat.get("name") or cid).strip()
         c_order = int(cat.get("order") or 0)
-        features_raw = cat.get("features") if isinstance(cat.get("features"), list) else []
+        features_raw = (
+            cat.get("features") if isinstance(cat.get("features"), list) else []
+        )
         features: list[dict[str, Any]] = []
         for feat in features_raw:
             if not isinstance(feat, dict):
@@ -124,9 +131,13 @@ def _load_feature_catalog_from_file(path: str = FEATURE_CATALOG_FALLBACK) -> dic
                 {
                     "feature_id": str(feat.get("feature_id") or ""),
                     "key": f_key,
-                    "feature_name": str(feat.get("description") or feat.get("feature_name") or f_key),
+                    "feature_name": str(
+                        feat.get("description") or feat.get("feature_name") or f_key
+                    ),
                     "formula": str(feat.get("formula") or ""),
-                    "source_table_fields": str(feat.get("source") or feat.get("source_table_fields") or ""),
+                    "source_table_fields": str(
+                        feat.get("source") or feat.get("source_table_fields") or ""
+                    ),
                     "enabled": bool(feat.get("enabled", True)),
                     "order_no": int(feat.get("order_no") or len(features) + 1),
                 }
@@ -151,31 +162,35 @@ def _load_feature_catalog_from_file(path: str = FEATURE_CATALOG_FALLBACK) -> dic
         "fallback_path": path,
     }
 
-
 async def _load_feature_catalog_from_db() -> dict[str, Any] | None:
     """从特征注册表读取当前生效版本。表不存在或无数据时返回 None。"""
     async with get_session(read_only=True) as session:
         version_row = (
-            await session.execute(
-                text(
-                    """
+            (
+                await session.execute(
+                    text(
+                        """
                     SELECT version_id, version_name, feature_count
                     FROM qm_feature_set_version
                     WHERE status = 'active'
                     ORDER BY effective_at DESC, created_at DESC
                     LIMIT 1
                     """
+                    )
                 )
             )
-        ).mappings().first()
+            .mappings()
+            .first()
+        )
 
         if not version_row:
             return None
 
         rows = (
-            await session.execute(
-                text(
-                    """
+            (
+                await session.execute(
+                    text(
+                        """
                     SELECT
                         c.category_id,
                         c.category_name,
@@ -193,10 +208,13 @@ async def _load_feature_catalog_from_db() -> dict[str, Any] | None:
                     WHERE i.version_id = :version_id
                     ORDER BY c.sort_order ASC, i.order_no ASC
                     """
-                ),
-                {"version_id": version_row["version_id"]},
+                    ),
+                    {"version_id": version_row["version_id"]},
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
 
         if not rows:
             return None
@@ -228,14 +246,20 @@ async def _load_feature_catalog_from_db() -> dict[str, Any] | None:
         categories = sorted(cat_map.values(), key=lambda x: x["order"])
         return {
             "version_id": str(version_row["version_id"]),
-            "version_name": str(version_row["version_name"] or version_row["version_id"]),
-            "feature_count": int(version_row["feature_count"] or sum(c["feature_count"] for c in categories)),
+            "version_name": str(
+                version_row["version_name"] or version_row["version_id"]
+            ),
+            "feature_count": int(
+                version_row["feature_count"]
+                or sum(c["feature_count"] for c in categories)
+            ),
             "categories": categories,
             "source": "database",
         }
 
-
-def _build_suggested_periods(min_date: date, max_date: date) -> dict[str, list[str]] | None:
+def _build_suggested_periods(
+    min_date: date, max_date: date
+) -> dict[str, list[str]] | None:
     total_days = (max_date - min_date).days + 1
     if total_days < 3:
         return None
@@ -267,7 +291,6 @@ def _build_suggested_periods(min_date: date, max_date: date) -> dict[str, list[s
         "test": [test_start.isoformat(), test_end.isoformat()],
     }
 
-
 def _scan_feature_snapshot_coverage() -> dict[str, Any] | None:
     if not FEATURE_SNAPSHOT_DIR.exists() or not FEATURE_SNAPSHOT_DIR.is_dir():
         return None
@@ -292,7 +315,9 @@ def _scan_feature_snapshot_coverage() -> dict[str, Any] | None:
 
     for file_path in files:
         try:
-            date_series = pd.read_parquet(file_path, columns=["trade_date"], engine="pyarrow")["trade_date"]
+            date_series = pd.read_parquet(
+                file_path, columns=["trade_date"], engine="pyarrow"
+            )["trade_date"]
             if date_series.empty:
                 continue
             file_min = pd.to_datetime(date_series.min(), errors="coerce")
@@ -302,8 +327,12 @@ def _scan_feature_snapshot_coverage() -> dict[str, Any] | None:
 
             file_min_date = file_min.date()
             file_max_date = file_max.date()
-            min_date = file_min_date if min_date is None else min(min_date, file_min_date)
-            max_date = file_max_date if max_date is None else max(max_date, file_max_date)
+            min_date = (
+                file_min_date if min_date is None else min(min_date, file_min_date)
+            )
+            max_date = (
+                file_max_date if max_date is None else max(max_date, file_max_date)
+            )
             scanned_files += 1
             total_rows += int(date_series.shape[0])
         except Exception:
@@ -324,20 +353,21 @@ def _scan_feature_snapshot_coverage() -> dict[str, Any] | None:
         "suggested_periods": _build_suggested_periods(min_date, max_date),
     }
 
-
 def _get_feature_snapshot_coverage_cached() -> dict[str, Any] | None:
     global _feature_coverage_cache_data
     global _feature_coverage_cache_expires_at
 
     now_ts = time_module.time()
-    if _feature_coverage_cache_data is not None and now_ts < _feature_coverage_cache_expires_at:
+    if (
+        _feature_coverage_cache_data is not None
+        and now_ts < _feature_coverage_cache_expires_at
+    ):
         return _feature_coverage_cache_data
 
     payload = _scan_feature_snapshot_coverage()
     _feature_coverage_cache_data = payload
     _feature_coverage_cache_expires_at = now_ts + FEATURE_COVERAGE_CACHE_TTL_SEC
     return payload
-
 
 def _scan_feature_snapshots_status(
     target_date: str | None = None,
@@ -413,15 +443,21 @@ def _scan_feature_snapshots_status(
     if len(files) > 0:
         # 获取最小日期（第一个文件）
         try:
-            first_df = pd.read_parquet(files[0], columns=["trade_date"], engine="pyarrow")
+            first_df = pd.read_parquet(
+                files[0], columns=["trade_date"], engine="pyarrow"
+            )
             if not first_df.empty:
-                min_date = pd.to_datetime(first_df["trade_date"].min(), errors="coerce").date()
+                min_date = pd.to_datetime(
+                    first_df["trade_date"].min(), errors="coerce"
+                ).date()
         except Exception as min_exc:
             logger.warning("Failed to read min date from parquet: %s", min_exc)
 
         # 获取最大日期（最后一个文件）
         try:
-            last_df = pd.read_parquet(files[-1], columns=["trade_date", "symbol"], engine="pyarrow")
+            last_df = pd.read_parquet(
+                files[-1], columns=["trade_date", "symbol"], engine="pyarrow"
+            )
             if not last_df.empty:
                 date_series = pd.to_datetime(last_df["trade_date"], errors="coerce")
                 max_date = date_series.max().date()
@@ -429,7 +465,9 @@ def _scan_feature_snapshots_status(
                 # 计算最新日期覆盖率（仅基于最后一个文件，这在按年/按月分区时是合理的性能折中）
                 if target_date:
                     target = date.fromisoformat(target_date)
-                    symbol_latest_dates = last_df.groupby("symbol")["trade_date"].max().to_dict()
+                    symbol_latest_dates = (
+                        last_df.groupby("symbol")["trade_date"].max().to_dict()
+                    )
 
                     at_target_count = 0
                     older_count = 0
@@ -438,18 +476,21 @@ def _scan_feature_snapshots_status(
                     for sym, latest_raw in sorted(symbol_latest_dates.items()):
                         try:
                             latest_dt = pd.to_datetime(latest_raw).date()
-                        except Exception: continue
+                        except Exception:
+                            continue
 
                         if latest_dt >= target:
                             at_target_count += 1
                         else:
                             older_count += 1
                             if len(older_samples) < topn:
-                                older_samples.append({
-                                    "symbol": str(sym),
-                                    "last_date": latest_dt.isoformat(),
-                                    "lag_days": (target - latest_dt).days,
-                                })
+                                older_samples.append(
+                                    {
+                                        "symbol": str(sym),
+                                        "last_date": latest_dt.isoformat(),
+                                        "lag_days": (target - latest_dt).days,
+                                    }
+                                )
 
                     result["latest_date_coverage"] = {
                         "target_date": target_date,
@@ -463,7 +504,7 @@ def _scan_feature_snapshots_status(
 
     # 统计总行数（轻量化，如果文件多则只估算或跳过耗时操作）
     result["scanned_files"] = len(files)
-    result["total_rows"] = 0 # 为了性能，不再逐个读取文件统计行数，除非有缓存
+    result["total_rows"] = 0  # 为了性能，不再逐个读取文件统计行数，除非有缓存
 
     # 计算建议的训练/验证/测试划分
     if min_date and max_date:
@@ -471,8 +512,9 @@ def _scan_feature_snapshots_status(
 
     return result
 
-
-def _enrich_feature_catalog_with_data_coverage(catalog: dict[str, Any] | None) -> dict[str, Any] | None:
+def _enrich_feature_catalog_with_data_coverage(
+    catalog: dict[str, Any] | None,
+) -> dict[str, Any] | None:
     if not isinstance(catalog, dict):
         return catalog
 
@@ -483,7 +525,6 @@ def _enrich_feature_catalog_with_data_coverage(catalog: dict[str, Any] | None) -
     enriched = dict(catalog)
     enriched["data_coverage"] = coverage
     return enriched
-
 
 def _resolve_expected_feature_dim(model_dir: Path) -> int:
     """解析生产模型推理期望维度，失败时回退到 48。"""
@@ -507,7 +548,7 @@ def _resolve_expected_feature_dim(model_dir: Path) -> int:
                     if dim > 0:
                         return dim
                 except Exception:
-                    pass
+                    logger.debug("ignored exception", exc_info=True)
         model_info = metadata.get("model_info")
         if isinstance(model_info, dict):
             for key in ("feature_count", "feature_dim", "input_dim"):
@@ -537,10 +578,9 @@ def _resolve_expected_feature_dim(model_dir: Path) -> int:
                 if dim > 0:
                     return dim
         except Exception:
-            pass
+            logger.debug("ignored exception", exc_info=True)
 
     return default_dim
-
 
 def _resolve_ready_threshold(total_rows: int) -> tuple[int, int, float, int]:
     """
@@ -565,7 +605,6 @@ def _resolve_ready_threshold(total_rows: int) -> tuple[int, int, float, int]:
     required = min(required, total_rows)
     return required, min_ready_symbols, ratio, min_ready_floor
 
-
 def _read_bin_start_index(bin_path: Path) -> int | None:
     """读取 qlib .day.bin 首 4 字节起始索引（float32 编码），失败返回 None。"""
     try:
@@ -578,7 +617,6 @@ def _read_bin_start_index(bin_path: Path) -> int | None:
         return int(struct.unpack("<f", head)[0])
     except Exception:
         return None
-
 
 async def _resolve_inference_dates_with_calendar(
     *,
@@ -637,7 +675,6 @@ async def _resolve_inference_dates_with_calendar(
         adjusted,
     )
 
-
 def _scan_model_directory(model_dir: str) -> dict[str, Any]:
     """
     扫描单个模型目录，聚合所有元数据文件。
@@ -674,7 +711,7 @@ def _scan_model_directory(model_dir: str) -> dict[str, Any]:
             with open(feature_description_path, encoding="utf-8") as f:
                 feature_description = f.read(10000)  # 读取前10k字符，防止过大阻塞
         except Exception:
-            pass
+            logger.debug("ignored exception", exc_info=True)
 
     # 从 metadata 提取关键字段
     performance_metrics = (metadata or {}).get("performance_metrics")
@@ -695,7 +732,12 @@ def _scan_model_directory(model_dir: str) -> dict[str, Any]:
     if not train_start and qlib_config:
         try:
             # 常见路径: task -> dataset -> kwargs -> segments
-            segments = qlib_config.get("task", {}).get("dataset", {}).get("kwargs", {}).get("segments", {})
+            segments = (
+                qlib_config.get("task", {})
+                .get("dataset", {})
+                .get("kwargs", {})
+                .get("segments", {})
+            )
             if segments:
                 train_seg = segments.get("train")
                 if isinstance(train_seg, list) and len(train_seg) >= 2:
@@ -705,7 +747,7 @@ def _scan_model_directory(model_dir: str) -> dict[str, Any]:
                 if isinstance(test_seg, list) and len(test_seg) >= 2:
                     test_start, test_end = test_seg[0], test_seg[1]
         except Exception:
-            pass
+            logger.debug("ignored exception", exc_info=True)
 
     # 增加兜底逻辑：从 metadata 直接读取日期区间，支持非 Qlib 结构的纯 Json 模型
     if isinstance(metadata, dict):
@@ -744,7 +786,6 @@ def _scan_model_directory(model_dir: str) -> dict[str, Any]:
         "files": files,
     }
 
-
 def _find_model_directories(root: str) -> list[str]:
     """
     递归扫描 models/ 下包含 metadata.json 或模型文件的目录，
@@ -759,23 +800,25 @@ def _find_model_directories(root: str) -> list[str]:
             continue
         # 判断是否是有效模型目录
         has_metadata = (entry / "metadata.json").exists()
-        has_model = any((entry / f"model.{ext}").exists() for ext in ("bin", "txt", "pkl", "pth", "onnx", "pt"))
+        has_model = any(
+            (entry / f"model.{ext}").exists()
+            for ext in ("bin", "txt", "pkl", "pth", "onnx", "pt")
+        )
         if has_metadata or has_model:
             result.append(str(entry))
     return result
 
-
 # ---------- Schemas (内联定义，避免额外文件) ----------
-
 
 class ModelCreate(BaseModel):
     name: str = Field(..., description="模型名称")
     description: str | None = Field(None, description="描述")
-    source_type: str = Field("ai_model", description="模型类型: ai_model, hybrid, external")
+    source_type: str = Field(
+        "ai_model", description="模型类型: ai_model, hybrid, external"
+    )
     start_date: datetime | None = Field(None, description="模型数据开始日期")
     end_date: datetime | None = Field(None, description="模型数据结束日期")
     config: dict[str, Any] | None = Field(None, description="配置参数")
-
 
 class ModelResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -791,7 +834,6 @@ class ModelResponse(BaseModel):
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
-
 class DataFileResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -802,7 +844,4 @@ class DataFileResponse(BaseModel):
     status: str = "uploaded"
     created_at: datetime | None = None
 
-
 # ---------- Endpoints ----------
-
-

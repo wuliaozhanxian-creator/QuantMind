@@ -6,7 +6,7 @@
 import ast
 import re
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from ..models import get_template_by_id
 from ..models.validation import (
@@ -32,14 +32,15 @@ except ImportError:
     _ValidationErrorType = str
     _ValidationSeverity = str
 
-
 class ParameterValidator:
     """参数验证器"""
 
     def __init__(self):
         self.rules = STRATEGY_PARAMETER_RULES
 
-    def validate_parameters(self, request: ParameterValidationRequest) -> ParameterValidationResponse:
+    def validate_parameters(
+        self, request: ParameterValidationRequest
+    ) -> ParameterValidationResponse:
         """验证策略参数"""
         start_time = time.time()
         errors = []
@@ -66,7 +67,9 @@ class ParameterValidator:
                     warnings.append(error)
 
                 # 尝试自动调整
-                suggested_value = self._suggest_value(rule.field, field_value, request.parameters)
+                suggested_value = self._suggest_value(
+                    rule.field, field_value, request.parameters
+                )
                 if suggested_value is not None:
                     adjusted_params[rule.field] = suggested_value
                     error.suggested_value = suggested_value
@@ -77,7 +80,9 @@ class ParameterValidator:
 
         # 生成建议
         if request.include_suggestions:
-            suggestions = self._generate_suggestions(request.parameters, errors, warnings)
+            suggestions = self._generate_suggestions(
+                request.parameters, errors, warnings
+            )
 
         # 计算得分
         score = self._calculate_score(errors, warnings)
@@ -90,7 +95,9 @@ class ParameterValidator:
             errors=errors,
             warnings=warnings,
             suggestions=suggestions,
-            adjusted_parameters=(adjusted_params if adjusted_params != request.parameters else None),
+            adjusted_parameters=(
+                adjusted_params if adjusted_params != request.parameters else None
+            ),
             score=score,
             processing_time=processing_time,
         )
@@ -128,10 +135,12 @@ class ParameterValidator:
                         elif rule.max_val is not None and num_val > rule.max_val:
                             return rule.max_val
                     except (ValueError, TypeError):
-                        pass
+                        pass  # noqa: BLE001 - 已知数值解析失败，预期静默
         return None
 
-    def _check_parameter_consistency(self, params: dict[str, Any]) -> list[ParameterValidationError]:
+    def _check_parameter_consistency(
+        self, params: dict[str, Any]
+    ) -> list[ParameterValidationError]:
         """检查参数一致性"""
         errors = []
 
@@ -173,7 +182,9 @@ class ParameterValidator:
 
         return errors
 
-    def _generate_suggestions(self, params: dict[str, Any], errors: list, warnings: list) -> list[str]:
+    def _generate_suggestions(
+        self, params: dict[str, Any], errors: list, warnings: list
+    ) -> list[str]:
         """生成建议"""
         suggestions = []
 
@@ -195,7 +206,9 @@ class ParameterValidator:
         optional_params = ["max_drawdown", "commission_rate", "slippage", "benchmark"]
         missing_params = [p for p in optional_params if p not in params]
         if missing_params:
-            suggestions.append(f"建议完善以下参数以获得更准确的回测结果：{', '.join(missing_params)}")
+            suggestions.append(
+                f"建议完善以下参数以获得更准确的回测结果：{', '.join(missing_params)}"
+            )
 
         return suggestions
 
@@ -210,7 +223,6 @@ class ParameterValidator:
         warning_penalty = len(warnings) * 5
 
         return max(0, base_score - error_penalty - warning_penalty)
-
 
 class CodeValidator:
     """代码验证器"""
@@ -232,10 +244,14 @@ class CodeValidator:
             warnings = self._analyze_code_quality(request.code)
 
         # 生成建议
-        suggestions = self._generate_code_suggestions(request.code, syntax_errors, logic_errors, warnings)
+        suggestions = self._generate_code_suggestions(
+            request.code, syntax_errors, logic_errors, warnings
+        )
 
         # 计算质量得分
-        quality_score = self._calculate_quality_score(request.code, syntax_errors, logic_errors, warnings)
+        quality_score = self._calculate_quality_score(
+            request.code, syntax_errors, logic_errors, warnings
+        )
 
         # 计算复杂度
         complexity = self._calculate_complexity(request.code)
@@ -323,7 +339,9 @@ class CodeValidator:
 
         return errors
 
-    def _validate_logic(self, code: str, parameters: dict[str, Any] | None) -> list[ValidationError]:
+    def _validate_logic(
+        self, code: str, parameters: dict[str, Any] | None
+    ) -> list[ValidationError]:
         """验证逻辑"""
         errors = []
 
@@ -338,7 +356,9 @@ class CodeValidator:
 
             # 检查是否包含必需函数
             required_functions = CODE_QUALITY_METRICS["required_functions"]
-            missing_functions = [f for f in required_functions if f not in defined_functions]
+            missing_functions = [
+                f for f in required_functions if f not in defined_functions
+            ]
 
             for func in missing_functions:
                 errors.append(
@@ -387,7 +407,9 @@ class CodeValidator:
 
         # 检查注释比例
         lines = code.split("\n")
-        code_lines = [line for line in lines if line.strip() and not line.strip().startswith("#")]
+        code_lines = [
+            line for line in lines if line.strip() and not line.strip().startswith("#")
+        ]
         comment_lines = [line for line in lines if line.strip().startswith("#")]
 
         if code_lines:
@@ -422,7 +444,7 @@ class CodeValidator:
                             )
                         )
         except Exception:
-            pass
+            pass  # noqa: BLE001 - None
 
         return warnings
 
@@ -453,7 +475,9 @@ class CodeValidator:
 
         return suggestions
 
-    def _calculate_quality_score(self, code: str, syntax_errors: list, logic_errors: list, warnings: list) -> float:
+    def _calculate_quality_score(
+        self, code: str, syntax_errors: list, logic_errors: list, warnings: list
+    ) -> float:
         """计算代码质量得分"""
         base_score = 100.0
 
@@ -469,13 +493,19 @@ class CodeValidator:
         # 复杂度扣分
         complexity = self._calculate_complexity(code)
         if complexity > CODE_QUALITY_METRICS["complexity_threshold"]:
-            complexity_penalty = (complexity - CODE_QUALITY_METRICS["complexity_threshold"]) * 0.5
+            complexity_penalty = (
+                complexity - CODE_QUALITY_METRICS["complexity_threshold"]
+            ) * 0.5
         else:
             complexity_penalty = 0
 
         return max(
             0,
-            base_score - syntax_penalty - logic_penalty - warning_penalty - complexity_penalty,
+            base_score
+            - syntax_penalty
+            - logic_penalty
+            - warning_penalty
+            - complexity_penalty,
         )
 
     def _calculate_complexity(self, code: str) -> int:
@@ -500,15 +530,18 @@ class CodeValidator:
                     complexity += 1
         except Exception:
             # 如果解析失败，基于文本计算
-            complexity = len(re.findall(r"\b(if|for|while|try|except|lambda|def|class)\b", code))
+            complexity = len(
+                re.findall(r"\b(if|for|while|try|except|lambda|def|class)\b", code)
+            )
 
         return complexity
-
 
 class TemplateValidator:
     """模板验证器"""
 
-    def validate_template_compatibility(self, request: TemplateValidationRequest) -> TemplateValidationResponse:
+    def validate_template_compatibility(
+        self, request: TemplateValidationRequest
+    ) -> TemplateValidationResponse:
         """验证模板兼容性"""
         start_time = time.time()
         errors = []
@@ -539,13 +572,17 @@ class TemplateValidator:
         errors.extend(param_errors)
 
         # 计算兼容性得分
-        compatibility_score = self._calculate_compatibility_score(template, request.parameters)
+        compatibility_score = self._calculate_compatibility_score(
+            template, request.parameters
+        )
 
         # 生成适配建议
         adaptations = self._generate_adaptations(template, request.parameters)
 
         # 生成建议
-        suggestions = self._generate_template_suggestions(template, request.parameters, errors)
+        suggestions = self._generate_template_suggestions(
+            template, request.parameters, errors
+        )
 
         processing_time = int((time.time() - start_time) * 1000)
 
@@ -561,7 +598,9 @@ class TemplateValidator:
             processing_time=processing_time,
         )
 
-    def _validate_template_parameters(self, template, parameters: dict[str, Any]) -> list[ParameterValidationError]:
+    def _validate_template_parameters(
+        self, template, parameters: dict[str, Any]
+    ) -> list[ParameterValidationError]:
         """验证模板参数"""
         errors = []
 
@@ -602,7 +641,11 @@ class TemplateValidator:
                     _message=f"市场 {market} 不适合此模板",
                     _severity="warning",
                     _current_value=market,
-                    _suggested_value=(template.suitable_markets[0] if template.suitable_markets else "CN"),
+                    _suggested_value=(
+                        template.suitable_markets[0]
+                        if template.suitable_markets
+                        else "CN"
+                    ),
                 )
             )
 
@@ -626,7 +669,9 @@ class TemplateValidator:
                 return False
         return True
 
-    def _calculate_compatibility_score(self, template, parameters: dict[str, Any]) -> float:
+    def _calculate_compatibility_score(
+        self, template, parameters: dict[str, Any]
+    ) -> float:
         """计算兼容性得分"""
         score = 0.5  # 基础分
 
@@ -667,7 +712,9 @@ class TemplateValidator:
         # 市场适配建议
         market = parameters.get("market")
         if market and market not in template.suitable_markets:
-            adaptations.append(f"建议切换到适合的市场：{', '.join(template.suitable_markets)}")
+            adaptations.append(
+                f"建议切换到适合的市场：{', '.join(template.suitable_markets)}"
+            )
 
         # 风险适配建议
         risk_level = parameters.get("risk_level")
@@ -678,7 +725,9 @@ class TemplateValidator:
 
         return adaptations
 
-    def _generate_template_suggestions(self, template, parameters: dict[str, Any], errors: list) -> list[str]:
+    def _generate_template_suggestions(
+        self, template, parameters: dict[str, Any], errors: list
+    ) -> list[str]:
         """生成模板建议"""
         suggestions = []
 
@@ -696,7 +745,6 @@ class TemplateValidator:
 
         return suggestions
 
-
 class UnifiedValidator:
     """统一验证器"""
 
@@ -705,18 +753,29 @@ class UnifiedValidator:
         self.code_validator = CodeValidator()
         self.template_validator = TemplateValidator()
 
-    def validate_batch(self, request: BatchValidationRequest) -> BatchValidationResponse:
+    def validate_batch(
+        self, request: BatchValidationRequest
+    ) -> BatchValidationResponse:
         """批量验证"""
         start_time = time.time()
         results = {}
 
         # 参数验证
-        if request.parameters and ("parameters" in request.validation_types or "all" in request.validation_types):
-            param_request = ParameterValidationRequest(parameters=request.parameters, strict_mode=request.strict_mode)
-            results["parameter_validation"] = self.parameter_validator.validate_parameters(param_request)
+        if request.parameters and (
+            "parameters" in request.validation_types
+            or "all" in request.validation_types
+        ):
+            param_request = ParameterValidationRequest(
+                parameters=request.parameters, strict_mode=request.strict_mode
+            )
+            results["parameter_validation"] = (
+                self.parameter_validator.validate_parameters(param_request)
+            )
 
         # 代码验证
-        if request.code and ("code" in request.validation_types or "all" in request.validation_types):
+        if request.code and (
+            "code" in request.validation_types or "all" in request.validation_types
+        ):
             code_request = CodeValidationRequest(
                 code=request.code,
                 parameters=request.parameters,
@@ -725,17 +784,23 @@ class UnifiedValidator:
             results["code_validation"] = self.code_validator.validate_code(code_request)
 
         # 模板验证
-        if request.template_id and ("template" in request.validation_types or "all" in request.validation_types):
+        if request.template_id and (
+            "template" in request.validation_types or "all" in request.validation_types
+        ):
             template_request = TemplateValidationRequest(
                 _template_id=request.template_id,
                 parameters=request.parameters or {},
                 _strict_mode=request.strict_mode,
             )
-            results["template_validation"] = self.template_validator.validate_template_compatibility(template_request)
+            results["template_validation"] = (
+                self.template_validator.validate_template_compatibility(
+                    template_request
+                )
+            )
 
         # 计算综合得分
         scores = []
-        for key, result in results.items():
+        for _key, result in results.items():
             if hasattr(result, "score"):
                 scores.append(result.score)
             elif hasattr(result, "quality_score"):
@@ -814,7 +879,6 @@ class UnifiedValidator:
             steps.append("参数和代码验证通过，可以开始生成策略")
 
         return steps
-
 
 # 全局验证器实例
 unified_validator = UnifiedValidator()

@@ -42,8 +42,12 @@ def get_auth_service() -> AuthService:
     return AuthService()
 
 
-@router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
-async def register(user_data: UserRegister, auth_service: AuthService = Depends(get_auth_service)):
+@router.post(
+    "/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED
+)
+async def register(
+    user_data: UserRegister, auth_service: AuthService = Depends(get_auth_service)
+):
     """
     用户注册
 
@@ -54,12 +58,14 @@ async def register(user_data: UserRegister, auth_service: AuthService = Depends(
     try:
         return await auth_service.register(user_data)
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        ) from e
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="注册失败，请稍后重试",
-        )
+        ) from None
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -90,7 +96,9 @@ async def login(
                     "data": {"mfa_token": mfa_token},
                 },
             )
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=error_msg)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail=error_msg
+        ) from e
     except Exception:
         import logging
 
@@ -98,7 +106,7 @@ async def login(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="登录失败，请稍后重试",
-        )
+        ) from None
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
@@ -113,12 +121,16 @@ async def logout(
     - **token**: 访问Token
     """
     if not token and request:
-        auth_header = request.headers.get("Authorization") or request.headers.get("authorization")
+        auth_header = request.headers.get("Authorization") or request.headers.get(
+            "authorization"
+        )
         if auth_header and auth_header.startswith("Bearer "):
             token = auth_header[7:]
 
     if not token:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="缺少访问Token")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="缺少访问Token"
+        )
 
     await auth_service.logout(token)
     return None
@@ -136,9 +148,13 @@ async def refresh(
     ip_address = request.client.host if request.client else None
     user_agent = request.headers.get("User-Agent")
     try:
-        return await auth_service.refresh_tokens(payload.refresh_token, ip_address, user_agent)
+        return await auth_service.refresh_tokens(
+            payload.refresh_token, ip_address, user_agent
+        )
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)
+        ) from exc
 
 
 @router.post("/send-verification")
@@ -170,7 +186,9 @@ async def send_verification(verification: VerificationRequest, request: Request)
                 )
                 user = result.scalar_one_or_none()
                 if not user:
-                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在"
+                    )
                 target_user_id = user.user_id
 
         ip_address = request.client.host if request.client else None
@@ -192,7 +210,9 @@ async def forgot_password(request_body: ForgotPasswordRequest):
     """
     async with get_session(read_only=False) as session:
         reset_service = PasswordResetService(session)
-        await reset_service.request_password_reset(request_body.email, request_body.tenant_id)
+        await reset_service.request_password_reset(
+            request_body.email, request_body.tenant_id
+        )
 
     return {"code": 200, "message": "如果邮箱存在，已发送重置邮件"}
 
@@ -229,10 +249,14 @@ async def register_by_phone(
     """手机号注册"""
     try:
         return await auth_service.register_by_phone(
-            request.phone, request.code, request.password, request.tenant_id, request.username
+            request.phone,
+            request.code,
+            request.password,
+            request.tenant_id,
+            request.username,
         )
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.post("/login/phone", response_model=TokenResponse)
@@ -245,9 +269,11 @@ async def login_by_phone(
     ip = req.client.host if req.client else None
     ua = req.headers.get("user-agent")
     try:
-        return await auth_service.login_by_phone(request.phone, request.code, request.tenant_id, ip, ua)
+        return await auth_service.login_by_phone(
+            request.phone, request.code, request.tenant_id, ip, ua
+        )
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.post("/password/reset/phone")
@@ -257,10 +283,12 @@ async def reset_password_by_phone(
 ):
     """手机号重置密码"""
     try:
-        await auth_service.reset_password_by_phone(request.phone, request.code, request.new_password, request.tenant_id)
+        await auth_service.reset_password_by_phone(
+            request.phone, request.code, request.new_password, request.tenant_id
+        )
         return {"code": 200, "message": "密码已重置"}
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.post("/check-availability")
@@ -301,6 +329,6 @@ async def change_password(
         )
         return {"code": 200, "message": "密码修改成功"}
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"修改密码失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"修改密码失败: {str(e)}") from e

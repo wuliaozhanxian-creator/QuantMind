@@ -1,4 +1,4 @@
-from typing import Optional, List, Any
+from typing import Optional, Any
 from pydantic import BaseModel, ConfigDict, Field
 from decimal import Decimal
 from datetime import datetime
@@ -44,10 +44,12 @@ class PortfolioSchema(PortfolioBase):
 
 class PortfolioResponse(PortfolioSchema):
     """跟 PortfolioSchema 一致，用于别名"""
+
     pass
 
 class PortfolioSummary(BaseModel):
     """投资组合简要汇总"""
+
     id: int
     name: str
     total_value: Decimal
@@ -58,14 +60,17 @@ class PortfolioSummary(BaseModel):
 
 class RealTradingResponse(PortfolioSchema):
     """实盘交易响应，结构同 PortfolioSchema"""
+
     pass
 
 class MessageResponse(BaseModel):
     """通用消息响应"""
+
     message: str
 
 class SnapshotResponse(BaseModel):
     """组合快照响应"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -106,6 +111,7 @@ class PositionAdjust(BaseModel):
 
 class PositionResponse(PositionBase):
     """一个具体持仓的响应详情"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -122,6 +128,7 @@ class PositionResponse(PositionBase):
 
 class PositionHistoryResponse(BaseModel):
     """持仓变更历史响应"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int

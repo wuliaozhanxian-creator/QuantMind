@@ -2,7 +2,7 @@
 AI Provider工厂类
 """
 
-from typing import Dict, List, Optional, Type
+from typing import Optional
 
 from ..config import get_config
 from .base import BaseAIProvider, ModelConfig, ModelType
@@ -10,7 +10,6 @@ from .claude_provider import ClaudeProvider
 from .deepseek_provider import DeepSeekProvider
 from .local_provider import LocalProvider
 from .openai_provider import OpenAIProvider
-
 
 class AIProviderFactory:
     """AI Provider工厂类"""
@@ -24,7 +23,9 @@ class AIProviderFactory:
         cls._providers[name] = provider_class
 
     @classmethod
-    def create_provider(cls, provider_name: str, config: ModelConfig | None = None) -> BaseAIProvider:
+    def create_provider(
+        cls, provider_name: str, config: ModelConfig | None = None
+    ) -> BaseAIProvider:
         """创建AI Provider实例"""
         if provider_name not in cls._providers:
             raise ValueError(f"Unknown provider: {provider_name}")
@@ -36,7 +37,9 @@ class AIProviderFactory:
         return provider_class(config)
 
     @classmethod
-    def get_provider(cls, provider_name: str, config: ModelConfig | None = None) -> BaseAIProvider:
+    def get_provider(
+        cls, provider_name: str, config: ModelConfig | None = None
+    ) -> BaseAIProvider:
         """获取AI Provider实例（单例模式）"""
         key = f"{provider_name}_{id(config) if config else 'default'}"
 
@@ -57,7 +60,9 @@ class AIProviderFactory:
             raise ValueError(f"Unknown provider: {provider_name}")
 
         provider_class = cls._providers[provider_name]
-        temp_instance = provider_class(ModelConfig(model_name="temp", model_type=ModelType.CUSTOM))
+        temp_instance = provider_class(
+            ModelConfig(model_name="temp", model_type=ModelType.CUSTOM)
+        )
         return temp_instance.get_supported_models()
 
     @classmethod
@@ -117,7 +122,6 @@ class AIProviderFactory:
 
         return results
 
-
 # 注册所有Provider
 def register_default_providers():
     """注册默认的AI Provider"""
@@ -125,7 +129,6 @@ def register_default_providers():
     AIProviderFactory.register_provider("claude", ClaudeProvider)
     AIProviderFactory.register_provider("deepseek", DeepSeekProvider)
     AIProviderFactory.register_provider("local", LocalProvider)
-
 
 # 自动注册默认Provider
 register_default_providers()

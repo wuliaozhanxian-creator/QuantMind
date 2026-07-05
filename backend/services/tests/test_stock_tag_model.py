@@ -16,7 +16,9 @@ from backend.services.engine.models.stock_tag import StockTag, TagDictionary
 @pytest.fixture()
 def engine():
     eng = create_engine("sqlite:///:memory:")
-    TagDictionary.metadata.create_all(eng, tables=[TagDictionary.__table__, StockTag.__table__])
+    TagDictionary.metadata.create_all(
+        eng, tables=[TagDictionary.__table__, StockTag.__table__]
+    )
     return eng
 
 
@@ -24,10 +26,24 @@ def engine():
 def session(engine):
     Session = sessionmaker(bind=engine)
     sess = Session()
-    sess.add(TagDictionary(tag_code="hs300", tag_name="沪深300", tag_category="index",
-                           is_active=True, sort_order=0))
-    sess.add(TagDictionary(tag_code="ai", tag_name="AI", tag_category="concept",
-                           is_active=True, sort_order=1))
+    sess.add(
+        TagDictionary(
+            tag_code="hs300",
+            tag_name="沪深300",
+            tag_category="index",
+            is_active=True,
+            sort_order=0,
+        )
+    )
+    sess.add(
+        TagDictionary(
+            tag_code="ai",
+            tag_name="AI",
+            tag_category="concept",
+            is_active=True,
+            sort_order=1,
+        )
+    )
     sess.commit()
     return sess
 
@@ -40,8 +56,14 @@ def test_table_names_registered() -> None:
 def test_tag_dictionary_columns(engine) -> None:
     cols = {c["name"] for c in inspect(engine).get_columns("tag_dictionary")}
     expected = {
-        "tag_code", "tag_name", "tag_category", "source",
-        "is_active", "sort_order", "created_at", "updated_at",
+        "tag_code",
+        "tag_name",
+        "tag_category",
+        "source",
+        "is_active",
+        "sort_order",
+        "created_at",
+        "updated_at",
     }
     assert expected <= cols
 
@@ -59,9 +81,7 @@ def test_stock_tag_unique_constraint_and_indexes(engine) -> None:
     assert "ix_stock_tag_symbol" in indexes
 
     uniques = inspector.get_unique_constraints("stock_tag")
-    assert any(
-        set(u["column_names"]) == {"symbol", "tag_code"} for u in uniques
-    )
+    assert any(set(u["column_names"]) == {"symbol", "tag_code"} for u in uniques)
 
 
 def test_foreign_key_to_tag_dictionary(engine) -> None:

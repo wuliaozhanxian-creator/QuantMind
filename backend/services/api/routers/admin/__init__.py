@@ -16,9 +16,9 @@ admin_router.include_router(
 admin_router.include_router(
     model_management_router, prefix="/models", tags=["Admin-ModelManagement"]
 )
+admin_router.include_router(users_router, prefix="/users", tags=["Admin-Users"])
 admin_router.include_router(
-    users_router, prefix="/users", tags=["Admin-Users"]
-)
-admin_router.include_router(
-    strategy_templates_router, prefix="/strategy-templates", tags=["Admin-StrategyTemplates"]
+    strategy_templates_router,
+    prefix="/strategy-templates",
+    tags=["Admin-StrategyTemplates"],
 )

@@ -7,12 +7,11 @@ import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
-
 
 @dataclass
 class StopLossConfig:
@@ -26,7 +25,6 @@ class StopLossConfig:
     volatility_multiplier: float = 2.0  # 波动率倍数
     lookback_period: int = 20  # 回看期
     min_profit_for_trail: float = 0.02  # 启动移动止损的最小盈利
-
 
 @dataclass
 class Position:
@@ -50,7 +48,6 @@ class Position:
     close_price: float | None = None
     close_reason: str | None = None
 
-
 @dataclass
 class StopLossOrder:
     """止损订单"""
@@ -64,7 +61,6 @@ class StopLossOrder:
     triggered_time: datetime | None = None
     triggered_price: float | None = None
 
-
 class StopLossStrategy(ABC):
     """止损策略基类"""
 
@@ -76,7 +72,9 @@ class StopLossStrategy(ABC):
         """计算止损价格"""
 
     @abstractmethod
-    def should_trigger_stop(self, position: Position, current_price: float) -> tuple[bool, str]:
+    def should_trigger_stop(
+        self, position: Position, current_price: float
+    ) -> tuple[bool, str]:
         """判断是否触发止损"""
 
     def update_position(self, position: Position, current_price: float):
@@ -84,12 +82,15 @@ class StopLossStrategy(ABC):
         position.current_price = current_price
 
         if position.side == "long":
-            position.unrealized_pnl = (current_price - position.entry_price) * position.quantity
+            position.unrealized_pnl = (
+                current_price - position.entry_price
+            ) * position.quantity
             position.highest_price = max(position.highest_price, current_price)
         else:  # short
-            position.unrealized_pnl = (position.entry_price - current_price) * position.quantity
+            position.unrealized_pnl = (
+                position.entry_price - current_price
+            ) * position.quantity
             position.lowest_price = min(position.lowest_price, current_price)
-
 
 class FixedStopLoss(StopLossStrategy):
     """固定比例止损"""
@@ -101,7 +102,9 @@ class FixedStopLoss(StopLossStrategy):
         else:  # short
             return position.entry_price * (1 + self.config.stop_loss_pct)
 
-    def should_trigger_stop(self, position: Position, current_price: float) -> tuple[bool, str]:
+    def should_trigger_stop(
+        self, position: Position, current_price: float
+    ) -> tuple[bool, str]:
         """判断是否触发固定止损"""
         self.update_position(position, current_price)
 
@@ -120,7 +123,6 @@ class FixedStopLoss(StopLossStrategy):
 
         return False, ""
 
-
 class TrailingStopLoss(StopLossStrategy):
     """移动止损"""
 
@@ -132,10 +134,14 @@ class TrailingStopLoss(StopLossStrategy):
 
             # 如果已有盈利，设置移动止损
             if position.unrealized_pnl > 0:
-                profit_pct = position.unrealized_pnl / (position.entry_price * position.quantity)
+                profit_pct = position.unrealized_pnl / (
+                    position.entry_price * position.quantity
+                )
                 if profit_pct >= self.config.min_profit_for_trail:
                     # 移动止损价格 = 当前价格 - 移动止损比例
-                    trailing_stop = position.current_price * (1 - self.config.trailing_stop_pct)
+                    trailing_stop = position.current_price * (
+                        1 - self.config.trailing_stop_pct
+                    )
                     return max(initial_stop, trailing_stop)
 
             return initial_stop
@@ -143,14 +149,20 @@ class TrailingStopLoss(StopLossStrategy):
             initial_stop = position.entry_price * (1 + self.config.stop_loss_pct)
 
             if position.unrealized_pnl > 0:
-                profit_pct = position.unrealized_pnl / (position.entry_price * position.quantity)
+                profit_pct = position.unrealized_pnl / (
+                    position.entry_price * position.quantity
+                )
                 if profit_pct >= self.config.min_profit_for_trail:
-                    trailing_stop = position.current_price * (1 + self.config.trailing_stop_pct)
+                    trailing_stop = position.current_price * (
+                        1 + self.config.trailing_stop_pct
+                    )
                     return min(initial_stop, trailing_stop)
 
             return initial_stop
 
-    def should_trigger_stop(self, position: Position, current_price: float) -> tuple[bool, str]:
+    def should_trigger_stop(
+        self, position: Position, current_price: float
+    ) -> tuple[bool, str]:
         """判断是否触发移动止损"""
         self.update_position(position, current_price)
 
@@ -174,7 +186,6 @@ class TrailingStopLoss(StopLossStrategy):
                 )
 
         return False, ""
-
 
 class ATRStopLoss(StopLossStrategy):
     """基于ATR的止损"""
@@ -223,7 +234,9 @@ class ATRStopLoss(StopLossStrategy):
         else:  # short
             return position.entry_price + (atr * atr_multiplier)
 
-    def should_trigger_stop(self, position: Position, current_price: float) -> tuple[bool, str]:
+    def should_trigger_stop(
+        self, position: Position, current_price: float
+    ) -> tuple[bool, str]:
         """判断是否触发ATR止损"""
         self.update_position(position, current_price)
 
@@ -241,7 +254,6 @@ class ATRStopLoss(StopLossStrategy):
                 )
 
         return False, ""
-
 
 class VolatilityStopLoss(StopLossStrategy):
     """基于波动率的止损"""
@@ -276,7 +288,9 @@ class VolatilityStopLoss(StopLossStrategy):
         else:  # short
             return position.entry_price * (1 + stop_distance)
 
-    def should_trigger_stop(self, position: Position, current_price: float) -> tuple[bool, str]:
+    def should_trigger_stop(
+        self, position: Position, current_price: float
+    ) -> tuple[bool, str]:
         """判断是否触发波动率止损"""
         self.update_position(position, current_price)
 
@@ -295,11 +309,12 @@ class VolatilityStopLoss(StopLossStrategy):
 
         return False, ""
 
-
 class TimeBasedStopLoss(StopLossStrategy):
     """基于时间的止损"""
 
-    def __init__(self, config: StopLossConfig, max_hold_time: timedelta = timedelta(days=30)):
+    def __init__(
+        self, config: StopLossConfig, max_hold_time: timedelta = timedelta(days=30)
+    ):
         super().__init__(config)
         self.max_hold_time = max_hold_time
 
@@ -307,7 +322,9 @@ class TimeBasedStopLoss(StopLossStrategy):
         """时间止损不直接计算价格，而是基于持仓时间"""
         return 0.0
 
-    def should_trigger_stop(self, position: Position, current_price: float) -> tuple[bool, str]:
+    def should_trigger_stop(
+        self, position: Position, current_price: float
+    ) -> tuple[bool, str]:
         """判断是否触发时间止损"""
         self.update_position(position, current_price)
 
@@ -319,7 +336,6 @@ class TimeBasedStopLoss(StopLossStrategy):
             )
 
         return False, ""
-
 
 class StopLossManager:
     """止损管理器"""
@@ -374,7 +390,9 @@ class StopLossManager:
         # 计算初始止损价格
         if stop_loss_strategy in self.strategies:
             strategy = self.strategies[stop_loss_strategy]
-            position.stop_loss_price = strategy.calculate_stop_loss_price(position, **strategy_kwargs)
+            position.stop_loss_price = strategy.calculate_stop_loss_price(
+                position, **strategy_kwargs
+            )
 
         self.positions[position_id] = position
 
@@ -412,7 +430,9 @@ class StopLossManager:
             strategy = self.strategies.get(self.stop_orders[position_id].stop_type)
 
             if strategy:
-                should_stop, reason = strategy.should_trigger_stop(position, current_price)
+                should_stop, reason = strategy.should_trigger_stop(
+                    position, current_price
+                )
 
                 if should_stop:
                     triggered_stops.append((position_id, reason))
@@ -432,15 +452,21 @@ class StopLossManager:
 
         # 计算已实现盈亏
         if position.side == "long":
-            position.realized_pnl = (close_price - position.entry_price) * position.quantity
+            position.realized_pnl = (
+                close_price - position.entry_price
+            ) * position.quantity
         else:  # short
-            position.realized_pnl = (position.entry_price - close_price) * position.quantity
+            position.realized_pnl = (
+                position.entry_price - close_price
+            ) * position.quantity
 
         # 停用止损订单
         if position_id in self.stop_orders:
             self.stop_orders[position_id].is_active = False
 
-        logger.info(f"平仓 {position_id}, 价格: {close_price}, 原因: {close_reason}, 盈亏: {position.realized_pnl:.2f}")
+        logger.info(
+            f"平仓 {position_id}, 价格: {close_price}, 原因: {close_reason}, 盈亏: {position.realized_pnl:.2f}"
+        )
 
     def update_stop_loss(self, position_id: str, new_stop_price: float):
         """手动更新止损价格"""
@@ -490,9 +516,15 @@ class StopLossManager:
         winning_trades = [p for p in closed_positions if p.realized_pnl > 0]
         losing_trades = [p for p in closed_positions if p.realized_pnl < 0]
 
-        win_rate = len(winning_trades) / len(closed_positions) if closed_positions else 0
-        avg_win = np.mean([p.realized_pnl for p in winning_trades]) if winning_trades else 0
-        avg_loss = np.mean([p.realized_pnl for p in losing_trades]) if losing_trades else 0
+        win_rate = (
+            len(winning_trades) / len(closed_positions) if closed_positions else 0
+        )
+        avg_win = (
+            np.mean([p.realized_pnl for p in winning_trades]) if winning_trades else 0
+        )
+        avg_loss = (
+            np.mean([p.realized_pnl for p in losing_trades]) if losing_trades else 0
+        )
         profit_factor = abs(avg_win / avg_loss) if avg_loss != 0 else float("inf")
 
         return {
@@ -504,7 +536,9 @@ class StopLossManager:
             "avg_win": avg_win,
             "avg_loss": avg_loss,
             "profit_factor": profit_factor,
-            "stop_orders_active": len([o for o in self.stop_orders.values() if o.is_active]),
+            "stop_orders_active": len(
+                [o for o in self.stop_orders.values() if o.is_active]
+            ),
         }
 
     def cleanup_closed_positions(self, older_than_days: int = 30):
@@ -513,7 +547,11 @@ class StopLossManager:
 
         to_remove = []
         for position_id, position in self.positions.items():
-            if position.is_closed and position.close_time and position.close_time < cutoff_time:
+            if (
+                position.is_closed
+                and position.close_time
+                and position.close_time < cutoff_time
+            ):
                 to_remove.append(position_id)
 
         for position_id in to_remove:

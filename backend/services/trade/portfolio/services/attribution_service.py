@@ -10,7 +10,6 @@
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -160,7 +159,9 @@ class AttributionService:
         for sa in sector_map.values():
             sa.pnl = round(sa.pnl, 2)
             sa.weight = round(sa.weight, 4)
-            sa.contribution = round(sa.pnl / initial_capital, 6) if initial_capital > 0 else 0.0
+            sa.contribution = (
+                round(sa.pnl / initial_capital, 6) if initial_capital > 0 else 0.0
+            )
 
         sector_list = sorted(sector_map.values(), key=lambda x: x.pnl, reverse=True)
 

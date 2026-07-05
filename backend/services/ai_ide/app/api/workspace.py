@@ -13,7 +13,6 @@ logger = logging.getLogger("AI-IDE-Workspace")
 
 router = APIRouter()
 
-
 # 数据目录 (优先使用环境变量，确保生产环境可写)
 DATA_DIR = os.getenv("AI_IDE_DATA_DIR")
 if not DATA_DIR:
@@ -21,7 +20,6 @@ if not DATA_DIR:
 
 os.makedirs(DATA_DIR, exist_ok=True)
 CONFIG_FILE = os.path.join(DATA_DIR, "config.json")
-
 
 def load_config():
     if os.path.exists(CONFIG_FILE):
@@ -32,7 +30,6 @@ def load_config():
             logger.error(f"Failed to load config: {e}")
     return {}
 
-
 def save_config(data):
     try:
         current = load_config()
@@ -41,7 +38,6 @@ def save_config(data):
             json.dump(current, f, ensure_ascii=False, indent=2)
     except Exception as e:
         logger.error(f"Failed to save config: {e}")
-
 
 def get_project_root():
     # 优先从配置文件读取
@@ -54,9 +50,7 @@ def get_project_root():
         root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))
     return os.path.abspath(root)
 
-
 CURRENT_ROOT = get_project_root()
-
 
 def _resolve_workspace_path(path: str, *, must_exist: bool = False) -> str:
     """Resolve a relative path under CURRENT_ROOT and enforce boundary checks."""
@@ -73,24 +67,19 @@ def _resolve_workspace_path(path: str, *, must_exist: bool = False) -> str:
         raise HTTPException(status_code=404, detail=f"Path not found: {path}")
     return target
 
-
 class CreateItemRequest(BaseModel):
     name: str
     dir: str | None = None
-
 
 class RenameRequest(BaseModel):
     old_path: str
     new_path: str
 
-
 class SetRootRequest(BaseModel):
     path: str
 
-
 class SaveRequest(BaseModel):
     content: str
-
 
 @router.get("/list")
 async def list_files(path: str = ""):
@@ -144,12 +133,15 @@ async def list_files(path: str = ""):
             "items": items,
             "base": CURRENT_ROOT,
             "parent": parent_rel,
-            "current": (os.path.relpath(target_path, CURRENT_ROOT) if target_path != CURRENT_ROOT else ""),
+            "current": (
+                os.path.relpath(target_path, CURRENT_ROOT)
+                if target_path != CURRENT_ROOT
+                else ""
+            ),
         }
     except Exception as e:
         logger.error(f"Failed to list files: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @router.post("/set-root")
 async def set_root(request: SetRootRequest):
@@ -162,7 +154,6 @@ async def set_root(request: SetRootRequest):
     else:
         raise HTTPException(status_code=400, detail="Invalid directory path")
 
-
 @router.post("/create/file")
 async def create_file(request: CreateItemRequest):
     full_path = _resolve_workspace_path(os.path.join(request.dir or "", request.name))
@@ -174,8 +165,7 @@ async def create_file(request: CreateItemRequest):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @router.post("/create/folder")
 async def create_folder(request: CreateItemRequest):
@@ -186,8 +176,7 @@ async def create_folder(request: CreateItemRequest):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @router.post("/rename")
 async def rename_item(request: RenameRequest):
@@ -200,8 +189,7 @@ async def rename_item(request: RenameRequest):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @router.get("/{file_path:path}")
 async def get_content(file_path: str):
@@ -214,8 +202,7 @@ async def get_content(file_path: str):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @router.post("/{file_path:path}")
 async def save_content(file_path: str, request: SaveRequest):
@@ -228,8 +215,7 @@ async def save_content(file_path: str, request: SaveRequest):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @router.delete("/{file_path:path}")
 async def delete_item(file_path: str):
@@ -243,4 +229,4 @@ async def delete_item(file_path: str):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e

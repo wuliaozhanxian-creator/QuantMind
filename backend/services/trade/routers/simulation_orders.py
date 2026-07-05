@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Optional
+from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -23,15 +23,17 @@ from backend.services.trade.simulation.services.simulation_manager import (
 
 router = APIRouter()
 
-
 def _require_int_user_id(raw_user_id: str) -> int:
     try:
         return int(raw_user_id)
     except (TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="Invalid user_id in token")
+        raise HTTPException(
+            status_code=400, detail="Invalid user_id in token"
+        ) from None
 
-
-@router.post("/orders", response_model=SimOrderResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/orders", response_model=SimOrderResponse, status_code=status.HTTP_201_CREATED
+)
 async def create_order(
     data: SimOrderCreate,
     auth: AuthContext = Depends(get_auth_context),
@@ -66,14 +68,18 @@ async def create_order(
     if not session_decision.can_execute:
         if session_decision.final_state == "expired":
             await engine.mark_expired(order, session_decision.message)
-            return await order_service.get_order(auth.tenant_id, user_id, order.order_id)
+            return await order_service.get_order(
+                auth.tenant_id, user_id, order.order_id
+            )
         if session_decision.retryable:
             await order_service.queue_order(
                 order,
                 session_decision.message,
                 trading_session_date=session_decision.target_trade_date,
             )
-            return await order_service.get_order(auth.tenant_id, user_id, order.order_id)
+            return await order_service.get_order(
+                auth.tenant_id, user_id, order.order_id
+            )
         await engine.mark_rejected(order, session_decision.message)
         return await order_service.get_order(auth.tenant_id, user_id, order.order_id)
 
@@ -92,7 +98,6 @@ async def create_order(
 
     await engine.apply_filled(order, result)
     return await order_service.get_order(auth.tenant_id, user_id, order.order_id)
-
 
 @router.get("/orders", response_model=list[SimOrderResponse])
 async def list_orders(
@@ -120,7 +125,6 @@ async def list_orders(
         offset=offset,
     )
 
-
 @router.get("/orders/{order_id}", response_model=SimOrderResponse)
 async def get_order(
     order_id: UUID,
@@ -133,7 +137,6 @@ async def get_order(
     if not order:
         raise HTTPException(status_code=404, detail="Simulation order not found")
     return order
-
 
 @router.post("/orders/{order_id}/cancel", response_model=SimOrderResponse)
 async def cancel_order(
@@ -151,4 +154,4 @@ async def cancel_order(
     try:
         return await service.cancel_order(order, request.reason)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e

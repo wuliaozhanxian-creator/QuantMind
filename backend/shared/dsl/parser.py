@@ -5,12 +5,11 @@ DSL解析器 - 解析量化策略DSL语法
 import json
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List
+from typing import Any
 
 from ..observability.logging import get_logger
 
 logger = get_logger(__name__)
-
 
 class TokenType(Enum):
     """DSL词法单元类型"""
@@ -34,7 +33,6 @@ class TokenType(Enum):
     NEWLINE = "NEWLINE"
     EOF = "EO"
 
-
 @dataclass
 class Token:
     """词法单元"""
@@ -44,7 +42,6 @@ class Token:
     line: int = 1
     column: int = 1
 
-
 @dataclass
 class ASTNode:
     """抽象语法树节点"""
@@ -53,7 +50,6 @@ class ASTNode:
     value: Any = None
     children: list["ASTNode"] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
-
 
 class DSLLexer:
     """DSL词法分析器"""
@@ -106,7 +102,9 @@ class DSLLexer:
 
             if char.isspace():
                 if char == "\n":
-                    self.tokens.append(Token(TokenType.NEWLINE, char, self.line, self.column))
+                    self.tokens.append(
+                        Token(TokenType.NEWLINE, char, self.line, self.column)
+                    )
                     self.line += 1
                     self.column = 1
                 else:
@@ -129,12 +127,16 @@ class DSLLexer:
         start_pos = self.pos
         start_col = self.column
 
-        while self.pos < len(self.text) and (self.text[self.pos].isalnum() or self.text[self.pos] == "_"):
+        while self.pos < len(self.text) and (
+            self.text[self.pos].isalnum() or self.text[self.pos] == "_"
+        ):
             self.pos += 1
             self.column += 1
 
         value = self.text[start_pos : self.pos]
-        token_type = TokenType.KEYWORD if value in self.KEYWORDS else TokenType.IDENTIFIER
+        token_type = (
+            TokenType.KEYWORD if value in self.KEYWORDS else TokenType.IDENTIFIER
+        )
         self.tokens.append(Token(token_type, value, self.line, start_col))
 
     def _read_number(self):
@@ -142,7 +144,9 @@ class DSLLexer:
         start_pos = self.pos
         start_col = self.column
 
-        while self.pos < len(self.text) and (self.text[self.pos].isdigit() or self.text[self.pos] == "."):
+        while self.pos < len(self.text) and (
+            self.text[self.pos].isdigit() or self.text[self.pos] == "."
+        ):
             self.pos += 1
             self.column += 1
 
@@ -181,7 +185,9 @@ class DSLLexer:
         if self.pos + 1 < len(self.text):
             two_char = char + self.text[self.pos + 1]
             if two_char in [">=", "<=", "==", "!=", "&&", "||"]:
-                self.tokens.append(Token(TokenType.COMPARATOR, two_char, self.line, start_col))
+                self.tokens.append(
+                    Token(TokenType.COMPARATOR, two_char, self.line, start_col)
+                )
                 self.pos += 2
                 self.column += 2
                 return
@@ -213,7 +219,6 @@ class DSLLexer:
         self.tokens.append(Token(token_type, char, self.line, start_col))
         self.pos += 1
         self.column += 1
-
 
 class DSLParser:
     """DSL语法分析器"""
@@ -251,7 +256,11 @@ class DSLParser:
 
     def _current_token(self) -> Token:
         """获取当前token"""
-        return self.tokens[self.pos] if self.pos < len(self.tokens) else Token(TokenType.EOF, "")
+        return (
+            self.tokens[self.pos]
+            if self.pos < len(self.tokens)
+            else Token(TokenType.EOF, "")
+        )
 
     def _advance(self) -> Token:
         """前进到下一个token"""
@@ -263,7 +272,9 @@ class DSLParser:
         """期望特定类型的token"""
         token = self._current_token()
         if token.type != token_type:
-            raise SyntaxError(f"Expected {token_type}, got {token.type} at line {token.line}")
+            raise SyntaxError(
+                f"Expected {token_type}, got {token.type} at line {token.line}"
+            )
         return self._advance()
 
     def _parse_strategy(self) -> ASTNode:
@@ -347,7 +358,10 @@ class DSLParser:
         then_branch = self._parse_statement()
 
         else_branch = None
-        if self._current_token().type == TokenType.KEYWORD and self._current_token().value == "else":
+        if (
+            self._current_token().type == TokenType.KEYWORD
+            and self._current_token().value == "else"
+        ):
             self._advance()
             else_branch = self._parse_statement()
 
@@ -389,7 +403,10 @@ class DSLParser:
         """解析逻辑或表达式"""
         left = self._parse_logical_and()
 
-        while self._current_token().type == TokenType.LOGICAL and self._current_token().value == "or":
+        while (
+            self._current_token().type == TokenType.LOGICAL
+            and self._current_token().value == "or"
+        ):
             op = self._advance()
             right = self._parse_logical_and()
 
@@ -403,7 +420,10 @@ class DSLParser:
         """解析逻辑与表达式"""
         left = self._parse_comparison()
 
-        while self._current_token().type == TokenType.LOGICAL and self._current_token().value == "and":
+        while (
+            self._current_token().type == TokenType.LOGICAL
+            and self._current_token().value == "and"
+        ):
             op = self._advance()
             right = self._parse_comparison()
 
@@ -431,7 +451,10 @@ class DSLParser:
         """解析加减表达式"""
         left = self._parse_multiplicative()
 
-        while self._current_token().type == TokenType.OPERATOR and self._current_token().value in ["+", "-"]:
+        while (
+            self._current_token().type == TokenType.OPERATOR
+            and self._current_token().value in ["+", "-"]
+        ):
             op = self._advance()
             right = self._parse_multiplicative()
 
@@ -445,7 +468,10 @@ class DSLParser:
         """解析乘除表达式"""
         left = self._parse_primary()
 
-        while self._current_token().type == TokenType.OPERATOR and self._current_token().value in ["*", "/"]:
+        while (
+            self._current_token().type == TokenType.OPERATOR
+            and self._current_token().value in ["*", "/"]
+        ):
             op = self._advance()
             right = self._parse_primary()
 
@@ -597,7 +623,6 @@ class DSLParser:
             rule["else_action"] = else_action
 
         return rule
-
 
 @dataclass
 class StrategyDSL:

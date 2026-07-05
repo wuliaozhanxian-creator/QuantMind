@@ -3,7 +3,7 @@ DSL优化器 - 优化DSL策略性能
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from ..observability.logging import get_logger
 from .compiler import CompiledStrategy, DSLCompiler
@@ -11,7 +11,6 @@ from .executor import DSLExecutor, ExecutionContext, ExecutionResult
 from .parser import StrategyDSL
 
 logger = get_logger(__name__)
-
 
 @dataclass
 class OptimizationTarget:
@@ -21,7 +20,6 @@ class OptimizationTarget:
     weight: float = 1.0
     target_value: float | None = None
     minimize: bool = False
-
 
 @dataclass
 class OptimizationResult:
@@ -34,7 +32,6 @@ class OptimizationResult:
     improvement: dict[str, float] = field(default_factory=dict)
     optimization_time: float = 0.0
     iterations: int = 0
-
 
 class DSLOptimizer:
     """DSL优化器"""
@@ -122,10 +119,14 @@ class DSLOptimizer:
                             best_result = result
                             best_score = score
 
-                            self.logger.debug(f"Found better strategy at iteration {iteration}, score: {score:.4f}")
+                            self.logger.debug(
+                                f"Found better strategy at iteration {iteration}, score: {score:.4f}"
+                            )
 
                 except Exception as e:
-                    self.logger.warning(f"Failed to evaluate variant {i} at iteration {iteration}: {e}")
+                    self.logger.warning(
+                        f"Failed to evaluate variant {i} at iteration {iteration}: {e}"
+                    )
                     continue
 
             # 自适应调整
@@ -157,7 +158,9 @@ class DSLOptimizer:
 
         return result
 
-    def _generate_dsl_variants(self, strategy_dsl: StrategyDSL, iteration: int) -> list[StrategyDSL]:
+    def _generate_dsl_variants(
+        self, strategy_dsl: StrategyDSL, iteration: int
+    ) -> list[StrategyDSL]:
         """生成DSL变体"""
         variants = []
 
@@ -176,7 +179,9 @@ class DSLOptimizer:
 
         return variants
 
-    def _optimize_parameters(self, strategy_dsl: StrategyDSL, iteration: int) -> list[StrategyDSL]:
+    def _optimize_parameters(
+        self, strategy_dsl: StrategyDSL, iteration: int
+    ) -> list[StrategyDSL]:
         """优化参数"""
         variants = []
 
@@ -214,7 +219,9 @@ class DSLOptimizer:
 
         return variants
 
-    def _optimize_rules(self, strategy_dsl: StrategyDSL, iteration: int) -> list[StrategyDSL]:
+    def _optimize_rules(
+        self, strategy_dsl: StrategyDSL, iteration: int
+    ) -> list[StrategyDSL]:
         """优化规则"""
         variants = []
 
@@ -310,7 +317,7 @@ class DSLOptimizer:
                         new_threshold = threshold * 1.1  # 增加10%
                         new_rule["condition"] = f"{parts[0].strip()} > {new_threshold}"
                     except ValueError:
-                        pass
+                        pass  # noqa: BLE001 - 已知数值解析失败，预期静默
             elif "<" in condition:
                 # 减少阈值
                 parts = condition.split("<")
@@ -320,7 +327,7 @@ class DSLOptimizer:
                         new_threshold = threshold * 0.9  # 减少10%
                         new_rule["condition"] = f"{parts[0].strip()} < {new_threshold}"
                     except ValueError:
-                        pass
+                        pass  # noqa: BLE001 - 已知数值解析失败，预期静默
 
             return new_rule
 
@@ -345,7 +352,9 @@ class DSLOptimizer:
         except Exception:
             return None
 
-    def _calculate_optimization_score(self, result: ExecutionResult, targets: list[OptimizationTarget]) -> float:
+    def _calculate_optimization_score(
+        self, result: ExecutionResult, targets: list[OptimizationTarget]
+    ) -> float:
         """计算优化分数"""
         if not result.success:
             return float("-in")
@@ -372,7 +381,9 @@ class DSLOptimizer:
 
         return total_score / total_weight if total_weight > 0 else 0.0
 
-    def _is_better_score(self, new_score: float, current_score: float, targets: list[OptimizationTarget]) -> bool:
+    def _is_better_score(
+        self, new_score: float, current_score: float, targets: list[OptimizationTarget]
+    ) -> bool:
         """判断是否是更好的分数"""
         if targets and targets[0].minimize:
             return new_score < current_score
@@ -392,11 +403,15 @@ class DSLOptimizer:
 
         # 检查规则变化
         if len(original.rules) != len(modified.rules):
-            changes.append(f"rules count: {len(original.rules)} -> {len(modified.rules)}")
+            changes.append(
+                f"rules count: {len(original.rules)} -> {len(modified.rules)}"
+            )
 
         return "; ".join(changes) if changes else "structural changes"
 
-    def _adaptive_adjustment(self, recent_history: list[dict[str, Any]], targets: list[OptimizationTarget]) -> None:
+    def _adaptive_adjustment(
+        self, recent_history: list[dict[str, Any]], targets: list[OptimizationTarget]
+    ) -> None:
         """自适应调整"""
         if len(recent_history) < 3:
             return
@@ -409,7 +424,9 @@ class DSLOptimizer:
             self.logger.info("Applying adaptive adjustment due to slow convergence")
             # 这里可以实现更复杂的自适应逻辑
 
-    def _calculate_improvement(self, initial: ExecutionResult, best: ExecutionResult) -> dict[str, float]:
+    def _calculate_improvement(
+        self, initial: ExecutionResult, best: ExecutionResult
+    ) -> dict[str, float]:
         """计算改进"""
         improvement = {}
 

@@ -16,8 +16,12 @@ class Settings(BaseSettings):
     APP_VERSION: str = "2.0.0"
 
     # Remote service URLs
-    STRATEGY_SERVICE_URL: str = os.getenv("STRATEGY_SERVICE_URL", "http://quantmind-engine:8001")
-    REAL_TRADING_SERVICE_URL: str = os.getenv("REAL_TRADING_SERVICE_URL", "http://quantmind-trade:8002")
+    STRATEGY_SERVICE_URL: str = os.getenv(
+        "STRATEGY_SERVICE_URL", "http://quantmind-engine:8001"
+    )
+    REAL_TRADING_SERVICE_URL: str = os.getenv(
+        "REAL_TRADING_SERVICE_URL", "http://quantmind-trade:8002"
+    )
 
     # Cache TTL
     CACHE_TTL_PORTFOLIO: int = 300

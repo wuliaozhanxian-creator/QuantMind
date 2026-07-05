@@ -7,7 +7,7 @@ import os
 import secrets
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 
 from dotenv import load_dotenv
 
@@ -18,7 +18,6 @@ if _ROOT_ENV.exists():
 
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
 
 def find_env_file() -> Path | None:
     """
@@ -42,7 +41,7 @@ def find_env_file() -> Path | None:
     try:
         possible_locations.append(Path(__file__).resolve().parents[3] / ".env")
     except IndexError:
-        pass
+        pass  # noqa: BLE001 - 已知索引越界，预期静默
 
     possible_locations.extend(
         [
@@ -58,10 +57,8 @@ def find_env_file() -> Path | None:
     # 3. 未找到.env文件
     return None
 
-
 # 查找.env文件
 _ENV_FILE = find_env_file()
-
 
 class Settings(BaseSettings):
     """
@@ -97,18 +94,25 @@ class Settings(BaseSettings):
     DB_MAX_OVERFLOW: int = int(os.getenv("DB_MAX_OVERFLOW", "30"))
 
     # ============ Redis配置 ============
-    REDIS_HOST: str = os.getenv("REDIS_HOST") or ("quantmind-redis" if os.path.exists("/.dockerenv") else "localhost")
+    REDIS_HOST: str = os.getenv("REDIS_HOST") or (
+        "quantmind-redis" if os.path.exists("/.dockerenv") else "localhost"
+    )
     REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
 
     @model_validator(mode="after")
     def post_init(self) -> "Settings":
         """初始化后处理"""
         # 如果 REDIS_HOST 仍然是 localhost 且在 Docker 中，强制改为 quantmind-redis
-        if os.path.exists("/.dockerenv") and self.REDIS_HOST in ("localhost", "127.0.0.1"):
+        if os.path.exists("/.dockerenv") and self.REDIS_HOST in (
+            "localhost",
+            "127.0.0.1",
+        ):
             self.REDIS_HOST = "quantmind-redis"
         return self
 
-    REDIS_SENTINELS: str = os.getenv("REDIS_SENTINELS", "localhost:26379,localhost:26380,localhost:26381")
+    REDIS_SENTINELS: str = os.getenv(
+        "REDIS_SENTINELS", "localhost:26379,localhost:26380,localhost:26381"
+    )
     REDIS_MASTER_NAME: str = os.getenv("REDIS_MASTER_NAME", "quantmind-master")
     REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD", "")
     REDIS_MAX_CONNECTIONS: int = int(os.getenv("REDIS_MAX_CONNECTIONS", "50"))
@@ -143,7 +147,7 @@ class Settings(BaseSettings):
                 try:
                     return json.loads(v)
                 except Exception:
-                    pass
+                    pass  # noqa: BLE001 - None
             # 默认按逗号分割
             return [origin.strip() for origin in v.split(",") if origin.strip()]
         return v
@@ -250,10 +254,11 @@ class Settings(BaseSettings):
 
         # 检查密码策略一致性
         if self.PASSWORD_MIN_LENGTH < 4:
-            print(f"[WARNING]  Warning: PASSWORD_MIN_LENGTH is very low ({self.PASSWORD_MIN_LENGTH})")
+            print(
+                f"[WARNING]  Warning: PASSWORD_MIN_LENGTH is very low ({self.PASSWORD_MIN_LENGTH})"
+            )
 
         return self
-
 
 def get_settings() -> Settings:
     """
@@ -274,7 +279,6 @@ def get_settings() -> Settings:
         print("  3. Variable values are valid")
         print()
         sys.exit(1)
-
 
 # 全局配置实例
 settings = get_settings()

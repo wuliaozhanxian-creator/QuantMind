@@ -66,6 +66,7 @@ export REDIS_MASTER_NAME="quantmind-master"
 
 export CORS_ALLOWED_ORIGINS="https://app.quantmind.example,https://console.quantmind.example"
 
+# T6.5-P3 residual, M4 migration: INTERNAL_CALL_SECRET 已废弃（仅训练容器回调用），服务间认证改用 SECRET_KEY 签发的 service JWT
 export INTERNAL_CALL_SECRET="replace-with-prod-internal-secret"
 export SECRET_KEY="replace-with-prod-secret"
 export JWT_SECRET_KEY="replace-with-prod-jwt-secret"

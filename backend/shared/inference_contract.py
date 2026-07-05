@@ -7,18 +7,17 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-
 def _safe_int(val: Any, default: int = 0) -> int:
     try:
         return int(float(val))
     except (ValueError, TypeError):
         return default
 
-
 def canonical_json_hash(payload: Any) -> str:
-    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    raw = json.dumps(
+        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
-
 
 def normalize_fill_values(fill_values: dict[str, Any] | None) -> dict[str, float]:
     out: dict[str, float] = {}
@@ -32,11 +31,9 @@ def normalize_fill_values(fill_values: dict[str, Any] | None) -> dict[str, float
         out[str(k)] = n
     return out
 
-
 def _hash_symbols(symbols: pd.Series) -> str:
     sym_text = "\n".join(symbols.astype(str).tolist())
     return hashlib.sha256(sym_text.encode("utf-8")).hexdigest()
-
 
 def _hash_feature_matrix(df: pd.DataFrame, feature_columns: list[str]) -> str:
     if not feature_columns:
@@ -45,12 +42,18 @@ def _hash_feature_matrix(df: pd.DataFrame, feature_columns: list[str]) -> str:
     for col in feature_columns:
         if col not in work.columns:
             work[col] = 0.0
-    matrix = work[feature_columns].apply(pd.to_numeric, errors="coerce").fillna(0.0).to_numpy(dtype=np.float32)
+    matrix = (
+        work[feature_columns]
+        .apply(pd.to_numeric, errors="coerce")
+        .fillna(0.0)
+        .to_numpy(dtype=np.float32)
+    )
     matrix = np.nan_to_num(matrix, nan=0.0, posinf=0.0, neginf=0.0)
     return hashlib.sha256(matrix.tobytes(order="C")).hexdigest()
 
-
-def build_day_snapshot(df: pd.DataFrame, feature_columns: list[str], *, symbol_col: str = "symbol") -> dict[str, Any]:
+def build_day_snapshot(
+    df: pd.DataFrame, feature_columns: list[str], *, symbol_col: str = "symbol"
+) -> dict[str, Any]:
     if df.empty:
         return {
             "row_count": 0,
@@ -66,7 +69,6 @@ def build_day_snapshot(df: pd.DataFrame, feature_columns: list[str], *, symbol_c
         "feature_hash": _hash_feature_matrix(ordered, feature_columns),
     }
 
-
 def build_daily_manifest(
     df: pd.DataFrame,
     feature_columns: list[str],
@@ -80,9 +82,10 @@ def build_daily_manifest(
     work = df.copy()
     work[trade_date_col] = pd.to_datetime(work[trade_date_col]).dt.strftime("%Y-%m-%d")
     for trade_date, frame in work.groupby(trade_date_col, sort=True):
-        manifest[str(trade_date)] = build_day_snapshot(frame, feature_columns, symbol_col=symbol_col)
+        manifest[str(trade_date)] = build_day_snapshot(
+            frame, feature_columns, symbol_col=symbol_col
+        )
     return manifest, canonical_json_hash(manifest)
-
 
 def compare_frozen_config(
     *,
@@ -101,7 +104,9 @@ def compare_frozen_config(
         mismatches.append(
             {
                 "field": "feature_columns",
-                "expected_hash": canonical_json_hash(list(frozen_feature_columns or [])),
+                "expected_hash": canonical_json_hash(
+                    list(frozen_feature_columns or [])
+                ),
                 "actual_hash": canonical_json_hash(list(actual_feature_columns or [])),
             }
         )

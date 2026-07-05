@@ -1,15 +1,16 @@
 import logging
-from typing import Any, Dict, List
+from typing import Any
 
 import numpy as np
 import pandas as pd
 from qlib.data import D
 
-from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
+from backend.services.engine.qlib_app.utils.structured_logger import (
+    StructuredTaskLogger,
+)
 
 logger = logging.getLogger(__name__)
 task_logger = StructuredTaskLogger(logger, "StyleAttributionService")
-
 
 class StyleAttributionService:
     """
@@ -108,22 +109,31 @@ class StyleAttributionService:
                             total_weight += weight
 
                 # 归一化权重下的暴露
-                portfolio_exposure[factor] = float(exposure / total_weight) if total_weight > 0 else 0.0
+                portfolio_exposure[factor] = (
+                    float(exposure / total_weight) if total_weight > 0 else 0.0
+                )
 
             # 5. 计算基准暴露 (Benchmark Exposure)
             benchmark_exposure = {}
             if (benchmark, target_date) in factor_data.index:
                 for factor in cls.STYLE_FACTORS.keys():
                     val = factor_data.loc[(benchmark, target_date), factor]
-                    benchmark_exposure[factor] = float(val) if not np.isnan(val) else 0.0
+                    benchmark_exposure[factor] = (
+                        float(val) if not np.isnan(val) else 0.0
+                    )
 
             return {
                 "date": str(target_date),
                 "portfolio": portfolio_exposure,
                 "benchmark": benchmark_exposure,
-                "active": {k: portfolio_exposure[k] - benchmark_exposure.get(k, 0) for k in portfolio_exposure},
+                "active": {
+                    k: portfolio_exposure[k] - benchmark_exposure.get(k, 0)
+                    for k in portfolio_exposure
+                },
             }
 
         except Exception as e:
-            task_logger.error("analyze_portfolio_exposure_failed", "风格归因分析失败", error=str(e))
+            task_logger.error(
+                "analyze_portfolio_exposure_failed", "风格归因分析失败", error=str(e)
+            )
             return {}

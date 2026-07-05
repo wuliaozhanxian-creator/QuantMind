@@ -9,7 +9,7 @@ import time
 import traceback
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Optional
 from uuid import uuid4
 
 import numpy as np
@@ -27,8 +27,12 @@ from backend.services.engine.qlib_app.services.market_state_service import (
 )
 from backend.services.engine.qlib_app.services.risk_analyzer import RiskAnalyzer
 from backend.services.engine.qlib_app.services.strategy_builder import StrategyFactory
-from backend.services.engine.qlib_app.services.strategy_templates import get_template_by_id
-from backend.services.engine.qlib_app.utils.margin_position import ensure_margin_backtest_support
+from backend.services.engine.qlib_app.services.strategy_templates import (
+    get_template_by_id,
+)
+from backend.services.engine.qlib_app.utils.margin_position import (
+    ensure_margin_backtest_support,
+)
 from backend.services.engine.qlib_app.utils.qlib_utils import (
     QLIB_BACKEND,
     D,
@@ -39,12 +43,13 @@ from backend.services.engine.qlib_app.utils.qlib_utils import (
 from backend.services.engine.qlib_app.utils.strategy_adapter import StrategyAdapter
 from backend.shared.notification_publisher import publish_notification_async
 from backend.shared.utils import normalize_user_id
-from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
+from backend.services.engine.qlib_app.utils.structured_logger import (
+    StructuredTaskLogger,
+)
 from .backtest_service_runtime import QlibBacktestServiceRuntimeMixin
 
 logger = logging.getLogger(__name__)
 task_logger = StructuredTaskLogger(logger, "BacktestService")
-
 
 # 计算项目根目录
 def _find_project_root() -> Path:
@@ -57,13 +62,13 @@ def _find_project_root() -> Path:
                 break
             curr = curr.parent
     except Exception:
-        pass
+        logger.debug("ignored exception", exc_info=True)
     return Path(os.getcwd())
 
-
 PROJECT_ROOT = _find_project_root()
-task_logger.info("project_root_resolved", "Project root resolved", root=str(PROJECT_ROOT))
-
+task_logger.info(
+    "project_root_resolved", "Project root resolved", root=str(PROJECT_ROOT)
+)
 
 class QlibBacktestService(QlibBacktestServiceRuntimeMixin):
     """Qlib 回测服务"""
@@ -81,9 +86,13 @@ class QlibBacktestService(QlibBacktestServiceRuntimeMixin):
                 potential_path = PROJECT_ROOT / provider_uri
                 if potential_path.exists():
                     provider_uri = str(potential_path)
-                    task_logger.info("provider_uri_resolved", "Resolved provider_uri", provider_uri=provider_uri)
+                    task_logger.info(
+                        "provider_uri_resolved",
+                        "Resolved provider_uri",
+                        provider_uri=provider_uri,
+                    )
             except Exception:
-                pass
+                logger.debug("ignored exception", exc_info=True)
 
         self.provider_uri = provider_uri
         self.provider_uri_dict = {"day": provider_uri}
@@ -103,7 +112,11 @@ class QlibBacktestService(QlibBacktestServiceRuntimeMixin):
             self._cache = get_cache_manager()
             task_logger.info("cache_manager_initialized", "缓存管理器已初始化")
         except Exception as e:
-            task_logger.warning("cache_manager_init_failed", "缓存管理器初始化失败，将不使用缓存", error=str(e))
+            task_logger.warning(
+                "cache_manager_init_failed",
+                "缓存管理器初始化失败，将不使用缓存",
+                error=str(e),
+            )
             self._cache = None
 
     def _load_seed(self) -> int | None:
@@ -124,7 +137,9 @@ class QlibBacktestService(QlibBacktestServiceRuntimeMixin):
                 if value > 0:
                     return value
             except ValueError:
-                task_logger.warning("invalid_kernels", "Invalid QLIB_BACKTEST_KERNELS", value=raw)
+                task_logger.warning(
+                    "invalid_kernels", "Invalid QLIB_BACKTEST_KERNELS", value=raw
+                )
         return max(1, min((os.cpu_count() or 1), 8))
 
     def _load_joblib_backend(self) -> str:
@@ -147,14 +162,16 @@ class QlibBacktestService(QlibBacktestServiceRuntimeMixin):
             torch.backends.cudnn.deterministic = True
             torch.backends.cudnn.benchmark = False
         except Exception:
-            pass
+            logger.debug("ignored exception", exc_info=True)
 
     def _resolve_seed(self, request_seed: int | None) -> int | None:
         return request_seed if request_seed is not None else self._seed
 
     @staticmethod
     def _should_enable_short_selling(request: QlibBacktestRequest) -> bool:
-        return str(request.strategy_type or "").strip().lower() == "long_short_topk" and bool(
+        return str(
+            request.strategy_type or ""
+        ).strip().lower() == "long_short_topk" and bool(
             request.strategy_params.enable_short_selling
         )
 
@@ -164,14 +181,18 @@ class QlibBacktestService(QlibBacktestServiceRuntimeMixin):
         解析策略 Builder。
         优先使用内置映射；若未命中且存在同 ID 模板，则自动回退到模板代码执行。
         """
-        builder, is_fallback, normalized = StrategyFactory.resolve_builder(request.strategy_type)
+        builder, is_fallback, normalized = StrategyFactory.resolve_builder(
+            request.strategy_type
+        )
         if not is_fallback:
             return builder
 
         if request.strategy_content and request.strategy_content.strip():
             return StrategyFactory.get_builder("CustomStrategy")
 
-        template = get_template_by_id(request.strategy_type) or get_template_by_id(normalized)
+        template = get_template_by_id(request.strategy_type) or get_template_by_id(
+            normalized
+        )
         if template and getattr(template, "code", "").strip():
             request.strategy_content = template.code
             request.strategy_type = "CustomStrategy"
@@ -239,11 +260,17 @@ class QlibBacktestService(QlibBacktestServiceRuntimeMixin):
     def _audit_data_quality(self):
         """轻量级数据质量审计"""
         try:
-            df = D.features(["SH000300"], ["$close"], start_time="2023-01-01", end_time="2023-01-10")
+            df = D.features(
+                ["SH000300"], ["$close"], start_time="2023-01-01", end_time="2023-01-10"
+            )
             if df is None or df.empty:
-                task_logger.warning("data_audit_missing_benchmark", "数据质量审计未发现基准数据")
+                task_logger.warning(
+                    "data_audit_missing_benchmark", "数据质量审计未发现基准数据"
+                )
             elif df.isna().any().any():
-                task_logger.error("data_audit_nan_found", "数据质量审计发现 NaN 值，建议进行数据预洗")
+                task_logger.error(
+                    "data_audit_nan_found", "数据质量审计发现 NaN 值，建议进行数据预洗"
+                )
         except Exception as e:
             task_logger.debug("data_audit_skipped", "数据审计执行跳过", error=str(e))
 

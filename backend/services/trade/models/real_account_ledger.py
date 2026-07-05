@@ -1,6 +1,16 @@
 from datetime import datetime
 
-from sqlalchemy import Column, Date, DateTime, Float, Index, Integer, JSON, String, UniqueConstraint
+from sqlalchemy import (
+    Column,
+    Date,
+    DateTime,
+    Float,
+    Index,
+    Integer,
+    JSON,
+    String,
+    UniqueConstraint,
+)
 
 from backend.services.trade.models.base import Base
 
@@ -23,7 +33,9 @@ class RealAccountLedgerDailySnapshot(Base):
     account_id = Column(String(64), nullable=False, index=True)
 
     snapshot_date = Column(Date, nullable=False, index=True)
-    last_snapshot_at = Column(DateTime, nullable=False, default=datetime.now, index=True)
+    last_snapshot_at = Column(
+        DateTime, nullable=False, default=datetime.now, index=True
+    )
     initial_equity = Column(Float, nullable=False, default=0.0)
     day_open_equity = Column(Float, nullable=False, default=0.0)
     month_open_equity = Column(Float, nullable=False, default=0.0)

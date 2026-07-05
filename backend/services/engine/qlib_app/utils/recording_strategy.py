@@ -13,10 +13,11 @@ from qlib.contrib.strategy.signal_strategy import (
 import redis
 
 from backend.shared.fundamental_aligner import fundamental_aligner
-from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
+from backend.services.engine.qlib_app.utils.structured_logger import (
+    StructuredTaskLogger,
+)
 
 logger = logging.getLogger(__name__)
-
 
 class FundamentalFilteredSignal(Signal):
     """对 signal.get_signal() 的返回值补充基本面过滤。"""
@@ -29,7 +30,9 @@ class FundamentalFilteredSignal(Signal):
         return getattr(self._signal, name)
 
     @staticmethod
-    def _resolve_trade_date(args: tuple[Any, ...], kwargs: dict[str, Any]) -> pd.Timestamp | None:
+    def _resolve_trade_date(
+        args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> pd.Timestamp | None:
         candidates = (
             kwargs.get("end_time"),
             kwargs.get("start_time"),
@@ -46,13 +49,19 @@ class FundamentalFilteredSignal(Signal):
         return None
 
     @staticmethod
-    def _filter_score_index(score: pd.Series | pd.DataFrame, instruments: list[str]) -> pd.Series | pd.DataFrame:
+    def _filter_score_index(
+        score: pd.Series | pd.DataFrame, instruments: list[str]
+    ) -> pd.Series | pd.DataFrame:
         if not instruments:
             return score.iloc[0:0]
 
         instrument_set = {str(item) for item in instruments}
         if isinstance(score.index, pd.MultiIndex) and "instrument" in score.index.names:
-            mask = score.index.get_level_values("instrument").astype(str).isin(instrument_set)
+            mask = (
+                score.index.get_level_values("instrument")
+                .astype(str)
+                .isin(instrument_set)
+            )
             return score.loc[mask]
 
         kept_index = [idx for idx in score.index if str(idx) in instrument_set]
@@ -72,8 +81,13 @@ class FundamentalFilteredSignal(Signal):
             return score
 
         try:
-            if isinstance(score.index, pd.MultiIndex) and "instrument" in score.index.names:
-                instruments = score.index.get_level_values("instrument").astype(str).tolist()
+            if (
+                isinstance(score.index, pd.MultiIndex)
+                and "instrument" in score.index.names
+            ):
+                instruments = (
+                    score.index.get_level_values("instrument").astype(str).tolist()
+                )
             else:
                 instruments = [str(idx) for idx in score.index.tolist()]
 
@@ -89,10 +103,17 @@ class FundamentalFilteredSignal(Signal):
             StructuredTaskLogger(
                 logger,
                 "fundamental-filter-signal",
-                {"trade_date": trade_date.strftime("%Y-%m-%d") if hasattr(trade_date, "strftime") else trade_date},
-            ).warning("fundamental_signal_filter_failed", "基本面信号过滤失败，回退原始信号", error=str(exc))
+                {
+                    "trade_date": trade_date.strftime("%Y-%m-%d")
+                    if hasattr(trade_date, "strftime")
+                    else trade_date
+                },
+            ).warning(
+                "fundamental_signal_filter_failed",
+                "基本面信号过滤失败，回退原始信号",
+                error=str(exc),
+            )
             return score
-
 
 # 所有「本项目自定义 / 前端传入」的 kwargs，Qlib 的 BaseStrategy 不认识它们，
 # 必须在调用 super().__init__() 之前统一 pop。
@@ -143,7 +164,6 @@ _OUR_KWARGS = {
     # 融券股票池
     "margin_stock_pool",
     # 调仓周期（各策略自行 pop 使用，不传给 BaseStrategy）
-    "rebalance_days",
     # 做空开关
     "enable_short_selling",
     # 敞口配置
@@ -179,7 +199,6 @@ _OUR_KWARGS = {
     # 各策略应在 super().__init__() 前通过 _resolve_signal_kwarg() 处理 signal
 }
 
-
 def _resolve_signal_kwarg(kwargs: dict) -> dict:
     """
     信号参数兼容性处理：将 dict 格式的 signal 转换为实例对象。
@@ -203,7 +222,6 @@ def _resolve_signal_kwarg(kwargs: dict) -> dict:
 
     return kwargs
 
-
 def _normalize_display_quantity(symbol: str, quantity: float) -> int:
     """A 股展示数量纠偏，避免复权因子日间漂移造成非整手抖动。"""
     qty_int = int(round(float(quantity)))
@@ -213,7 +231,6 @@ def _normalize_display_quantity(symbol: str, quantity: float) -> int:
         if abs(qty_int - lot_rounded) <= 2:
             return lot_rounded
     return qty_int
-
 
 class RedisLoggerMixin:
     """
@@ -236,7 +253,11 @@ class RedisLoggerMixin:
             self.redis_client._ensure_connection()
             log.info("redis_init", "RedisLogger initialized via Sentinel client")
         except Exception as e:
-            log.warning("redis_sentinel_unavailable", "无法使用哨兵客户端，尝试传统连接", error=e)
+            log.warning(
+                "redis_sentinel_unavailable",
+                "无法使用哨兵客户端，尝试传统连接",
+                error=e,
+            )
             self.redis_host = kwargs.pop("redis_host", "localhost")
             self.redis_port = kwargs.pop("redis_port", 6379)
             self.redis_db = kwargs.pop("redis_db", 0)
@@ -278,7 +299,9 @@ class RedisLoggerMixin:
                         min(int(trade_step), trade_calendar.get_trade_len() - 1)
                     )[0]
                 else:
-                    current_date = trade_calendar[min(int(trade_step), len(trade_calendar) - 1)]
+                    current_date = trade_calendar[
+                        min(int(trade_step), len(trade_calendar) - 1)
+                    ]
                 if hasattr(current_date, "strftime"):
                     current_date = current_date.strftime("%Y-%m-%d")
 
@@ -338,9 +361,7 @@ class RedisLoggerMixin:
                     try:
                         date_str = order.start_time.strftime("%Y-%m-%d")
                     except (AttributeError, ValueError) as fmt_exc:
-                        logger.debug(
-                            "Failed to format order start_time: %s", fmt_exc
-                        )
+                        logger.debug("Failed to format order start_time: %s", fmt_exc)
 
                 cash_after = None
                 position_value_after = None
@@ -358,17 +379,23 @@ class RedisLoggerMixin:
                     if pos_obj is not None:
                         if hasattr(pos_obj, "get_cash"):
                             try:
-                                cash_after = float(pos_obj.get_cash(include_settle=True))
+                                cash_after = float(
+                                    pos_obj.get_cash(include_settle=True)
+                                )
                             except TypeError:
                                 cash_after = float(pos_obj.get_cash())
                         if hasattr(pos_obj, "calculate_stock_value"):
-                            position_value_after = float(pos_obj.calculate_stock_value())
+                            position_value_after = float(
+                                pos_obj.calculate_stock_value()
+                            )
                         if hasattr(pos_obj, "calculate_value"):
                             equity_after = float(pos_obj.calculate_value())
-                        elif cash_after is not None and position_value_after is not None:
+                        elif (
+                            cash_after is not None and position_value_after is not None
+                        ):
                             equity_after = cash_after + position_value_after
                 except Exception:
-                    pass
+                    logger.debug("ignored exception", exc_info=True)
 
                 adj_price = float(trade_price)
                 adj_quantity = float(order.deal_amount)
@@ -385,14 +412,20 @@ class RedisLoggerMixin:
                 # quantity（deal_amount）是复权调整单位，需要 ×factor 还原为真实股数。
                 display_price = adj_price  # 真实不复权价格，直接使用
                 display_quantity = adj_quantity
-                if factor_val is not None and factor_val > 0 and not self.trade_exchange.trade_w_adj_price:
+                if (
+                    factor_val is not None
+                    and factor_val > 0
+                    and not self.trade_exchange.trade_w_adj_price
+                ):
                     display_quantity = adj_quantity * factor_val  # 还原真实股数
 
                 record = {
                     "date": date_str,
                     "symbol": str(order.stock_id),
                     "action": direction,
-                    "quantity": _normalize_display_quantity(str(order.stock_id), display_quantity),
+                    "quantity": _normalize_display_quantity(
+                        str(order.stock_id), display_quantity
+                    ),
                     "price": float(display_price),
                     "commission": float(trade_cost),
                     "totalAmount": float(trade_val),
@@ -419,7 +452,6 @@ class RedisLoggerMixin:
                 {"backtest_id": self.backtest_id, "strategy": self.__class__.__name__},
             ).error("trade_log_failed", "记录交易日志失败", error=e)
 
-
 class DynamicRiskMixin:
     """动态风险仓位支持"""
 
@@ -442,18 +474,28 @@ class DynamicRiskMixin:
                 if isinstance(value, (int, float)):
                     return self._clamp(float(value))
                 if isinstance(value, str) and isinstance(self.position_by_state, dict):
-                    mapped = self.position_by_state.get(value, self.position_by_state.get("neutral", 1.0))
-                    base = float(self.strategy_total_position) if self.strategy_total_position is not None else 1.0
+                    mapped = self.position_by_state.get(
+                        value, self.position_by_state.get("neutral", 1.0)
+                    )
+                    base = (
+                        float(self.strategy_total_position)
+                        if self.strategy_total_position is not None
+                        else 1.0
+                    )
                     # Enforce max leverage limit
                     return self._clamp(min(mapped * base, self.max_leverage))
 
         if self.default_risk_degree is not None:
             try:
                 # Enforce max leverage limit on default risk degree too
-                return self._clamp(min(float(self.default_risk_degree), self.max_leverage))
+                return self._clamp(
+                    min(float(self.default_risk_degree), self.max_leverage)
+                )
             except Exception:
-                pass
-        return self._clamp(min(super().get_risk_degree(*args, **kwargs), self.max_leverage))
+                logger.debug("ignored exception", exc_info=True)
+        return self._clamp(
+            min(super().get_risk_degree(*args, **kwargs), self.max_leverage)
+        )
 
     def reset_dynamic_risk(self):
         """回测重置时清除止损状态和初始本金记录，避免跨轮次污染。"""
@@ -524,7 +566,11 @@ class DynamicRiskMixin:
                     "strategy": self.__class__.__name__,
                     "backtest_id": getattr(self, "backtest_id", None),
                 },
-            ).debug("account_stop_loss_check_failed", "Failed to check account stop-loss", error=e)
+            ).debug(
+                "account_stop_loss_check_failed",
+                "Failed to check account stop-loss",
+                error=e,
+            )
 
         return False
 
@@ -572,7 +618,9 @@ class DynamicRiskMixin:
             return None
         try:
             if hasattr(trade_calendar, "get_step_time"):
-                return trade_calendar.get_step_time(min(int(trade_step), trade_calendar.get_trade_len() - 1))[0]
+                return trade_calendar.get_step_time(
+                    min(int(trade_step), trade_calendar.get_trade_len() - 1)
+                )[0]
             return trade_calendar[min(int(trade_step), len(trade_calendar) - 1)]
         except Exception:
             return None
@@ -587,13 +635,13 @@ class DynamicRiskMixin:
             try:
                 return int(trade_calendar.get_trade_step())
             except Exception:
-                pass
+                logger.debug("ignored exception", exc_info=True)
         trade_step = getattr(self, "trade_step", None)
         if trade_step is not None:
             try:
                 return int(trade_step)
             except Exception:
-                pass
+                logger.debug("ignored exception", exc_info=True)
         return None
 
     def _should_rebalance(self, rebalance_days: int) -> bool:
@@ -627,7 +675,6 @@ class DynamicRiskMixin:
                 return super().reset(*args, **filtered)
             except TypeError:
                 return super().reset()
-
 
 class FundamentalFilterMixin:
     """
@@ -669,14 +716,24 @@ class FundamentalFilterMixin:
                 logger,
                 "fundamental-filter-mixin",
                 {"backtest_id": getattr(self, "backtest_id", None)},
-            ).warning("signal_no_get_signal", "signal 没有 get_signal 方法，跳过包装", signal_type=type(signal).__name__)
+            ).warning(
+                "signal_no_get_signal",
+                "signal 没有 get_signal 方法，跳过包装",
+                signal_type=type(signal).__name__,
+            )
             return
-        kwargs["signal"] = FundamentalFilteredSignal(signal, self.fundamental_constraints)
+        kwargs["signal"] = FundamentalFilteredSignal(
+            signal, self.fundamental_constraints
+        )
         StructuredTaskLogger(
             logger,
             "fundamental-filter-mixin",
             {"backtest_id": getattr(self, "backtest_id", None)},
-        ).info("signal_wrapped", "信号已包装为 FundamentalFilteredSignal", constraints=list(self.fundamental_constraints.keys()))
+        ).info(
+            "signal_wrapped",
+            "信号已包装为 FundamentalFilteredSignal",
+            constraints=list(self.fundamental_constraints.keys()),
+        )
 
     def apply_fundamental_filter(self, score, trade_date):
         if not self.use_fundamental_filter or score is None or score.empty:
@@ -695,7 +752,6 @@ class FundamentalFilterMixin:
 
         # 使用统一的索引过滤方法，兼容单层和多层索引
         return FundamentalFilteredSignal._filter_score_index(score, list(filtered_list))
-
 
 class RedisRecordingStrategy(
     DynamicRiskMixin, FundamentalFilterMixin, TopkDropoutStrategy, RedisLoggerMixin
@@ -725,11 +781,15 @@ class RedisRecordingStrategy(
         # 3. 调用 super().__init__
         super().__init__(*args, **clean_kwargs)
 
-    def generate_target_weight_position(self, score, current=None, trade_exchange=None, *args, **kwargs):
+    def generate_target_weight_position(
+        self, score, current=None, trade_exchange=None, *args, **kwargs
+    ):
         t_start = kwargs.get("trade_start_time") or kwargs.get("t_start")
         if t_start:
             score = self.apply_fundamental_filter(score, t_start)
-        return super().generate_target_weight_position(score, current, trade_exchange, *args, **kwargs)
+        return super().generate_target_weight_position(
+            score, current, trade_exchange, *args, **kwargs
+        )
 
     def generate_trade_decision(self, execute_result=None):
         # 0. 账户止损检查
@@ -737,7 +797,10 @@ class RedisRecordingStrategy(
             StructuredTaskLogger(
                 logger,
                 "redis-recording-strategy",
-                {"rebalance_days": self.rebalance_days, "backtest_id": getattr(self, "backtest_id", None)},
+                {
+                    "rebalance_days": self.rebalance_days,
+                    "backtest_id": getattr(self, "backtest_id", None),
+                },
             ).info("account_stop_loss", "Account stop-loss triggered. Liquidating.")
             return self._liquidate_all()
 
@@ -757,11 +820,15 @@ class RedisRecordingStrategy(
         except TypeError as e:
             if "unsupported operand type(s) for /: 'float' and 'NoneType'" in str(e):
                 from qlib.backtest.decision import TradeDecisionWO
+
                 StructuredTaskLogger(
                     logger,
                     "redis-recording-strategy",
                     {"backtest_id": getattr(self, "backtest_id", None)},
-                ).warning("skip_trade_no_price", "Skip trade due to missing price data (suspended stock)")
+                ).warning(
+                    "skip_trade_no_price",
+                    "Skip trade due to missing price data (suspended stock)",
+                )
                 return TradeDecisionWO([], self)
             raise
         return trade_decision
@@ -789,7 +856,6 @@ class RedisRecordingStrategy(
         """
         self.log_progress()
         self.log_executed_trades(execute_result)
-
 
 class SimpleWeightStrategy(WeightStrategyBase):
     """
@@ -824,7 +890,9 @@ class SimpleWeightStrategy(WeightStrategyBase):
             remaining = remaining.loc[~over]
         return weights[weights > 0]
 
-    def generate_target_weight_position(self, score, current=None, trade_exchange=None, *args, **kwargs):
+    def generate_target_weight_position(
+        self, score, current=None, trade_exchange=None, *args, **kwargs
+    ):
         if current is None and args:
             current = args[0]
         if trade_exchange is None and len(args) > 1:
@@ -871,7 +939,6 @@ class SimpleWeightStrategy(WeightStrategyBase):
             weights = sc / total
         return weights.to_dict()
 
-
 class RedisWeightStrategy(DynamicRiskMixin, SimpleWeightStrategy, RedisLoggerMixin):
     """
     带有 Redis 记录功能的 SimpleWeightStrategy，并在选股层过滤涨停/停牌股。
@@ -890,7 +957,10 @@ class RedisWeightStrategy(DynamicRiskMixin, SimpleWeightStrategy, RedisLoggerMix
         StructuredTaskLogger(
             logger,
             "redis-weight-strategy",
-            {"rebalance_days": self.rebalance_days, "backtest_id": getattr(self, "backtest_id", None)},
+            {
+                "rebalance_days": self.rebalance_days,
+                "backtest_id": getattr(self, "backtest_id", None),
+            },
         ).info("init", "RedisWeightStrategy initialized")
         clean_kwargs = {k: v for k, v in kwargs.items() if k not in _OUR_KWARGS}
         super().__init__(*args, **clean_kwargs)
@@ -912,13 +982,21 @@ class RedisWeightStrategy(DynamicRiskMixin, SimpleWeightStrategy, RedisLoggerMix
             except TypeError:
                 return super().reset()
 
-    def generate_target_weight_position(self, score, current=None, trade_exchange=None, *args, **kwargs):
+    def generate_target_weight_position(
+        self, score, current=None, trade_exchange=None, *args, **kwargs
+    ):
         if self.check_account_stop_loss():
             StructuredTaskLogger(
                 logger,
                 "redis-weight-strategy",
-                {"rebalance_days": self.rebalance_days, "backtest_id": getattr(self, "backtest_id", None)},
-            ).info("account_stop_loss", "Account stop-loss triggered. Target position is empty.")
+                {
+                    "rebalance_days": self.rebalance_days,
+                    "backtest_id": getattr(self, "backtest_id", None),
+                },
+            ).info(
+                "account_stop_loss",
+                "Account stop-loss triggered. Target position is empty.",
+            )
             return {}
 
         exchange = trade_exchange or getattr(self, "trade_exchange", None)
@@ -930,7 +1008,10 @@ class RedisWeightStrategy(DynamicRiskMixin, SimpleWeightStrategy, RedisLoggerMix
             StructuredTaskLogger(
                 logger,
                 "redis-weight-strategy",
-                {"rebalance_days": self.rebalance_days, "backtest_id": getattr(self, "backtest_id", None)},
+                {
+                    "rebalance_days": self.rebalance_days,
+                    "backtest_id": getattr(self, "backtest_id", None),
+                },
             ).warning("trade_exchange_missing", "trade_exchange 未注入，跳过涨停过滤")
         elif score is not None and not score.empty and t_start is not None:
             if isinstance(score, pd.DataFrame):
@@ -939,19 +1020,24 @@ class RedisWeightStrategy(DynamicRiskMixin, SimpleWeightStrategy, RedisLoggerMix
             skipped = 0
             for sid in score.index:
                 try:
-                    if exchange.check_stock_suspended(sid, t_start, t_end) or exchange.check_stock_limit(
+                    if exchange.check_stock_suspended(
+                        sid, t_start, t_end
+                    ) or exchange.check_stock_limit(
                         sid, t_start, t_end, direction=Order.BUY
                     ):
                         skipped += 1
                         continue
                 except Exception:
-                    pass
+                    logger.debug("ignored exception", exc_info=True)
                 filtered_index.append(sid)
             if skipped:
                 StructuredTaskLogger(
                     logger,
                     "redis-weight-strategy",
-                    {"rebalance_days": self.rebalance_days, "backtest_id": getattr(self, "backtest_id", None)},
+                    {
+                        "rebalance_days": self.rebalance_days,
+                        "backtest_id": getattr(self, "backtest_id", None),
+                    },
                 ).info(
                     "trade_filter",
                     "剔除涨停/停牌标的",
@@ -963,7 +1049,10 @@ class RedisWeightStrategy(DynamicRiskMixin, SimpleWeightStrategy, RedisLoggerMix
                 StructuredTaskLogger(
                     logger,
                     "redis-weight-strategy",
-                    {"rebalance_days": self.rebalance_days, "backtest_id": getattr(self, "backtest_id", None)},
+                    {
+                        "rebalance_days": self.rebalance_days,
+                        "backtest_id": getattr(self, "backtest_id", None),
+                    },
                 ).info(
                     "trade_filter",
                     "检查标的，无涨停/停牌",
@@ -971,7 +1060,9 @@ class RedisWeightStrategy(DynamicRiskMixin, SimpleWeightStrategy, RedisLoggerMix
                     checked=len(score),
                 )
 
-        return super().generate_target_weight_position(score, current, trade_exchange, *args, **kwargs)
+        return super().generate_target_weight_position(
+            score, current, trade_exchange, *args, **kwargs
+        )
 
     def _safe_generate_trade_decision(self, execute_result=None):
         """安全地生成交易决策，处理 get_deal_price 返回 None 的情况。"""
@@ -980,6 +1071,7 @@ class RedisWeightStrategy(DynamicRiskMixin, SimpleWeightStrategy, RedisLoggerMix
         except TypeError as e:
             if "unsupported operand type(s) for /: 'float' and 'NoneType'" in str(e):
                 from qlib.backtest.decision import TradeDecisionWO
+
                 StructuredTaskLogger(
                     logger,
                     "redis-weight-strategy",
@@ -998,7 +1090,10 @@ class RedisWeightStrategy(DynamicRiskMixin, SimpleWeightStrategy, RedisLoggerMix
         StructuredTaskLogger(
             logger,
             "redis-weight-strategy",
-            {"rebalance_days": self.rebalance_days, "backtest_id": getattr(self, "backtest_id", None)},
+            {
+                "rebalance_days": self.rebalance_days,
+                "backtest_id": getattr(self, "backtest_id", None),
+            },
         ).info("generate_orders", "Generating orders", step=current_step)
         return self._safe_generate_trade_decision(execute_result)
 

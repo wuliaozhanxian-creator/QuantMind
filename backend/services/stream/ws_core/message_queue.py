@@ -10,10 +10,9 @@ import logging
 import time
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
-
 
 class MessagePriority(Enum):
     """消息优先级"""
@@ -22,7 +21,6 @@ class MessagePriority(Enum):
     NORMAL = 2
     HIGH = 3
     URGENT = 4
-
 
 @dataclass
 class QueuedMessage:
@@ -39,7 +37,6 @@ class QueuedMessage:
         if self.priority != other.priority:
             return self.priority.value > other.priority.value
         return self.timestamp < other.timestamp
-
 
 class MessageQueue:
     """
@@ -232,7 +229,6 @@ class MessageQueue:
             except asyncio.QueueEmpty:
                 break
         logger.info("消息队列已清空")
-
 
 # 全局消息队列实例
 message_queue = MessageQueue()

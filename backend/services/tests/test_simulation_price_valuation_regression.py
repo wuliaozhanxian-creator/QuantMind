@@ -108,6 +108,7 @@ def test_simulation_account_prefers_redis_before_daily_reprice_ready_time():
 
 def test_simulation_eod_worker_targets_previous_trade_day_for_overnight_run():
     tz = ZoneInfo("Asia/Shanghai")
-    assert _resolve_target_trade_date(
-        datetime(2026, 6, 19, 3, 30, tzinfo=tz)
-    ).isoformat() == "2026-06-18"
+    assert (
+        _resolve_target_trade_date(datetime(2026, 6, 19, 3, 30, tzinfo=tz)).isoformat()
+        == "2026-06-18"
+    )

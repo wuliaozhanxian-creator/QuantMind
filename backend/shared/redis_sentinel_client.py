@@ -28,7 +28,6 @@ from redis import Redis
 
 logger = logging.getLogger(__name__)
 
-
 class RedisSentinelConfig:
     """Redis 配置加载"""
 
@@ -42,10 +41,14 @@ class RedisSentinelConfig:
 
         if not self.host:
             self.host = "quantmind-redis" if is_docker else "127.0.0.1"
-            print(f"[RedisSentinelConfig] REDIS_HOST not set, defaulting to: {self.host}")
+            print(
+                f"[RedisSentinelConfig] REDIS_HOST not set, defaulting to: {self.host}"
+            )
         elif is_docker and self.host in ("localhost", "127.0.0.1"):
             self.host = "quantmind-redis"
-            print(f"[RedisSentinelConfig] Corrected localhost to quantmind-redis in Docker: {self.host}")
+            print(
+                f"[RedisSentinelConfig] Corrected localhost to quantmind-redis in Docker: {self.host}"
+            )
 
         self.port = int(os.getenv("REDIS_PORT", "6379"))
         self.db = int(os.getenv("REDIS_DB", "0"))
@@ -58,12 +61,16 @@ class RedisSentinelConfig:
 
         # 3. 模式自动感应
         # 如果明确设置了哨兵地址，则启用哨兵模式；否则使用单机直连（兼容 GCP Memorystore）
-        self.use_sentinel = (os.getenv("REDIS_USE_SENTINEL", "true").lower() == "true") and bool(self.sentinels)
+        self.use_sentinel = (
+            os.getenv("REDIS_USE_SENTINEL", "true").lower() == "true"
+        ) and bool(self.sentinels)
 
         # 4. 连接池与超时
         self.max_connections = int(os.getenv("REDIS_MAX_CONNECTIONS", "100"))
         self.socket_timeout = float(os.getenv("REDIS_SOCKET_TIMEOUT", "5"))
-        self.socket_connect_timeout = float(os.getenv("REDIS_SOCKET_CONNECT_TIMEOUT", "5"))
+        self.socket_connect_timeout = float(
+            os.getenv("REDIS_SOCKET_CONNECT_TIMEOUT", "5")
+        )
         self.health_check_interval = int(os.getenv("REDIS_HEALTH_CHECK_INTERVAL", "30"))
         self.decode_responses = False  # 保持 bytes 兼容 pickle
 
@@ -86,7 +93,6 @@ class RedisSentinelConfig:
             port = int(parts[1]) if len(parts) > 1 else 26379
             sentinels.append((host, port))
         return sentinels
-
 
 class RedisSentinelClient:
     """统一 Redis 客户端（屏蔽底层部署差异）"""
@@ -196,7 +202,11 @@ class RedisSentinelClient:
         """
         try:
             self._ensure_connection()
-            client = self._slave_client if use_slave and self._slave_client else self._master_client
+            client = (
+                self._slave_client
+                if use_slave and self._slave_client
+                else self._master_client
+            )
             return client.get(key)
         except Exception as e:
             logger.error(f"Redis GET failed for key {key}: {e}")
@@ -208,7 +218,9 @@ class RedisSentinelClient:
                     logger.error(f"Redis GET failed on master for key {key}: {e2}")
             return None
 
-    def set(self, key: str, value: bytes, ex: int | None = None, nx: bool = False) -> bool:
+    def set(
+        self, key: str, value: bytes, ex: int | None = None, nx: bool = False
+    ) -> bool:
         """
         设置缓存值
 
@@ -321,7 +333,9 @@ class RedisSentinelClient:
             logger.error(f"Redis XADD failed for stream {stream}: {e}")
             raise
 
-    def hset(self, key: str, field: str = None, value: Any = None, mapping: dict = None) -> int:
+    def hset(
+        self, key: str, field: str = None, value: Any = None, mapping: dict = None
+    ) -> int:
         """设置 Hash 字段值"""
         try:
             self._ensure_connection()
@@ -334,7 +348,11 @@ class RedisSentinelClient:
         """获取 Hash 所有字段"""
         try:
             self._ensure_connection()
-            client = self._slave_client if use_slave and self._slave_client else self._master_client
+            client = (
+                self._slave_client
+                if use_slave and self._slave_client
+                else self._master_client
+            )
             res = client.hgetall(key)
             # 兼容 decode_responses=False 模式，手动转码
             if not self.config.decode_responses:
@@ -348,7 +366,11 @@ class RedisSentinelClient:
         """检查 Hash 中是否存在指定字段"""
         try:
             self._ensure_connection()
-            client = self._slave_client if use_slave and self._slave_client else self._master_client
+            client = (
+                self._slave_client
+                if use_slave and self._slave_client
+                else self._master_client
+            )
             return client.hexists(key, field)
         except Exception as e:
             logger.error(f"Redis HEXISTS failed for key {key}: {e}")
@@ -500,7 +522,9 @@ class RedisSentinelClient:
             logger.error(f"Redis SET_OBJECT failed for key {key}: {e}")
             return False
 
-    def get_object(self, key: str, use_slave: bool = True, serializer: str = "pickle") -> Any | None:
+    def get_object(
+        self, key: str, use_slave: bool = True, serializer: str = "pickle"
+    ) -> Any | None:
         """
         获取Python对象
 
@@ -588,10 +612,8 @@ class RedisSentinelClient:
 
         self._initialized = False
 
-
 # 全局Redis客户端实例
 _redis_sentinel_client: RedisSentinelClient | None = None
-
 
 def get_redis_sentinel_client() -> RedisSentinelClient:
     """
@@ -606,7 +628,6 @@ def get_redis_sentinel_client() -> RedisSentinelClient:
         _redis_sentinel_client = RedisSentinelClient()
 
     return _redis_sentinel_client
-
 
 def close_redis_sentinel_client():
     """关闭全局Redis哨兵客户端"""

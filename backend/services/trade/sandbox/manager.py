@@ -9,7 +9,6 @@ from backend.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-
 class SandboxPlatformManager:
     """
     轻量级沙箱进程池管理器。
@@ -59,7 +58,7 @@ class SandboxPlatformManager:
                 try:
                     queue.close()
                 except Exception:
-                    pass
+                    logger.debug("ignored exception", exc_info=True)
 
         stale_keys = [key for key, pid in self._active_runs.items() if pid in dead_pids]
         for key in stale_keys:
@@ -97,7 +96,7 @@ class SandboxPlatformManager:
     def stop_pool(self):
         """关闭所有 worker"""
         logger.info("Stopping Sandbox Worker Pool...")
-        for pid, q in self._task_queues.items():
+        for _pid, q in self._task_queues.items():
             q.put(None)  # 发送毒药
 
         for pid, p in self._workers.items():
@@ -109,7 +108,7 @@ class SandboxPlatformManager:
                 try:
                     q.close()
                 except Exception:
-                    pass
+                    logger.debug("ignored exception", exc_info=True)
 
         self._workers.clear()
         self._task_queues.clear()
@@ -167,7 +166,9 @@ class SandboxPlatformManager:
         self._purge_dead_workers()
         key = self._strategy_key(tenant_id, user_id, strategy_id)
         if key not in self._active_runs:
-            logger.warning(f"Strategy {strategy_id} is not tracked as running in sandbox.")
+            logger.warning(
+                f"Strategy {strategy_id} is not tracked as running in sandbox."
+            )
             return False
 
         pid = self._active_runs[key]
@@ -181,7 +182,9 @@ class SandboxPlatformManager:
             )
             return False
 
-        shared_keys = [k for k, mapped_pid in self._active_runs.items() if mapped_pid == pid]
+        shared_keys = [
+            k for k, mapped_pid in self._active_runs.items() if mapped_pid == pid
+        ]
         if len(shared_keys) > 1:
             # 历史版本可能把多个策略映射到同一 PID；避免一次 stop 误杀其他用户策略。
             self._active_runs.pop(key, None)
@@ -204,9 +207,11 @@ class SandboxPlatformManager:
             try:
                 queue.close()
             except Exception:
-                pass
+                logger.debug("ignored exception", exc_info=True)
 
-        for stale_key in [k for k, mapped_pid in self._active_runs.items() if mapped_pid == pid]:
+        for stale_key in [
+            k for k, mapped_pid in self._active_runs.items() if mapped_pid == pid
+        ]:
             self._active_runs.pop(stale_key, None)
 
         new_pid = self._spawn_worker()
@@ -218,7 +223,9 @@ class SandboxPlatformManager:
         )
         return True
 
-    def is_strategy_running(self, tenant_id: str, user_id: str, strategy_id: str) -> bool:
+    def is_strategy_running(
+        self, tenant_id: str, user_id: str, strategy_id: str
+    ) -> bool:
         self._purge_dead_workers()
         key = self._strategy_key(tenant_id, user_id, strategy_id)
         pid = self._active_runs.get(key)
@@ -229,6 +236,5 @@ class SandboxPlatformManager:
         if not alive:
             self._active_runs.pop(key, None)
         return alive
-
 
 sandbox_manager = SandboxPlatformManager()

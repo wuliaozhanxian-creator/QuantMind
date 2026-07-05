@@ -8,13 +8,12 @@ import hashlib
 import os
 import uuid
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from dotenv import load_dotenv
 from loguru import logger
 
 load_dotenv()
-
 
 class LocalStorageService:
     """Local file storage service for OSS edition."""
@@ -171,7 +170,7 @@ class LocalStorageService:
                 return {"success": True, "files": [], "total_count": 0}
 
             files = []
-            for root, dirs, filenames in os.walk(search_root):
+            for root, _dirs, filenames in os.walk(search_root):
                 for filename in filenames:
                     full_path = os.path.join(root, filename)
                     rel_key = os.path.relpath(full_path, self.local_storage_root)
@@ -201,9 +200,7 @@ class LocalStorageService:
             logger.error(f"Local storage list_files failed: {e}")
             return {"success": False, "error": str(e)}
 
-
 def get_cos_service() -> LocalStorageService:
     return LocalStorageService()
-
 
 TencentCOSService = LocalStorageService

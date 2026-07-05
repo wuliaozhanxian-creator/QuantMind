@@ -21,7 +21,6 @@ _INDEPENDENT_MODEL_SOURCES = {
     "explicit_system_model",
 }
 
-
 def _build_execution_meta(
     *,
     fallback_used: bool,
@@ -49,7 +48,6 @@ def _build_execution_meta(
         ),
     }
 
-
 def _get_model_data_dir(model_dir: Path) -> str:
     """
     从模型配置中获取推理数据目录。
@@ -73,10 +71,9 @@ def _get_model_data_dir(model_dir: Path) -> str:
             if data_source == "qlib":
                 return "db/qlib_data"
         except Exception:
-            pass
+            logger.debug("ignored exception", exc_info=True)
 
     return "db/feature_snapshots"
-
 
 class InferenceRouterService:
     """统一推理编排层：显式模型/策略绑定/默认模型（无 alpha158 兜底）。"""
@@ -84,8 +81,12 @@ class InferenceRouterService:
     def __init__(self, inference_service: InferenceService | None = None):
         self.inference_service = inference_service or InferenceService()
         self.primary_model_id = os.getenv("PRIMARY_MODEL_ID", "model_qlib")
-        self.primary_model_dir = os.getenv("MODELS_PRODUCTION", "/app/models/production/model_qlib")
-        self.primary_data_source = os.getenv("QLIB_PRIMARY_DATA_PATH", "db/feature_snapshots")
+        self.primary_model_dir = os.getenv(
+            "MODELS_PRODUCTION", "/app/models/production/model_qlib"
+        )
+        self.primary_data_source = os.getenv(
+            "QLIB_PRIMARY_DATA_PATH", "db/feature_snapshots"
+        )
 
     def _resolve_data_source(self, model_id: str, model_source: str = "") -> str:
         if model_source in {"explicit_model_id", "strategy_binding", "user_default"}:
@@ -209,7 +210,9 @@ class InferenceRouterService:
             fallback_used=False,
             fallback_reason="",
             active_model_id=requested_model,
-            active_data_source=self._resolve_data_source(requested_model, model_source=model_source),
+            active_data_source=self._resolve_data_source(
+                requested_model, model_source=model_source
+            ),
             trace_id=trace_id,
             model_source=model_source,
             effective_model_id=effective_mid,
@@ -230,7 +233,9 @@ class InferenceRouterService:
         if tenant_id and user_id:
             try:
                 asyncio.get_running_loop()
-                raise RuntimeError("predict_with_fallback must use async API when tenant_id/user_id are provided")
+                raise RuntimeError(
+                    "predict_with_fallback must use async API when tenant_id/user_id are provided"
+                )
             except RuntimeError as loop_err:
                 if "must use async API" in str(loop_err):
                     raise
@@ -330,15 +335,22 @@ class InferenceRouterService:
         tenant_id: str,
         user_id: str,
     ) -> dict[str, Any]:
-        effective_model_id = str(resolved.get("effective_model_id") or self.primary_model_id)
+        effective_model_id = str(
+            resolved.get("effective_model_id") or self.primary_model_id
+        )
         model_source = str(resolved.get("model_source") or "")
         storage_path = str(resolved.get("storage_path") or "").strip()
 
-        if storage_path and Path(storage_path).exists() and model_source in {
-            "explicit_model_id",
-            "strategy_binding",
-            "user_default",
-        }:
+        if (
+            storage_path
+            and Path(storage_path).exists()
+            and model_source
+            in {
+                "explicit_model_id",
+                "strategy_binding",
+                "user_default",
+            }
+        ):
             user_result = self._predict_single_model(
                 model_id=effective_model_id,
                 data=data,
@@ -350,7 +362,9 @@ class InferenceRouterService:
                 fallback_used=False,
                 fallback_reason="",
                 active_model_id=effective_model_id,
-                active_data_source=self._resolve_data_source(effective_model_id, model_source=model_source),
+                active_data_source=self._resolve_data_source(
+                    effective_model_id, model_source=model_source
+                ),
                 trace_id=trace_id,
                 model_source=model_source,
                 effective_model_id=effective_model_id,
@@ -387,11 +401,15 @@ class InferenceRouterService:
                 strategy_id=str(strategy_id) if strategy_id is not None else None,
                 model_id=model_id,
             )
-        effective_model_id = str(resolved.get("effective_model_id") or self.primary_model_id)
+        effective_model_id = str(
+            resolved.get("effective_model_id") or self.primary_model_id
+        )
         model_source = str(resolved.get("model_source") or "")
         storage_path = str(resolved.get("storage_path") or "").strip()
 
-        explicit_storage_dir = storage_path if storage_path and Path(storage_path).exists() else ""
+        explicit_storage_dir = (
+            storage_path if storage_path and Path(storage_path).exists() else ""
+        )
         independent_execution = model_source in _INDEPENDENT_MODEL_SOURCES
 
         if explicit_storage_dir:
@@ -408,7 +426,9 @@ class InferenceRouterService:
             primary_data_dir=primary_data_dir,
             primary_model_id=primary_id,
         )
-        result = runner.execute(date, tenant_id=tenant_id, user_id=user_id, redis_client=redis_client)
+        result = runner.execute(
+            date, tenant_id=tenant_id, user_id=user_id, redis_client=redis_client
+        )
         execution_meta = _build_execution_meta(
             fallback_used=bool(result.fallback_used),
             fallback_reason=result.fallback_reason,

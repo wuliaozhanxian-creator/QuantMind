@@ -3,12 +3,11 @@
 import logging
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import aiohttp
 
 logger = logging.getLogger(__name__)
-
 
 class DataSourceAdapter(ABC):
     """数据源适配器基类"""
@@ -32,7 +31,6 @@ class DataSourceAdapter(ABC):
     async def fetch_symbols(self, market: str | None = None) -> list[dict[str, Any]]:
         """获取交易标的列表"""
 
-
 class TencentDataSource(DataSourceAdapter):
     """腾讯财经数据源"""
 
@@ -46,9 +44,13 @@ class TencentDataSource(DataSourceAdapter):
             url = f"{self.BASE_URL}/q={formatted_symbol}"
 
             async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                async with session.get(
+                    url, timeout=aiohttp.ClientTimeout(total=5)
+                ) as resp:
                     if resp.status != 200:
-                        logger.error(f"Failed to fetch quote from Tencent: {resp.status}")
+                        logger.error(
+                            f"Failed to fetch quote from Tencent: {resp.status}"
+                        )
                         return None
 
                     text = await resp.text()
@@ -82,12 +84,19 @@ class TencentDataSource(DataSourceAdapter):
                 )
             else:
                 # 分钟线
-                url = "https://ifzq.gtimg.cn/appstock/app/kline/mkline" f"?param={formatted_symbol},{token},,{limit}"
+                url = (
+                    "https://ifzq.gtimg.cn/appstock/app/kline/mkline"
+                    f"?param={formatted_symbol},{token},,{limit}"
+                )
 
             async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                async with session.get(
+                    url, timeout=aiohttp.ClientTimeout(total=8)
+                ) as resp:
                     if resp.status != 200:
-                        logger.error("Failed to fetch kline from Tencent: %s", resp.status)
+                        logger.error(
+                            "Failed to fetch kline from Tencent: %s", resp.status
+                        )
                         return []
                     payload = await resp.json(content_type=None)
 
@@ -124,7 +133,9 @@ class TencentDataSource(DataSourceAdapter):
 
     async def fetch_symbols(self, market: str | None = None) -> list[dict[str, Any]]:
         """获取交易标的列表"""
-        logger.warning("Tencent symbols API not fully implemented, returning empty list")
+        logger.warning(
+            "Tencent symbols API not fully implemented, returning empty list"
+        )
         return []
 
     def _format_symbol(self, symbol: str) -> str:
@@ -174,24 +185,40 @@ class TencentDataSource(DataSourceAdapter):
                 # Bid 1-5
                 "bid1_price": float(parts[9]) if parts[9] else 0.0,
                 "bid1_volume": int(parts[10]) if parts[10] else 0,
-                "bid2_price": (float(parts[11]) if len(parts) > 11 and parts[11] else 0.0),
+                "bid2_price": (
+                    float(parts[11]) if len(parts) > 11 and parts[11] else 0.0
+                ),
                 "bid2_volume": int(parts[12]) if len(parts) > 12 and parts[12] else 0,
-                "bid3_price": (float(parts[13]) if len(parts) > 13 and parts[13] else 0.0),
+                "bid3_price": (
+                    float(parts[13]) if len(parts) > 13 and parts[13] else 0.0
+                ),
                 "bid3_volume": int(parts[14]) if len(parts) > 14 and parts[14] else 0,
-                "bid4_price": (float(parts[15]) if len(parts) > 15 and parts[15] else 0.0),
+                "bid4_price": (
+                    float(parts[15]) if len(parts) > 15 and parts[15] else 0.0
+                ),
                 "bid4_volume": int(parts[16]) if len(parts) > 16 and parts[16] else 0,
-                "bid5_price": (float(parts[17]) if len(parts) > 17 and parts[17] else 0.0),
+                "bid5_price": (
+                    float(parts[17]) if len(parts) > 17 and parts[17] else 0.0
+                ),
                 "bid5_volume": int(parts[18]) if len(parts) > 18 and parts[18] else 0,
                 # Ask 1-5
                 "ask1_price": float(parts[19]) if parts[19] else 0.0,
                 "ask1_volume": int(parts[20]) if parts[20] else 0,
-                "ask2_price": (float(parts[21]) if len(parts) > 21 and parts[21] else 0.0),
+                "ask2_price": (
+                    float(parts[21]) if len(parts) > 21 and parts[21] else 0.0
+                ),
                 "ask2_volume": int(parts[22]) if len(parts) > 22 and parts[22] else 0,
-                "ask3_price": (float(parts[23]) if len(parts) > 23 and parts[23] else 0.0),
+                "ask3_price": (
+                    float(parts[23]) if len(parts) > 23 and parts[23] else 0.0
+                ),
                 "ask3_volume": int(parts[24]) if len(parts) > 24 and parts[24] else 0,
-                "ask4_price": (float(parts[25]) if len(parts) > 25 and parts[25] else 0.0),
+                "ask4_price": (
+                    float(parts[25]) if len(parts) > 25 and parts[25] else 0.0
+                ),
                 "ask4_volume": int(parts[26]) if len(parts) > 26 and parts[26] else 0,
-                "ask5_price": (float(parts[27]) if len(parts) > 27 and parts[27] else 0.0),
+                "ask5_price": (
+                    float(parts[27]) if len(parts) > 27 and parts[27] else 0.0
+                ),
                 "ask5_volume": int(parts[28]) if len(parts) > 28 and parts[28] else 0,
                 "data_source": "tencent",
             }
@@ -218,7 +245,9 @@ class TencentDataSource(DataSourceAdapter):
         }
         return interval_map.get(key)
 
-    def _pick_tencent_kline_rows(self, data: dict[str, Any], token: str) -> list[list[Any]]:
+    def _pick_tencent_kline_rows(
+        self, data: dict[str, Any], token: str
+    ) -> list[list[Any]]:
         # fqkline/get 常见字段：qfqday / day / week / month
         if token in {"day", "week", "month"}:
             for key in (f"qfq{token}", token, f"hfq{token}"):
@@ -249,11 +278,15 @@ class TencentDataSource(DataSourceAdapter):
             high_price = float(row[3] or 0)
             low_price = float(row[4] or 0)
             volume = int(float(row[5] or 0))
-            amount = float(row[6]) if len(row) > 6 and row[6] not in (None, "") else None
+            amount = (
+                float(row[6]) if len(row) > 6 and row[6] not in (None, "") else None
+            )
 
             baseline = prev_close if prev_close and prev_close > 0 else None
             change = (close_price - baseline) if baseline else None
-            change_percent = (change / baseline * 100) if baseline and change is not None else None
+            change_percent = (
+                (change / baseline * 100) if baseline and change is not None else None
+            )
 
             return {
                 "symbol": symbol,
@@ -266,7 +299,9 @@ class TencentDataSource(DataSourceAdapter):
                 "volume": volume,
                 "amount": amount,
                 "change": change,
-                "change_percent": round(change_percent, 4) if change_percent is not None else None,
+                "change_percent": round(change_percent, 4)
+                if change_percent is not None
+                else None,
                 "turnover_rate": None,
                 "data_source": "tencent",
             }
@@ -282,7 +317,6 @@ class TencentDataSource(DataSourceAdapter):
                 continue
         return None
 
-
 class SinaDataSource(DataSourceAdapter):
     """新浪财经数据源"""
 
@@ -296,7 +330,9 @@ class SinaDataSource(DataSourceAdapter):
             url = f"{self.BASE_URL}/list={formatted_symbol}"
 
             async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                async with session.get(
+                    url, timeout=aiohttp.ClientTimeout(total=5)
+                ) as resp:
                     if resp.status != 200:
                         logger.error(f"Failed to fetch quote from Sina: {resp.status}")
                         return None
@@ -402,7 +438,6 @@ class SinaDataSource(DataSourceAdapter):
         except Exception as e:
             logger.error(f"Error parsing Sina quote: {e}")
             return None
-
 
 """
 注意：企业级金融业务禁止内置任何模拟/演示数据源。

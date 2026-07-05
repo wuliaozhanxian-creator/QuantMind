@@ -6,10 +6,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from backend.services.trade.deps import AuthContext, get_auth_context
-from backend.services.trade.services.manual_execution_service import manual_execution_service
+from backend.services.trade.services.manual_execution_service import (
+    manual_execution_service,
+)
 
 router = APIRouter(prefix="/manual-executions", tags=["Manual Executions"])
-
 
 class ManualExecutionCreateRequest(BaseModel):
     model_id: str = Field(..., description="模型 ID")
@@ -20,7 +21,6 @@ class ManualExecutionCreateRequest(BaseModel):
     note: str | None = Field(None, description="备注")
     model_config = {"protected_namespaces": ()}
 
-
 class ManualExecutionPreviewRequest(BaseModel):
     model_id: str = Field(..., description="模型 ID")
     run_id: str = Field(..., description="推理批次 run_id")
@@ -28,7 +28,6 @@ class ManualExecutionPreviewRequest(BaseModel):
     trading_mode: str = Field("REAL", description="REAL / SHADOW / SIMULATION")
     note: str | None = Field(None, description="备注")
     model_config = {"protected_namespaces": ()}
-
 
 @router.post("/preview")
 async def preview_manual_execution(
@@ -44,7 +43,6 @@ async def preview_manual_execution(
         trading_mode=payload.trading_mode,
         note=payload.note,
     )
-
 
 @router.post("")
 async def create_manual_execution(
@@ -63,13 +61,12 @@ async def create_manual_execution(
     )
     return {"status": "success", **result}
 
-
 @router.get("")
 async def list_manual_executions(
     limit: int = Query(20, ge=1, le=100),
-    task_type: Optional[str] = Query(None),
-    task_source: Optional[str] = Query(None),
-    active_runtime_id: Optional[str] = Query(None),
+    task_type: str | None = Query(None),
+    task_source: str | None = Query(None),
+    active_runtime_id: str | None = Query(None),
     auth: AuthContext = Depends(get_auth_context),
 ):
     return await manual_execution_service.list_tasks(
@@ -81,7 +78,6 @@ async def list_manual_executions(
         active_runtime_id=active_runtime_id,
     )
 
-
 @router.delete("")
 async def clear_manual_executions(
     auth: AuthContext = Depends(get_auth_context),
@@ -91,7 +87,6 @@ async def clear_manual_executions(
         tenant_id=auth.tenant_id,
         user_id=auth.user_id,
     )
-
 
 @router.get("/{task_id}")
 async def get_manual_execution(
@@ -106,7 +101,6 @@ async def get_manual_execution(
     if not task:
         raise HTTPException(status_code=404, detail="手动执行任务不存在")
     return task
-
 
 @router.get("/{task_id}/logs")
 async def get_manual_execution_logs(

@@ -4,10 +4,9 @@ Tushare数据适配器占位符
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
-
 
 class TushareAdapter:
     """Tushare数据适配器"""
@@ -30,7 +29,9 @@ class TushareAdapter:
         logger.warning("Tushare adapter not available, returning empty data")
         return []
 
-    def get_daily_data(self, ts_code: str, start_date: str = None, end_date: str = None) -> list[dict[str, Any]]:
+    def get_daily_data(
+        self, ts_code: str, start_date: str = None, end_date: str = None
+    ) -> list[dict[str, Any]]:
         """获取日线数据"""
         logger.warning("Tushare adapter not available, returning empty data")
         return []
@@ -39,7 +40,6 @@ class TushareAdapter:
         """获取股票列表"""
         logger.warning("Tushare adapter not available, returning empty data")
         return []
-
 
 def get_tushare_adapter(token: str = None) -> TushareAdapter | None:
     """获取Tushare适配器实例

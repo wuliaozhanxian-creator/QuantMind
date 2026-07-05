@@ -4,6 +4,7 @@ import time
 from datetime import datetime, timezone, date, timedelta, time as time_obj
 from pathlib import Path
 
+
 def _is_trading_session_now() -> bool:
     """检查当前是否处于 A 股交易时段（09:15-11:30, 13:00-15:00）"""
     now = datetime.now()
@@ -11,11 +12,12 @@ def _is_trading_session_now() -> bool:
         return False
     try:
         import exchange_calendars as xcals
+
         calendar = xcals.get_calendar("XSHG")
         if not calendar.is_session(now.date()):
             return False
     except Exception:
-        pass
+        logger.debug("ignored exception", exc_info=True)
     curr = now.time()
     if curr >= time_obj(9, 15) and curr <= time_obj(11, 30):
         return True
@@ -34,7 +36,9 @@ from .real_trading_utils import (
     _resolve_runner_image_for_mode,
     _upsert_preflight_snapshot,
 )
-from backend.services.trade.services.manual_execution_service import manual_execution_service
+from backend.services.trade.services.manual_execution_service import (
+    manual_execution_service,
+)
 from backend.services.trade.services.trading_precheck_service import (
     _check_simulation_model_ready,
     _check_user_hosting_permission,
@@ -64,6 +68,7 @@ def _parse_snapshot_timestamp(raw: Any) -> float | None:
         return parsed.timestamp()
     return None
 
+
 @router.get("/preflight")
 async def preflight_check(
     trading_mode: str = "REAL",
@@ -81,7 +86,9 @@ async def preflight_check(
     - Runner 镜像配置（REAL/SHADOW 必需）
     - SECRET_KEY 配置（必需，service JWT 签发）
     """
-    resolved_user_id, resolved_tenant_id = _normalize_identity(auth, user_id=user_id, tenant_id=tenant_id)
+    resolved_user_id, resolved_tenant_id = _normalize_identity(
+        auth, user_id=user_id, tenant_id=tenant_id
+    )
     mode = str(trading_mode or "REAL").strip().upper()
     if mode not in {"REAL", "SHADOW", "SIMULATION"}:
         raise HTTPException(status_code=400, detail=f"unsupported trading_mode: {mode}")
@@ -143,13 +150,19 @@ async def preflight_check(
         )
     except Exception as exc:
         permission_ok, permission_message = False, f"用户权限检测失败: {exc}"
-    
-    permission_required = (mode != "SIMULATION")
+
+    permission_required = mode != "SIMULATION"
     if not permission_required:
         permission_ok = True
         permission_message = f"[SIMULATION] 订阅门禁已放行; {permission_message}"
 
-    add_check("user_permission", "用户权限", permission_ok, permission_required, permission_message)
+    add_check(
+        "user_permission",
+        "用户权限",
+        permission_ok,
+        permission_required,
+        permission_message,
+    )
 
     try:
         hosted_status = await manual_execution_service.get_default_model_hosted_status(
@@ -196,14 +209,18 @@ async def preflight_check(
             orchestration_label,
             orchestration_ok,
             orchestration_required,
-            f"{orchestration_label} 客户端已就绪" if orchestration_ok else f"{orchestration_label} 客户端未初始化",
+            f"{orchestration_label} 客户端已就绪"
+            if orchestration_ok
+            else f"{orchestration_label} 客户端未初始化",
         )
 
     # 7) QMT Agent 在线状态（PG 账户快照 + Redis 心跳）
     bridge_required = mode == "REAL"
     account_report: dict | None = None
     if bridge_required:
-        heartbeat_key = build_trade_agent_heartbeat_key(resolved_tenant_id, resolved_user_id)
+        heartbeat_key = build_trade_agent_heartbeat_key(
+            resolved_tenant_id, resolved_user_id
+        )
         try:
             account_snapshot = await _fetch_latest_real_account_snapshot(
                 db,
@@ -252,7 +269,9 @@ async def preflight_check(
                         "检测到 QMT Agent 心跳格式异常（非 JSON 对象）",
                     )
                 else:
-                    account_ts = _parse_snapshot_timestamp(account_snapshot.get("snapshot_at"))
+                    account_ts = _parse_snapshot_timestamp(
+                        account_snapshot.get("snapshot_at")
+                    )
                     heartbeat_ts = _parse_bridge_report_ts(heartbeat_report)
                     if account_ts is None or heartbeat_ts is None:
                         add_check(
@@ -265,9 +284,16 @@ async def preflight_check(
                     else:
                         account_age_sec = max(0, int(time.time() - account_ts))
                         heartbeat_age_sec = max(0, int(time.time() - heartbeat_ts))
-                        account_threshold_sec = int(os.getenv("QMT_AGENT_ACCOUNT_STALE_THRESHOLD_SEC", "120"))
-                        heartbeat_threshold_sec = int(os.getenv("QMT_AGENT_HEARTBEAT_STALE_THRESHOLD_SEC", "60"))
-                        if account_age_sec <= account_threshold_sec and heartbeat_age_sec <= heartbeat_threshold_sec:
+                        account_threshold_sec = int(
+                            os.getenv("QMT_AGENT_ACCOUNT_STALE_THRESHOLD_SEC", "120")
+                        )
+                        heartbeat_threshold_sec = int(
+                            os.getenv("QMT_AGENT_HEARTBEAT_STALE_THRESHOLD_SEC", "60")
+                        )
+                        if (
+                            account_age_sec <= account_threshold_sec
+                            and heartbeat_age_sec <= heartbeat_threshold_sec
+                        ):
                             add_check(
                                 "qmt_agent_online",
                                 "QMT Agent 在线状态",
@@ -298,8 +324,10 @@ async def preflight_check(
         "margin_trading_feature",
         "双向交易功能开关",
         True,  # 警告：不阻断启动
-        False, # 不阻断
-        "ENABLE_MARGIN_TRADING 已开启" if margin_enabled else "[WARNING] ENABLE_MARGIN_TRADING 未开启(部分双向策略可能无法下单)",
+        False,  # 不阻断
+        "ENABLE_MARGIN_TRADING 已开启"
+        if margin_enabled
+        else "[WARNING] ENABLE_MARGIN_TRADING 未开启(部分双向策略可能无法下单)",
     )
 
     if margin_enabled:
@@ -316,7 +344,10 @@ async def preflight_check(
                     if snapshot.record_count > 0
                     else "融资融券股票池为空"
                 ),
-                {"source_path": snapshot.source_path, "record_count": snapshot.record_count},
+                {
+                    "source_path": snapshot.source_path,
+                    "record_count": snapshot.record_count,
+                },
             )
         except Exception as e:
             add_check(
@@ -334,11 +365,15 @@ async def preflight_check(
             "实盘多空灰度开关",
             long_short_enabled or not real_short_required,
             real_short_required,
-            "ENABLE_LONG_SHORT_REAL 已开启" if long_short_enabled else "ENABLE_LONG_SHORT_REAL 未开启",
+            "ENABLE_LONG_SHORT_REAL 已开启"
+            if long_short_enabled
+            else "ENABLE_LONG_SHORT_REAL 未开启",
         )
         whitelist_users = {
             item.strip()
-            for item in str(getattr(settings, "LONG_SHORT_WHITELIST_USERS", "")).split(",")
+            for item in str(getattr(settings, "LONG_SHORT_WHITELIST_USERS", "")).split(
+                ","
+            )
             if item and item.strip()
         }
         in_whitelist = str(resolved_user_id) in whitelist_users
@@ -366,7 +401,8 @@ async def preflight_check(
         )
 
         account_has_credit_fields = isinstance(account_report, dict) and any(
-            key in account_report for key in ("liabilities", "credit_limit", "short_market_value")
+            key in account_report
+            for key in ("liabilities", "credit_limit", "short_market_value")
         )
         add_check(
             "margin_account_state",
@@ -380,8 +416,10 @@ async def preflight_check(
             ),
             account_report if account_has_credit_fields else {},
         )
-        short_admission_ready = isinstance(account_report, dict) and bool(account_report.get("credit_enabled", False)) and (
-            int(account_report.get("shortable_symbols_count") or 0) > 0
+        short_admission_ready = (
+            isinstance(account_report, dict)
+            and bool(account_report.get("credit_enabled", False))
+            and (int(account_report.get("shortable_symbols_count") or 0) > 0)
         )
         add_check(
             "short_admission_capability",
@@ -398,14 +436,22 @@ async def preflight_check(
         )
 
     # 8~9) Stream 探针：REAL/SHADOW 必需；SIMULATION 仅在交易时段必需。
-    is_trading = _is_trading_session_now()
+    _is_trading_session_now()
     if mode in {"REAL", "SHADOW", "SIMULATION"}:
-
         stream_required = True
         # 统一使用 trading_precheck_service 中已经容器实测通过的逻辑
-        from backend.services.trade.services.trading_precheck_service import _check_stream_series_freshness
+        from backend.services.trade.services.trading_precheck_service import (
+            _check_stream_series_freshness,
+        )
+
         stream_ok, stream_msg = _check_stream_series_freshness(None)
-        add_check("stream_series_freshness", "Stream时序序列", stream_ok, stream_required, stream_msg)
+        add_check(
+            "stream_series_freshness",
+            "Stream时序序列",
+            stream_ok,
+            stream_required,
+            stream_msg,
+        )
 
         # 9) Stream quote 落库速率检测（quotes 表）
         quote_window_min = int(os.getenv("PREFLIGHT_QUOTE_WINDOW_MINUTES", "5"))
@@ -416,7 +462,10 @@ async def preflight_check(
                 FROM quotes
                 WHERE timestamp >= NOW() - make_interval(mins => :window)
                 """)
-            quote_cnt = int((await db.execute(quote_sql, {"window": quote_window_min})).scalar() or 0)
+            quote_cnt = int(
+                (await db.execute(quote_sql, {"window": quote_window_min})).scalar()
+                or 0
+            )
             quote_ok = quote_cnt >= quote_min_count
             add_check(
                 "stream_quote_persist_rate",
@@ -455,7 +504,12 @@ async def preflight_check(
             production_dir = model_context.get("model_dir")
             if not isinstance(production_dir, Path):
                 production_dir = Path(
-                    str(production_dir or os.getenv("MODELS_PRODUCTION", "/app/models/production/model_qlib"))
+                    str(
+                        production_dir
+                        or os.getenv(
+                            "MODELS_PRODUCTION", "/app/models/production/model_qlib"
+                        )
+                    )
                 )
             model_ok, model_detail = await _check_simulation_model_ready(
                 tenant_id=resolved_tenant_id,
@@ -532,12 +586,10 @@ async def preflight_check(
                 "sim_trades",
             ]
             missing_required = [
-                name for name in required_tables
-                if not bool(table_probe_row.get(name))
+                name for name in required_tables if not bool(table_probe_row.get(name))
             ]
             missing_legacy = [
-                name for name in legacy_tables
-                if not bool(table_probe_row.get(name))
+                name for name in legacy_tables if not bool(table_probe_row.get(name))
             ]
             tables_ok = len(missing_required) == 0
             details: dict = {
@@ -546,7 +598,11 @@ async def preflight_check(
                 "legacy_tables": legacy_tables,
                 "missing_legacy_tables": missing_legacy,
             }
-            message = "模拟盘关键表已就绪" if tables_ok else f"缺少模拟盘关键表: {', '.join(missing_required)}"
+            message = (
+                "模拟盘关键表已就绪"
+                if tables_ok
+                else f"缺少模拟盘关键表: {', '.join(missing_required)}"
+            )
             if missing_legacy:
                 message += f" (legacy表缺失: {', '.join(missing_legacy)})"
             add_check(
@@ -567,8 +623,13 @@ async def preflight_check(
             )
 
         # 11.3 资金快照任务配置（非阻断，便于排障）
-        snapshot_enabled = str(os.getenv("SIM_FUND_SNAPSHOT_ENABLED", "true")).strip().lower() != "false"
-        interval_raw = str(os.getenv("SIM_FUND_SNAPSHOT_INTERVAL_SECONDS", "300")).strip()
+        snapshot_enabled = (
+            str(os.getenv("SIM_FUND_SNAPSHOT_ENABLED", "true")).strip().lower()
+            != "false"
+        )
+        interval_raw = str(
+            os.getenv("SIM_FUND_SNAPSHOT_INTERVAL_SECONDS", "300")
+        ).strip()
         try:
             interval_seconds = int(interval_raw)
         except Exception:
@@ -647,7 +708,9 @@ async def list_preflight_snapshots_daily(
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    resolved_user_id, resolved_tenant_id = _normalize_identity(auth, user_id=user_id, tenant_id=tenant_id)
+    resolved_user_id, resolved_tenant_id = _normalize_identity(
+        auth, user_id=user_id, tenant_id=tenant_id
+    )
     query = (
         select(PreflightSnapshot)
         .where(
@@ -675,7 +738,9 @@ async def list_preflight_snapshots_daily(
             "passed_checks": int(r.passed_checks or 0),
             "required_failed_count": int(r.required_failed_count or 0),
             "failed_required_keys": r.failed_required_keys or [],
-            "last_checked_at": r.last_checked_at.isoformat() if r.last_checked_at else None,
+            "last_checked_at": r.last_checked_at.isoformat()
+            if r.last_checked_at
+            else None,
             "updated_at": r.updated_at.isoformat() if r.updated_at else None,
             "checks": r.checks or [],
         }
@@ -696,7 +761,9 @@ async def get_account(
     只读取 PostgreSQL 中最近一次持久化快照，不再用 Redis 参与展示口径。
     """
     try:
-        resolved_user_id, resolved_tenant_id = _normalize_identity(auth, user_id=user_id, tenant_id=tenant_id)
+        resolved_user_id, resolved_tenant_id = _normalize_identity(
+            auth, user_id=user_id, tenant_id=tenant_id
+        )
         latest_snapshot = await _fetch_latest_real_account_snapshot(
             db,
             tenant_id=resolved_tenant_id,
@@ -710,13 +777,21 @@ async def get_account(
 
         account_info = dict(latest_snapshot)
         snapshot_ts = _parse_snapshot_timestamp(account_info.get("snapshot_at"))
-        stale_threshold_sec = max(30, int(os.getenv("QMT_AGENT_ACCOUNT_STALE_THRESHOLD_SEC", "120") or 120))
-        account_age_sec = None if snapshot_ts is None else max(0.0, time.time() - snapshot_ts)
-        account_info["is_online"] = bool(account_age_sec is not None and account_age_sec <= stale_threshold_sec)
+        stale_threshold_sec = max(
+            30, int(os.getenv("QMT_AGENT_ACCOUNT_STALE_THRESHOLD_SEC", "120") or 120)
+        )
+        account_age_sec = (
+            None if snapshot_ts is None else max(0.0, time.time() - snapshot_ts)
+        )
+        account_info["is_online"] = bool(
+            account_age_sec is not None and account_age_sec <= stale_threshold_sec
+        )
         if account_age_sec is not None:
             account_info["account_age_seconds"] = int(account_age_sec)
         if account_info["is_online"] is False:
-            account_info["stale_reason"] = f"account_snapshot_stale({int(account_age_sec or 0)}s)"
+            account_info["stale_reason"] = (
+                f"account_snapshot_stale({int(account_age_sec or 0)}s)"
+            )
 
         # ── 字段归一化 ──────────────────────────────────────────────────
         # 对外暴露语义统一来自 PostgreSQL 最新快照视图：
@@ -751,7 +826,9 @@ async def get_account(
             account_info["baseline"] = {
                 "initial_equity": float(account_info.get("initial_equity") or 0.0),
                 "day_open_equity": float(account_info.get("day_open_equity") or 0.0),
-                "month_open_equity": float(account_info.get("month_open_equity") or 0.0),
+                "month_open_equity": float(
+                    account_info.get("month_open_equity") or 0.0
+                ),
             }
 
             return account_info
@@ -766,7 +843,7 @@ async def get_account(
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="账户快照字段格式异常，请检查 PostgreSQL 视图口径",
-            )
+            ) from e
     except HTTPException:
         raise
     except Exception as e:
@@ -774,4 +851,4 @@ async def get_account(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="获取账户信息失败",
-        )
+        ) from e

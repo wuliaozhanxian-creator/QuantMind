@@ -33,12 +33,16 @@ async def get_profile(
     """
     # 检查权限
     if user_id != current_user["user_id"]:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="没有权限访问该用户档案")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="没有权限访问该用户档案"
+        )
 
     profile = await profile_service.get_profile(user_id, current_user["tenant_id"])
 
     if not profile:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户档案不存在")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="用户档案不存在"
+        )
 
     return {
         "code": 200,
@@ -62,12 +66,18 @@ async def update_profile(
     """
     # 检查权限
     if user_id != current_user["user_id"]:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="没有权限修改该用户档案")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="没有权限修改该用户档案"
+        )
 
-    profile = await profile_service.update_profile(user_id, current_user["tenant_id"], profile_data)
+    profile = await profile_service.update_profile(
+        user_id, current_user["tenant_id"], profile_data
+    )
 
     if not profile:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户档案不存在")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="用户档案不存在"
+        )
 
     return {
         "code": 200,
@@ -85,11 +95,15 @@ async def get_my_profile(
     获取当前用户档案
     """
     user_id = current_user["user_id"]
-    profile = await profile_service.get_profile(user_id, current_user["tenant_id"], use_cache=False)
+    profile = await profile_service.get_profile(
+        user_id, current_user["tenant_id"], use_cache=False
+    )
 
     if not profile:
         # 如果档案不存在，创建一个
-        profile = await profile_service.create_profile(user_id, current_user["tenant_id"])
+        profile = await profile_service.create_profile(
+            user_id, current_user["tenant_id"]
+        )
 
     # profile 已经是 dict，直接使用
     return {
@@ -109,7 +123,9 @@ async def update_my_profile(
     更新当前用户档案
     """
     user_id = current_user["user_id"]
-    profile = await profile_service.update_profile(user_id, current_user["tenant_id"], profile_data)
+    profile = await profile_service.update_profile(
+        user_id, current_user["tenant_id"], profile_data
+    )
 
     # profile 已经是 dict，直接使用
     return {

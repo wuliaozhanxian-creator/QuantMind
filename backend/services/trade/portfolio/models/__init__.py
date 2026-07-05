@@ -27,7 +27,9 @@ class Portfolio(Base):
     __tablename__ = "portfolios"
 
     id = Column(Integer, primary_key=True, index=True)
-    tenant_id = Column(String(64), nullable=False, default="default", index=True, comment="租户ID")
+    tenant_id = Column(
+        String(64), nullable=False, default="default", index=True, comment="租户ID"
+    )
     user_id = Column(Integer, nullable=False, index=True, comment="用户ID")
     name = Column(String(100), nullable=False, comment="组合名称")
     description = Column(Text, nullable=True, comment="组合描述")
@@ -41,24 +43,18 @@ class Portfolio(Base):
     available_cash = Column(
         Numeric(20, 2), nullable=False, default=0, comment="可用现金"
     )
-    frozen_cash = Column(Numeric(20, 2), nullable=False,
-                         default=0, comment="冻结资金")
+    frozen_cash = Column(Numeric(20, 2), nullable=False, default=0, comment="冻结资金")
 
-    total_value = Column(Numeric(20, 2), nullable=False,
-                         default=0, comment="总市值")
-    total_pnl = Column(Numeric(20, 2), nullable=False,
-                       default=0, comment="总盈亏")
-    total_return = Column(Numeric(10, 4), nullable=False,
-                          default=0, comment="总收益率")
-    daily_pnl = Column(Numeric(20, 2), nullable=False,
-                       default=0, comment="日盈亏")
-    daily_return = Column(Numeric(10, 4), nullable=False,
-                          default=0, comment="日收益率")
-    yesterday_total_value = Column(Numeric(20, 2), nullable=False,
-                                   default=0, comment="昨日结算总资产")
+    total_value = Column(Numeric(20, 2), nullable=False, default=0, comment="总市值")
+    total_pnl = Column(Numeric(20, 2), nullable=False, default=0, comment="总盈亏")
+    total_return = Column(Numeric(10, 4), nullable=False, default=0, comment="总收益率")
+    daily_pnl = Column(Numeric(20, 2), nullable=False, default=0, comment="日盈亏")
+    daily_return = Column(Numeric(10, 4), nullable=False, default=0, comment="日收益率")
+    yesterday_total_value = Column(
+        Numeric(20, 2), nullable=False, default=0, comment="昨日结算总资产"
+    )
 
-    max_drawdown = Column(Numeric(10, 4), nullable=False,
-                          default=0, comment="最大回撤")
+    max_drawdown = Column(Numeric(10, 4), nullable=False, default=0, comment="最大回撤")
     sharpe_ratio = Column(Numeric(10, 4), nullable=True, comment="夏普比率")
     volatility = Column(Numeric(10, 4), nullable=True, comment="波动率")
 
@@ -103,10 +99,8 @@ class Portfolio(Base):
         Index("idx_portfolio_tenant_user_status", "tenant_id", "user_id", "status"),
         Index("idx_portfolio_user_status", "user_id", "status"),
         Index("idx_portfolio_created_at", "created_at"),
-        CheckConstraint("initial_capital >= 0",
-                        name="check_initial_capital_positive"),
-        CheckConstraint("available_cash >= 0",
-                        name="check_available_cash_positive"),
+        CheckConstraint("initial_capital >= 0", name="check_initial_capital_positive"),
+        CheckConstraint("available_cash >= 0", name="check_available_cash_positive"),
     )
 
 
@@ -121,24 +115,21 @@ class Position(Base):
     symbol = Column(String(20), nullable=False, index=True, comment="证券代码")
     symbol_name = Column(String(100), nullable=True, comment="证券名称")
     exchange = Column(String(20), nullable=True, comment="交易所")
-    side = Column(String(20), nullable=False, default=PositionSide.LONG.value, comment="持仓方向")
+    side = Column(
+        String(20), nullable=False, default=PositionSide.LONG.value, comment="持仓方向"
+    )
 
     quantity = Column(Integer, nullable=False, default=0, comment="持仓数量")
-    available_quantity = Column(
-        Integer, nullable=False, default=0, comment="可用数量")
-    frozen_quantity = Column(Integer, nullable=False,
-                             default=0, comment="冻结数量")
+    available_quantity = Column(Integer, nullable=False, default=0, comment="可用数量")
+    frozen_quantity = Column(Integer, nullable=False, default=0, comment="冻结数量")
 
-    avg_cost = Column(Numeric(20, 4), nullable=False,
-                      default=0, comment="平均成本")
-    total_cost = Column(Numeric(20, 2), nullable=False,
-                        default=0, comment="总成本")
+    avg_cost = Column(Numeric(20, 4), nullable=False, default=0, comment="平均成本")
+    total_cost = Column(Numeric(20, 2), nullable=False, default=0, comment="总成本")
 
     current_price = Column(
         Numeric(20, 4), nullable=False, default=0, comment="当前价格"
     )
-    market_value = Column(Numeric(20, 2), nullable=False,
-                          default=0, comment="市值")
+    market_value = Column(Numeric(20, 2), nullable=False, default=0, comment="市值")
 
     unrealized_pnl = Column(
         Numeric(20, 2), nullable=False, default=0, comment="浮动盈亏"
@@ -152,8 +143,7 @@ class Position(Base):
 
     weight = Column(Numeric(10, 4), nullable=False, default=0, comment="仓位权重")
 
-    status = Column(String(20), nullable=False,
-                    default="holding", comment="状态")
+    status = Column(String(20), nullable=False, default="holding", comment="状态")
 
     opened_at = Column(
         DateTime, default=datetime.utcnow, nullable=False, comment="开仓时间"
@@ -227,7 +217,9 @@ class PortfolioSnapshot(Base):
     volatility = Column(Numeric(10, 4), nullable=True, comment="波动率")
 
     position_count = Column(Integer, nullable=False, default=0, comment="持仓数量")
-    is_settlement = Column(Boolean, nullable=False, default=False, comment="是否为结算快照")
+    is_settlement = Column(
+        Boolean, nullable=False, default=False, comment="是否为结算快照"
+    )
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 

@@ -9,7 +9,6 @@ from backend.services.engine.auth_context import (
     get_authenticated_identity,
 )
 
-
 def identity_from_request(
     request: Request,
     *,

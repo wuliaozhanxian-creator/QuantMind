@@ -66,7 +66,12 @@ class _FakeTrader:
         return self._trades
 
     def query_stock_asset(self, _account):
-        return SimpleNamespace(cash=100000.0, available_cash=90000.0, total_asset=120000.0, market_value=20000.0)
+        return SimpleNamespace(
+            cash=100000.0,
+            available_cash=90000.0,
+            total_asset=120000.0,
+            market_value=20000.0,
+        )
 
     def query_stock_positions(self, _account):
         return []
@@ -233,13 +238,58 @@ def test_reconcile_recent_activity_applies_window_and_limits():
     now = int(time.time())
 
     trader._orders = [
-        SimpleNamespace(order_remark="a1b2c3d4-e5f6-7890-abcd-ef1234567890", order_id="1001", stock_code="600001.SH", order_type=23, traded_volume=0, price=9.8, order_status=48, order_time=now - 5000),
-        SimpleNamespace(order_remark="b2c3d4e5-f6a7-8901-bcde-f23456789012", order_id="1002", stock_code="600002.SH", order_type=23, traded_volume=10, price=10.2, order_status=49, order_time=now - 20),
-        SimpleNamespace(order_remark="c3d4e5f6-a7b8-9012-cdef-345678901234", order_id="1003", stock_code="600003.SH", order_type=24, traded_volume=100, price=10.3, order_status=50, order_time=now - 10),
+        SimpleNamespace(
+            order_remark="a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            order_id="1001",
+            stock_code="600001.SH",
+            order_type=23,
+            traded_volume=0,
+            price=9.8,
+            order_status=48,
+            order_time=now - 5000,
+        ),
+        SimpleNamespace(
+            order_remark="b2c3d4e5-f6a7-8901-bcde-f23456789012",
+            order_id="1002",
+            stock_code="600002.SH",
+            order_type=23,
+            traded_volume=10,
+            price=10.2,
+            order_status=49,
+            order_time=now - 20,
+        ),
+        SimpleNamespace(
+            order_remark="c3d4e5f6-a7b8-9012-cdef-345678901234",
+            order_id="1003",
+            stock_code="600003.SH",
+            order_type=24,
+            traded_volume=100,
+            price=10.3,
+            order_status=50,
+            order_time=now - 10,
+        ),
     ]
     trader._trades = [
-        SimpleNamespace(order_remark="d4e5f6a7-b8c9-0123-def0-456789012345", order_id="2001", traded_id="t-old", stock_code="600010.SH", order_type=23, traded_volume=100, traded_price=9.6, traded_time=now - 3000),
-        SimpleNamespace(order_remark="e5f6a7b8-c9d0-1234-ef01-567890123456", order_id="2002", traded_id="t-new", stock_code="600011.SH", order_type=24, traded_volume=200, traded_price=11.2, traded_time=now - 8),
+        SimpleNamespace(
+            order_remark="d4e5f6a7-b8c9-0123-def0-456789012345",
+            order_id="2001",
+            traded_id="t-old",
+            stock_code="600010.SH",
+            order_type=23,
+            traded_volume=100,
+            traded_price=9.6,
+            traded_time=now - 3000,
+        ),
+        SimpleNamespace(
+            order_remark="e5f6a7b8-c9d0-1234-ef01-567890123456",
+            order_id="2002",
+            traded_id="t-new",
+            stock_code="600011.SH",
+            order_type=24,
+            traded_volume=200,
+            traded_price=11.2,
+            traded_time=now - 8,
+        ),
     ]
 
     events = client.reconcile_recent_activity()
@@ -334,7 +384,9 @@ def test_submit_sell_to_open_rejected_when_quota_insufficient():
     client, trader = _make_client()
     client.cfg.enable_short_trading = True
     client.cfg.account_type = "CREDIT"
-    trader.query_credit_slo_code = lambda _account: [{"stock_code": "600000.SH", "available_amount": 10}]
+    trader.query_credit_slo_code = lambda _account: [
+        {"stock_code": "600000.SH", "available_amount": 10}
+    ]
 
     result = client.submit_order(
         {

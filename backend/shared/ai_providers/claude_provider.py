@@ -4,7 +4,7 @@ Claude Provider实现
 
 import asyncio
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from anthropic import AsyncAnthropic
 
@@ -20,7 +20,6 @@ from .base import (
 )
 
 logger = get_logger(__name__)
-
 
 class ClaudeProvider(BaseAIProvider):
     """Claude Provider"""
@@ -44,7 +43,9 @@ class ClaudeProvider(BaseAIProvider):
             await self._test_connection()
             self._is_initialized = True
 
-            self.logger.info("Claude provider initialized successfully", model=self.config.model_name)
+            self.logger.info(
+                "Claude provider initialized successfully", model=self.config.model_name
+            )
             return True
 
         except Exception as e:
@@ -61,7 +62,7 @@ class ClaudeProvider(BaseAIProvider):
             )
             return True
         except Exception as e:
-            raise Exception(f"Claude connection test failed: {e}")
+            raise Exception(f"Claude connection test failed: {e}") from e
 
     async def generate_strategy(self, request: StrategyRequest) -> StrategyResponse:
         """生成交易策略"""
@@ -133,7 +134,9 @@ Claude特别擅长：
             content = response.content[0].text
 
             # Claude不提供token使用统计，需要估算
-            estimated_tokens = self.estimate_tokens(system_prompt + user_prompt + content)
+            estimated_tokens = self.estimate_tokens(
+                system_prompt + user_prompt + content
+            )
             token_usage = {
                 "prompt_tokens": estimated_tokens // 2,
                 "completion_tokens": estimated_tokens // 2,
@@ -142,7 +145,9 @@ Claude特别擅长：
 
             # 解析响应
             strategy_response = self._parse_claude_response(content, request)
-            strategy_response.generation_time = asyncio.get_event_loop().time() - start_time
+            strategy_response.generation_time = (
+                asyncio.get_event_loop().time() - start_time
+            )
             strategy_response.model_used = self.config.model_name
             strategy_response.token_usage = token_usage
 
@@ -206,7 +211,11 @@ Claude的优势在于：
             # 创建一个基本的请求对象用于解析
             dummy_request = StrategyRequest(
                 prompt="Strategy optimization",
-                complexity_level=(self.config.complexity_level if hasattr(self.config, "complexity_level") else None),
+                complexity_level=(
+                    self.config.complexity_level
+                    if hasattr(self.config, "complexity_level")
+                    else None
+                ),
             )
 
             optimized_response = self._parse_claude_response(content, dummy_request)
@@ -339,7 +348,9 @@ Claude特别擅长：
         # Claude的token估算：大约4个字符 = 1个token
         return len(text) // 4
 
-    def _parse_claude_response(self, content: str, request: StrategyRequest) -> StrategyResponse:
+    def _parse_claude_response(
+        self, content: str, request: StrategyRequest
+    ) -> StrategyResponse:
         """解析Claude响应"""
         try:
             # 尝试提取JSON部分
@@ -369,8 +380,12 @@ Claude特别擅长：
                 }
 
             # 解析策略类型
-            strategy_type = self._parse_strategy_type(data.get("strategy_type", "custom"))
-            complexity = self._parse_complexity_level(data.get("complexity_level", "intermediate"))
+            strategy_type = self._parse_strategy_type(
+                data.get("strategy_type", "custom")
+            )
+            complexity = self._parse_complexity_level(
+                data.get("complexity_level", "intermediate")
+            )
 
             # 解析代码
             code_data = data.get("code", {})
@@ -414,9 +429,12 @@ Claude特别擅长：
             return StrategyResponse(
                 strategy_name="Claude Generated Strategy",
                 description=content,
-                strategy_type=request.strategy_type or self._parse_strategy_type("custom"),
+                strategy_type=request.strategy_type
+                or self._parse_strategy_type("custom"),
                 complexity_level=request.complexity_level,
-                code=StrategyCode(language="python", code=content, dependencies=["pandas", "numpy"]),
+                code=StrategyCode(
+                    language="python", code=content, dependencies=["pandas", "numpy"]
+                ),
                 model_used=self.config.model_name,
                 confidence_score=0.7,
             )

@@ -7,8 +7,7 @@
 import os
 import sys
 from pathlib import Path
-from typing import List, Optional
-
+from typing import Optional
 
 class PathManager:
     """项目路径管理器"""
@@ -199,10 +198,8 @@ class PathManager:
         os.environ["BACKEND_ROOT"] = str(self.backend_root)
         os.environ["SHARED_ROOT"] = str(self.shared_root)
 
-
 # 全局路径管理器实例
 _path_manager: PathManager | None = None
-
 
 def get_path_manager() -> PathManager:
     """获取全局路径管理器实例
@@ -215,7 +212,6 @@ def get_path_manager() -> PathManager:
         _path_manager = PathManager()
     return _path_manager
 
-
 def initialize_project_paths(force: bool = False) -> None:
     """初始化项目路径
 
@@ -225,7 +221,6 @@ def initialize_project_paths(force: bool = False) -> None:
     path_manager = get_path_manager()
     path_manager.initialize_python_path(force)
     path_manager.setup_environment_variables()
-
 
 def auto_import(module_name: str, fallback=None):
     """自动导入模块的装饰器
@@ -243,12 +238,11 @@ def auto_import(module_name: str, fallback=None):
             except ImportError as e:
                 if fallback is not None:
                     return fallback
-                raise ImportError(f"Cannot import {module_name}: {e}")
+                raise ImportError(f"Cannot import {module_name}: {e}") from e
 
         return wrapper
 
     return decorator
-
 
 # 模块级别的便捷导入函数
 def import_backend_module(service_name: str, module_name: str = "main"):
@@ -265,8 +259,9 @@ def import_backend_module(service_name: str, module_name: str = "main"):
     try:
         return __import__(full_module_name, fromlist=[module_name])
     except ImportError as e:
-        raise ImportError(f"Cannot import backend module {full_module_name}: {e}")
-
+        raise ImportError(
+            f"Cannot import backend module {full_module_name}: {e}"
+        ) from e
 
 def import_shared_module(module_name: str):
     """导入共享模块
@@ -281,8 +276,7 @@ def import_shared_module(module_name: str):
     try:
         return __import__(full_module_name, fromlist=[module_name])
     except ImportError as e:
-        raise ImportError(f"Cannot import shared module {full_module_name}: {e}")
-
+        raise ImportError(f"Cannot import shared module {full_module_name}: {e}") from e
 
 # 初始化路径（在模块导入时自动执行）
 initialize_project_paths()

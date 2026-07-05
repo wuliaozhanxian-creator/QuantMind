@@ -1,9 +1,8 @@
 import ast
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
-
 
 class StrategyConfigExtractor:
     """
@@ -26,18 +25,22 @@ class StrategyConfigExtractor:
                 return config
 
             # 2. 如果没找到直接赋值，查找 get_strategy_config 函数并尝试解析其返回的字典
-            config = StrategyConfigExtractor._find_function_return(tree, "get_strategy_config")
+            config = StrategyConfigExtractor._find_function_return(
+                tree, "get_strategy_config"
+            )
             if config:
                 return config
 
-            raise ValueError("未在代码中找到有效的 STRATEGY_CONFIG 定义或 get_strategy_config 函数")
+            raise ValueError(
+                "未在代码中找到有效的 STRATEGY_CONFIG 定义或 get_strategy_config 函数"
+            )
 
         except SyntaxError as e:
             logger.error(f"代码语法错误，无法解析: {e}")
-            raise ValueError(f"代码语法错误: {e.msg}")
+            raise ValueError(f"代码语法错误: {e.msg}") from e
         except Exception as e:
             logger.error(f"提取策略配置失败: {e}", exc_info=True)
-            raise ValueError(f"配置提取失败: {str(e)}")
+            raise ValueError(f"配置提取失败: {str(e)}") from e
 
     @staticmethod
     def _find_assignment(tree: ast.AST, target_name: str) -> dict[str, Any] | None:
@@ -55,7 +58,9 @@ class StrategyConfigExtractor:
         for node in tree.body:
             if isinstance(node, ast.FunctionDef) and node.name == func_name:
                 for subnode in node.body:
-                    if isinstance(subnode, ast.Return) and isinstance(subnode.value, ast.Dict):
+                    if isinstance(subnode, ast.Return) and isinstance(
+                        subnode.value, ast.Dict
+                    ):
                         return StrategyConfigExtractor._eval_node(subnode.value)
         return None
 
@@ -69,8 +74,10 @@ class StrategyConfigExtractor:
             return node.value
         elif isinstance(node, ast.Dict):
             return {
-                StrategyConfigExtractor._eval_node(k): StrategyConfigExtractor._eval_node(v)
-                for k, v in zip(node.keys, node.values)
+                StrategyConfigExtractor._eval_node(
+                    k
+                ): StrategyConfigExtractor._eval_node(v)
+                for k, v in zip(node.keys, node.values, strict=False)
                 if k is not None
             }
         elif isinstance(node, ast.List):
@@ -86,7 +93,6 @@ class StrategyConfigExtractor:
             return "<Expression>"
         else:
             return None
-
 
 if __name__ == "__main__":
     # 测试代码

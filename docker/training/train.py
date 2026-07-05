@@ -956,6 +956,21 @@ if __name__ == "__main__":
         result = {"status": "failed", "run_id": run_id, "error": str(e)}
 
     finally:
+        def _sanitize_floats(obj):
+            """递归清理 NaN/Infinity 等非法 JSON float 值"""
+            import math
+            if isinstance(obj, dict):
+                return {k: _sanitize_floats(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [_sanitize_floats(v) for v in obj]
+            elif isinstance(obj, float):
+                if math.isnan(obj) or math.isinf(obj):
+                    return None
+                return obj
+            return obj
+
+        result = _sanitize_floats(result)
+
         result_path.parent.mkdir(parents=True, exist_ok=True)
         result_json = json.dumps(result, ensure_ascii=False, indent=2)
         result_path.write_text(result_json)
@@ -963,6 +978,8 @@ if __name__ == "__main__":
 
         if callback_url:
             try:
+                # T6.5-P3 residual, M4 migration: 训练容器回调仍使用 X-Internal-Call-Secret
+                # 共享密钥机制。M4 迁移后将改为 service JWT（X-Service-Token header）。
                 resp = requests.post(
                     callback_url, json=result,
                     headers={"X-Internal-Call-Secret": callback_secret},

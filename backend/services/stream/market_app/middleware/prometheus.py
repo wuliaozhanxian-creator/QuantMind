@@ -19,11 +19,17 @@ request_duration = Histogram(
     ["method", "endpoint"],
 )
 
-active_connections = Gauge("market_data_active_connections", "Number of active connections")
+active_connections = Gauge(
+    "market_data_active_connections", "Number of active connections"
+)
 
-quote_fetch_count = Counter("market_data_quote_fetch_total", "Total quote fetch count", ["source", "status"])
+quote_fetch_count = Counter(
+    "market_data_quote_fetch_total", "Total quote fetch count", ["source", "status"]
+)
 
-kline_fetch_count = Counter("market_data_kline_fetch_total", "Total kline fetch count", ["interval", "status"])
+kline_fetch_count = Counter(
+    "market_data_kline_fetch_total", "Total kline fetch count", ["interval", "status"]
+)
 
 
 class PrometheusMiddleware(BaseHTTPMiddleware):
@@ -44,6 +50,8 @@ class PrometheusMiddleware(BaseHTTPMiddleware):
             status=response.status_code,
         ).inc()
 
-        request_duration.labels(method=request.method, endpoint=request.url.path).observe(duration)
+        request_duration.labels(
+            method=request.method, endpoint=request.url.path
+        ).observe(duration)
 
         return response

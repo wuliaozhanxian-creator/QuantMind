@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from typing import Optional, Tuple
+from typing import Optional
 
 from fastapi import HTTPException, Request, status
-
 
 def get_authenticated_identity(request: Request) -> tuple[str, str]:
     """从 request.state.user 提取身份信息。"""
@@ -16,7 +15,6 @@ def get_authenticated_identity(request: Request) -> tuple[str, str]:
             detail="Missing authenticated user context",
         )
     return user_id, tenant_id
-
 
 def assert_identity_not_spoofed(
     *,

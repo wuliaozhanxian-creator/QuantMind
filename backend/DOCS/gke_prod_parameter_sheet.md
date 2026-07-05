@@ -109,12 +109,14 @@ export REDIS_MASTER_NAME="quantmind-master"
 
 ```bash
 export CORS_ALLOWED_ORIGINS="https://app.quantmind.example,https://console.quantmind.example"
+# T6.5-P3 residual, M4 migration: INTERNAL_CALL_SECRET 已废弃（仅训练容器回调用），服务间认证改用 SECRET_KEY 签发的 service JWT
 export INTERNAL_CALL_SECRET="<生产内部调用密钥>"
-export SECRET_KEY="<生产应用密钥>"
+export SECRET_KEY="<生产应用密钥，签发 service JWT + 用户 JWT>"
 export JWT_SECRET_KEY="<生产 JWT 密钥>"
 ```
 
 要求：
+- `INTERNAL_CALL_SECRET`: 已废弃（DEPRECATED），仅训练容器回调使用。服务间认证改用 `SECRET_KEY` 签发的 service JWT（`X-Service-Token` header）。T6.5-P3 residual, M4 migration。
 - 不要使用测试值
 - 不要使用 `latest` 风格的弱默认值
 
@@ -146,8 +148,9 @@ export REDIS_SENTINELS=""
 export REDIS_MASTER_NAME="quantmind-master"
 
 export CORS_ALLOWED_ORIGINS="https://app.quantmind.example,https://console.quantmind.example"
+# T6.5-P3 residual, M4 migration: INTERNAL_CALL_SECRET 已废弃（仅训练容器回调用），服务间认证改用 SECRET_KEY 签发的 service JWT
 export INTERNAL_CALL_SECRET="<生产内部调用密钥>"
-export SECRET_KEY="<生产应用密钥>"
+export SECRET_KEY="<生产应用密钥，签发 service JWT + 用户 JWT>"
 export JWT_SECRET_KEY="<生产 JWT 密钥>"
 ```
 

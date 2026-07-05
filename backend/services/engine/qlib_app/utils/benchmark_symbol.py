@@ -45,4 +45,3 @@ def benchmark_candidates(symbol: str | None) -> list[str]:
             seen.add(item)
             ordered.append(item)
     return ordered
-

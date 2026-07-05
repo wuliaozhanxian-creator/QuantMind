@@ -1,10 +1,9 @@
 """KLine schemas"""
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
-
 
 class KLineBase(BaseModel):
     """K线基础模型"""
@@ -23,10 +22,8 @@ class KLineBase(BaseModel):
     turnover_rate: float | None = Field(None, description="换手率%")
     data_source: str | None = Field(None, description="数据源")
 
-
 class KLineCreate(KLineBase):
     """创建K线"""
-
 
 class KLineResponse(KLineBase):
     """K线响应"""
@@ -35,7 +32,6 @@ class KLineResponse(KLineBase):
 
     id: int | None = Field(None, description="主键")
     created_at: datetime | None = Field(None, description="创建时间")
-
 
 class KLineListResponse(BaseModel):
     """K线列表响应"""

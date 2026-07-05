@@ -13,7 +13,6 @@ from backend.shared.auth import decode_jwt_token
 
 security_scheme = HTTPBearer(auto_error=False)
 
-
 def decode_token(token: str) -> dict | None:
     """Decode JWT; return payload or None if invalid."""
     try:
@@ -21,13 +20,11 @@ def decode_token(token: str) -> dict | None:
     except HTTPException:
         return None
 
-
 class Principal(BaseModel):
     tenant_id: str
     user_id: str | None = None
     username: str | None = None
     roles: list[str] = []
-
 
 def get_principal(
     credentials: HTTPAuthorizationCredentials = Security(security_scheme),
@@ -70,12 +67,10 @@ def get_principal(
         roles=roles,
     )
 
-
 def require_user(principal: Principal = Depends(get_principal)) -> Principal:
     if not principal.user_id:
         raise HTTPException(status_code=401, detail="Unauthorized")
     return principal
-
 
 def get_current_user(
     credentials: HTTPAuthorizationCredentials = Security(security_scheme),

@@ -11,7 +11,6 @@ from ...services import SymbolService
 
 router = APIRouter(prefix="/symbols", tags=["symbols"])
 
-
 @router.post("/", response_model=SymbolResponse, status_code=201)
 async def create_symbol(symbol: SymbolCreate, db: AsyncSession = Depends(get_db)):
     """创建交易标的"""
@@ -24,7 +23,6 @@ async def create_symbol(symbol: SymbolCreate, db: AsyncSession = Depends(get_db)
 
     return await service.create_symbol(symbol)
 
-
 @router.get("/{symbol}", response_model=SymbolResponse)
 async def get_symbol(symbol: str, db: AsyncSession = Depends(get_db)):
     """获取交易标的"""
@@ -35,7 +33,6 @@ async def get_symbol(symbol: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Symbol not found")
 
     return db_symbol
-
 
 @router.get("/", response_model=SymbolListResponse)
 async def list_symbols(
@@ -52,9 +49,10 @@ async def list_symbols(
 
     return SymbolListResponse(total=len(symbols), symbols=symbols)
 
-
 @router.patch("/{symbol}", response_model=SymbolResponse)
-async def update_symbol(symbol: str, update_data: dict, db: AsyncSession = Depends(get_db)):
+async def update_symbol(
+    symbol: str, update_data: dict, db: AsyncSession = Depends(get_db)
+):
     """更新交易标的"""
     service = SymbolService(db)
     updated = await service.update_symbol(symbol, update_data)
@@ -63,7 +61,6 @@ async def update_symbol(symbol: str, update_data: dict, db: AsyncSession = Depen
         raise HTTPException(status_code=404, detail="Symbol not found")
 
     return updated
-
 
 @router.delete("/{symbol}", status_code=204)
 async def delete_symbol(symbol: str, db: AsyncSession = Depends(get_db)):

@@ -31,8 +31,9 @@ _STOCK_META_CACHE_MTIME: float | None = None
 _DEFAULT_STOCK_INDEX_JSON_PATH = str(
     Path(__file__).resolve().parents[4] / "data" / "stocks" / "stocks_index.json"
 )
-_STOCK_INDEX_JSON_PATH = os.getenv("STOCK_INDEX_JSON_PATH", _DEFAULT_STOCK_INDEX_JSON_PATH)
-
+_STOCK_INDEX_JSON_PATH = os.getenv(
+    "STOCK_INDEX_JSON_PATH", _DEFAULT_STOCK_INDEX_JSON_PATH
+)
 
 def _resolve_stock_index_json_path() -> Path | None:
     candidates: list[str] = []
@@ -61,7 +62,6 @@ def _resolve_stock_index_json_path() -> Path | None:
             continue
     return None
 
-
 def _redis_get_json(key: str) -> dict[str, Any] | None:
     try:
         redis = get_remote_redis_client(db=3)
@@ -75,7 +75,6 @@ def _redis_get_json(key: str) -> dict[str, Any] | None:
     except Exception:
         return None
 
-
 def _redis_set_json(key: str, value: dict[str, Any], ttl_seconds: int) -> None:
     # T5.1 只读约束：此处通过 get_remote_redis_client 写入应用层缓存。
     # 当前 docker-compose 配置下连本地 Redis，写入安全；若配置
@@ -84,15 +83,15 @@ def _redis_set_json(key: str, value: dict[str, Any], ttl_seconds: int) -> None:
     # 降级为无缓存，不影响功能正确性）。
     try:
         redis = get_remote_redis_client(db=3)
-        payload = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        payload = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode(
+            "utf-8"
+        )
         redis.setex(key, ttl_seconds, payload)
     except Exception:
         return
 
-
 def _sdl_redis_key(trade_date: date) -> str:
     return f"qm:research:sdl:{trade_date.isoformat()}:v2"
-
 
 def _concept_tags_subquery(symbol_ref: str) -> str:
     return f"""COALESCE((
@@ -102,7 +101,6 @@ def _concept_tags_subquery(symbol_ref: str) -> str:
         WHERE st.symbol = {symbol_ref} AND td.tag_category IN ('concept', 'board')
       ), '[]'::jsonb)"""
 
-
 def _index_tags_subquery(symbol_ref: str) -> str:
     return f"""COALESCE((
         SELECT to_jsonb(array_agg(td.tag_name ORDER BY td.sort_order, td.tag_name))
@@ -111,13 +109,11 @@ def _index_tags_subquery(symbol_ref: str) -> str:
         WHERE st.symbol = {symbol_ref} AND td.tag_category = 'index'
       ), '[]'::jsonb)"""
 
-
 def _is_index_member(symbol_ref: str, tag_code: str) -> str:
     return (
         f"EXISTS(SELECT 1 FROM stock_tag st "
         f"WHERE st.symbol = {symbol_ref} AND st.tag_code = '{tag_code}')"
     )
-
 
 def _delete_remote_sdl_keys(redis_client: Any, keys: list[str]) -> None:
     # T5.1 只读约束：此处通过远程 Redis 客户端删除无效行情缓存。
@@ -128,10 +124,9 @@ def _delete_remote_sdl_keys(redis_client: Any, keys: list[str]) -> None:
     try:
         batch_size = 500
         for i in range(0, len(keys), batch_size):
-            redis_client.delete(*keys[i:i + batch_size])
+            redis_client.delete(*keys[i : i + batch_size])
     except Exception:
         return
-
 
 def _safe_float(value: Any) -> float | None:
     try:
@@ -144,8 +139,9 @@ def _safe_float(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
 
-
-def _is_invalid_sdl_symbols_cache(trade_date: date, symbol_map: dict[str, dict[str, Any]]) -> bool:
+def _is_invalid_sdl_symbols_cache(
+    trade_date: date, symbol_map: dict[str, dict[str, Any]]
+) -> bool:
     if not symbol_map:
         return False
 
@@ -170,11 +166,14 @@ def _is_invalid_sdl_symbols_cache(trade_date: date, symbol_map: dict[str, dict[s
     if trade_date <= today and total_count >= 20:
         return_1d_coverage = len(return_1d_values) / total_count
         return_3d_coverage = len(return_3d_values) / total_count
-        if trade_date <= today and return_1d_coverage >= 0.8 and return_3d_coverage <= 0.2:
+        if (
+            trade_date <= today
+            and return_1d_coverage >= 0.8
+            and return_3d_coverage <= 0.2
+        ):
             return True
 
     return False
-
 
 def _load_sdl_from_remote_redis(trade_date: date) -> dict[str, dict[str, Any]]:
     """从远程 Redis 加载 sdl:日期:股票代码 格式的缓存（使用 pipeline 批量读取）"""
@@ -191,13 +190,13 @@ def _load_sdl_from_remote_redis(trade_date: date) -> dict[str, dict[str, Any]]:
         symbol_map: dict[str, dict[str, Any]] = {}
 
         for i in range(0, len(keys), batch_size):
-            batch_keys = keys[i:i + batch_size]
+            batch_keys = keys[i : i + batch_size]
             pipe = redis.pipeline()
             for key in batch_keys:
                 pipe.hgetall(key)
             results = pipe.execute()
 
-            for key, data in zip(batch_keys, results):
+            for key, data in zip(batch_keys, results, strict=False):
                 if not data:
                     continue
                 # key 格式: sdl:2026-04-30:SH600000
@@ -220,13 +219,23 @@ def _load_sdl_from_remote_redis(trade_date: date) -> dict[str, dict[str, Any]]:
                     "total_mv": float(data.get("total_mv", 0) or 0),
                     "float_mv": float(data.get("float_mv", 0) or 0),
                     "listed_days": int(float(data.get("listed_days", 0) or 0)),
-                    "is_st": data.get("is_st", "0") == "1" or data.get("is_st") == True,
+                    "is_st": data.get("is_st", "0") == "1" or data.get("is_st"),
                     "latest_change_pct": float(data.get("pct_change", 0) or 0),
-                    "return_1d": float(data.get("return_1d", 0) or 0) if data.get("return_1d") else None,
-                    "return_3d": float(data.get("return_3d", 0) or 0) if data.get("return_3d") else None,
-                    "return_5d": float(data.get("return_5d", 0) or 0) if data.get("return_5d") else None,
-                    "return_10d": float(data.get("return_10d", 0) or 0) if data.get("return_10d") else None,
-                    "return_20d": float(data.get("return_20d", 0) or 0) if data.get("return_20d") else None,
+                    "return_1d": float(data.get("return_1d", 0) or 0)
+                    if data.get("return_1d")
+                    else None,
+                    "return_3d": float(data.get("return_3d", 0) or 0)
+                    if data.get("return_3d")
+                    else None,
+                    "return_5d": float(data.get("return_5d", 0) or 0)
+                    if data.get("return_5d")
+                    else None,
+                    "return_10d": float(data.get("return_10d", 0) or 0)
+                    if data.get("return_10d")
+                    else None,
+                    "return_20d": float(data.get("return_20d", 0) or 0)
+                    if data.get("return_20d")
+                    else None,
                     "ma5": float(data.get("ma5", 0) or 0),
                     "ma10": float(data.get("ma10", 0) or 0),
                     "ma_gap_5": float(data.get("ma_gap_5", 0) or 0),
@@ -235,8 +244,12 @@ def _load_sdl_from_remote_redis(trade_date: date) -> dict[str, dict[str, Any]]:
                     "rsi": float(data.get("rsi_14", 0) or 0),
                     "volume_ratio_5": float(data.get("volume_ratio_5", 0) or 0),
                     "volume_ratio_20": float(data.get("volume_ratio_20", 0) or 0),
-                    "volume_trend_3d": float(data.get("volume_trend_3d", 0) or 0) if data.get("volume_trend_3d") else None,
-                    "consecutive_limit_up_days": int(float(data.get("consecutive_limit_up_days", 0) or 0)),
+                    "volume_trend_3d": float(data.get("volume_trend_3d", 0) or 0)
+                    if data.get("volume_trend_3d")
+                    else None,
+                    "consecutive_limit_up_days": int(
+                        float(data.get("consecutive_limit_up_days", 0) or 0)
+                    ),
                 }
         if _is_invalid_sdl_symbols_cache(trade_date, symbol_map):
             _delete_remote_sdl_keys(redis, keys)
@@ -244,9 +257,9 @@ def _load_sdl_from_remote_redis(trade_date: date) -> dict[str, dict[str, Any]]:
         return symbol_map
     except Exception as e:
         import logging
+
         logging.getLogger(__name__).warning(f"Failed to load from remote Redis: {e}")
         return {}
-
 
 async def _load_sdl_day_map(session, trade_date: date) -> dict[str, dict[str, Any]]:
     if trade_date.year != _SDL_REDIS_YEAR:
@@ -262,7 +275,9 @@ async def _load_sdl_day_map(session, trade_date: date) -> dict[str, dict[str, An
     cached = _redis_get_json(cache_key)
     if cached and "symbols" in cached and isinstance(cached["symbols"], dict):
         symbols = cached["symbols"]
-        if isinstance(symbols, dict) and not _is_invalid_sdl_symbols_cache(trade_date, symbols):
+        if isinstance(symbols, dict) and not _is_invalid_sdl_symbols_cache(
+            trade_date, symbols
+        ):
             return symbols
 
     sql = f"""
@@ -281,9 +296,9 @@ async def _load_sdl_day_map(session, trade_date: date) -> dict[str, dict[str, An
             COALESCE(float_mv, 0) AS float_mv,
             COALESCE(listed_days, 0) AS listed_days,
             COALESCE(is_st, 0) <> 0 AS is_st,
-            {_is_index_member('symbol', 'hs300')} AS is_hs300,
-            {_is_index_member('symbol', 'csi500')} AS is_csi500,
-            {_is_index_member('symbol', 'csi1000')} AS is_csi1000,
+            {_is_index_member("symbol", "hs300")} AS is_hs300,
+            {_is_index_member("symbol", "csi500")} AS is_csi500,
+            {_is_index_member("symbol", "csi1000")} AS is_csi1000,
             COALESCE(pct_change, 0) AS latest_change_pct,
             return_1d,
             return_3d,
@@ -307,8 +322,8 @@ async def _load_sdl_day_map(session, trade_date: date) -> dict[str, dict[str, An
             COALESCE(flow_net_amount, 0) AS flow_net_amount,
             COALESCE(inst_ownership, 0) AS inst_ownership,
             COALESCE(profit_growth, 0) AS profit_growth,
-            {_concept_tags_subquery('symbol')} AS concept_tags,
-            {_index_tags_subquery('symbol')} AS index_tags,
+            {_concept_tags_subquery("symbol")} AS concept_tags,
+            {_index_tags_subquery("symbol")} AS index_tags,
             COALESCE(consecutive_limit_up_days, 0) AS consecutive_limit_up_days_sdl
         FROM {_SDL_TABLE}
         WHERE trade_date = :trade_date
@@ -326,7 +341,9 @@ async def _load_sdl_day_map(session, trade_date: date) -> dict[str, dict[str, An
     symbol_map: dict[str, dict[str, Any]] = {}
     for row in rows:
         payload = dict(row)
-        payload["_sdl_trade_date"] = trade_date_param.isoformat() if isinstance(trade_date_param, date) else None
+        payload["_sdl_trade_date"] = (
+            trade_date_param.isoformat() if isinstance(trade_date_param, date) else None
+        )
         payload["_sdl_fallback"] = False
         symbol = StockCodeUtil.to_prefix(str(payload.get("symbol") or ""))
         if symbol:
@@ -336,7 +353,9 @@ async def _load_sdl_day_map(session, trade_date: date) -> dict[str, dict[str, An
         cache_key,
         {
             "trade_date": trade_date.isoformat(),
-            "used_trade_date": trade_date_param.isoformat() if isinstance(trade_date_param, date) else None,
+            "used_trade_date": trade_date_param.isoformat()
+            if isinstance(trade_date_param, date)
+            else None,
             "fallback_used": False,
             "symbols": symbol_map,
             "created_at": datetime.now().isoformat(),
@@ -345,8 +364,9 @@ async def _load_sdl_day_map(session, trade_date: date) -> dict[str, dict[str, An
     )
     return symbol_map
 
-
-def _get_local_cache(cache: dict[str, tuple[float, dict[str, Any]]], key: str, ttl_seconds: int) -> dict[str, Any] | None:
+def _get_local_cache(
+    cache: dict[str, tuple[float, dict[str, Any]]], key: str, ttl_seconds: int
+) -> dict[str, Any] | None:
     now = time.monotonic()
     cached = cache.get(key)
     if not cached:
@@ -356,15 +376,16 @@ def _get_local_cache(cache: dict[str, tuple[float, dict[str, Any]]], key: str, t
         return None
     return cached[1]
 
-
 def _set_local_cache(
-    cache: dict[str, tuple[float, dict[str, Any]]], key: str, payload: dict[str, Any], max_entries: int
+    cache: dict[str, tuple[float, dict[str, Any]]],
+    key: str,
+    payload: dict[str, Any],
+    max_entries: int,
 ) -> None:
     cache[key] = (time.monotonic(), payload)
     if len(cache) > max_entries:
         oldest_key = min(cache.items(), key=lambda kv: kv[1][0])[0]
         cache.pop(oldest_key, None)
-
 
 def _norm_symbol_sql(symbol_expr: str) -> str:
     return f"""
@@ -377,7 +398,6 @@ def _norm_symbol_sql(symbol_expr: str) -> str:
             ELSE UPPER({symbol_expr})
         END
     """
-
 
 _SDL_SELECT_BY_RUN_DATE = """
     COALESCE(sdl_run.stock_name, '') AS stock_name,
@@ -443,7 +463,6 @@ _SDL_SELECT_BY_RUN_DATE = """
     COALESCE(sdl_run.consecutive_limit_up_days, 0) AS consecutive_limit_up_days_sdl
 """
 
-
 _SDL_LATEST = f"""
     SELECT DISTINCT ON (symbol) symbol, trade_date, stock_name, industry,
         close, pct_change, pe_ttm, pb, roe, adj_factor, turnover_rate, amount, total_mv, float_mv, listed_days, is_st,
@@ -502,14 +521,11 @@ _SDL_SELECT_SIMPLE = """
     COALESCE(sdl_latest.adj_factor, 1) AS adj_factor
 """
 
-
 def _sdl_join_condition(symbol_expr: str = "snap.symbol") -> str:
     return f"(\n    sdl_latest.symbol = {_norm_symbol_sql(symbol_expr)}\n)"
 
-
 def _serialize_date(d: Any) -> str | None:
     return d.isoformat() if isinstance(d, (date, datetime)) else None
-
 
 def _serialize_float(v: Any) -> float | None:
     try:
@@ -522,19 +538,16 @@ def _serialize_float(v: Any) -> float | None:
     except (ValueError, TypeError):
         return None
 
-
 def _serialize_int(v: Any) -> int | None:
     try:
         return int(v) if v is not None else None
     except Exception:
         return None
 
-
 def _to_nominal_price(numeric_price: Any, adj_factor: Any) -> float:
     numeric_price = _serialize_float(numeric_price) or 0.0
     numeric_adj_factor = _serialize_float(adj_factor) or 1.0
     return round(numeric_price / numeric_adj_factor, 2)
-
 
 def _resolve_stock_name(row, symbol):
     # Try all possible name fields
@@ -546,7 +559,6 @@ def _resolve_stock_name(row, symbol):
     if fallback and fallback != symbol:
         return fallback
     return symbol
-
 
 def _resolve_industry(row, symbol: str) -> str:
     val = row.get("industry")
@@ -561,14 +573,12 @@ def _resolve_industry(row, symbol: str) -> str:
             return v
     return ""
 
-
 def _resolve_stock_name_from_index(symbol: str) -> str | None:
     meta = _resolve_stock_meta_from_index(symbol)
     if not meta:
         return None
     name = str(meta.get("name") or "").strip()
     return name or None
-
 
 def _resolve_stock_meta_from_index(symbol: str) -> dict[str, str] | None:
     global _STOCK_META_CACHE_MTIME
@@ -617,7 +627,6 @@ def _resolve_stock_meta_from_index(symbol: str) -> dict[str, str] | None:
 
     return _STOCK_META_CACHE.get(symbol_norm)
 
-
 def _format_candidate_record(row: dict[str, Any]) -> dict[str, Any]:
     symbol = str(row.get("symbol") or "unknown")
     run_id = str(row.get("run_id") or "unknown")
@@ -665,7 +674,11 @@ def _format_candidate_record(row: dict[str, Any]) -> dict[str, Any]:
 
     snapshot_turnover_rate = _serialize_float(row.get("snapshot_turnover_rate"))
     live_turnover_rate = _serialize_float(row.get("turnover_rate") or 0.0) or 0.0
-    resolved_turnover_rate = snapshot_turnover_rate if snapshot_turnover_rate is not None else live_turnover_rate
+    resolved_turnover_rate = (
+        snapshot_turnover_rate
+        if snapshot_turnover_rate is not None
+        else live_turnover_rate
+    )
 
     return {
         "key": f"{run_id}:{symbol}",
@@ -686,7 +699,9 @@ def _format_candidate_record(row: dict[str, Any]) -> dict[str, Any]:
         "floatMv": round(to_yi(row.get("float_mv")), 2),
         "listedDays": _serialize_int(row.get("listed_days")) or 0,
         "sector": _resolve_industry(row, symbol),
-        "concept": " / ".join(concept_tags[:3]) if isinstance(concept_tags, list) and concept_tags else "",
+        "concept": " / ".join(concept_tags[:3])
+        if isinstance(concept_tags, list) and concept_tags
+        else "",
         "conceptTags": concept_tags if isinstance(concept_tags, list) else [],
         "indexTags": index_tags if isinstance(index_tags, list) else [],
         "riskFlags": risk_flags if isinstance(risk_flags, list) else [],
@@ -694,8 +709,10 @@ def _format_candidate_record(row: dict[str, Any]) -> dict[str, Any]:
         "pe": _serialize_float(row.get("pe")) or 0.0,
         "pb": _serialize_float(row.get("pb")) or 0.0,
         "roe": round((_serialize_float(row.get("roe")) or 0.0), 4),
-        "ma5": (_serialize_float(row.get("ma5")) or 0.0) / (_serialize_float(row.get("adj_factor")) or 1.0),
-        "ma10": (_serialize_float(row.get("ma10")) or 0.0) / (_serialize_float(row.get("adj_factor")) or 1.0),
+        "ma5": (_serialize_float(row.get("ma5")) or 0.0)
+        / (_serialize_float(row.get("adj_factor")) or 1.0),
+        "ma10": (_serialize_float(row.get("ma10")) or 0.0)
+        / (_serialize_float(row.get("adj_factor")) or 1.0),
         "maGap5": _serialize_float(row.get("ma_gap_5")) or 0.0,
         "maGap10": _serialize_float(row.get("ma_gap_10")) or 0.0,
         "maGap20": _serialize_float(row.get("ma_gap_20")) or 0.0,
@@ -718,8 +735,10 @@ def _format_candidate_record(row: dict[str, Any]) -> dict[str, Any]:
         "nullReason": null_reasons,
         "marketJoinStatus": market_join_status,
         "mainFlow": (_serialize_float(row.get("main_flow")) or 0.0) / 1000000.0,
-        "flowNetAmount": (_serialize_float(row.get("flow_net_amount")) or 0.0) / 1000000.0,
-        "instOwnership": (_serialize_float(row.get("inst_ownership")) or 0.0) / 1000000.0,
+        "flowNetAmount": (_serialize_float(row.get("flow_net_amount")) or 0.0)
+        / 1000000.0,
+        "instOwnership": (_serialize_float(row.get("inst_ownership")) or 0.0)
+        / 1000000.0,
         "profitGrowth": _serialize_float(row.get("profit_growth")) or 0.0,
         "isSt": bool(row.get("is_st")),
         "isTradable": (_serialize_float(row.get("close_price")) or 0.0) > 0,
@@ -729,7 +748,6 @@ def _format_candidate_record(row: dict[str, Any]) -> dict[str, Any]:
         "isCsi500": bool(row.get("is_csi500")),
         "isCsi1000": bool(row.get("is_csi1000")),
     }
-
 
 async def _fetch_summary(
     session, where: str, params: dict[str, Any], include_market_stats: bool = True
@@ -791,11 +809,11 @@ async def _fetch_summary(
         "margin": _serialize_int(payload.get("margin_count")) or 0,
         "chinext": _serialize_int(payload.get("chinext_count")) or 0,
         "avgScore": round(_serialize_float(payload.get("avg_score")) or 0.0, 4),
-        "highConfidenceCount": _serialize_int(payload.get("high_confidence_count")) or 0,
+        "highConfidenceCount": _serialize_int(payload.get("high_confidence_count"))
+        or 0,
         "strongCount": _serialize_int(payload.get("strong_count")) or 0,
         "lastUpdatedAt": _serialize_date(payload.get("last_updated_at")),
     }
-
 
 async def _do_get_overview(
     tid: str,
@@ -827,10 +845,16 @@ async def _do_get_overview(
         snap_rows = result.mappings().all()
 
         if not snap_rows:
-            summary = await _fetch_summary(session, where, params, include_market_stats=include_market_stats)
+            summary = await _fetch_summary(
+                session, where, params, include_market_stats=include_market_stats
+            )
             return {"items": [], "summary": summary}
 
-        trade_dates = {row.get("data_trade_date") for row in snap_rows if isinstance(row.get("data_trade_date"), date)}
+        trade_dates = {
+            row.get("data_trade_date")
+            for row in snap_rows
+            if isinstance(row.get("data_trade_date"), date)
+        }
 
         sdl_maps = {}
         for td in trade_dates:
@@ -863,7 +887,9 @@ async def _do_get_overview(
             merged_rows.append(merged)
 
         items = [_format_candidate_record(r) for r in merged_rows]
-        summary = await _fetch_summary(session, where, params, include_market_stats=include_market_stats)
+        summary = await _fetch_summary(
+            session, where, params, include_market_stats=include_market_stats
+        )
         summary["warnings"] = {
             "market_data_missing_for_trade_date": missing_trade_date_count,
             "market_data_fallback_trade_date": fallback_trade_date_count,
@@ -871,7 +897,6 @@ async def _do_get_overview(
             "return_3d_unavailable": missing_return_3d_count,
         }
     return {"items": items, "summary": summary}
-
 
 def _humanize_model_name(model_id: str) -> str:
     if not model_id:
@@ -889,9 +914,8 @@ def _humanize_model_name(model_id: str) -> str:
                     dt = datetime.strptime(ts[:12], "%Y%m%d%H%M")
                     return f"训练模型 ({dt.strftime('%m/%d %H:%M')})"
                 except Exception:
-                    pass
+                    pass  # noqa: BLE001 - None
     return model_id.replace("_", " ").title()
-
 
 async def get_available_models(tid: str, uid: str) -> dict[str, Any]:
     async with get_session(read_only=True) as session:
@@ -919,14 +943,15 @@ async def get_available_models(tid: str, uid: str) -> dict[str, Any]:
         for r in res.mappings():
             mid = r["model_id"]
             name = r["display_name"] or _humanize_model_name(mid)
-            models.append({
-                "modelId": mid,
-                "name": name,
-                "status": r["status"],
-                "hasInference": r["has_inference"]
-            })
+            models.append(
+                {
+                    "modelId": mid,
+                    "name": name,
+                    "status": r["status"],
+                    "hasInference": r["has_inference"],
+                }
+            )
         return {"code": 200, "data": {"models": models}}
-
 
 async def get_inference_runs(tid: str, uid: str, model_id: str) -> dict[str, Any]:
     async with get_session(read_only=True) as session:
@@ -959,13 +984,16 @@ async def get_inference_runs(tid: str, uid: str, model_id: str) -> dict[str, Any
             },
         }
 
-
 async def get_research_overview(
-    tid: str, uid: str, model_id: str | None, run_id: str | None, limit: int, offset: int
+    tid: str,
+    uid: str,
+    model_id: str | None,
+    run_id: str | None,
+    limit: int,
+    offset: int,
 ) -> dict[str, Any]:
     data = await _do_get_overview(tid, uid, model_id, run_id, limit, offset)
     return {"code": 200, "data": {"items": data["items"], "summary": data["summary"]}}
-
 
 async def _do_get_universe_with_sdl_redis(
     tid: str, uid: str, run_id: str, limit: int, offset: int
@@ -982,7 +1010,9 @@ async def _do_get_universe_with_sdl_redis(
         """
         snap_rows = (await session.execute(text(snap_sql), params)).mappings().all()
         if not snap_rows:
-            summary = await _fetch_summary(session, where, params, include_market_stats=False)
+            summary = await _fetch_summary(
+                session, where, params, include_market_stats=False
+            )
             return {"items": [], "summary": summary}
 
         trade_dates = {row.get("data_trade_date") for row in snap_rows}
@@ -1023,7 +1053,9 @@ async def _do_get_universe_with_sdl_redis(
             merged_rows.append(merged)
 
         items = [_format_candidate_record(r) for r in merged_rows]
-        summary = await _fetch_summary(session, where, params, include_market_stats=False)
+        summary = await _fetch_summary(
+            session, where, params, include_market_stats=False
+        )
         summary["warnings"] = {
             "market_data_missing_for_trade_date": missing_trade_date_count,
             "market_data_fallback_trade_date": fallback_trade_date_count,
@@ -1032,8 +1064,9 @@ async def _do_get_universe_with_sdl_redis(
         }
         return {"items": items, "summary": summary}
 
-
-async def get_research_universe(tid: str, uid: str, run_id: str, limit: int, offset: int = 0) -> dict[str, Any]:
+async def get_research_universe(
+    tid: str, uid: str, run_id: str, limit: int, offset: int = 0
+) -> dict[str, Any]:
     cache_key = f"{tid}:{uid}:{run_id}:{limit}:{offset}"
     cached = _get_local_cache(_UNIVERSE_CACHE, cache_key, _UNIVERSE_CACHE_TTL_SECONDS)
     if cached is not None:
@@ -1041,13 +1074,19 @@ async def get_research_universe(tid: str, uid: str, run_id: str, limit: int, off
 
     data = await _do_get_universe_with_sdl_redis(tid, uid, run_id, limit, offset)
     if data is None:
-        data = await _do_get_overview(tid, uid, None, run_id, limit, offset, include_market_stats=False)
-    payload = {"code": 200, "data": {"items": data["items"], "summary": data["summary"]}}
+        data = await _do_get_overview(
+            tid, uid, None, run_id, limit, offset, include_market_stats=False
+        )
+    payload = {
+        "code": 200,
+        "data": {"items": data["items"], "summary": data["summary"]},
+    }
     _set_local_cache(_UNIVERSE_CACHE, cache_key, payload, _UNIVERSE_CACHE_MAX_ENTRIES)
     return payload
 
-
-async def get_user_watchlist(tid: str, uid: str, limit: int, offset: int) -> dict[str, Any]:
+async def get_user_watchlist(
+    tid: str, uid: str, limit: int, offset: int
+) -> dict[str, Any]:
     async with get_session(read_only=True) as session:
         res = await session.execute(
             text(
@@ -1057,19 +1096,31 @@ async def get_user_watchlist(tid: str, uid: str, limit: int, offset: int) -> dic
             {"tid": tid, "uid": uid, "limit": limit, "offset": offset},
         )
         items = [
-            {"symbol": r[0], "stockName": r[1], "addedAt": _serialize_date(r[2]), "sourceRunId": r[3]} for r in res
+            {
+                "symbol": r[0],
+                "stockName": r[1],
+                "addedAt": _serialize_date(r[2]),
+                "sourceRunId": r[3],
+            }
+            for r in res
         ]
         total = (
             await session.execute(
-                text("SELECT COUNT(*) FROM qm_user_watchlist WHERE tenant_id = :tid AND user_id = :uid"),
+                text(
+                    "SELECT COUNT(*) FROM qm_user_watchlist WHERE tenant_id = :tid AND user_id = :uid"
+                ),
                 {"tid": tid, "uid": uid},
             )
         ).scalar() or 0
     return {"code": 200, "data": {"items": items, "total": total}}
 
-
 async def add_to_watchlist(
-    tid: str, uid: str, symbol: str, run_id: str | None, stock_name: str | None, features_snapshot: dict[str, Any] | None
+    tid: str,
+    uid: str,
+    symbol: str,
+    run_id: str | None,
+    stock_name: str | None,
+    features_snapshot: dict[str, Any] | None,
 ) -> dict[str, Any]:
     async with get_session() as session:
         await session.execute(
@@ -1078,21 +1129,30 @@ async def add_to_watchlist(
                 "VALUES (:tid, :uid, :s, :n, :rid, :f, NOW()) "
                 "ON CONFLICT (tenant_id, user_id, symbol) DO UPDATE SET features_snapshot = EXCLUDED.features_snapshot, updated_at = NOW()"
             ),
-            {"tid": tid, "uid": uid, "s": symbol, "n": stock_name, "rid": run_id, "f": json.dumps(features_snapshot or {})},
+            {
+                "tid": tid,
+                "uid": uid,
+                "s": symbol,
+                "n": stock_name,
+                "rid": run_id,
+                "f": json.dumps(features_snapshot or {}),
+            },
         )
     return {"code": 200, "message": "success"}
-
 
 async def remove_from_watchlist(tid: str, uid: str, symbol: str) -> dict[str, Any]:
     async with get_session() as session:
         await session.execute(
-            text("DELETE FROM qm_user_watchlist WHERE tenant_id = :tid AND user_id = :uid AND symbol = :s"),
+            text(
+                "DELETE FROM qm_user_watchlist WHERE tenant_id = :tid AND user_id = :uid AND symbol = :s"
+            ),
             {"tid": tid, "uid": uid, "s": symbol},
         )
     return {"code": 200, "message": "success"}
 
-
-async def get_user_research_pool(tid: str, uid: str, status: str | None, limit: int, offset: int) -> dict[str, Any]:
+async def get_user_research_pool(
+    tid: str, uid: str, status: str | None, limit: int, offset: int
+) -> dict[str, Any]:
     where = "tenant_id = :tid AND user_id = :uid"
     params: dict[str, Any] = {"tid": tid, "uid": uid, "limit": limit, "offset": offset}
     if status:
@@ -1107,12 +1167,22 @@ async def get_user_research_pool(tid: str, uid: str, status: str | None, limit: 
             params,
         )
         items = [
-            {"symbol": r[0], "stockName": r[1], "addedAt": _serialize_date(r[2]), "sourceRunId": r[3], "status": r[4]}
+            {
+                "symbol": r[0],
+                "stockName": r[1],
+                "addedAt": _serialize_date(r[2]),
+                "sourceRunId": r[3],
+                "status": r[4],
+            }
             for r in res
         ]
-        total = (await session.execute(text(f"SELECT COUNT(*) FROM qm_user_research_pool WHERE {where}"), params)).scalar() or 0
+        total = (
+            await session.execute(
+                text(f"SELECT COUNT(*) FROM qm_user_research_pool WHERE {where}"),
+                params,
+            )
+        ).scalar() or 0
     return {"code": 200, "data": {"items": items, "total": total}}
-
 
 async def add_to_research_pool(
     tid: str,
@@ -1147,23 +1217,28 @@ async def add_to_research_pool(
         )
     return {"code": 200, "message": "success"}
 
-
 async def remove_from_research_pool(tid: str, uid: str, symbol: str) -> dict[str, Any]:
     async with get_session() as session:
         await session.execute(
-            text("DELETE FROM qm_user_research_pool WHERE tenant_id = :tid AND user_id = :uid AND symbol = :s"),
+            text(
+                "DELETE FROM qm_user_research_pool WHERE tenant_id = :tid AND user_id = :uid AND symbol = :s"
+            ),
             {"tid": tid, "uid": uid, "s": symbol},
         )
     return {"code": 200, "message": "success"}
 
-
-async def get_symbols_features(tid: str, uid: str, symbols: list[str], lite: bool) -> dict[str, Any]:
-    normalized_symbols = [StockCodeUtil.to_prefix(s.strip()) for s in symbols if s.strip()]
+async def get_symbols_features(
+    tid: str, uid: str, symbols: list[str], lite: bool
+) -> dict[str, Any]:
+    normalized_symbols = [
+        StockCodeUtil.to_prefix(s.strip()) for s in symbols if s.strip()
+    ]
     if not normalized_symbols:
         return {"code": 200, "data": {"items": []}}
 
     # SQL 注入防护：校验每个 symbol 格式（仅允许 SH/SZ/BJ + 6位数字）
     import re as _re
+
     _valid_symbol_re = _re.compile(r"^(SH|SZ|BJ)\d{6}$")
     normalized_symbols = [s for s in normalized_symbols if _valid_symbol_re.match(s)]
     if not normalized_symbols:
@@ -1182,7 +1257,7 @@ async def get_symbols_features(tid: str, uid: str, symbols: list[str], lite: boo
             SELECT symbol, features_snapshot, ({norm}) AS prefix_symbol
             FROM qm_user_watchlist WHERE tenant_id = :tid AND user_id = :uid
         )
-        SELECT 
+        SELECT
             sym_list.raw_symbol AS symbol,
             COALESCE(ps.features_snapshot, ws.features_snapshot) as snapshot
         FROM sym_list
@@ -1208,12 +1283,18 @@ async def get_symbols_features(tid: str, uid: str, symbols: list[str], lite: boo
             items.append(snap)
         return {"code": 200, "data": {"items": items}}
 
-
 async def get_stock_kline(symbol: str, days: int) -> dict[str, Any]:
     """构建 K 线：优先从 stock_daily_latest 查询，不足时从 klines 表补充"""
     normalized_symbol = StockCodeUtil.to_prefix(symbol)
     # klines 表使用不带前缀的 symbol
-    bare_symbol = symbol.replace("SH", "").replace("SZ", "").replace("BJ", "").replace("sh.", "").replace("sz.", "").strip()
+    bare_symbol = (
+        symbol.replace("SH", "")
+        .replace("SZ", "")
+        .replace("BJ", "")
+        .replace("sh.", "")
+        .replace("sz.", "")
+        .strip()
+    )
     cache_key = f"sdl-kline:{normalized_symbol}:{days}"
     cached = _get_local_cache(_SDL_CACHE, cache_key, _SDL_CACHE_TTL_SECONDS)
     if cached is not None:
@@ -1239,14 +1320,16 @@ async def get_stock_kline(symbol: str, days: int) -> dict[str, Any]:
             for row in rows:
                 close = float(row.get("close", 0) or 0)
                 if close > 0:
-                    items.append({
-                        "date": str(row.get("trade_date", "")),
-                        "open": round(float(row.get("open", 0) or 0), 2),
-                        "high": round(float(row.get("high", 0) or 0), 2),
-                        "low": round(float(row.get("low", 0) or 0), 2),
-                        "close": round(close, 2),
-                        "volume": float(row.get("volume", 0) or 0),
-                    })
+                    items.append(
+                        {
+                            "date": str(row.get("trade_date", "")),
+                            "open": round(float(row.get("open", 0) or 0), 2),
+                            "high": round(float(row.get("high", 0) or 0), 2),
+                            "low": round(float(row.get("low", 0) or 0), 2),
+                            "close": round(close, 2),
+                            "volume": float(row.get("volume", 0) or 0),
+                        }
+                    )
 
             # 如果 stock_daily_latest 数据不足，从 klines 表补充历史数据
             if len(items) < days:
@@ -1271,17 +1354,20 @@ async def get_stock_kline(symbol: str, days: int) -> dict[str, Any]:
                     date_str = str(row.get("trade_date", ""))
                     close = float(row.get("close", 0) or 0)
                     if close > 0 and date_str not in existing_dates:
-                        items.append({
-                            "date": date_str,
-                            "open": round(float(row.get("open", 0) or 0), 2),
-                            "high": round(float(row.get("high", 0) or 0), 2),
-                            "low": round(float(row.get("low", 0) or 0), 2),
-                            "close": round(close, 2),
-                            "volume": float(row.get("volume", 0) or 0),
-                        })
+                        items.append(
+                            {
+                                "date": date_str,
+                                "open": round(float(row.get("open", 0) or 0), 2),
+                                "high": round(float(row.get("high", 0) or 0), 2),
+                                "low": round(float(row.get("low", 0) or 0), 2),
+                                "close": round(close, 2),
+                                "volume": float(row.get("volume", 0) or 0),
+                            }
+                        )
             items.reverse()
     except Exception as e:
         import logging
+
         logging.getLogger(__name__).warning(f"K-line PG read failed for {symbol}: {e}")
 
     payload = {"code": 200, "data": {"symbol": normalized_symbol, "items": items}}

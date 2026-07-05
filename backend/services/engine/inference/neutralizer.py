@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -13,7 +13,6 @@ except ImportError:
     _DUCKDB_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
-
 
 class Neutralizer:
     """
@@ -33,11 +32,15 @@ class Neutralizer:
             return
 
         if not _DUCKDB_AVAILABLE:
-            logger.warning("duckdb not installed; neutralization metadata unavailable, skipping neutralization")
+            logger.warning(
+                "duckdb not installed; neutralization metadata unavailable, skipping neutralization"
+            )
             return
 
         if not Path(self.db_path).exists():
-            logger.warning(f"Official factors duckdb file not found at {self.db_path}; skipping neutralization metadata refresh")
+            logger.warning(
+                f"Official factors duckdb file not found at {self.db_path}; skipping neutralization metadata refresh"
+            )
             return
 
         try:
@@ -53,7 +56,7 @@ class Neutralizer:
             ind AS (
                 SELECT stkcd, date, Nindnme as industry FROM TRD_Co WHERE date <= '{date_str}'
             )
-            SELECT 
+            SELECT
                 p.stkcd, p.Clsprc * s.a_circulated_share as mkt_cap, i.industry
             FROM price p
             ASOF LEFT JOIN shrs s ON p.stkcd = s.stkcd AND p.date >= s.date
@@ -68,7 +71,9 @@ class Neutralizer:
                 self._industry_cache = df.set_index("stkcd")["industry"].to_dict()
                 self._mkt_cap_cache = df.set_index("stkcd")["log_cap"].to_dict()
                 self._last_update_date = date_str
-                logger.info(f"Refreshed neutralization metadata for {date_str}, records: {len(df)}")
+                logger.info(
+                    f"Refreshed neutralization metadata for {date_str}, records: {len(df)}"
+                )
         except Exception as e:
             logger.error(f"Failed to refresh neutralization metadata: {e}")
 
@@ -89,14 +94,18 @@ class Neutralizer:
         initial_len = len(df)
         df = df.dropna(subset=["industry", "log_cap"])
         if len(df) < initial_len:
-            logger.warning(f"Dropped {initial_len - len(df)} stocks due to missing neutralization metadata")
+            logger.warning(
+                f"Dropped {initial_len - len(df)} stocks due to missing neutralization metadata"
+            )
 
         if df.empty or len(df) < 10:
             return df
 
         # Prepare X: Constant + LogCap + Industry Dummies
         ind_dummies = pd.get_dummies(df["industry"], drop_first=True)
-        X = np.column_stack([np.ones(len(df)), df["log_cap"].values, ind_dummies.values.astype(float)])
+        X = np.column_stack(
+            [np.ones(len(df)), df["log_cap"].values, ind_dummies.values.astype(float)]
+        )
 
         # Batch regression for speed
         Y = df[feature_cols].fillna(0.0).values

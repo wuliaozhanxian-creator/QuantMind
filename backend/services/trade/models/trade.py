@@ -5,7 +5,17 @@ Trade Model
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, Enum, Float, ForeignKey, Index, Integer, String
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    Enum,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+)
 from sqlalchemy.dialects.postgresql import UUID
 
 from .base import Base, TimestampMixin

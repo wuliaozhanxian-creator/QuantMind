@@ -8,11 +8,10 @@ import json
 import logging
 import time
 from functools import wraps
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
-
 
 class PerformanceCache:
     """性能缓存管理器"""
@@ -112,7 +111,11 @@ class PerformanceCache:
     def cleanup(self):
         """清理过期缓存"""
         current_time = time.time()
-        expired_keys = [key for key, entry in self._cache.items() if current_time > entry["expires_at"]]
+        expired_keys = [
+            key
+            for key, entry in self._cache.items()
+            if current_time > entry["expires_at"]
+        ]
 
         for key in expired_keys:
             del self._cache[key]
@@ -128,7 +131,9 @@ class PerformanceCache:
             统计信息字典
         """
         current_time = time.time()
-        active_entries = sum(1 for entry in self._cache.values() if current_time <= entry["expires_at"])
+        active_entries = sum(
+            1 for entry in self._cache.values() if current_time <= entry["expires_at"]
+        )
 
         return {
             "total_entries": len(self._cache),
@@ -138,9 +143,7 @@ class PerformanceCache:
 
         # 全局缓存实例
 
-
 _global_cache = PerformanceCache()
-
 
 def cached(ttl: int | None = None, cache_instance: PerformanceCache | None = None):
     """
@@ -178,7 +181,8 @@ def cached(ttl: int | None = None, cache_instance: PerformanceCache | None = Non
             cache.set(cache_key, result, ttl)
 
             logger.debug(
-                f"Function {func.__name__} executed in {execution_time:.3f}s, " f"result cached with key {cache_key}"
+                f"Function {func.__name__} executed in {execution_time:.3f}s, "
+                f"result cached with key {cache_key}"
             )
 
             return result
@@ -191,7 +195,6 @@ def cached(ttl: int | None = None, cache_instance: PerformanceCache | None = Non
         return wrapper
 
     return decorator
-
 
 def get_cache() -> PerformanceCache:
     """获取全局缓存实例"""

@@ -39,9 +39,7 @@ class PostRecord(Base):
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     last_comment_at = Column(DateTime)
 
-    __table_args__ = (
-        Index("idx_post_tenant_category", "tenant_id", "category"),
-    )
+    __table_args__ = (Index("idx_post_tenant_category", "tenant_id", "category"),)
 
 
 class CommentRecord(Base):
@@ -72,8 +70,12 @@ class InteractionRecord(Base):
 
     __table_args__ = (
         UniqueConstraint(
-            "tenant_id", "user_id", "post_id", "comment_id", "type",
-            name="uq_community_interactions"
+            "tenant_id",
+            "user_id",
+            "post_id",
+            "comment_id",
+            "type",
+            name="uq_community_interactions",
         ),
     )
 
@@ -89,7 +91,9 @@ class AuthorFollowRecord(Base):
 
     __table_args__ = (
         UniqueConstraint(
-            "tenant_id", "follower_user_id", "author_user_id",
-            name="uq_community_author_follows_model"
+            "tenant_id",
+            "follower_user_id",
+            "author_user_id",
+            name="uq_community_author_follows_model",
         ),
     )

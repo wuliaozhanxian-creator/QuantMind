@@ -36,14 +36,19 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 import exchange_calendars as xcals
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from backend.services.engine.services.event_stream import EngineSignalStreamPublisher
-from backend.shared.inference_contract import build_day_snapshot, canonical_json_hash, compare_frozen_config, _safe_int
+from backend.shared.inference_contract import (
+    build_day_snapshot,
+    canonical_json_hash,
+    compare_frozen_config,
+    _safe_int,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +67,6 @@ _PREDICTION_RETENTION_DAYS = int(os.getenv("INFERENCE_PREDICTION_RETENTION_DAYS"
 
 # Redis 标记键：记录当日推理已完成
 _COMPLETED_REDIS_KEY_PREFIX = "qm:inference:completed"
-
 
 @dataclass
 class ExecutionResult:
@@ -90,7 +94,6 @@ class ExecutionResult:
     execution_mode: str = ""
     model_switch_used: bool = False
     model_switch_reason: str = ""
-
 
 class InferenceScriptRunner:
     """执行模型目录中的 inference.py 并处理结果。
@@ -202,7 +205,7 @@ class InferenceScriptRunner:
                             if dim > 0:
                                 return dim
                         except Exception:
-                            pass
+                            logger.debug("ignored exception", exc_info=True)
                 model_info = meta.get("model_info") if isinstance(meta, dict) else None
                 if isinstance(model_info, dict):
                     for key in ("feature_count", "feature_dim", "input_dim"):
@@ -213,7 +216,7 @@ class InferenceScriptRunner:
                     if isinstance(feature_columns, list) and feature_columns:
                         return len(feature_columns)
             except Exception:
-                pass
+                logger.debug("ignored exception", exc_info=True)
 
         schema_path = self.primary_model_dir / "feature_schema.json"
         if schema_path.is_file():
@@ -225,7 +228,7 @@ class InferenceScriptRunner:
                         if isinstance(cols, list) and cols:
                             return len(cols)
             except Exception:
-                pass
+                logger.debug("ignored exception", exc_info=True)
 
         main_script = self.primary_model_dir / self.primary_script_name
         if main_script.is_file():
@@ -239,7 +242,7 @@ class InferenceScriptRunner:
                     if dim > 0:
                         return dim
             except Exception:
-                pass
+                logger.debug("ignored exception", exc_info=True)
 
         return _DEFAULT_FEATURE_DIM
 
@@ -250,7 +253,7 @@ class InferenceScriptRunner:
             try:
                 return json.loads(meta_path.read_text(encoding="utf-8"))
             except Exception:
-                pass
+                logger.debug("ignored exception", exc_info=True)
         return {}
 
     def _read_inference_contract(self) -> dict | None:
@@ -287,7 +290,9 @@ class InferenceScriptRunner:
             logger.warning("[InferenceScriptRunner] 构建当日数据快照失败: %s", exc)
             return None
 
-    def _precheck_inference_contract(self, *, trade_date: str, meta: dict[str, Any], data_dir: str) -> dict[str, Any]:
+    def _precheck_inference_contract(
+        self, *, trade_date: str, meta: dict[str, Any], data_dir: str
+    ) -> dict[str, Any]:
         contract = self._read_inference_contract()
         if not contract:
             # 容错放行：契约缺失不阻断推理，仅记录警告
@@ -301,8 +306,14 @@ class InferenceScriptRunner:
                 "detail": {},
             }
 
-        frozen = contract.get("frozen_inference_params") if isinstance(contract.get("frozen_inference_params"), dict) else {}
-        actual_feature_columns = list(meta.get("feature_columns") or meta.get("features") or [])
+        frozen = (
+            contract.get("frozen_inference_params")
+            if isinstance(contract.get("frozen_inference_params"), dict)
+            else {}
+        )
+        actual_feature_columns = list(
+            meta.get("feature_columns") or meta.get("features") or []
+        )
         actual_fill_values = dict(meta.get("fill_values") or {})
         actual_best_iteration = _safe_int(meta.get("best_iteration"))
         actual_target_horizon = _safe_int(meta.get("target_horizon_days"))
@@ -318,7 +329,9 @@ class InferenceScriptRunner:
         )
         if mismatches:
             # 只把特征列 (feature_columns) 不一致视作致命阻断，其余非致命放行
-            fatal_mismatches = [m for m in mismatches if m.get("field") == "feature_columns"]
+            fatal_mismatches = [
+                m for m in mismatches if m.get("field") == "feature_columns"
+            ]
             if fatal_mismatches:
                 return {
                     "passed": False,
@@ -326,7 +339,9 @@ class InferenceScriptRunner:
                     "detail": {"mismatches": mismatches},
                     "contract_version": _safe_int(contract.get("contract_version")),
                     "contract_hash": str(contract.get("contract_hash") or ""),
-                    "manifest_hash": str((contract.get("data_manifest") or {}).get("manifest_hash") or ""),
+                    "manifest_hash": str(
+                        (contract.get("data_manifest") or {}).get("manifest_hash") or ""
+                    ),
                 }
             else:
                 logger.warning(
@@ -336,12 +351,17 @@ class InferenceScriptRunner:
                 )
 
         daily_manifest = (contract.get("data_manifest") or {}).get("daily")
-        expected_day = (daily_manifest or {}).get(str(trade_date)) if isinstance(daily_manifest, dict) else None
+        expected_day = (
+            (daily_manifest or {}).get(str(trade_date))
+            if isinstance(daily_manifest, dict)
+            else None
+        )
         if not isinstance(expected_day, dict):
             # 容错放行：历史模型实盘运行新日期时通常无此记录
             logger.warning(
                 "[PRECHECK] Bypassed missing date in data manifest for trade_date %s. (Model: %s)",
-                trade_date, meta.get("model_id") or "unknown",
+                trade_date,
+                meta.get("model_id") or "unknown",
             )
             expected_day = {}
 
@@ -356,7 +376,9 @@ class InferenceScriptRunner:
             logger.warning(
                 "[PRECHECK] Bypassed data_manifest_build_failed for trade_date=%s, data_dir=%s. "
                 "(Model: %s, 可能为 qlib 二进制数据源，无 parquet 快照文件，跳过数据一致性校验)",
-                trade_date, data_dir, meta.get("model_id") or "unknown",
+                trade_date,
+                data_dir,
+                meta.get("model_id") or "unknown",
             )
             return {
                 "passed": True,
@@ -364,7 +386,9 @@ class InferenceScriptRunner:
                 "detail": {},
                 "contract_version": _safe_int(contract.get("contract_version")),
                 "contract_hash": str(contract.get("contract_hash") or ""),
-                "manifest_hash": str((contract.get("data_manifest") or {}).get("manifest_hash") or ""),
+                "manifest_hash": str(
+                    (contract.get("data_manifest") or {}).get("manifest_hash") or ""
+                ),
             }
 
         if expected_day:  # 仅在契约中存在当天期望哈希时比对
@@ -374,7 +398,8 @@ class InferenceScriptRunner:
                 # 容错放行：数据哈希不一致仅记录 Warning，不阻断
                 logger.warning(
                     "[PRECHECK] Bypassed data manifest mismatch for trade_date %s. (Model: %s)",
-                    trade_date, meta.get("model_id") or "unknown",
+                    trade_date,
+                    meta.get("model_id") or "unknown",
                 )
 
         return {
@@ -383,7 +408,9 @@ class InferenceScriptRunner:
             "detail": {},
             "contract_version": _safe_int(contract.get("contract_version")),
             "contract_hash": str(contract.get("contract_hash") or ""),
-            "manifest_hash": str((contract.get("data_manifest") or {}).get("manifest_hash") or ""),
+            "manifest_hash": str(
+                (contract.get("data_manifest") or {}).get("manifest_hash") or ""
+            ),
         }
 
     def _try_deploy_parquet_template(self, script_path: Path) -> bool:
@@ -564,9 +591,7 @@ class InferenceScriptRunner:
             _db_name = os.getenv("DB_NAME", "quantmind")
             if not _db_password:
                 raise RuntimeError("DB_PASSWORD 未配置，无法构建同步数据库连接")
-            sync_db_url = (
-                f"postgresql+psycopg2://{_db_user}:{_db_password}@{_db_host}:{_db_port}/{_db_name}"
-            )
+            sync_db_url = f"postgresql+psycopg2://{_db_user}:{_db_password}@{_db_host}:{_db_port}/{_db_name}"
         sync_engine = create_engine(sync_db_url, pool_pre_ping=True, future=True)
         SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=sync_engine)
 
@@ -747,7 +772,9 @@ class InferenceScriptRunner:
             data_dir=active_data_source,
         )
         if not contract_check.get("passed", False):
-            mismatch_type = str(contract_check.get("mismatch_type") or "contract_mismatch")
+            mismatch_type = str(
+                contract_check.get("mismatch_type") or "contract_mismatch"
+            )
             logger.error(
                 "[InferenceScriptRunner] 推理契约预检失败, run_id=%s, mismatch_type=%s, detail=%s",
                 run_id,
@@ -928,14 +955,16 @@ class InferenceScriptRunner:
             with open(p, encoding="utf-8") as f:
                 data = json.load(f)
         except json.JSONDecodeError:
-            logger.warning(f"[InferenceScriptRunner] 信号文件 JSON 解析失败: {file_path}")
+            logger.warning(
+                f"[InferenceScriptRunner] 信号文件 JSON 解析失败: {file_path}"
+            )
             return None
         else:
             # 解析成功后才删除临时文件
             try:
                 p.unlink()
             except Exception:
-                pass
+                logger.debug("ignored exception", exc_info=True)
 
         if not isinstance(data, list):
             return None
@@ -955,7 +984,7 @@ class InferenceScriptRunner:
                     if symbol.isdigit() and len(symbol) == 6:
                         if symbol.startswith("900") or symbol.startswith("200"):
                             continue
-                    
+
                     # 2. 排除北交所: BJ 前缀或 .BJ 后缀，或数字开头 (43, 83, 87, 88)
                     if symbol.startswith("BJ") or ".BJ" in symbol:
                         continue
@@ -966,13 +995,15 @@ class InferenceScriptRunner:
                         {"symbol": str(item["symbol"]), "score": float(item["score"])}
                     )
                 except (ValueError, TypeError):
-                    pass
+                    pass  # noqa: BLE001 - 已知数值解析失败，预期静默
         if not valid and data:
             logger.warning(
                 f"[InferenceScriptRunner] 所有 {len(data)} 条信号被过滤（B股/北交所），"
                 f"file={file_path}"
             )
-        return valid  # 返回空列表而非 None，便于上层区分「文件解析失败」和「全部被过滤」
+        return (
+            valid  # 返回空列表而非 None，便于上层区分「文件解析失败」和「全部被过滤」
+        )
 
     @staticmethod
     def _normalize_model_bucket(model_id: str | None) -> str:
@@ -1219,7 +1250,7 @@ class InferenceScriptRunner:
                 try:
                     quote_redis.close()
                 except Exception:
-                    pass
+                    logger.debug("ignored exception", exc_info=True)
             # ── Step 3: 写入投研平台候选池快照 ────────────────────────────────
             # 同步写入 qm_research_candidate_snapshot，使推理结果立即在投研平台可见
             # 先删除同 run_id 的旧数据（覆盖策略）
@@ -1262,12 +1293,16 @@ class InferenceScriptRunner:
             """)
             for sym, score in zip(symbols, scores, strict=True):
                 signal_side = "BUY" if score > 0 else "HOLD"
-                confidence_level = "high" if score > 0.5 else ("medium" if score > 0.2 else "watch")
+                confidence_level = (
+                    "high" if score > 0.5 else ("medium" if score > 0.2 else "watch")
+                )
                 # 获取 expected_price（从之前 Redis 查询的结果）
                 expected_price_val = None
                 if quote_redis:
                     try:
-                        raw_sym = sym.replace("SH", "").replace("SZ", "").replace("BJ", "")
+                        raw_sym = (
+                            sym.replace("SH", "").replace("SZ", "").replace("BJ", "")
+                        )
                         if sym.startswith("SH"):
                             redis_key = f"stock:{raw_sym}.SH"
                         elif sym.startswith("SZ"):
@@ -1280,7 +1315,7 @@ class InferenceScriptRunner:
                         if now_price:
                             expected_price_val = float(now_price)
                     except Exception:
-                        pass
+                        logger.debug("ignored exception", exc_info=True)
                 db.execute(
                     candidate_sql,
                     {
@@ -1315,7 +1350,7 @@ class InferenceScriptRunner:
             try:
                 sync_engine.dispose()
             except Exception:
-                pass
+                logger.debug("ignored exception", exc_info=True)
 
         # 发布信号到 Redis Stream（失败不影响主流程）
         try:

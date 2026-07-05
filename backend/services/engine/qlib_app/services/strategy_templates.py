@@ -18,20 +18,20 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
-from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
+from backend.services.engine.qlib_app.utils.structured_logger import (
+    StructuredTaskLogger,
+)
 
 task_logger = StructuredTaskLogger(logger, "StrategyTemplateLoader")
-
 
 # ---------------------------------------------------------------------------
 # Schema（与旧版兼容，字段保持不变）
 # ---------------------------------------------------------------------------
-
 
 class StrategyParameter(BaseModel):
     name: str
@@ -39,7 +39,6 @@ class StrategyParameter(BaseModel):
     default: Any
     min: float | None = None
     max: float | None = None
-
 
 class StrategyTemplate(BaseModel):
     id: str
@@ -53,11 +52,9 @@ class StrategyTemplate(BaseModel):
     live_defaults: dict[str, Any] = {}
     live_config_tips: list[str] = []
 
-
 # ---------------------------------------------------------------------------
 # 目录解析
 # ---------------------------------------------------------------------------
-
 
 def _find_project_root() -> Path:
     """向上查找项目根目录（包含 GEMINI.md 或 requirements.txt）。"""
@@ -70,7 +67,6 @@ def _find_project_root() -> Path:
         curr = curr.parent
     return Path(__file__).resolve().parents[6]
 
-
 def _resolve_templates_dir() -> Path:
     """解析模板目录（优先环境变量）。"""
     env_dir = os.getenv("STRATEGY_TEMPLATES_DIR", "").strip()
@@ -78,16 +74,18 @@ def _resolve_templates_dir() -> Path:
         p = Path(env_dir)
         if p.is_dir():
             return p
-        task_logger.warning("templates_dir_missing", "STRATEGY_TEMPLATES_DIR 不存在，回退到默认路径", path=env_dir)
+        task_logger.warning(
+            "templates_dir_missing",
+            "STRATEGY_TEMPLATES_DIR 不存在，回退到默认路径",
+            path=env_dir,
+        )
     return _find_project_root() / "strategy_templates"
-
 
 # ---------------------------------------------------------------------------
 # 动态加载器
 # ---------------------------------------------------------------------------
 
 _CACHE_TTL = int(os.getenv("STRATEGY_TEMPLATES_CACHE_TTL", "60"))
-
 
 class StrategyTemplateLoader:
     """
@@ -103,7 +101,12 @@ class StrategyTemplateLoader:
         self._cache: list[StrategyTemplate] | None = None
         self._cache_at: float = 0.0
 
-        task_logger.info("initialized", "StrategyTemplateLoader 初始化", templates_dir=str(self._templates_dir), cache_ttl=_CACHE_TTL)
+        task_logger.info(
+            "initialized",
+            "StrategyTemplateLoader 初始化",
+            templates_dir=str(self._templates_dir),
+            cache_ttl=_CACHE_TTL,
+        )
 
     def _is_cache_valid(self) -> bool:
         return self._cache is not None and (time.time() - self._cache_at) < _CACHE_TTL
@@ -112,28 +115,45 @@ class StrategyTemplateLoader:
         """从一对 .json + .py 文件加载单个模板，失败时返回 None。"""
         py_path = json_path.with_suffix(".py")
         if not py_path.exists():
-            task_logger.warning("missing_strategy_code", "缺少策略代码文件，跳过", path=str(py_path))
+            task_logger.warning(
+                "missing_strategy_code", "缺少策略代码文件，跳过", path=str(py_path)
+            )
             return None
 
         try:
             with open(json_path, encoding="utf-8") as f:
                 meta: dict[str, Any] = json.load(f)
         except Exception as e:
-            task_logger.error("read_template_meta_failed", "读取模板元数据失败", path=str(json_path), error=str(e))
+            task_logger.error(
+                "read_template_meta_failed",
+                "读取模板元数据失败",
+                path=str(json_path),
+                error=str(e),
+            )
             return None
 
         try:
             with open(py_path, encoding="utf-8") as f:
                 code = f.read()
         except Exception as e:
-            task_logger.error("read_strategy_code_failed", "读取策略代码失败", path=str(py_path), error=str(e))
+            task_logger.error(
+                "read_strategy_code_failed",
+                "读取策略代码失败",
+                path=str(py_path),
+                error=str(e),
+            )
             return None
 
         # 必填字段校验
         required = ("id", "name", "description", "category", "difficulty")
         missing = [k for k in required if not meta.get(k)]
         if missing:
-            task_logger.warning("template_missing_required", "模板缺少必填字段，跳过", template_id=json_path.stem, missing=missing)
+            task_logger.warning(
+                "template_missing_required",
+                "模板缺少必填字段，跳过",
+                template_id=json_path.stem,
+                missing=missing,
+            )
             return None
 
         try:
@@ -152,7 +172,12 @@ class StrategyTemplateLoader:
                 live_config_tips=meta.get("live_config_tips", []),
             )
         except Exception as e:
-            task_logger.error("build_template_failed", "构建模板对象失败", template_id=json_path.stem, error=str(e))
+            task_logger.error(
+                "build_template_failed",
+                "构建模板对象失败",
+                template_id=json_path.stem,
+                error=str(e),
+            )
             return None
 
     def load(self) -> list[StrategyTemplate]:
@@ -161,7 +186,11 @@ class StrategyTemplateLoader:
             return self._cache  # type: ignore[return-value]
 
         if not self._templates_dir.exists():
-            task_logger.warning("templates_dir_not_found", "策略模板目录不存在，返回空列表", path=str(self._templates_dir))
+            task_logger.warning(
+                "templates_dir_not_found",
+                "策略模板目录不存在，返回空列表",
+                path=str(self._templates_dir),
+            )
             # 保留旧缓存、不更新时间戳，以便下次仍会重试
             return self._cache or []
 
@@ -174,12 +203,19 @@ class StrategyTemplateLoader:
         # 排序逻辑：按难度排序（简单优先），难度相同按 ID 排序
         # beginner (1) < intermediate (2) < advanced (3)
         difficulty_map = {"beginner": 1, "intermediate": 2, "advanced": 3}
-        templates.sort(key=lambda x: (difficulty_map.get(x.difficulty, 9), x.id.lower()))
+        templates.sort(
+            key=lambda x: (difficulty_map.get(x.difficulty, 9), x.id.lower())
+        )
 
         self._cache = templates
         self._cache_at = time.time()
 
-        task_logger.info("templates_loaded", "策略模板加载完成", count=len(templates), templates_dir=str(self._templates_dir))
+        task_logger.info(
+            "templates_loaded",
+            "策略模板加载完成",
+            count=len(templates),
+            templates_dir=str(self._templates_dir),
+        )
         return templates
 
     def get_by_id(self, template_id: str) -> StrategyTemplate | None:
@@ -196,28 +232,23 @@ class StrategyTemplateLoader:
         self._cache_at = 0.0
         task_logger.info("cache_invalidated", "策略模板缓存已手动清除")
 
-
 # ---------------------------------------------------------------------------
 # 全局单例
 # ---------------------------------------------------------------------------
 
 _loader = StrategyTemplateLoader()
 
-
 # ---------------------------------------------------------------------------
 # 公开接口（与旧版 strategy_templates.py 完全兼容）
 # ---------------------------------------------------------------------------
-
 
 def get_all_templates() -> list[StrategyTemplate]:
     """返回所有可用策略模板。"""
     return _loader.load()
 
-
 def get_template_by_id(template_id: str) -> StrategyTemplate | None:
     """按 ID 查询单个策略模板（不区分大小写）。"""
     return _loader.get_by_id(template_id)
-
 
 def invalidate_templates_cache() -> None:
     """强制失效模板缓存（用于管理员刷新场景）。"""

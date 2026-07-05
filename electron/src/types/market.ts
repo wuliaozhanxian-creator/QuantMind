@@ -34,7 +34,7 @@ export interface MarketDataParams {
 export interface IndicatorParams {
   symbol: string;
   indicators: string[];
-  params?: Record<string, any>;
+  params?: Record<string, unknown>;
 }
 
 /**
@@ -42,7 +42,7 @@ export interface IndicatorParams {
  */
 export interface IndicatorResponse {
   symbol: string;
-  indicators: Record<string, any>;
+  indicators: Record<string, unknown>;
   timestamp: string;
 }
 

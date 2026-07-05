@@ -13,27 +13,50 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-
-def build_closed_trade_frame(trades: list[dict[str, Any]] | pd.DataFrame | None) -> pd.DataFrame:
+def build_closed_trade_frame(
+    trades: list[dict[str, Any]] | pd.DataFrame | None,
+) -> pd.DataFrame:
     """将成交流水重建为已平仓闭环单笔记录。"""
     return summarize_trade_matching(trades)["closed_trades"]
 
-
-def summarize_trade_matching(trades: list[dict[str, Any]] | pd.DataFrame | None) -> dict[str, Any]:
+def summarize_trade_matching(
+    trades: list[dict[str, Any]] | pd.DataFrame | None,
+) -> dict[str, Any]:
     """汇总真实成交配对结果，兼顾已平仓闭环与未平仓买入笔数。"""
     if trades is None:
         return {"closed_trades": pd.DataFrame(), "open_buy_trades": 0}
 
-    working = trades.copy() if isinstance(trades, pd.DataFrame) else pd.DataFrame(trades)
+    working = (
+        trades.copy() if isinstance(trades, pd.DataFrame) else pd.DataFrame(trades)
+    )
     if working.empty:
         return {"closed_trades": pd.DataFrame(), "open_buy_trades": 0}
 
-    date_col = next((column for column in ["trade_date", "date", "datetime", "created_at"] if column in working.columns), None)
-    if date_col is None or "symbol" not in working.columns or "action" not in working.columns:
+    date_col = next(
+        (
+            column
+            for column in ["trade_date", "date", "datetime", "created_at"]
+            if column in working.columns
+        ),
+        None,
+    )
+    if (
+        date_col is None
+        or "symbol" not in working.columns
+        or "action" not in working.columns
+    ):
         return {"closed_trades": pd.DataFrame(), "open_buy_trades": 0}
 
-    price_col = "price" if "price" in working.columns else ("adj_price" if "adj_price" in working.columns else None)
-    qty_col = "quantity" if "quantity" in working.columns else ("adj_quantity" if "adj_quantity" in working.columns else None)
+    price_col = (
+        "price"
+        if "price" in working.columns
+        else ("adj_price" if "adj_price" in working.columns else None)
+    )
+    qty_col = (
+        "quantity"
+        if "quantity" in working.columns
+        else ("adj_quantity" if "adj_quantity" in working.columns else None)
+    )
     if price_col is None or qty_col is None:
         return {"closed_trades": pd.DataFrame(), "open_buy_trades": 0}
 
@@ -50,8 +73,14 @@ def summarize_trade_matching(trades: list[dict[str, Any]] | pd.DataFrame | None)
 
     normalized["qty"] = pd.to_numeric(normalized[qty_col], errors="coerce").abs()
     normalized["price_value"] = pd.to_numeric(normalized[price_col], errors="coerce")
-    commission_source = normalized["commission"] if "commission" in normalized.columns else pd.Series(0.0, index=normalized.index)
-    normalized["commission_value"] = pd.to_numeric(commission_source, errors="coerce").fillna(0.0).abs()
+    commission_source = (
+        normalized["commission"]
+        if "commission" in normalized.columns
+        else pd.Series(0.0, index=normalized.index)
+    )
+    normalized["commission_value"] = (
+        pd.to_numeric(commission_source, errors="coerce").fillna(0.0).abs()
+    )
     normalized = normalized.replace([np.inf, -np.inf], np.nan)
     normalized = normalized.dropna(subset=["qty", "price_value"])
     normalized = normalized[normalized["qty"] > 0]
@@ -89,7 +118,9 @@ def summarize_trade_matching(trades: list[dict[str, Any]] | pd.DataFrame | None)
             lot_qty = float(lot["remaining_qty"])
             consume = min(remaining, lot_qty)
 
-            entry_cost = consume * (float(lot["buy_price"]) + float(lot["buy_commission_per_share"]))
+            entry_cost = consume * (
+                float(lot["buy_price"]) + float(lot["buy_commission_per_share"])
+            )
             exit_value = consume * (price - commission_per_share)
             pnl = exit_value - entry_cost
             return_pct = pnl / entry_cost if abs(entry_cost) > 1e-12 else 0.0
@@ -118,13 +149,15 @@ def summarize_trade_matching(trades: list[dict[str, Any]] | pd.DataFrame | None)
 
     open_buy_trades = sum(len(queue) for queue in open_lots.values())
     if not closed_records:
-        return {"closed_trades": pd.DataFrame(), "open_buy_trades": int(open_buy_trades)}
+        return {
+            "closed_trades": pd.DataFrame(),
+            "open_buy_trades": int(open_buy_trades),
+        }
 
     return {
         "closed_trades": pd.DataFrame(closed_records),
         "open_buy_trades": int(open_buy_trades),
     }
-
 
 def calculate_closed_trade_metrics(
     closed_trades: pd.DataFrame,
@@ -170,9 +203,21 @@ def calculate_closed_trade_metrics(
             result["trade_frequency"] = float(total_trade_events / months)
         return result
 
-    pnl = pd.to_numeric(closed_trades["pnl"], errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
-    returns = pd.to_numeric(closed_trades["return_pct"], errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
-    holding_days = pd.to_numeric(closed_trades["holding_days"], errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
+    pnl = (
+        pd.to_numeric(closed_trades["pnl"], errors="coerce")
+        .replace([np.inf, -np.inf], np.nan)
+        .dropna()
+    )
+    returns = (
+        pd.to_numeric(closed_trades["return_pct"], errors="coerce")
+        .replace([np.inf, -np.inf], np.nan)
+        .dropna()
+    )
+    holding_days = (
+        pd.to_numeric(closed_trades["holding_days"], errors="coerce")
+        .replace([np.inf, -np.inf], np.nan)
+        .dropna()
+    )
 
     wins = returns[returns > 0]
     losses = returns[returns < 0]
@@ -188,15 +233,23 @@ def calculate_closed_trade_metrics(
 
     avg_win_return = float(wins.mean()) if not wins.empty else 0.0
     avg_loss_return = abs(float(losses.mean())) if not losses.empty else 0.0
-    profit_loss_ratio = float(avg_win_return / avg_loss_return) if avg_loss_return > 0 else 0.0
+    profit_loss_ratio = (
+        float(avg_win_return / avg_loss_return) if avg_loss_return > 0 else 0.0
+    )
 
     total_win_pnl = float(pnl_wins.sum()) if not pnl_wins.empty else 0.0
     total_loss_pnl = abs(float(pnl_losses.sum())) if not pnl_losses.empty else 0.0
-    profit_factor = float(total_win_pnl / total_loss_pnl) if total_loss_pnl > 0 else (float("inf") if total_win_pnl > 0 else 0.0)
+    profit_factor = (
+        float(total_win_pnl / total_loss_pnl)
+        if total_loss_pnl > 0
+        else (float("inf") if total_win_pnl > 0 else 0.0)
+    )
 
     month_span = 1
     if "exit_date" in closed_trades.columns:
-        exit_dates = pd.to_datetime(closed_trades["exit_date"], errors="coerce").dropna()
+        exit_dates = pd.to_datetime(
+            closed_trades["exit_date"], errors="coerce"
+        ).dropna()
         if not exit_dates.empty:
             grouped = exit_dates.dt.to_period("M").value_counts()
             month_span = max(len(grouped.index), 1)
@@ -210,22 +263,27 @@ def calculate_closed_trade_metrics(
             "winning_trades": win_count,
             "losing_trades": loss_count,
             "flat_trades": flat_count,
-            "real_win_rate": float(win_count / closed_count) if closed_count > 0 else 0.0,
+            "real_win_rate": float(win_count / closed_count)
+            if closed_count > 0
+            else 0.0,
             "win_rate": float(win_count / closed_count) if closed_count > 0 else 0.0,
             "profit_loss_ratio": profit_loss_ratio,
             "profit_factor": profit_factor,
             "avg_win_return": avg_win_return,
             "avg_loss_return": avg_loss_return,
             "avg_trade_return": float(returns.mean()) if not returns.empty else 0.0,
-            "median_trade_return": float(returns.median()) if not returns.empty else 0.0,
+            "median_trade_return": float(returns.median())
+            if not returns.empty
+            else 0.0,
             "max_win_return": float(returns.max()) if not returns.empty else 0.0,
             "max_loss_return": float(returns.min()) if not returns.empty else 0.0,
-            "avg_holding_days": float(holding_days.mean()) if not holding_days.empty else 0.0,
+            "avg_holding_days": float(holding_days.mean())
+            if not holding_days.empty
+            else 0.0,
             "trade_frequency": float(closed_count / month_span),
         }
     )
     return result
-
 
 def calculate_profit_loss_days_ratio(returns: pd.Series) -> float:
     if returns.empty:
@@ -236,8 +294,9 @@ def calculate_profit_loss_days_ratio(returns: pd.Series) -> float:
         return float(win_days) if win_days > 0 else 0.0
     return float(win_days / loss_days)
 
-
-def build_trade_frequency_series_from_closed_trades(closed_trades: pd.DataFrame) -> dict[str, list[Any]]:
+def build_trade_frequency_series_from_closed_trades(
+    closed_trades: pd.DataFrame,
+) -> dict[str, list[Any]]:
     series = {"dates": [], "values": []}
     if closed_trades.empty or "exit_date" not in closed_trades.columns:
         return series

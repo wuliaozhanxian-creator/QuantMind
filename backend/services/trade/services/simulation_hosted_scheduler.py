@@ -43,14 +43,12 @@ _DEFAULT_LIVE_TRADE_CONFIG: dict[str, Any] = {
     "trigger_window_seconds": 90,
 }
 
-
 @dataclass(frozen=True)
 class SimulationScheduleDecision:
     should_trigger: bool
     phase: str
     trade_date: str
     reason: str
-
 
 @dataclass(frozen=True)
 class SimulationNextTrigger:
@@ -61,14 +59,12 @@ class SimulationNextTrigger:
     window_end_at: datetime
     reason: str
 
-
 def _to_int(value: Any, default: int) -> int:
     try:
         number = int(float(value))
         return number if math.isfinite(number) else default
     except Exception:
         return default
-
 
 def _normalize_live_trade_config(value: Any) -> dict[str, Any]:
     cfg = value if isinstance(value, dict) else {}
@@ -90,7 +86,6 @@ def _normalize_live_trade_config(value: Any) -> dict[str, Any]:
     )
     return merged
 
-
 def _parse_started_at(value: Any) -> date | None:
     text = str(value or "").strip()
     if not text:
@@ -103,7 +98,6 @@ def _parse_started_at(value: Any) -> date | None:
     except Exception:
         return None
 
-
 def _session_index(day: date) -> int | None:
     if get_calendar is None:
         return None
@@ -113,7 +107,6 @@ def _session_index(day: date) -> int | None:
         return int(calendar.sessions.get_loc(session))
     except Exception:
         return None
-
 
 def _is_interval_rebalance_day(
     current_day: date,
@@ -133,7 +126,6 @@ def _is_interval_rebalance_day(
 
     return max(0, (current_day - started_day).days) % rebalance_days == 0
 
-
 def _is_trading_day(day: date) -> bool:
     if get_calendar is None:
         return day.weekday() < 5
@@ -143,7 +135,6 @@ def _is_trading_day(day: date) -> bool:
     except Exception:
         return day.weekday() < 5
 
-
 def _is_enabled_session(now_hhmm: str, live_trade_config: dict[str, Any]) -> bool:
     enabled = set(live_trade_config.get("enabled_sessions") or [])
     if "AM" in enabled and "09:30" <= now_hhmm <= "11:30":
@@ -151,7 +142,6 @@ def _is_enabled_session(now_hhmm: str, live_trade_config: dict[str, Any]) -> boo
     if "PM" in enabled and "13:00" <= now_hhmm <= "15:00":
         return True
     return False
-
 
 def _matches_trigger_window(
     local_now: datetime,
@@ -177,11 +167,12 @@ def _matches_trigger_window(
     delta_seconds = (local_now - target_dt).total_seconds()
     return 0 <= delta_seconds <= max(1, int(window_seconds))
 
-
 def _resolve_phase(local_now: datetime, live_trade_config: dict[str, Any]) -> str:
     sell_time = str(live_trade_config.get("sell_time") or "14:45")
     buy_time = str(live_trade_config.get("buy_time") or "14:50")
-    window_seconds = max(30, _to_int(live_trade_config.get("trigger_window_seconds"), 90))
+    window_seconds = max(
+        30, _to_int(live_trade_config.get("trigger_window_seconds"), 90)
+    )
     sell_hit = _matches_trigger_window(
         local_now,
         sell_time,
@@ -206,7 +197,6 @@ def _resolve_phase(local_now: datetime, live_trade_config: dict[str, Any]) -> st
         if sell_hit:
             return "SELL"
     return "IDLE"
-
 
 def _should_trigger(
     *,
@@ -245,10 +235,10 @@ def _should_trigger(
         return SimulationScheduleDecision(False, phase, trade_date, "before_window")
     return SimulationScheduleDecision(True, phase, trade_date, "matched")
 
-
-def _is_time_in_enabled_session(target_hhmm: str, live_trade_config: dict[str, Any]) -> bool:
+def _is_time_in_enabled_session(
+    target_hhmm: str, live_trade_config: dict[str, Any]
+) -> bool:
     return _is_enabled_session(str(target_hhmm or "").strip(), live_trade_config)
-
 
 def _build_candidate_trigger_datetimes(
     *,
@@ -293,7 +283,6 @@ def _build_candidate_trigger_datetimes(
     candidates.sort(key=lambda item: item[0])
     return candidates
 
-
 def _next_scheduled_trigger(
     *,
     now: datetime,
@@ -336,7 +325,6 @@ def _next_scheduled_trigger(
             )
     return None
 
-
 def _task_id(
     *,
     tenant_id: str,
@@ -360,7 +348,6 @@ def _task_id(
     )
     return f"hosted_sim_{hashlib.sha1(source.encode('utf-8')).hexdigest()[:16]}"
 
-
 def _lock_key(
     *,
     tenant_id: str,
@@ -372,7 +359,6 @@ def _lock_key(
     return (
         f"qm:hosted:simulation:{tenant_id}:{user_id}:{strategy_id}:{trade_date}:{phase}"
     )
-
 
 class SimulationHostedScheduler:
     def __init__(self, redis: RedisClient, interval_seconds: int = 30):
@@ -396,7 +382,7 @@ class SimulationHostedScheduler:
             try:
                 await self._task
             except asyncio.CancelledError:
-                pass
+                pass  # noqa: BLE001 - asyncio 任务取消信号，预期静默处理
 
     async def _run(self) -> None:
         logger.info(
@@ -571,5 +557,5 @@ class SimulationHostedScheduler:
             try:
                 self.redis.client.delete(lock_key)
             except Exception:
-                pass
+                logger.debug("ignored exception", exc_info=True)
             raise

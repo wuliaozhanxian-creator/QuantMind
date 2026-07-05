@@ -23,7 +23,6 @@ from opentelemetry.sdk.trace.sampling import ParentBasedTraceIdRatio
 
 logger = logging.getLogger(__name__)
 
-
 def setup_tracing(
     service_name: str,
     otlp_endpoint: str = "http://localhost:4317",
@@ -83,13 +82,16 @@ def setup_tracing(
     # 设置全局TracerProvider
     trace.set_tracer_provider(tracer_provider)
 
-    logger.info(f"Tracing configured: service={service_name}, sampling_rate={sampling_rate}")
+    logger.info(
+        f"Tracing configured: service={service_name}, sampling_rate={sampling_rate}"
+    )
 
     # 返回Tracer
     return trace.get_tracer(service_name)
 
-
-def instrument_app(app, service_name: str, otlp_endpoint: str = "http://localhost:4317", **kwargs):
+def instrument_app(
+    app, service_name: str, otlp_endpoint: str = "http://localhost:4317", **kwargs
+):
     """
     自动插桩FastAPI应用.
 
@@ -126,11 +128,9 @@ def instrument_app(app, service_name: str, otlp_endpoint: str = "http://localhos
 
     logger.info(f"Service '{service_name}' instrumented for tracing")
 
-
 def get_current_span() -> trace.Span | None:
     """获取当前活跃的Span."""
     return trace.get_current_span()
-
 
 def add_span_attributes(**attributes):
     """向当前Span添加属性."""
@@ -139,20 +139,17 @@ def add_span_attributes(**attributes):
         for key, value in attributes.items():
             span.set_attribute(key, value)
 
-
 def add_span_event(name: str, attributes: dict | None = None):
     """向当前Span添加事件."""
     span = get_current_span()
     if span and span.is_recording():
         span.add_event(name, attributes=attributes or {})
 
-
 def record_exception(exception: Exception):
     """记录异常到当前Span."""
     span = get_current_span()
     if span and span.is_recording():
         span.record_exception(exception)
-
 
 # 装饰器：为函数创建Span
 def traced(name: str | None = None):

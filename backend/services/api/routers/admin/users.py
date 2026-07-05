@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
@@ -9,10 +9,8 @@ from backend.services.api.user_app.services.user_service import UserService
 
 router = APIRouter()
 
-
 def get_user_service() -> UserService:
     return UserService()
-
 
 @router.get("/")
 async def list_users(
@@ -46,8 +44,6 @@ async def list_users(
         "data": users_list,
     }
 
-
-
 @router.post("/{user_id}/toggle-status")
 async def toggle_user_status(
     user_id: str,
@@ -61,6 +57,12 @@ async def toggle_user_status(
         raise HTTPException(status_code=404, detail="用户不存在")
 
     new_status = not user.is_active
-    updated_user = await user_service.update_user(user_id, tenant_id, is_active=new_status)
+    updated_user = await user_service.update_user(
+        user_id, tenant_id, is_active=new_status
+    )
 
-    return {"code": 200, "message": "状态已更新", "data": {"is_active": updated_user.is_active}}
+    return {
+        "code": 200,
+        "message": "状态已更新",
+        "data": {"is_active": updated_user.is_active},
+    }

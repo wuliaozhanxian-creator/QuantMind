@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import date, datetime
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -11,7 +11,6 @@ from sqlalchemy import text
 from backend.shared.database_manager_v2 import get_session
 
 router = APIRouter(prefix="/engine", tags=["Realtime Contract"])
-
 
 class FeatureReadyRequest(BaseModel):
     tenant_id: str = "default"
@@ -31,7 +30,6 @@ class FeatureReadyRequest(BaseModel):
     quality: dict[str, Any] = Field(default_factory=dict)
     error_message: str | None = None
 
-
 class SignalScoreItem(BaseModel):
     symbol: str
     light_score: float | None = None
@@ -45,7 +43,6 @@ class SignalScoreItem(BaseModel):
     expected_price: float | None = None
     quality: dict[str, Any] = Field(default_factory=dict)
 
-
 class SignalReadyRequest(BaseModel):
     tenant_id: str = "default"
     user_id: str
@@ -53,7 +50,6 @@ class SignalReadyRequest(BaseModel):
     model_version: str
     feature_version: str
     scores: list[SignalScoreItem] = Field(default_factory=list)
-
 
 class DispatchStageRequest(BaseModel):
     run_id: str
@@ -78,7 +74,6 @@ class DispatchStageRequest(BaseModel):
     failed_count: int = 0
     trace_id: str | None = None
     last_error: str | None = None
-
 
 class DispatchItemUpsert(BaseModel):
     run_id: str
@@ -106,14 +101,12 @@ class DispatchItemUpsert(BaseModel):
     exchange_trade_id: str | None = None
     exec_message: str | None = None
 
-
 class DispatchItemsUpsertRequest(BaseModel):
     run_id: str
     tenant_id: str = "default"
     user_id: str
     trade_date: date
     items: list[DispatchItemUpsert]
-
 
 @router.post("/runs/{run_id}/feature-ready")
 async def mark_feature_ready(run_id: str, payload: FeatureReadyRequest):
@@ -158,7 +151,6 @@ async def mark_feature_ready(run_id: str, payload: FeatureReadyRequest):
     async with get_session(read_only=False) as db:
         await db.execute(sql, params)
     return {"ok": True, "run_id": run_id, "stage": "feature_ready"}
-
 
 @router.post("/runs/{run_id}/signal-ready")
 async def mark_signal_ready(run_id: str, payload: SignalReadyRequest):
@@ -218,7 +210,9 @@ async def mark_signal_ready(run_id: str, payload: SignalReadyRequest):
                     "light_score": item.light_score,
                     "tft_score": item.tft_score,
                     "fusion_score": item.fusion_score,
-                    "risk_weight": item.risk_weight if item.risk_weight is not None else 1.0,
+                    "risk_weight": item.risk_weight
+                    if item.risk_weight is not None
+                    else 1.0,
                     "regime": item.regime or "normal",
                     "score_rank": item.score_rank,
                     "universe_tag": item.universe_tag,
@@ -234,7 +228,6 @@ async def mark_signal_ready(run_id: str, payload: SignalReadyRequest):
         "stage": "signal_ready",
         "upserted_scores": len(payload.scores),
     }
-
 
 @router.post("/dispatch/{batch_id}/stage")
 async def update_dispatch_stage(batch_id: str, payload: DispatchStageRequest):
@@ -270,7 +263,6 @@ async def update_dispatch_stage(batch_id: str, payload: DispatchStageRequest):
     async with get_session(read_only=False) as db:
         await db.execute(sql, params)
     return {"ok": True, "batch_id": batch_id, "stage": payload.stage}
-
 
 @router.post("/dispatch/{batch_id}/items/upsert")
 async def upsert_dispatch_items(batch_id: str, payload: DispatchItemsUpsertRequest):

@@ -12,10 +12,11 @@ from typing import Optional
 
 import redis
 
-from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
+from backend.services.engine.qlib_app.utils.structured_logger import (
+    StructuredTaskLogger,
+)
 
 logger = logging.getLogger(__name__)
-
 
 class RedisLogPusher:
     """Redis 日志推送器
@@ -35,7 +36,9 @@ class RedisLogPusher:
         self.optimization_id = optimization_id
         self.redis_client = self._init_redis()
         self.log_key = f"qlib:logs:{optimization_id}"
-        self._log = StructuredTaskLogger(logger, "redis-log-pusher", {"optimization_id": optimization_id})
+        self._log = StructuredTaskLogger(
+            logger, "redis-log-pusher", {"optimization_id": optimization_id}
+        )
 
         if self.redis_client:
             self._log.info("init", "Redis日志推送器已初始化")

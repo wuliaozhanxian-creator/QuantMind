@@ -17,7 +17,6 @@ from backend.services.api.user_app.services.rbac_service import RBACService
 
 router = APIRouter(prefix="/rbac")
 
-
 class RoleResponse(BaseModel):
     """角色响应"""
 
@@ -27,7 +26,6 @@ class RoleResponse(BaseModel):
     description: str | None
     is_active: bool
     priority: int
-
 
 class PermissionResponse(BaseModel):
     """权限响应"""
@@ -39,7 +37,6 @@ class PermissionResponse(BaseModel):
     action: str
     description: str | None
 
-
 class ResponseModel(BaseModel):
     """统一响应模型"""
 
@@ -47,9 +44,10 @@ class ResponseModel(BaseModel):
     message: str = "success"
     data: dict = {}
 
-
 @router.get("/user/roles", response_model=ResponseModel)
-async def get_user_roles(current_user: dict = Depends(get_current_user), db=Depends(get_db)):
+async def get_user_roles(
+    current_user: dict = Depends(get_current_user), db=Depends(get_db)
+):
     """
     获取当前用户的角色
     """
@@ -73,9 +71,10 @@ async def get_user_roles(current_user: dict = Depends(get_current_user), db=Depe
         },
     }
 
-
 @router.get("/user/permissions", response_model=ResponseModel)
-async def get_user_permissions(current_user: dict = Depends(get_current_user), db=Depends(get_db)):
+async def get_user_permissions(
+    current_user: dict = Depends(get_current_user), db=Depends(get_db)
+):
     """
     获取当前用户的所有权限
     """
@@ -88,7 +87,6 @@ async def get_user_permissions(current_user: dict = Depends(get_current_user), d
         "data": {"permissions": list(permissions), "count": len(permissions)},
     }
 
-
 @router.get("/check-permission", response_model=ResponseModel)
 async def check_permission(
     permission_code: str = Query(..., description="权限代码"),
@@ -99,14 +97,15 @@ async def check_permission(
     检查用户是否拥有特定权限
     """
     rbac_service = RBACService(db)
-    has_perm = await rbac_service.has_permission(current_user["user_id"], permission_code)
+    has_perm = await rbac_service.has_permission(
+        current_user["user_id"], permission_code
+    )
 
     return {
         "code": 200,
         "message": "success",
         "data": {"has_permission": has_perm, "permission_code": permission_code},
     }
-
 
 @router.post("/users/{user_id}/roles/{role_id}", response_model=ResponseModel)
 async def add_role_to_user(
@@ -125,8 +124,9 @@ async def add_role_to_user(
 
         return {"code": 200, "message": "角色添加成功", "data": {}}
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        ) from e
 
 @router.delete("/users/{user_id}/roles/{role_id}", response_model=ResponseModel)
 async def remove_role_from_user(
@@ -145,11 +145,14 @@ async def remove_role_from_user(
 
         return {"code": 200, "message": "角色移除成功", "data": {}}
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        ) from e
 
 @router.get("/roles", response_model=ResponseModel)
-async def list_roles(current_user: dict = Depends(get_current_user), db=Depends(get_db)):
+async def list_roles(
+    current_user: dict = Depends(get_current_user), db=Depends(get_db)
+):
     """
     获取所有角色列表
     """
@@ -179,7 +182,6 @@ async def list_roles(current_user: dict = Depends(get_current_user), db=Depends(
             "count": len(roles),
         },
     }
-
 
 @router.get("/permissions", response_model=ResponseModel)
 async def list_permissions(

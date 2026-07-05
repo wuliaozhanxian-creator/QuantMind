@@ -57,7 +57,6 @@ _POLL_INTERVAL = int(os.getenv("ETL_POLL_INTERVAL_SECONDS", "30"))
 # 状态文件保留的最近执行记录数
 _MAX_HISTORY_PER_TASK = int(os.getenv("ETL_MAX_HISTORY", "50"))
 
-
 # ============================================================
 # Cron 表达式解析（5 字段 unix cron：分 时 日 月 周）
 # ============================================================
@@ -105,7 +104,6 @@ class CronSchedule:
             and weekday in self.day_of_week
         )
 
-
 def _parse_cron_field(expr: str, min_val: int, max_val: int) -> set[int]:
     """解析单个 cron 字段，支持 *, 数字, 逗号, 范围(1-5), 步长(*/2, 1-10/2)"""
     result: set[int] = set()
@@ -142,7 +140,6 @@ def _parse_cron_field(expr: str, min_val: int, max_val: int) -> set[int]:
         raise ValueError(f"cron 字段解析为空: {expr!r}")
     return result
 
-
 # ============================================================
 # 任务定义与执行记录
 # ============================================================
@@ -176,7 +173,6 @@ class TaskSpec:
         if self.name in self.depends_on:
             raise ValueError(f"任务 {self.name} 不能依赖自身")
 
-
 @dataclass
 class TaskRunRecord:
     """单次任务执行记录"""
@@ -193,7 +189,6 @@ class TaskRunRecord:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
-
 
 # ============================================================
 # 状态持久化
@@ -263,7 +258,6 @@ class StateStore:
             # 深拷贝避免外部修改
             return json.loads(json.dumps(self._cache))
 
-
 # ============================================================
 # 任务执行器
 # ============================================================
@@ -326,7 +320,6 @@ def _execute_task(spec: TaskSpec, triggered_by: str) -> TaskRunRecord:
         record.return_code,
     )
     return record
-
 
 # ============================================================
 # 调度器主类
@@ -541,7 +534,6 @@ class ETLScheduler:
             "updated_at": snap.get("updated_at"),
         }
 
-
 # ============================================================
 # 默认任务注册（与现有 ETL 脚本对齐）
 # ============================================================
@@ -620,7 +612,6 @@ def build_default_scheduler(state_path: str | Path | None = None) -> ETLSchedule
 
     return scheduler
 
-
 # ============================================================
 # CLI 入口
 # ============================================================
@@ -687,7 +678,6 @@ def _cli() -> int:
 
     parser.print_help()
     return 1
-
 
 if __name__ == "__main__":
     sys.exit(_cli())

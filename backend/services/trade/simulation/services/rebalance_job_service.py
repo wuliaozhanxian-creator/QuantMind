@@ -8,7 +8,9 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import select
 
-from backend.services.trade.simulation.models.rebalance_job import SimulationRebalanceJob
+from backend.services.trade.simulation.models.rebalance_job import (
+    SimulationRebalanceJob,
+)
 from backend.shared.database_manager_v2 import get_session
 
 
@@ -43,7 +45,8 @@ class SimulationRebalanceJobService:
                     schedule_type=schedule_type,
                     planned_run_at=planned_run_at,
                     window_start_at=planned_run_at,
-                    window_end_at=planned_run_at + timedelta(seconds=max(1, int(window_seconds))),
+                    window_end_at=planned_run_at
+                    + timedelta(seconds=max(1, int(window_seconds))),
                     status="pending",
                     idempotency_key=idempotency_key,
                 )
@@ -52,7 +55,9 @@ class SimulationRebalanceJobService:
                 row.schedule_type = schedule_type
                 row.planned_run_at = planned_run_at
                 row.window_start_at = planned_run_at
-                row.window_end_at = planned_run_at + timedelta(seconds=max(1, int(window_seconds)))
+                row.window_end_at = planned_run_at + timedelta(
+                    seconds=max(1, int(window_seconds))
+                )
                 row.idempotency_key = idempotency_key
                 if str(row.status or "").lower() in {"failed", "expired", "skipped"}:
                     row.status = "pending"
@@ -114,14 +119,18 @@ class SimulationRebalanceJobService:
         expired = 0
         async with get_session(read_only=False) as session:
             rows = (
-                await session.execute(
-                    select(SimulationRebalanceJob).where(
-                        SimulationRebalanceJob.status.in_(("pending", "ready")),
-                        SimulationRebalanceJob.window_end_at.is_not(None),
-                        SimulationRebalanceJob.window_end_at < now,
+                (
+                    await session.execute(
+                        select(SimulationRebalanceJob).where(
+                            SimulationRebalanceJob.status.in_(("pending", "ready")),
+                            SimulationRebalanceJob.window_end_at.is_not(None),
+                            SimulationRebalanceJob.window_end_at < now,
+                        )
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             for row in rows:
                 row.status = "expired"
                 row.finished_at = now
@@ -130,7 +139,9 @@ class SimulationRebalanceJobService:
         return expired
 
     @staticmethod
-    async def mark_finished(job_id: str, *, status: str, last_error: str | None = None) -> None:
+    async def mark_finished(
+        job_id: str, *, status: str, last_error: str | None = None
+    ) -> None:
         async with get_session(read_only=False) as session:
             row = (
                 await session.execute(

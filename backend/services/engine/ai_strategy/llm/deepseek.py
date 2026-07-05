@@ -12,7 +12,7 @@ import asyncio
 import logging
 import os
 import time
-from typing import TYPE_CHECKING, Any, Dict, Tuple
+from typing import TYPE_CHECKING, Any
 
 import requests
 
@@ -24,10 +24,8 @@ from .base import BaseLLMProvider, normalize_name
 
 logger = logging.getLogger(__name__)
 
-
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
-
 
 class DeepseekLLM:
     """
@@ -61,14 +59,20 @@ class DeepseekLLM:
 
         self.api_key = api_key
         self.model = (
-            os.getenv("DEEPSEEK_MODEL") or getattr(ai_strategy_config, "DEEPSEEK_MODEL", None) or "deepseek-chat"
+            os.getenv("DEEPSEEK_MODEL")
+            or getattr(ai_strategy_config, "DEEPSEEK_MODEL", None)
+            or "deepseek-chat"
         )
 
         # Reuse common generation knobs if present.
         self.max_tokens = int(getattr(ai_strategy_config, "DEEPSEEK_MAX_TOKENS", 2000))
-        self.temperature = float(getattr(ai_strategy_config, "DEEPSEEK_TEMPERATURE", 0.7))
+        self.temperature = float(
+            getattr(ai_strategy_config, "DEEPSEEK_TEMPERATURE", 0.7)
+        )
 
-    def generate_code(self, prompt: str, mode: str = "simple") -> tuple[str, dict[str, Any]]:
+    def generate_code(
+        self, prompt: str, mode: str = "simple"
+    ) -> tuple[str, dict[str, Any]]:
         messages = [
             {
                 "role": "system",
@@ -90,10 +94,14 @@ class DeepseekLLM:
         last_exc: Exception | None = None
         for attempt in range(3):
             try:
-                r = requests.post(self.endpoint, json=payload, headers=headers, timeout=180)
+                r = requests.post(
+                    self.endpoint, json=payload, headers=headers, timeout=180
+                )
                 r.raise_for_status()
                 data = r.json()
-                content = (((data.get("choices") or [{}])[0]).get("message") or {}).get("content") or ""
+                content = (((data.get("choices") or [{}])[0]).get("message") or {}).get(
+                    "content"
+                ) or ""
                 meta = {
                     "model_used": data.get("model", self.model),
                     "usage": data.get("usage", {}),
@@ -109,11 +117,9 @@ class DeepseekLLM:
 
         raise RuntimeError(f"DEEPSEEK request failed after retries: {last_exc}")
 
-
 # ---------------------------------------------------------------------------
 # 异步 Provider (原 providers/deepseek_provider.py)
 # ---------------------------------------------------------------------------
-
 
 class DeepseekProvider(BaseLLMProvider):
     """DeepSeek LLM Provider"""
@@ -127,10 +133,14 @@ class DeepseekProvider(BaseLLMProvider):
             logger.warning(f"Failed to initialize DeepseekLLM: {e}")
             self.llm = None
 
-    async def generate(self, req: StrategyGenerationRequest) -> StrategyGenerationResult:
+    async def generate(
+        self, req: StrategyGenerationRequest
+    ) -> StrategyGenerationResult:
         """使用 DeepSeek 生成策略代码"""
         if not self.llm:
-            raise RuntimeError("DeepSeek provider not properly initialized (check API key)")
+            raise RuntimeError(
+                "DeepSeek provider not properly initialized (check API key)"
+            )
 
         strategy_name = normalize_name(req.description)
         prompt = self._build_prompt(req)
@@ -186,7 +196,9 @@ class DeepseekProvider(BaseLLMProvider):
         data = r.json()
         return data["choices"][0]["message"]
 
-    async def convert(self, req: StrategyConversionRequest) -> StrategyConversionResponse:
+    async def convert(
+        self, req: StrategyConversionRequest
+    ) -> StrategyConversionResponse:
         """转换第三方策略到Qlib格式"""
         # Reuse QlibStrategyCodeGenerator
         from ..generators.qlib_strategy_generator import QlibStrategyCodeGenerator

@@ -4,10 +4,9 @@ Qlib 策略/执行器预设，避免重复拼装默认配置
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 from .qlib_adapter import QlibNotAvailable
-
 
 def build_default_qlib_strategy(params: dict[str, Any]) -> Any:
     """
@@ -44,7 +43,6 @@ def build_default_qlib_strategy(params: dict[str, Any]) -> Any:
     except ImportError as e:  # noqa: BLE001
         raise QlibNotAvailable(f"pyqlib 未安装或策略 {strategy_type} 无法加载") from e
 
-
 def build_default_qlib_executor(params: dict[str, Any]) -> Any:
     """
     返回一个默认 Qlib 执行器（SimulatorExecutor，日频）
@@ -60,6 +58,5 @@ def build_default_qlib_executor(params: dict[str, Any]) -> Any:
         verbose=False,
         indicator_config={},
     )
-
 
 __all__ = ["build_default_qlib_strategy", "build_default_qlib_executor"]

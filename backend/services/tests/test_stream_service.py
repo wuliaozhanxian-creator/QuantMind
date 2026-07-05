@@ -49,7 +49,9 @@ class TestStreamAppCreation:
         from backend.services.stream.main import app
 
         ws_routes = [r.path for r in app.routes if hasattr(r, "path")]
-        assert "/ws/bridge" in ws_routes, f"未找到 /ws/bridge 端点，当前路由: {ws_routes}"
+        assert "/ws/bridge" in ws_routes, (
+            f"未找到 /ws/bridge 端点，当前路由: {ws_routes}"
+        )
 
     def test_cors_middleware_configured(self):
         """验证 CORS 中间件已配置"""
@@ -276,7 +278,9 @@ class TestWSCoreModules:
                 },
             }
 
-            targets = stream_main._resolve_bridge_targets("default", "00000001", "acc-1")
+            targets = stream_main._resolve_bridge_targets(
+                "default", "00000001", "acc-1"
+            )
 
             assert targets == ["c2"]
         finally:

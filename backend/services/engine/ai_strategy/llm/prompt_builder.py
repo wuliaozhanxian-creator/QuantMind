@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ..api.schemas.generation import GenerateRequest
 
-
 def build_strategy_prompt(body: "GenerateRequest", dsl: str) -> str:
     """构建策略生成的 LLM 提示词。
 
@@ -123,7 +122,6 @@ def build_strategy_prompt(body: "GenerateRequest", dsl: str) -> str:
         若是模型策略，严禁输出 `from quantmind.api`、`on_bar`、`strategy.run()` 模板。
         """)
     return prompt.strip()
-
 
 def build_repair_prompt(code: str, err: str) -> str:
     """构建代码修复的 LLM 提示词。

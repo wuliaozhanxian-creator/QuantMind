@@ -5,12 +5,11 @@
 """
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import pandas as pd
 
 from .base import DatabaseDataOperation
-
 
 @dataclass
 class ValidationRule:
@@ -21,7 +20,6 @@ class ValidationRule:
     validator_func: callable
     severity: str = "error"  # error, warning, info
 
-
 @dataclass
 class ValidationResult:
     """验证结果数据类"""
@@ -31,7 +29,6 @@ class ValidationResult:
     message: str
     details: dict[str, Any] | None = None
     severity: str = "error"
-
 
 class DataValidator(DatabaseDataOperation):
     """
@@ -99,9 +96,12 @@ class DataValidator(DatabaseDataOperation):
                 results["anomalies"] = self._detect_anomalies(**kwargs)
 
             # 汇总结果
-            total_validations = sum(len(result.get("validations", [])) for result in results.values())
+            total_validations = sum(
+                len(result.get("validations", [])) for result in results.values()
+            )
             passed_validations = sum(
-                sum(1 for v in result.get("validations", []) if v.passed) for result in results.values()
+                sum(1 for v in result.get("validations", []) if v.passed)
+                for result in results.values()
             )
 
             return {
@@ -110,7 +110,11 @@ class DataValidator(DatabaseDataOperation):
                     "total_validations": total_validations,
                     "passed_validations": passed_validations,
                     "failed_validations": total_validations - passed_validations,
-                    "pass_rate": ((passed_validations / total_validations * 100) if total_validations > 0 else 0),
+                    "pass_rate": (
+                        (passed_validations / total_validations * 100)
+                        if total_validations > 0
+                        else 0
+                    ),
                 },
                 "results": results,
             }
@@ -161,7 +165,9 @@ class DataValidator(DatabaseDataOperation):
 
     def _validate_data_completeness(self, **kwargs) -> dict[str, Any]:
         """验证数据完整性"""
-        self.logger.info("Validating data completeness", extra={"operation_id": self.operation_id})
+        self.logger.info(
+            "Validating data completeness", extra={"operation_id": self.operation_id}
+        )
 
         try:
             # 获取数据
@@ -203,7 +209,9 @@ class DataValidator(DatabaseDataOperation):
                     )
 
             # 检查数据完整性
-            completeness = (1 - data.isnull().sum().sum() / (len(data) * len(data.columns))) * 100
+            completeness = (
+                1 - data.isnull().sum().sum() / (len(data) * len(data.columns))
+            ) * 100
             min_completeness = self.get_config_value("min_data_completeness", 95.0)
 
             validations.append(
@@ -238,7 +246,9 @@ class DataValidator(DatabaseDataOperation):
 
     def _validate_data_consistency(self, **kwargs) -> dict[str, Any]:
         """验证数据一致性"""
-        self.logger.info("Validating data consistency", extra={"operation_id": self.operation_id})
+        self.logger.info(
+            "Validating data consistency", extra={"operation_id": self.operation_id}
+        )
 
         try:
             data = self._fetch_validation_data(**kwargs)
@@ -289,7 +299,9 @@ class DataValidator(DatabaseDataOperation):
 
     def _validate_data_quality(self, **kwargs) -> dict[str, Any]:
         """验证数据质量"""
-        self.logger.info("Validating data quality", extra={"operation_id": self.operation_id})
+        self.logger.info(
+            "Validating data quality", extra={"operation_id": self.operation_id}
+        )
 
         try:
             data = self._fetch_validation_data(**kwargs)
@@ -352,7 +364,9 @@ class DataValidator(DatabaseDataOperation):
 
     def _detect_anomalies(self, **kwargs) -> dict[str, Any]:
         """检测异常数据"""
-        self.logger.info("Detecting data anomalies", extra={"operation_id": self.operation_id})
+        self.logger.info(
+            "Detecting data anomalies", extra={"operation_id": self.operation_id}
+        )
 
         try:
             data = self._fetch_validation_data(**kwargs)
@@ -393,7 +407,9 @@ class DataValidator(DatabaseDataOperation):
                 volume_std = data["volume"].std()
                 threshold = self.get_config_value("volume_anomaly_threshold", 5.0)
 
-                volume_anomalies = data[abs(data["volume"] - volume_mean) > threshold * volume_std]
+                volume_anomalies = data[
+                    abs(data["volume"] - volume_mean) > threshold * volume_std
+                ]
 
                 if not volume_anomalies.empty:
                     validations.append(
@@ -449,8 +465,16 @@ class DataValidator(DatabaseDataOperation):
         return ValidationResult(
             rule_name="no_null_prices",
             passed=not null_prices,
-            message=("Price fields contain null values" if null_prices else "Price fields are complete"),
-            details={"null_columns": data[price_columns].columns[data[price_columns].isnull().any()].tolist()},
+            message=(
+                "Price fields contain null values"
+                if null_prices
+                else "Price fields are complete"
+            ),
+            details={
+                "null_columns": data[price_columns]
+                .columns[data[price_columns].isnull().any()]
+                .tolist()
+            },
         )
 
     def _validate_positive_prices(self, data: pd.DataFrame) -> ValidationResult:
@@ -461,7 +485,11 @@ class DataValidator(DatabaseDataOperation):
         return ValidationResult(
             rule_name="positive_prices",
             passed=not negative_prices,
-            message=("Found non-positive prices" if negative_prices else "All prices are positive"),
+            message=(
+                "Found non-positive prices"
+                if negative_prices
+                else "All prices are positive"
+            ),
             details={"negative_price_count": (data[price_columns] <= 0).sum().sum()},
         )
 
@@ -509,7 +537,11 @@ class DataValidator(DatabaseDataOperation):
         return ValidationResult(
             rule_name="volume_positive",
             passed=not negative_volume,
-            message=("Found negative volume values" if negative_volume else "All volume values are non-negative"),
+            message=(
+                "Found negative volume values"
+                if negative_volume
+                else "All volume values are non-negative"
+            ),
             details={"negative_volume_count": (data["volume"] < 0).sum()},
         )
 
@@ -529,7 +561,11 @@ class DataValidator(DatabaseDataOperation):
         return ValidationResult(
             rule_name="date_sequence",
             passed=dates_sorted,
-            message=("Date sequence is not ordered" if not dates_sorted else "Date sequence is properly ordered"),
+            message=(
+                "Date sequence is not ordered"
+                if not dates_sorted
+                else "Date sequence is properly ordered"
+            ),
             details={"dates_sorted": dates_sorted},
         )
 
@@ -573,10 +609,9 @@ class DataValidator(DatabaseDataOperation):
             "severity": validation.severity,
         }
 
-
 # 便捷函数
 def validate_stock_data(
-    validation_types: list[str] = ["all"],
+    validation_types: list[str] = None,
     symbols: list[str] | None = None,
     config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -591,9 +626,10 @@ def validate_stock_data(
     Returns:
         验证结果
     """
+    if validation_types is None:
+        validation_types = ["all"]
     validator = DataValidator(config)
     return validator.execute(validation_types=validation_types, symbols=symbols)
-
 
 if __name__ == "__main__":
     # 示例用法

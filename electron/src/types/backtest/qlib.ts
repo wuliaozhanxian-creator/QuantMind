@@ -128,11 +128,11 @@ export interface QlibBacktestResult {
   execution_time?: number;
   equity_curve?: Array<{ date: string; value: number }>;
   drawdown_curve?: Array<{ date: string; value: number }>;
-  trades?: Array<Record<string, any>>;
-  
+  trades?: Array<Record<string, unknown>>;
+
   // 分析归因
-  style_attribution?: any;
-  factor_metrics?: any;
-  stratified_returns?: any[];
-  rebalance_suggestions?: any[];
+  style_attribution?: Record<string, unknown>;
+  factor_metrics?: Record<string, unknown>;
+  stratified_returns?: Array<Record<string, unknown>>;
+  rebalance_suggestions?: Array<Record<string, unknown>>;
 }

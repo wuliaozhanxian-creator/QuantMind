@@ -7,7 +7,7 @@ service with in-memory caching to avoid repeated calls.
 
 import os
 import time
-from typing import Dict, Optional
+from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,7 +20,6 @@ USER_CENTER_CACHE_TTL = int(os.getenv("USER_CENTER_CACHE_TTL", "300"))
 # Simple in-memory cache: user_id -> (expires_at, data)
 _cache: dict[str, tuple] = {}
 _stats: dict[str, int] = {"hit": 0, "miss": 0, "fail": 0}
-
 
 async def fetch_user_summary(
     user_id: str, tenant_id: str = "default", fallback_name: str | None = None
@@ -54,7 +53,9 @@ async def fetch_user_summary(
 
         summary = {
             "id": profile.user_id,
-            "name": profile.display_name or getattr(profile, "username_at_runtime", None) or f"QA_{user_id[:5]}",
+            "name": profile.display_name
+            or getattr(profile, "username_at_runtime", None)
+            or f"QA_{user_id[:5]}",
             "avatar": profile.avatar_url,
             "bio": profile.bio,
             "followers_count": getattr(profile, "followers_count", 0),
@@ -78,7 +79,6 @@ async def fetch_user_summary(
             }
         _stats["fail"] += 1
         return None
-
 
 async def record_activity(
     user_id: str,
@@ -109,10 +109,8 @@ async def record_activity(
         _stats["fail"] += 1
         return False
 
-
 def clear_cache():
     _cache.clear()
-
 
 def get_stats() -> dict[str, int]:
     return dict(_stats)

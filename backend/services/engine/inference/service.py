@@ -20,17 +20,20 @@ from backend.shared.stock_utils import StockCodeUtil
 
 logger = logging.getLogger(__name__)
 
-
 class InferenceService:
     """Main service for handling model inference requests."""
 
     def __init__(self, production_dir: Path | None = None):
         self.production_dir = production_dir or PRODUCTION_MODELS_DIR
         self.history_buffer = HistoryBuffer()
-        self.model_loader = ModelLoader(self.production_dir, max_models=MAX_MODELS_IN_MEMORY)
+        self.model_loader = ModelLoader(
+            self.production_dir, max_models=MAX_MODELS_IN_MEMORY
+        )
         self.data_adapter = DataAdapter(history_buffer=self.history_buffer)
         self.neutralizer = Neutralizer()
-        logger.info(f"Initialized InferenceService with production dir: {self.production_dir}")
+        logger.info(
+            f"Initialized InferenceService with production dir: {self.production_dir}"
+        )
 
     def predict(
         self,
@@ -47,10 +50,14 @@ class InferenceService:
             cache_key = f"{cache_namespace}:{model_id}" if cache_namespace else model_id
             model = self.model_loader.get_model(model_id, cache_key=cache_key)
             if model is None:
-                self.model_loader.load_model(model_id, model_dir=model_dir, cache_key=cache_key)
+                self.model_loader.load_model(
+                    model_id, model_dir=model_dir, cache_key=cache_key
+                )
                 model = self.model_loader.get_model(model_id, cache_key=cache_key)
 
-            metadata = self.model_loader.get_model_metadata(model_id, model_dir=model_dir)
+            metadata = self.model_loader.get_model_metadata(
+                model_id, model_dir=model_dir
+            )
             if self._is_sequence_model(metadata):
                 return self._predict_sequence_model(
                     model_id=model_id,
@@ -128,7 +135,9 @@ class InferenceService:
             # 1. 获取模型
             model = self.model_loader.get_model(model_id, cache_key=cache_key)
             if model is None:
-                self.model_loader.load_model(model_id, model_dir=model_dir, cache_key=cache_key)
+                self.model_loader.load_model(
+                    model_id, model_dir=model_dir, cache_key=cache_key
+                )
                 model = self.model_loader.get_model(model_id, cache_key=cache_key)
 
             if model is None:
@@ -163,7 +172,9 @@ class InferenceService:
             logger.error(f"Batch prediction failed for model {model_id}: {e}")
             return {"status": "error", "model_id": model_id, "error": str(e)}
 
-    def _resolve_feature_columns(self, model: Any, metadata: dict[str, Any] | None) -> list[str]:
+    def _resolve_feature_columns(
+        self, model: Any, metadata: dict[str, Any] | None
+    ) -> list[str]:
         """从 metadata 或模型对象推断特征列。"""
         if metadata:
             feature_columns = metadata.get("feature_columns", [])
@@ -182,7 +193,7 @@ class InferenceService:
                 if feature_columns:
                     return [str(c) for c in feature_columns]
             except Exception:
-                pass
+                logger.debug("ignored exception", exc_info=True)
 
         # Qlib LGBModel wrapper
         if hasattr(model, "model") and hasattr(model.model, "feature_name"):
@@ -191,7 +202,7 @@ class InferenceService:
                 if feature_columns:
                     return [str(c) for c in feature_columns]
             except Exception:
-                pass
+                logger.debug("ignored exception", exc_info=True)
 
         # Fallback
         return ["open", "high", "low", "close", "volume"]
@@ -217,7 +228,9 @@ class InferenceService:
         feature_columns = self._resolve_feature_columns(model, metadata)
         lookback = int(
             (metadata.get("preprocess", {}) or {}).get("lookback_window")
-            or (metadata.get("input_spec", {}) or {}).get("tensor_shape", [None, 30, None])[1]
+            or (metadata.get("input_spec", {}) or {}).get(
+                "tensor_shape", [None, 30, None]
+            )[1]
             or 30
         )
         clip_range = (metadata.get("preprocess", {}) or {}).get("clip_range")
@@ -228,9 +241,13 @@ class InferenceService:
         if isinstance(data, dict) and "sequences" in data:
             seq_arr = np.asarray(data.get("sequences"), dtype=np.float32)
             if seq_arr.ndim != 3:
-                raise ValueError(f"sequences must be 3D array, got shape={seq_arr.shape}")
+                raise ValueError(
+                    f"sequences must be 3D array, got shape={seq_arr.shape}"
+                )
             if seq_arr.shape[2] != len(feature_columns):
-                raise ValueError(f"feature dim mismatch: got {seq_arr.shape[2]}, expect {len(feature_columns)}")
+                raise ValueError(
+                    f"feature dim mismatch: got {seq_arr.shape[2]}, expect {len(feature_columns)}"
+                )
             raw_symbols = data.get("symbols") or []
             if isinstance(raw_symbols, list) and len(raw_symbols) == seq_arr.shape[0]:
                 symbols = [StockCodeUtil.to_prefix(str(s)) for s in raw_symbols]
@@ -241,7 +258,9 @@ class InferenceService:
             if "instrument" not in df.columns and "symbol" in df.columns:
                 df["instrument"] = df["symbol"]
             if "instrument" not in df.columns:
-                raise ValueError("sequence inference data must include instrument/symbol")
+                raise ValueError(
+                    "sequence inference data must include instrument/symbol"
+                )
             if "date" in df.columns and "datetime" not in df.columns:
                 df["datetime"] = pd.to_datetime(df["date"], errors="coerce")
             if "datetime" in df.columns:
@@ -260,7 +279,9 @@ class InferenceService:
                 seq_list.append(seq)
                 symbols.append(str(inst))
             if not seq_list:
-                raise ValueError(f"no valid sequence found, need >= {lookback} rows per instrument")
+                raise ValueError(
+                    f"no valid sequence found, need >= {lookback} rows per instrument"
+                )
             seq_arr = np.stack(seq_list, axis=0).astype(np.float32, copy=False)
 
         if isinstance(clip_range, list) and len(clip_range) == 2:
@@ -313,7 +334,9 @@ class InferenceService:
 
         raise TypeError(f"Unsupported model type for prediction: {type(model)}")
 
-    def get_model_info(self, model_id: str, *, model_dir: Path | None = None) -> dict[str, Any] | None:
+    def get_model_info(
+        self, model_id: str, *, model_dir: Path | None = None
+    ) -> dict[str, Any] | None:
         """
         Get detailed information about a model.
 

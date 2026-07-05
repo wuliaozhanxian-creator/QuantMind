@@ -6,7 +6,7 @@ import logging
 import sys
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
@@ -41,7 +41,6 @@ except ImportError:
     Counter = None
     Histogram = None
 
-
 # 创建fallback装饰器
 def fallback_performance_decorator(logger, operation_name):
     """Fallback performance decorator when observability modules are not available"""
@@ -54,18 +53,15 @@ def fallback_performance_decorator(logger, operation_name):
 
     return decorator
 
-
 # 使用fallback装饰器如果log_performance不可用
 if log_performance is None:
     log_performance = fallback_performance_decorator
-
 
 # 初始化日志
 if init_service_logging:
     logger = init_service_logging("backtest-engine")
 else:
     logger = logging.getLogger(__name__)
-
 
 class BacktestEngine:
     """
@@ -110,7 +106,9 @@ class BacktestEngine:
         # 风险管理组件
         if self.enable_risk_management:
             self.risk_manager = RiskManager(risk_config or RiskConfig())
-            self.stop_loss_manager = StopLossManager(stop_loss_config or StopLossConfig())
+            self.stop_loss_manager = StopLossManager(
+                stop_loss_config or StopLossConfig()
+            )
         else:
             self.risk_manager = None
             self.stop_loss_manager = None
@@ -266,7 +264,9 @@ class BacktestEngine:
             self.current_price = daily_market[first_symbol]["close"]
 
             # 更新组合价值（多标的）
-            close_prices = {symbol: row["close"] for symbol, row in daily_market.items()}
+            close_prices = {
+                symbol: row["close"] for symbol, row in daily_market.items()
+            }
             self.portfolio.update_market_value(date, close_prices)
 
             # 记录每日收益
@@ -294,7 +294,9 @@ class BacktestEngine:
                     }
 
                     if price_updates:
-                        triggered_stops = self.stop_loss_manager.update_prices(price_updates)
+                        triggered_stops = self.stop_loss_manager.update_prices(
+                            price_updates
+                        )
 
                         # 处理触发的止损
                         for position_id, reason in triggered_stops:
@@ -383,22 +385,39 @@ class BacktestEngine:
                 "total_trades": len(self.trades),
                 "final_value": self.portfolio.get_total_value(),
                 "total_return": self.performance_metrics.get("total_return", 0),
-                "rejected_orders": len([o for o in self.orders if o.status == OrderStatus.REJECTED]),
+                "rejected_orders": len(
+                    [o for o in self.orders if o.status == OrderStatus.REJECTED]
+                ),
                 "duration_ms": (
-                    round((time.perf_counter() - self.run_started_at) * 1000, 2) if self.run_started_at else None
+                    round((time.perf_counter() - self.run_started_at) * 1000, 2)
+                    if self.run_started_at
+                    else None
                 ),
             },
         )
 
         # 记录 Prometheus 指标（若可用）
         strategy_label = (
-            getattr(self, "strategy", None).__class__.__name__ if getattr(self, "strategy", None) else "unknown"
+            getattr(self, "strategy", None).__class__.__name__
+            if getattr(self, "strategy", None)
+            else "unknown"
         )
-        if hasattr(BacktestEngine, "_METRIC_DURATION") and BacktestEngine._METRIC_DURATION:
+        if (
+            hasattr(BacktestEngine, "_METRIC_DURATION")
+            and BacktestEngine._METRIC_DURATION
+        ):
             try:
-                duration_sec = time.perf_counter() - self.run_started_at if self.run_started_at else 0
-                BacktestEngine._METRIC_DURATION.labels(strategy=strategy_label).observe(duration_sec)
-                BacktestEngine._METRIC_TRADES.labels(strategy=strategy_label).inc(len(self.trades))
+                duration_sec = (
+                    time.perf_counter() - self.run_started_at
+                    if self.run_started_at
+                    else 0
+                )
+                BacktestEngine._METRIC_DURATION.labels(strategy=strategy_label).observe(
+                    duration_sec
+                )
+                BacktestEngine._METRIC_TRADES.labels(strategy=strategy_label).inc(
+                    len(self.trades)
+                )
                 BacktestEngine._METRIC_REJECTED.labels(strategy=strategy_label).inc(
                     len([o for o in self.orders if o.status == OrderStatus.REJECTED])
                 )
@@ -426,7 +445,9 @@ class BacktestEngine:
 
     def _process_orders(self, market_data: dict[str, pd.Series]) -> None:
         """处理待执行订单"""
-        pending_orders = [order for order in self.orders if order.status == OrderStatus.PENDING]
+        pending_orders = [
+            order for order in self.orders if order.status == OrderStatus.PENDING
+        ]
 
         for order in pending_orders:
             symbol_data = market_data.get(order.symbol)
@@ -452,7 +473,6 @@ class BacktestEngine:
 
     def _execute_order(self, order: Order, market_data: pd.Series) -> None:
         """执行订单（支持多头买卖和融券做空/平空）"""
-        is_short_side = order.side in (OrderSide.SHORT_SELL, OrderSide.BUY_TO_COVER)
 
         # 计算执行价格（考虑滑点）
         if order.side in (OrderSide.BUY, OrderSide.BUY_TO_COVER):
@@ -582,10 +602,14 @@ class BacktestEngine:
                 positions_to_remove = [
                     pos_id
                     for pos_id, position in self.stop_loss_manager.positions.items()
-                    if position.symbol == order.symbol and position.side == "long" and not position.is_closed
+                    if position.symbol == order.symbol
+                    and position.side == "long"
+                    and not position.is_closed
                 ]
                 for pos_id in positions_to_remove:
-                    self.stop_loss_manager.close_position(pos_id, execution_price, "手动卖出")
+                    self.stop_loss_manager.close_position(
+                        pos_id, execution_price, "手动卖出"
+                    )
             trade["realized_pnl"] = realized_pnl
 
         elif order.side == OrderSide.SHORT_SELL:
@@ -616,10 +640,14 @@ class BacktestEngine:
                 positions_to_remove = [
                     pos_id
                     for pos_id, position in self.stop_loss_manager.positions.items()
-                    if position.symbol == order.symbol and position.side == "short" and not position.is_closed
+                    if position.symbol == order.symbol
+                    and position.side == "short"
+                    and not position.is_closed
                 ]
                 for pos_id in positions_to_remove:
-                    self.stop_loss_manager.close_position(pos_id, execution_price, "平空")
+                    self.stop_loss_manager.close_position(
+                        pos_id, execution_price, "平空"
+                    )
             trade["realized_pnl"] = realized_pnl
 
         # 更新订单状态
@@ -640,9 +668,15 @@ class BacktestEngine:
         returns = np.array(self.daily_returns)
 
         # 基础指标
-        total_return = (self.portfolio.get_total_value() - self.initial_cash) / self.initial_cash
+        total_return = (
+            self.portfolio.get_total_value() - self.initial_cash
+        ) / self.initial_cash
         years = len(returns) / 252
-        annual_return = (1 + total_return) ** (1 / max(years, 1 / 252)) - 1 if total_return > -1 else total_return
+        annual_return = (
+            (1 + total_return) ** (1 / max(years, 1 / 252)) - 1
+            if total_return > -1
+            else total_return
+        )
 
         # 风险指标
         volatility = np.std(returns, ddof=1) * np.sqrt(252)
@@ -669,7 +703,9 @@ class BacktestEngine:
             "total_trades": total_trades,
             "winning_trades": winning_trades,
             "win_rate": winning_trades / total_trades if total_trades > 0 else 0,
-            "rejected_orders": len([o for o in self.orders if o.status == OrderStatus.REJECTED]),
+            "rejected_orders": len(
+                [o for o in self.orders if o.status == OrderStatus.REJECTED]
+            ),
         }
 
         logger.info(
@@ -693,7 +729,9 @@ class BacktestEngine:
             "trades": self.trades,
             "performance_metrics": self.performance_metrics,
             "positions": self.portfolio.get_positions(),
-            "risk_management": (self.get_risk_summary() if self.enable_risk_management else None),
+            "risk_management": (
+                self.get_risk_summary() if self.enable_risk_management else None
+            ),
         }
 
         # 添加增强的风险指标
@@ -730,7 +768,11 @@ class BacktestEngine:
         try:
             import subprocess
 
-            git_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=".").decode().strip()
+            git_commit = (
+                subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=".")
+                .decode()
+                .strip()
+            )
         except Exception:
             git_commit = None
 
@@ -744,7 +786,9 @@ class BacktestEngine:
             "enable_risk_management": self.enable_risk_management,
             "git_commit": git_commit,
             "duration_ms": (
-                round((time.perf_counter() - self.run_started_at) * 1000, 2) if self.run_started_at else None
+                round((time.perf_counter() - self.run_started_at) * 1000, 2)
+                if self.run_started_at
+                else None
             ),
         }
 
@@ -783,7 +827,7 @@ class BacktestEngine:
             summary["risk_alerts"] = {
                 "total_alerts": len(self.risk_alerts),
                 "recent_alerts": self.risk_alerts[-10:],  # 最近10个警告
-                "alert_types": list(set(alert["type"] for alert in self.risk_alerts)),
+                "alert_types": list({alert["type"] for alert in self.risk_alerts}),
             }
 
         return summary

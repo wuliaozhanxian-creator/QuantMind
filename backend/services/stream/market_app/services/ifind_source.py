@@ -1,14 +1,13 @@
 import logging
 import os
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import httpx
 
 from .data_source import DataSourceAdapter
 
 logger = logging.getLogger(__name__)
-
 
 class IFindDataSource(DataSourceAdapter):
     """
@@ -57,7 +56,9 @@ class IFindDataSource(DataSourceAdapter):
 
             # Use a slightly longer timeout for external API
             async with httpx.AsyncClient(timeout=5.0) as client:
-                response = await client.post(self.BASE_URL, headers=headers, json=payload)
+                response = await client.post(
+                    self.BASE_URL, headers=headers, json=payload
+                )
 
                 if response.status_code == 200:
                     data = response.json()
@@ -69,30 +70,46 @@ class IFindDataSource(DataSourceAdapter):
                     # Check for token expiration error codes (broad check for now)
                     # iFind often uses non-zero error codes for auth issues
                     # If we have a refresh token, try to refresh and retry once
-                    elif self.refresh_token and "token" in str(data.get("errmsg", "")).lower():
-                        logger.warning(f"Token expired or invalid: {data.get('errmsg')}. Refreshing...")
+                    elif (
+                        self.refresh_token
+                        and "token" in str(data.get("errmsg", "")).lower()
+                    ):
+                        logger.warning(
+                            f"Token expired or invalid: {data.get('errmsg')}. Refreshing..."
+                        )
                         if await self._refresh_access_token(client):
                             # Retry with new token
                             headers["access_token"] = self.access_token
-                            response = await client.post(self.BASE_URL, headers=headers, json=payload)
-                            if response.status_code == 200 and response.json().get("errorcode") == 0:
+                            response = await client.post(
+                                self.BASE_URL, headers=headers, json=payload
+                            )
+                            if (
+                                response.status_code == 200
+                                and response.json().get("errorcode") == 0
+                            ):
                                 return self._parse_quote(response.json(), symbol)
 
-                    logger.error(f"iFind API error: {data.get('errmsg', 'Unknown error')}")
+                    logger.error(
+                        f"iFind API error: {data.get('errmsg', 'Unknown error')}"
+                    )
                     return None
 
                 elif response.status_code == 401:
                     logger.warning("401 Unauthorized. Refreshing token...")
                     if await self._refresh_access_token(client):
                         headers["access_token"] = self.access_token
-                        response = await client.post(self.BASE_URL, headers=headers, json=payload)
+                        response = await client.post(
+                            self.BASE_URL, headers=headers, json=payload
+                        )
                         if response.status_code == 200:
                             return self._parse_quote(response.json(), symbol)
 
                     logger.error("Failed to refresh token or retry failed")
                     return None
                 else:
-                    logger.error(f"iFind API HTTP error: {response.status_code} - {response.text}")
+                    logger.error(
+                        f"iFind API HTTP error: {response.status_code} - {response.text}"
+                    )
                     return None
 
         except Exception as e:
@@ -169,7 +186,9 @@ class IFindDataSource(DataSourceAdapter):
         else:
             return f"{s}.SZ"
 
-    def _parse_quote(self, data: dict[str, Any], original_symbol: str) -> dict[str, Any] | None:
+    def _parse_quote(
+        self, data: dict[str, Any], original_symbol: str
+    ) -> dict[str, Any] | None:
         """
         解析 iFind 返回的 JSON 数据
 

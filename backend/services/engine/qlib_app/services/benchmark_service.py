@@ -20,18 +20,21 @@ from backend.services.engine.qlib_app.services.backtest_persistence import (
 )
 from backend.services.engine.qlib_app.utils.benchmark_symbol import benchmark_candidates
 from backend.services.engine.qlib_app.utils.qlib_utils import D
-from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
+from backend.services.engine.qlib_app.utils.structured_logger import (
+    StructuredTaskLogger,
+)
 
 logger = logging.getLogger(__name__)
 DEFAULT_RISK_FREE_RATE = 0.02
-
 
 class BenchmarkService:
     """基准对比分析服务"""
 
     def __init__(self):
         self._persistence = BacktestPersistence()
-        StructuredTaskLogger(logger, "benchmark-service").info("init", "BenchmarkService initialized")
+        StructuredTaskLogger(logger, "benchmark-service").info(
+            "init", "BenchmarkService initialized"
+        )
 
     async def analyze(
         self,
@@ -42,10 +45,14 @@ class BenchmarkService:
     ) -> BenchmarkComparisonResponse:
         try:
             # 1. 获取真实策略收益
-            strategy_returns = await self._get_strategy_returns(backtest_id, user_id, tenant_id)
+            strategy_returns = await self._get_strategy_returns(
+                backtest_id, user_id, tenant_id
+            )
 
             # 2. 从 Qlib 获取真实基准收益
-            benchmark_returns = await self._get_benchmark_returns(benchmark_id, strategy_returns.index)
+            benchmark_returns = await self._get_benchmark_returns(
+                benchmark_id, strategy_returns.index
+            )
 
             if strategy_returns is None or benchmark_returns is None:
                 raise ValueError("回测或基准收益数据缺失")
@@ -73,12 +80,21 @@ class BenchmarkService:
                 beta=beta,
                 risk_free_rate=DEFAULT_RISK_FREE_RATE,
             )
-            tracking_error = self._to_finite_float(excess.std(ddof=1) * np.sqrt(252)) or 0.0
-            correlation = self._to_finite_float(aligned["strategy"].corr(aligned["benchmark"])) or 0.0
+            tracking_error = (
+                self._to_finite_float(excess.std(ddof=1) * np.sqrt(252)) or 0.0
+            )
+            correlation = (
+                self._to_finite_float(aligned["strategy"].corr(aligned["benchmark"]))
+                or 0.0
+            )
             strategy_cum = (1.0 + aligned["strategy"]).cumprod() - 1.0
             benchmark_cum = (1.0 + aligned["benchmark"]).cumprod() - 1.0
             excess_curve = strategy_cum - benchmark_cum
-            excess_return = self._to_finite_float(excess_curve.iloc[-1]) if len(excess_curve) > 0 else 0.0
+            excess_return = (
+                self._to_finite_float(excess_curve.iloc[-1])
+                if len(excess_curve) > 0
+                else 0.0
+            )
             if excess_return is None:
                 excess_return = 0.0
             upside_capture, downside_capture = self._calc_capture(aligned)
@@ -109,14 +125,22 @@ class BenchmarkService:
             StructuredTaskLogger(
                 logger,
                 "benchmark-service",
-                {"backtest_id": backtest_id, "tenant_id": tenant_id, "benchmark_id": benchmark_id},
+                {
+                    "backtest_id": backtest_id,
+                    "tenant_id": tenant_id,
+                    "benchmark_id": benchmark_id,
+                },
             ).exception("failed", "基准对比分析失败", error=exc)
             raise
 
-    async def _get_strategy_returns(self, backtest_id: str, user_id: str, tenant_id: str) -> pd.Series | None:
+    async def _get_strategy_returns(
+        self, backtest_id: str, user_id: str, tenant_id: str
+    ) -> pd.Series | None:
         """获取真实策略收益"""
         # 优化：按需加载
-        result = await self._persistence.get_result(backtest_id, tenant_id=tenant_id, include_fields=["equity_curve"])
+        result = await self._persistence.get_result(
+            backtest_id, tenant_id=tenant_id, include_fields=["equity_curve"]
+        )
         if not result or not result.equity_curve:
             return None
 
@@ -126,7 +150,9 @@ class BenchmarkService:
         returns = df["value"].pct_change().replace([np.inf, -np.inf], np.nan).fillna(0)
         return returns.clip(lower=-0.95, upper=1.0)
 
-    async def _get_benchmark_returns(self, benchmark_id: str, dates: pd.Index) -> pd.Series | None:
+    async def _get_benchmark_returns(
+        self, benchmark_id: str, dates: pd.Index
+    ) -> pd.Series | None:
         """从 Qlib 数据源获取真实基准收益"""
         try:
             # 确保 Qlib 已初始化 (由 main.py 处理，此处作为保险)
@@ -206,7 +232,9 @@ class BenchmarkService:
         benchmark_annual = self._annualize_compounded_return(benchmark)
         if strategy_annual is None or benchmark_annual is None:
             return None
-        alpha = strategy_annual - (risk_free_rate + beta * (benchmark_annual - risk_free_rate))
+        alpha = strategy_annual - (
+            risk_free_rate + beta * (benchmark_annual - risk_free_rate)
+        )
         return self._to_finite_float(alpha)
 
     def _calc_capture(self, aligned: pd.DataFrame) -> tuple[float, float]:
@@ -214,8 +242,16 @@ class BenchmarkService:
         down = aligned[aligned["benchmark"] < 0]
         upside_base = up["benchmark"].mean() if not up.empty else 0.0
         downside_base = down["benchmark"].mean() if not down.empty else 0.0
-        upside = self._to_finite_float(up["strategy"].mean() / upside_base) if upside_base else 0.0
-        downside = self._to_finite_float(down["strategy"].mean() / downside_base) if downside_base else 0.0
+        upside = (
+            self._to_finite_float(up["strategy"].mean() / upside_base)
+            if upside_base
+            else 0.0
+        )
+        downside = (
+            self._to_finite_float(down["strategy"].mean() / downside_base)
+            if downside_base
+            else 0.0
+        )
         upside = upside if upside is not None else 0.0
         downside = downside if downside is not None else 0.0
         return upside, downside

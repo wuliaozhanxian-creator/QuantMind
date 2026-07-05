@@ -17,7 +17,9 @@ router = APIRouter(prefix="/api-keys", tags=["API Keys"])
 
 
 @router.post("", response_model=ApiKeyResponse, status_code=status.HTTP_201_CREATED)
-async def create_api_key(data: ApiKeyCreate, current_user: dict = Depends(get_current_user)):
+async def create_api_key(
+    data: ApiKeyCreate, current_user: dict = Depends(get_current_user)
+):
     """
     Create a new API Key.
     The secret key is only returned once.
@@ -38,36 +40,48 @@ async def list_api_keys(current_user: dict = Depends(get_current_user)):
     """
     async with get_session(read_only=True) as session:
         service = ApiKeyService(session)
-        keys = await service.get_user_keys(user_id=current_user["user_id"], tenant_id=current_user["tenant_id"])
+        keys = await service.get_user_keys(
+            user_id=current_user["user_id"], tenant_id=current_user["tenant_id"]
+        )
         return {"items": keys, "count": len(keys)}
 
 
 @router.put("/{access_key}", response_model=ApiKeyInfo)
-async def update_api_key(access_key: str, data: ApiKeyUpdate, current_user: dict = Depends(get_current_user)):
+async def update_api_key(
+    access_key: str, data: ApiKeyUpdate, current_user: dict = Depends(get_current_user)
+):
     """
     Update API Key (name, permissions, status).
     """
     async with get_session(read_only=False) as session:
         service = ApiKeyService(session)
-        key = await service.update_api_key(user_id=current_user["user_id"], access_key=access_key, data=data)
+        key = await service.update_api_key(
+            user_id=current_user["user_id"], access_key=access_key, data=data
+        )
         if not key:
             raise HTTPException(status_code=404, detail="API Key not found")
         return key
 
 
 @router.delete("/{access_key}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_api_key(access_key: str, current_user: dict = Depends(get_current_user)):
+async def delete_api_key(
+    access_key: str, current_user: dict = Depends(get_current_user)
+):
     """
     Revoke (delete) an API Key.
     """
     async with get_session(read_only=False) as session:
         service = ApiKeyService(session)
-        success = await service.delete_api_key(user_id=current_user["user_id"], access_key=access_key)
+        success = await service.delete_api_key(
+            user_id=current_user["user_id"], access_key=access_key
+        )
         if not success:
             raise HTTPException(status_code=404, detail="API Key not found")
 
 
-@router.post("/init", response_model=ApiKeyInfo, summary="确保用户至少有一个默认交易 API Key")
+@router.post(
+    "/init", response_model=ApiKeyInfo, summary="确保用户至少有一个默认交易 API Key"
+)
 async def init_default_api_key(current_user: dict = Depends(get_current_user)):
     """
     幂等接口：若该用户尚无 API Key，则自动创建一个名为"交易系统默认Key"的 Key。
@@ -80,7 +94,9 @@ async def init_default_api_key(current_user: dict = Depends(get_current_user)):
     async with get_session(read_only=False) as session:
         service = ApiKeyService(session)
         # 1. 查询是否已存在
-        existing_keys = await service.get_user_keys(user_id=user_id, tenant_id=tenant_id)
+        existing_keys = await service.get_user_keys(
+            user_id=user_id, tenant_id=tenant_id
+        )
         if existing_keys:
             # 已存在，返回最晚创建的一条（access_key 可展示，secret 不再返回）
             return existing_keys[0]
@@ -90,7 +106,9 @@ async def init_default_api_key(current_user: dict = Depends(get_current_user)):
             name="交易系统默认Key",
             permissions=["trade.read", "trade.write"],
         )
-        created = await service.create_api_key(user_id=user_id, tenant_id=tenant_id, data=create_data)
+        created = await service.create_api_key(
+            user_id=user_id, tenant_id=tenant_id, data=create_data
+        )
         # 返回 ApiKeyInfo（不含 secret_key 明文，前端只需显示 access_key）
         return ApiKeyInfo(
             id=created.id,

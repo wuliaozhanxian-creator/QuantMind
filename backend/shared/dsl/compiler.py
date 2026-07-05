@@ -4,13 +4,12 @@ DSL编译器 - 将DSL编译为可执行的Python代码
 
 import ast
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any
 
 from ..observability.logging import get_logger
 from .parser import StrategyDSL
 
 logger = get_logger(__name__)
-
 
 @dataclass
 class CompiledStrategy:
@@ -33,7 +32,6 @@ class CompiledStrategy:
             "variables": self.variables,
             "metadata": self.metadata,
         }
-
 
 class DSLCompiler:
     """DSL编译器"""
@@ -98,7 +96,9 @@ class DSLCompiler:
             strategy_code = self._generate_strategy_function(strategy_dsl)
 
             # 组合完整代码
-            full_code = self._combine_code(imports, variables_code, functions_code, strategy_code)
+            full_code = self._combine_code(
+                imports, variables_code, functions_code, strategy_code
+            )
 
             # 验证生成的代码
             self._validate_code(full_code)
@@ -129,7 +129,7 @@ class DSLCompiler:
         return [
             "import numpy as np",
             "import pandas as pd",
-            "from typing import Dict, List, Any, Optional",
+            "from typing import Any, Optional",
             "from dataclasses import dataclass",
             "import warnings",
             "warnings.filterwarnings('ignore')",
@@ -194,7 +194,7 @@ def rsi(data: pd.Series, period: int = 14) -> pd.Series:
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
-def macd(data: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> Dict[str, pd.Series]:
+def macd(data: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> dict[str, pd.Series]:
     """MACD Indicator"""
     ema_fast = ema(data, fast)
     ema_slow = ema(data, slow)
@@ -208,7 +208,7 @@ def macd(data: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> Di
         'histogram': histogram
     }
 
-def bollinger(data: pd.Series, period: int = 20, std_dev: float = 2) -> Dict[str, pd.Series]:
+def bollinger(data: pd.Series, period: int = 20, std_dev: float = 2) -> dict[str, pd.Series]:
     """Bollinger Bands"""
     sma_line = sma(data, period)
     std_line = data.rolling(window=period).std()
@@ -311,7 +311,9 @@ def ceil_value(data: pd.Series) -> pd.Series:
         function_lines = []
 
         # 函数定义
-        function_lines.append(f"def {strategy_dsl.name}_strategy(data: pd.DataFrame) -> Dict[str, Any]:")
+        function_lines.append(
+            f"def {strategy_dsl.name}_strategy(data: pd.DataFrame) -> dict[str, Any]:"
+        )
         function_lines.append('    """')
         function_lines.append(f"    Generated strategy: {strategy_dsl.name}")
         function_lines.append('    """')
@@ -325,10 +327,18 @@ def ceil_value(data: pd.Series) -> pd.Series:
 
         # 提取价格数据
         function_lines.append("    # Extract price data")
-        function_lines.append('    close = data["close"] if "close" in data.columns else data.iloc[:, 0]')
-        function_lines.append('    open_price = data["open"] if "open" in data.columns else close')
-        function_lines.append('    high = data["high"] if "high" in data.columns else close')
-        function_lines.append('    low = data["low"] if "low" in data.columns else close')
+        function_lines.append(
+            '    close = data["close"] if "close" in data.columns else data.iloc[:, 0]'
+        )
+        function_lines.append(
+            '    open_price = data["open"] if "open" in data.columns else close'
+        )
+        function_lines.append(
+            '    high = data["high"] if "high" in data.columns else close'
+        )
+        function_lines.append(
+            '    low = data["low"] if "low" in data.columns else close'
+        )
         function_lines.append(
             '    volume = data["volume"] if "volume" in data.columns else pd.Series(1, index=data.index)'
         )
@@ -407,12 +417,17 @@ else:
                 return f"{left} {op} {right}"
             elif "function" in condition:
                 func_name = condition["function"]
-                args = [self._generate_condition_expression(arg) for arg in condition.get("args", [])]
+                args = [
+                    self._generate_condition_expression(arg)
+                    for arg in condition.get("args", [])
+                ]
                 return f"{func_name}({', '.join(args)})"
 
         return str(condition)
 
-    def _combine_code(self, imports: list[str], variables: str, functions: str, strategy: str) -> str:
+    def _combine_code(
+        self, imports: list[str], variables: str, functions: str, strategy: str
+    ) -> str:
         """组合完整代码"""
         parts = []
 
@@ -451,7 +466,7 @@ else:
             # 尝试解析AST
             ast.parse(code)
         except SyntaxError as e:
-            raise SyntaxError(f"Generated code has syntax error: {e}")
+            raise SyntaxError(f"Generated code has syntax error: {e}") from e
 
     def _extract_function_names(self, code: str) -> list[str]:
         """提取代码中的函数名"""

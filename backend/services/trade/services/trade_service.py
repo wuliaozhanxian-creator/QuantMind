@@ -6,7 +6,7 @@ import logging
 import json
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import List, Optional
+from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import and_, case, func, select
@@ -22,7 +22,6 @@ from backend.services.trade.portfolio.schemas.portfolio import TradeSync
 
 logger = logging.getLogger(__name__)
 
-
 class TradeService:
     """Trade management service with Redis caching"""
 
@@ -33,28 +32,37 @@ class TradeService:
 
         self.order_service = OrderService(db, redis)
 
-    def _get_trade_list_cache_key(self, user_id: int, portfolio_id: int | None = None, trading_mode: TradingMode | None = None) -> str:
+    def _get_trade_list_cache_key(
+        self,
+        user_id: int,
+        portfolio_id: int | None = None,
+        trading_mode: TradingMode | None = None,
+    ) -> str:
         mode_str = trading_mode.value if trading_mode else "all"
         port_str = f"port:{portfolio_id}" if portfolio_id else "all_portfolios"
         return f"trade:list:user:{user_id}:{port_str}:mode:{mode_str}"
 
-    async def _invalidate_trade_cache(self, user_id: int, portfolio_id: int | None = None):
+    async def _invalidate_trade_cache(
+        self, user_id: int, portfolio_id: int | None = None
+    ):
         """Invalidate trade-related caches for all combinations"""
         # Pattern match delete for this user
         pattern = f"trade:list:user:{user_id}:*"
         await self.redis.delete_pattern(pattern)
         logger.debug(f"Invalidated all trade caches for user {user_id}")
 
-    async def list_trades(self, query: TradeListQuery) -> List[Trade]:
-        """List trades with aggressive Redis caching"""
+    async def list_trades(self, query: TradeListQuery) -> list[Trade]:
+        """list trades with aggressive Redis caching"""
         # Try cache for standard list queries (no specific symbol/date filters)
         cache_key = None
         if not (query.start_date or query.end_date or query.symbol):
             # We always have user_id from AuthContext
-            cache_key = self._get_trade_list_cache_key(query.user_id, query.portfolio_id, query.trading_mode)
+            cache_key = self._get_trade_list_cache_key(
+                query.user_id, query.portfolio_id, query.trading_mode
+            )
             # Add paging info to key
             cache_key += f":limit:{query.limit}:offset:{query.offset}"
-            
+
             cached_data = await self.redis.get(cache_key)
             if cached_data:
                 logger.info(f"Cache hit for trade list: {cache_key}")
@@ -74,7 +82,7 @@ class TradeService:
             filters.append(Trade.trading_mode == query.trading_mode)
 
         stmt = select(Trade).where(and_(*filters)).order_by(Trade.executed_at.desc())
-        
+
         if query.limit:
             stmt = stmt.limit(query.limit)
         if query.offset:
@@ -92,10 +100,13 @@ class TradeService:
                     if isinstance(v, (datetime, UUID, Decimal)):
                         d[k] = str(v)
                 trade_dicts.append(d)
-            
-            await self.redis.set(cache_key, json.dumps(trade_dicts), expire=settings.CACHE_TTL_TRADE)
+
+            await self.redis.set(
+                cache_key, json.dumps(trade_dicts), expire=settings.CACHE_TTL_TRADE
+            )
 
         return trades
+
     async def create_trade(
         self,
         order: Order,
@@ -141,7 +152,9 @@ class TradeService:
         locked_order = result.scalar_one_or_none()
 
         if not locked_order:
-            logger.error(f"Concurrency conflict: Order {order.order_id} modified by another process")
+            logger.error(
+                f"Concurrency conflict: Order {order.order_id} modified by another process"
+            )
             raise RuntimeError("Order version conflict")
 
         # Update order amounts
@@ -152,7 +165,9 @@ class TradeService:
 
         # Calculate average price
         if locked_order.filled_quantity > 0:
-            locked_order.average_price = locked_order.filled_value / locked_order.filled_quantity
+            locked_order.average_price = (
+                locked_order.filled_value / locked_order.filled_quantity
+            )
 
         # Update order status via State Machine
         new_status = locked_order.status
@@ -170,11 +185,14 @@ class TradeService:
 
         # Immediate Position Sync
         try:
-            from backend.services.trade.portfolio.services.position_service import PositionService
+            from backend.services.trade.portfolio.services.position_service import (
+                PositionService,
+            )
+
             sync_data = TradeSync(
                 portfolio_id=trade.portfolio_id,
                 symbol=trade.symbol,
-                side=trade.side.value if hasattr(trade.side, 'value') else trade.side,
+                side=trade.side.value if hasattr(trade.side, "value") else trade.side,
                 quantity=trade.quantity,
                 price=trade.price,
                 commission=trade.commission,
@@ -183,13 +201,15 @@ class TradeService:
                 total_fee=trade.total_fee,
                 position_side=trade.position_side,
                 trade_action=trade.trade_action,
-                trade_id=str(trade.trade_id)
+                trade_id=str(trade.trade_id),
             )
             # Re-fetch session context if needed or use existing (Note: sync_trade_update needs its own commit if successful)
             await PositionService.sync_trade_update(self.db, sync_data)
             await self.db.commit()
         except Exception as e:
-            logger.error(f"Failed to sync position for trade {trade.trade_id}: {str(e)}")
+            logger.error(
+                f"Failed to sync position for trade {trade.trade_id}: {str(e)}"
+            )
             # In production, this might trigger a background retry job
 
         logger.info(f"Trade created and position synced: {trade.trade_id}")
@@ -248,7 +268,9 @@ class TradeService:
         if use_cache:
             cached = self.redis.get(cache_key)
             if cached:
-                return Trade(**{k: v for k, v in cached.items() if k != "_sa_instance_state"})
+                return Trade(
+                    **{k: v for k, v in cached.items() if k != "_sa_instance_state"}
+                )
 
         conditions = [Trade.trade_id == trade_id]
         if tenant_id is not None:
@@ -261,7 +283,9 @@ class TradeService:
 
         if trade and use_cache:
             # Cache it
-            trade_dict = {k: v for k, v in trade.__dict__.items() if k != "_sa_instance_state"}
+            trade_dict = {
+                k: v for k, v in trade.__dict__.items() if k != "_sa_instance_state"
+            }
             self.redis.set(cache_key, trade_dict, ttl=settings.CACHE_TTL_TRADE)
 
         return trade
@@ -275,8 +299,8 @@ class TradeService:
             return value
         return value.astimezone(timezone.utc).replace(tzinfo=None)
 
-    async def list_trades(self, query: TradeListQuery) -> list[Trade]:
-        """List trades with filters"""
+    async def list_trades(self, query: TradeListQuery) -> list[Trade]:  # noqa: F811 - 重复定义，line 48 为带缓存版本(死代码)；当前活跃版本为此处，需业务确认后统一
+        """list trades with filters"""
         conditions = []
         start_date = self._normalize_query_datetime(query.start_date)
         end_date = self._normalize_query_datetime(query.end_date)
@@ -307,7 +331,9 @@ class TradeService:
         result = await self.db.execute(stmt)
         return list(result.scalars().all())
 
-    async def get_trades_by_order(self, tenant_id: str, user_id: int, order_id: UUID) -> list[Trade]:
+    async def get_trades_by_order(
+        self, tenant_id: str, user_id: int, order_id: UUID
+    ) -> list[Trade]:
         """Get all trades for an order"""
         result = await self.db.execute(
             select(Trade)
@@ -322,7 +348,13 @@ class TradeService:
         )
         return list(result.scalars().all())
 
-    async def get_trade_statistics(self, tenant_id: str, user_id: int, portfolio_id: int | None = None, trading_mode: TradingMode | None = None) -> dict:
+    async def get_trade_statistics(
+        self,
+        tenant_id: str,
+        user_id: int,
+        portfolio_id: int | None = None,
+        trading_mode: TradingMode | None = None,
+    ) -> dict:
         """Get trade statistics"""
         conditions = [Trade.tenant_id == tenant_id, Trade.user_id == str(user_id)]
         if portfolio_id:
@@ -334,14 +366,20 @@ class TradeService:
             func.count(Trade.id).label("total_trades"),
             func.coalesce(func.sum(Trade.trade_value), 0.0).label("total_value"),
             func.coalesce(func.sum(Trade.commission), 0.0).label("total_commission"),
-            func.coalesce(func.sum(case((Trade.side == "buy", 1), else_=0)), 0).label("buy_trades"),
-            func.coalesce(func.sum(case((Trade.side == "sell", 1), else_=0)), 0).label("sell_trades"),
+            func.coalesce(func.sum(case((Trade.side == "buy", 1), else_=0)), 0).label(
+                "buy_trades"
+            ),
+            func.coalesce(func.sum(case((Trade.side == "sell", 1), else_=0)), 0).label(
+                "sell_trades"
+            ),
         ).where(and_(*conditions))
         summary_row = (await self.db.execute(summary_stmt)).one()
 
         day_bucket = func.date(Trade.executed_at)
         daily_stmt = (
-            select(day_bucket.label("trade_day"), func.count(Trade.id).label("trade_count"))
+            select(
+                day_bucket.label("trade_day"), func.count(Trade.id).label("trade_count")
+            )
             .where(and_(*conditions))
             .group_by(day_bucket)
             .order_by(day_bucket.asc())

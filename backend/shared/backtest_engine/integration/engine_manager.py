@@ -6,7 +6,7 @@
 import logging
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, Union
+from typing import Any, Union
 
 import pandas as pd
 
@@ -26,13 +26,11 @@ from .qlib_adapter import QlibBacktestAdapter, QlibNotAvailable
 
 logger = logging.getLogger(__name__)
 
-
 class EngineType(Enum):
     """回测引擎类型"""
 
     QLIB = "qlib"
     AUTO = "auto"  # 自动选择最适合的引擎
-
 
 class BacktestEngineManager:
     """
@@ -147,7 +145,9 @@ class BacktestEngineManager:
             if engine_type not in (EngineType.AUTO, EngineType.QLIB):
                 raise ValueError("当前仅支持 Qlib 回测引擎")
 
-            engine_type = EngineType.QLIB if engine_type == EngineType.AUTO else engine_type
+            engine_type = (
+                EngineType.QLIB if engine_type == EngineType.AUTO else engine_type
+            )
 
             self.logger.info(f"使用 {engine_type.value} 引擎运行回测")
 
@@ -215,7 +215,9 @@ class BacktestEngineManager:
         results = {
             "success": result.success,
             "initial_cash": engine.config.initial_capital,
-            "final_value": (result.equity_curve.iloc[-1] if len(result.equity_curve) > 0 else 0),
+            "final_value": (
+                result.equity_curve.iloc[-1] if len(result.equity_curve) > 0 else 0
+            ),
             "equity_curve": result.equity_curve.to_dict(),
             "positions": result.positions.to_dict(),
             "trades": result.trades.to_dict() if not result.trades.empty else {},
@@ -307,7 +309,9 @@ class BacktestEngineManager:
         else:
             raise ValueError(f"不支持的策略类型: {strategy_type}")
 
-    def _generate_signals_from_strategy(self, data: pd.DataFrame, strategy: BaseStrategy) -> pd.DataFrame:
+    def _generate_signals_from_strategy(
+        self, data: pd.DataFrame, strategy: BaseStrategy
+    ) -> pd.DataFrame:
         """从策略生成信号"""
         # 创建临时引擎来生成信号
         temp_engine = self.create_event_driven_engine()
@@ -315,7 +319,7 @@ class BacktestEngineManager:
         temp_engine.add_strategy(strategy)
 
         signals = []
-        for i, (date, row) in enumerate(data.iterrows()):
+        for _i, (date, row) in enumerate(data.iterrows()):
             market_data = {
                 "date": date,
                 "open": row["open"],
@@ -339,7 +343,9 @@ class BacktestEngineManager:
 
         return pd.DataFrame({"signals": signals}, index=data.index)
 
-    def _generate_signals_from_config(self, data: pd.DataFrame, config: dict[str, Any]) -> pd.DataFrame:
+    def _generate_signals_from_config(
+        self, data: pd.DataFrame, config: dict[str, Any]
+    ) -> pd.DataFrame:
         """从配置生成信号"""
         strategy_type = config.get("type", "simple_ma")
         params = config.get("parameters", {})
@@ -355,7 +361,9 @@ class BacktestEngineManager:
             # 生成信号
             signals = []
             for i in range(len(data)):
-                if pd.isna(data.iloc[i]["ma_short"]) or pd.isna(data.iloc[i]["ma_long"]):
+                if pd.isna(data.iloc[i]["ma_short"]) or pd.isna(
+                    data.iloc[i]["ma_long"]
+                ):
                     signals.append(0)
                 elif data.iloc[i]["ma_short"] > data.iloc[i]["ma_long"]:
                     signals.append(1)
@@ -432,25 +440,36 @@ class BacktestEngineManager:
                         "event_driven": ed_value,
                         "vectorized": vec_value,
                         "difference": abs(ed_value - vec_value),
-                        "relative_diff": abs(ed_value - vec_value) / max(abs(ed_value), abs(vec_value), 1e-6),
+                        "relative_diff": abs(ed_value - vec_value)
+                        / max(abs(ed_value), abs(vec_value), 1e-6),
                     }
 
                 # 生成建议
-                max_relative_diff = max(diff["relative_diff"] for diff in comparison["differences"].values())
+                max_relative_diff = max(
+                    diff["relative_diff"] for diff in comparison["differences"].values()
+                )
 
                 if max_relative_diff < 0.01:  # 小于1%差异
-                    comparison["recommendations"].append("两种引擎结果高度一致，可以优先使用向量化引擎以获得更好的性能")
+                    comparison["recommendations"].append(
+                        "两种引擎结果高度一致，可以优先使用向量化引擎以获得更好的性能"
+                    )
                 elif max_relative_diff > 0.1:  # 大于10%差异
-                    comparison["recommendations"].append("两种引擎结果差异较大，建议使用事件驱动引擎以获得更准确的结果")
+                    comparison["recommendations"].append(
+                        "两种引擎结果差异较大，建议使用事件驱动引擎以获得更准确的结果"
+                    )
                 else:
-                    comparison["recommendations"].append("两种引擎结果基本一致，可以根据性能需求选择合适的引擎")
+                    comparison["recommendations"].append(
+                        "两种引擎结果基本一致，可以根据性能需求选择合适的引擎"
+                    )
 
         return comparison
 
     def get_engine_info(self) -> dict[str, Any]:
         """获取引擎信息"""
         return {
-            "current_engine": (self.current_engine_type.value if self.current_engine_type else None),
+            "current_engine": (
+                self.current_engine_type.value if self.current_engine_type else None
+            ),
             "supported_engines": [EngineType.QLIB.value],
             "cached_engines": list(self.engine_cache.keys()),
         }

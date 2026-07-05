@@ -5,7 +5,6 @@
 """
 
 import logging
-from typing import Dict, List
 
 import numpy as np
 import pandas as pd
@@ -18,7 +17,9 @@ from backend.services.engine.qlib_app.schemas.analysis import (
 from backend.services.engine.qlib_app.services.backtest_persistence import (
     BacktestPersistence,
 )
-from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
+from backend.services.engine.qlib_app.utils.structured_logger import (
+    StructuredTaskLogger,
+)
 
 logger = logging.getLogger(__name__)
 task_logger = StructuredTaskLogger(logger, "PerformanceService")
@@ -33,15 +34,28 @@ class PerformanceService:
 
     async def analyze(self, backtest_id: str, user_id: str, tenant_id: str = "default"):
         """分析回测绩效（占位方法）"""
-        task_logger.info("analyze", "分析回测绩效", backtest_id=backtest_id, user_id=user_id, tenant_id=tenant_id)
+        task_logger.info(
+            "analyze",
+            "分析回测绩效",
+            backtest_id=backtest_id,
+            user_id=user_id,
+            tenant_id=tenant_id,
+        )
         return {}
 
-    async def _get_backtest_returns(self, backtest_id: str, user_id: str, tenant_id: str = "default") -> pd.Series:
+    async def _get_backtest_returns(
+        self, backtest_id: str, user_id: str, tenant_id: str = "default"
+    ) -> pd.Series:
         """从数据库获取真实的回测收益数据"""
         # 1. 从持久化层获取回测结果
         result = await self._persistence.get_result(backtest_id, tenant_id=tenant_id)
         if not result or not result.equity_curve:
-            task_logger.warning("missing_equity_curve", "未找到回测结果或权益曲线为空", backtest_id=backtest_id, tenant_id=tenant_id)
+            task_logger.warning(
+                "missing_equity_curve",
+                "未找到回测结果或权益曲线为空",
+                backtest_id=backtest_id,
+                tenant_id=tenant_id,
+            )
             return pd.Series(dtype=float)
 
         # 2. 转换数据
@@ -88,7 +102,9 @@ class PerformanceService:
 
         return quarterly_data
 
-    def _calculate_rolling_metrics(self, returns: pd.Series, window: int) -> dict[str, TimeSeriesData]:
+    def _calculate_rolling_metrics(
+        self, returns: pd.Series, window: int
+    ) -> dict[str, TimeSeriesData]:
         """计算滚动指标"""
         # 滚动收益
         rolling_return = returns.rolling(window=window).sum()
@@ -109,9 +125,15 @@ class PerformanceService:
         dates = returns.index[valid_indices].strftime("%Y-%m-%d").tolist()
 
         return {
-            "return": TimeSeriesData(dates=dates, values=rolling_return[valid_indices].tolist()),
-            "volatility": TimeSeriesData(dates=dates, values=rolling_vol[valid_indices].tolist()),
-            "sharpe": TimeSeriesData(dates=dates, values=rolling_sharpe[valid_indices].tolist()),
+            "return": TimeSeriesData(
+                dates=dates, values=rolling_return[valid_indices].tolist()
+            ),
+            "volatility": TimeSeriesData(
+                dates=dates, values=rolling_vol[valid_indices].tolist()
+            ),
+            "sharpe": TimeSeriesData(
+                dates=dates, values=rolling_sharpe[valid_indices].tolist()
+            ),
         }
 
     def _calculate_percentiles(self, returns: pd.Series) -> PercentileData:

@@ -17,7 +17,6 @@ from backend.services.trade.models.order import (
     TradingMode,
 )
 
-
 class OrderBase(BaseModel):
     """Base order schema"""
 
@@ -34,14 +33,12 @@ class OrderBase(BaseModel):
     client_order_id: str | None = Field(None, max_length=100)
     remarks: str | None = Field(None, max_length=500)
 
-
 class OrderCreate(OrderBase):
     """Create order schema"""
 
     portfolio_id: int = Field(..., gt=0)
     strategy_id: int | None = Field(None, gt=0)
     trading_mode: TradingMode | None = None
-
 
 class OrderUpdate(BaseModel):
     """Update order schema"""
@@ -50,7 +47,6 @@ class OrderUpdate(BaseModel):
     price: float | None = Field(None, gt=0)
     stop_price: float | None = Field(None, gt=0)
     remarks: str | None = Field(None, max_length=500)
-
 
 class OrderResponse(OrderBase):
     """Order response schema"""
@@ -99,18 +95,17 @@ class OrderResponse(OrderBase):
             aware_value = value
         else:
             from datetime import timedelta
+
             shanghai_tz = timezone(timedelta(hours=8))
             aware_value = value.replace(tzinfo=shanghai_tz)
-        
-        return aware_value.astimezone(timezone.utc).isoformat()
 
+        return aware_value.astimezone(timezone.utc).isoformat()
 
 class OrderCancelRequest(BaseModel):
     """Cancel order request"""
 
     order_id: UUID4
     reason: str | None = Field(None, max_length=200)
-
 
 class OrderListQuery(BaseModel):
     """Order list query"""

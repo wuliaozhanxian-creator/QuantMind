@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import os
-from typing import Dict, Optional
+from typing import Optional
 from collections.abc import Iterable
 
 import httpx
@@ -18,7 +18,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # 统一指向 Engine 服务的端口
-AI_IDE_SERVICE_URL = os.getenv("AI_IDE_SERVICE_URL", "http://127.0.0.1:8001").rstrip("/")
+AI_IDE_SERVICE_URL = os.getenv("AI_IDE_SERVICE_URL", "http://127.0.0.1:8001").rstrip(
+    "/"
+)
 _HOP_HEADERS = {
     "connection",
     "keep-alive",
@@ -32,8 +34,9 @@ _HOP_HEADERS = {
     "content-length",
 }
 
-
-def _sanitize_request_headers(headers: Iterable, user: dict | None = None) -> dict[str, str]:
+def _sanitize_request_headers(
+    headers: Iterable, user: dict | None = None
+) -> dict[str, str]:
     out: dict[str, str] = {}
     for k, v in headers:
         if k.lower() in _HOP_HEADERS:
@@ -49,7 +52,6 @@ def _sanitize_request_headers(headers: Iterable, user: dict | None = None) -> di
 
     return out
 
-
 def _sanitize_response_headers(headers: httpx.Headers) -> dict[str, str]:
     out: dict[str, str] = {}
     for k, v in headers.items():
@@ -58,8 +60,9 @@ def _sanitize_response_headers(headers: httpx.Headers) -> dict[str, str]:
         out[k] = v
     return out
 
-
-async def _forward(request: Request, upstream_path: str, user: dict | None = None) -> Response:
+async def _forward(
+    request: Request, upstream_path: str, user: dict | None = None
+) -> Response:
     body = await request.body()
     url = f"{AI_IDE_SERVICE_URL}{upstream_path}"
     headers = _sanitize_request_headers(request.headers.items(), user)
@@ -89,7 +92,9 @@ async def _forward(request: Request, upstream_path: str, user: dict | None = Non
             last_exc = exc
             if attempt < max_retries - 1:
                 wait_time = (attempt + 1) * 1.0
-                logger.warning(f"⚠️ AI-IDE Proxy Attempt {attempt + 1} failed ({exc}). Retrying in {wait_time}s...")
+                logger.warning(
+                    f"⚠️ AI-IDE Proxy Attempt {attempt + 1} failed ({exc}). Retrying in {wait_time}s..."
+                )
                 await asyncio.sleep(wait_time)
                 continue
             break
@@ -97,10 +102,13 @@ async def _forward(request: Request, upstream_path: str, user: dict | None = Non
             last_exc = exc
             break
 
-    raise map_upstream_http_error("ai_ide", last_exc or Exception("Unknown AI-IDE proxy error"))
+    raise map_upstream_http_error(
+        "ai_ide", last_exc or Exception("Unknown AI-IDE proxy error")
+    )
 
-
-async def _forward_stream(request: Request, upstream_path: str, user: dict | None = None) -> StreamingResponse:
+async def _forward_stream(
+    request: Request, upstream_path: str, user: dict | None = None
+) -> StreamingResponse:
     body = await request.body()
     url = f"{AI_IDE_SERVICE_URL}{upstream_path}"
     headers = _sanitize_request_headers(request.headers.items(), user)
@@ -135,7 +143,9 @@ async def _forward_stream(request: Request, upstream_path: str, user: dict | Non
             await client.aclose()
             if attempt < max_retries - 1:
                 wait_time = (attempt + 1) * 1.0
-                logger.warning(f"⚠️ AI-IDE Stream Proxy Attempt {attempt + 1} failed ({exc}). Retrying in {wait_time}s...")
+                logger.warning(
+                    f"⚠️ AI-IDE Stream Proxy Attempt {attempt + 1} failed ({exc}). Retrying in {wait_time}s..."
+                )
                 await asyncio.sleep(wait_time)
                 continue
             break
@@ -144,8 +154,9 @@ async def _forward_stream(request: Request, upstream_path: str, user: dict | Non
             await client.aclose()
             break
 
-    raise map_upstream_http_error("ai_ide", last_exc or Exception("Unknown AI-IDE stream proxy error"))
-
+    raise map_upstream_http_error(
+        "ai_ide", last_exc or Exception("Unknown AI-IDE stream proxy error")
+    )
 
 # 统一捕获 /api/v1/ai-ide 下的所有请求
 @router.api_route(
@@ -153,7 +164,9 @@ async def _forward_stream(request: Request, upstream_path: str, user: dict | Non
     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     include_in_schema=False,
 )
-async def proxy_ai_ide(subpath: str, request: Request, user: dict | None = Depends(get_optional_user)):
+async def proxy_ai_ide(
+    subpath: str, request: Request, user: dict | None = Depends(get_optional_user)
+):
     upstream_path = f"/api/v1/ai-ide/{subpath}"
 
     # 针对流式回复接口使用 StreamingResponse

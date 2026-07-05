@@ -8,7 +8,7 @@ WebSocket clients subscribed to 'trade.updates.{user_id}'.
 import asyncio
 import logging
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import redis.asyncio as aioredis
 
@@ -19,9 +19,7 @@ logger = logging.getLogger(__name__)
 
 TRADE_EVENTS_STREAM = "trading_events"
 
-
 import os
-
 
 def _build_redis_client() -> aioredis.Redis:
     # 交易事件推送使用本地 Redis，不是远程行情 Redis
@@ -40,7 +38,6 @@ def _build_redis_client() -> aioredis.Redis:
         socket_connect_timeout=3,
         socket_timeout=5,
     )
-
 
 class TradePusher:
     """Real-time trade event pusher via Redis Stream -> WebSocket."""
@@ -65,7 +62,7 @@ class TradePusher:
             try:
                 await self._task
             except asyncio.CancelledError:
-                pass
+                pass  # noqa: BLE001 - asyncio 任务取消信号，预期静默处理
         if self._redis:
             await self._redis.aclose()
         logger.info("TradePusher stopped")
@@ -98,7 +95,7 @@ class TradePusher:
                         await self._redis.aclose()
                     self._redis = _build_redis_client()
                 except Exception:
-                    pass
+                    logger.debug("ignored exception", exc_info=True)
 
     async def _broadcast(self, raw: dict[str, Any]) -> None:
         user_id = str(raw.get("user_id", "")).strip()
@@ -119,6 +116,5 @@ class TradePusher:
                 raw.get("event_type"),
                 sent,
             )
-
 
 trade_pusher = TradePusher()

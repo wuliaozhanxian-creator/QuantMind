@@ -13,7 +13,6 @@ from ...services import KLineService
 
 router = APIRouter(prefix="/klines", tags=["klines"])
 
-
 @router.get("/{symbol}", response_model=KLineListResponse)
 async def get_klines(
     symbol: str,
@@ -27,10 +26,11 @@ async def get_klines(
 ):
     """获取K线数据"""
     service = KLineService(db, redis)
-    klines = await service.get_klines(symbol, interval, start_time, end_time, limit, use_cache)
+    klines = await service.get_klines(
+        symbol, interval, start_time, end_time, limit, use_cache
+    )
 
     return KLineListResponse(total=len(klines), klines=klines)
-
 
 @router.get("/{symbol}/latest", response_model=KLineResponse)
 async def get_latest_kline(

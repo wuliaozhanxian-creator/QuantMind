@@ -12,7 +12,7 @@ import os
 import sys
 import time
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import requests
 from celery import Task
@@ -59,7 +59,6 @@ OPTIMIZATION_LOCK_WAIT_SECONDS = int(
 )
 optimization_persistence = OptimizationPersistence()
 
-
 def _get_redis_client() -> redis.Redis | None:
     try:
         return redis.Redis(
@@ -75,14 +74,12 @@ def _get_redis_client() -> redis.Redis | None:
         )
         return None
 
-
 def _try_acquire_optimization_lock(client: redis.Redis | None, owner: str) -> bool:
     if client is None:
         return True
     return bool(
         client.set(OPTIMIZATION_LOCK_KEY, owner, nx=True, ex=OPTIMIZATION_LOCK_TTL)
     )
-
 
 def _release_optimization_lock(client: redis.Redis | None, owner: str) -> None:
     if client is None:
@@ -102,7 +99,6 @@ def _release_optimization_lock(client: redis.Redis | None, owner: str) -> None:
             error=str(exc),
         )
 
-
 def _send_progress_update(data: dict[str, Any]):
     """通过 HTTP 发送进度更新到 FastAPI"""
     try:
@@ -116,7 +112,6 @@ def _send_progress_update(data: dict[str, Any]):
         task_logger.warning(
             "progress_update_failed", "Failed to send progress update", error=str(e)
         )
-
 
 async def _persist_optimization_progress(
     optimization_id: str | None,
@@ -139,7 +134,6 @@ async def _persist_optimization_progress(
         all_results=payload.get("all_results"),
         error_message=error_message,
     )
-
 
 class TaskRedisLogHandler(logging.Handler):
     """按任务写入 Redis 的日志处理器。"""
@@ -183,7 +177,7 @@ class TaskRedisLogHandler(logging.Handler):
                         )
             self.redis_client.expire(self.key, 3600)
         except Exception:
-            pass
+            logger.debug("ignored exception", exc_info=True)
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
@@ -208,7 +202,6 @@ class TaskRedisLogHandler(logging.Handler):
             exc_info=None,
         )
         self.emit(record)
-
 
 class TaskStreamAdapter(io.TextIOBase):
     """将 print/直接写入的文本转成任务日志。"""
@@ -239,11 +232,10 @@ class TaskStreamAdapter(io.TextIOBase):
             try:
                 self.original_stream.flush()
             except Exception:
-                pass
+                logger.debug("ignored exception", exc_info=True)
         if self.buffer:
             self.handler.emit_text(self.buffer, level=self.level)
             self.buffer = ""
-
 
 class TaskLogCapture:
     """任务级日志捕获：挂载 Redis handler，并把 stdout/stderr 归到当前任务。"""
@@ -289,13 +281,12 @@ class TaskLogCapture:
             try:
                 self.root_logger.removeHandler(self.handler)
             except Exception:
-                pass
+                logger.debug("ignored exception", exc_info=True)
             self._attached = False
         try:
             self.handler.close()
         except Exception:
-            pass
-
+            logger.debug("ignored exception", exc_info=True)
 
 class TaskStructuredLogger:
     """给任务日志统一添加固定前缀，便于 worker 控制台和 Redis 日志对齐。"""
@@ -322,7 +313,6 @@ class TaskStructuredLogger:
     def exception(self, message: str, *args, **kwargs) -> None:
         self._base_logger.exception(self._format(message), *args, **kwargs)
 
-
 class CallbackTask(Task):
     """带回调的任务基类"""
 
@@ -347,7 +337,6 @@ class CallbackTask(Task):
             exc_info=exc_info,
         )
 
-
 def _to_jsonable(payload: Any) -> Any:
     if payload is None or isinstance(payload, (str, int, float, bool)):
         return payload
@@ -359,24 +348,22 @@ def _to_jsonable(payload: Any) -> Any:
         try:
             return _to_jsonable(payload.model_dump(mode="json"))
         except Exception:
-            pass
+            logger.debug("ignored exception", exc_info=True)
     if hasattr(payload, "json"):
         try:
             return _to_jsonable(json.loads(payload.json()))
         except Exception:
-            pass
+            logger.debug("ignored exception", exc_info=True)
     if hasattr(payload, "dict"):
         try:
             return _to_jsonable(payload.dict())
         except Exception:
-            pass
+            logger.debug("ignored exception", exc_info=True)
     if isinstance(payload, BaseException):
         return {"error": str(payload), "exception_type": type(payload).__name__}
     return str(payload)
 
-
 _async_loop: asyncio.AbstractEventLoop | None = None
-
 
 def _run_async(coro):
     global _async_loop
@@ -384,7 +371,6 @@ def _run_async(coro):
         _async_loop = asyncio.new_event_loop()
     asyncio.set_event_loop(_async_loop)
     return _async_loop.run_until_complete(coro)
-
 
 def _resolve_provider_path(path: str) -> str:
     if not path:
@@ -397,10 +383,8 @@ def _resolve_provider_path(path: str) -> str:
     )
     return os.path.normpath(os.path.join(root_dir, path))
 
-
 def _get_qlib_service_instance() -> Any:
     return get_qlib_service()
-
 
 @celery_app.task(
     bind=True,
@@ -519,7 +503,6 @@ def run_backtest_async(self, request_dict: dict[str, Any]) -> dict[str, Any]:
         )
         raise
 
-
 @celery_app.task(name="qlib_app.tasks.log_frontend_error")
 def log_frontend_error(error_data: dict[str, Any]):
     """记录前端报错到 worker 日志"""
@@ -537,7 +520,6 @@ def log_frontend_error(error_data: dict[str, Any]):
         stack=stack,
     )
     return {"status": "logged"}
-
 
 @celery_app.task(name="qlib_app.tasks.get_backtest_status")
 def get_backtest_status(task_id: str) -> dict[str, Any]:
@@ -585,11 +567,9 @@ def get_backtest_status(task_id: str) -> dict[str, Any]:
         "failed": failed,
     }
 
-
 @celery_app.task(name="qlib_app.tasks.cleanup_old_results")
 def cleanup_old_results(days: int = 7):
     return {"message": "cleaned"}
-
 
 @celery_app.task(
     bind=True,
@@ -880,7 +860,6 @@ def run_optimization_async(self, request_dict: dict[str, Any]) -> dict[str, Any]
         raise
     finally:
         _release_optimization_lock(_get_redis_client(), optimization_id or task_id)
-
 
 @celery_app.task(
     bind=True,

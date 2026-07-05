@@ -27,15 +27,12 @@ from backend.services.api.user_app.services.user_service import UserService
 
 router = APIRouter(prefix="/users")
 
-
 def get_user_service() -> UserService:
     """获取用户服务"""
     return UserService()
 
-
 def get_profile_service() -> ProfileService:
     return ProfileService()
-
 
 def _parse_date(date_str: str | None, is_end: bool = False) -> datetime | None:
     if not date_str:
@@ -48,8 +45,9 @@ def _parse_date(date_str: str | None, is_end: bool = False) -> datetime | None:
             return dt
         return datetime.fromisoformat(date_str.replace("Z", "+00:00"))
     except ValueError:
-        raise HTTPException(status_code=400, detail=f"无效日期格式: {date_str}")
-
+        raise HTTPException(
+            status_code=400, detail=f"无效日期格式: {date_str}"
+        ) from None
 
 def _derive_login_type(request_path: str | None) -> str:
     path = (request_path or "").lower()
@@ -58,7 +56,6 @@ def _derive_login_type(request_path: str | None) -> str:
     if "sso" in path:
         return "sso"
     return "password"
-
 
 def _device_type_and_name(user_agent: str | None) -> tuple[str, str]:
     ua = (user_agent or "").lower()
@@ -69,7 +66,6 @@ def _device_type_and_name(user_agent: str | None) -> tuple[str, str]:
     if ua:
         return "desktop", "桌面设备"
     return "unknown", "未知设备"
-
 
 @router.get("/", response_model=PaginatedResponse)
 async def list_users(
@@ -110,7 +106,6 @@ async def list_users(
         },
     }
 
-
 @router.get("/me", response_model=ResponseModel)
 async def get_current_user_info(
     current_user: dict = Depends(get_current_user),
@@ -135,7 +130,6 @@ async def get_current_user_info(
         },
     }
 
-
 @router.post("/me/phone/send-code", response_model=ResponseModel)
 async def send_phone_manage_code(
     payload: PhoneSendCodeRequest,
@@ -146,7 +140,6 @@ async def send_phone_manage_code(
     OSS版本不支持短信验证。
     """
     raise HTTPException(status_code=503, detail="OSS版本不支持短信验证功能")
-
 
 @router.post("/me/phone/bind", response_model=ResponseModel)
 async def bind_phone(
@@ -160,7 +153,6 @@ async def bind_phone(
     """
     raise HTTPException(status_code=503, detail="OSS版本不支持短信验证功能")
 
-
 @router.post("/me/phone/change", response_model=ResponseModel)
 async def change_phone(
     payload: PhoneChangeRequest,
@@ -172,7 +164,6 @@ async def change_phone(
     OSS版本不支持短信验证。
     """
     raise HTTPException(status_code=503, detail="OSS版本不支持短信验证功能")
-
 
 @router.get("/{user_id}", response_model=ResponseModel)
 async def get_user(
@@ -205,7 +196,6 @@ async def get_user(
         },
     }
 
-
 @router.get("/{user_id}/detail", response_model=ResponseModel)
 async def get_user_detail(
     user_id: str,
@@ -229,7 +219,6 @@ async def get_user_detail(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
 
     return {"code": 200, "message": "success", "data": user_detail.dict()}
-
 
 @router.get("/{user_id}/login-history", response_model=ResponseModel)
 async def get_login_history(
@@ -326,7 +315,6 @@ async def get_login_history(
             },
         },
     }
-
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_user(

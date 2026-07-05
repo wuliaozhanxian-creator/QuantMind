@@ -6,10 +6,9 @@ Created: 2025-11-12
 
 import logging
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
-
 
 class ErrorCode(Enum):
     """错误代码"""
@@ -45,11 +44,12 @@ class ErrorCode(Enum):
     INTERNAL_ERROR = 9001
     SERVICE_UNAVAILABLE = 9002
 
-
 class WebSocketError(Exception):
     """WebSocket 基础异常"""
 
-    def __init__(self, code: ErrorCode, message: str, details: dict[str, Any] | None = None):
+    def __init__(
+        self, code: ErrorCode, message: str, details: dict[str, Any] | None = None
+    ):
         self.code = code
         self.message = message
         self.details = details or {}
@@ -73,13 +73,11 @@ class WebSocketError(Exception):
             "timestamp": None,  # 由发送方填充
         }
 
-
 class ConnectionError(WebSocketError):
     """连接错误"""
 
     def __init__(self, message: str, details: dict[str, Any] | None = None):
         super().__init__(ErrorCode.CONNECTION_FAILED, message, details)
-
 
 class AuthenticationError(WebSocketError):
     """认证错误"""
@@ -87,13 +85,13 @@ class AuthenticationError(WebSocketError):
     def __init__(self, message: str, details: dict[str, Any] | None = None):
         super().__init__(ErrorCode.AUTH_FAILED, message, details)
 
-
 class MessageError(WebSocketError):
     """消息错误"""
 
-    def __init__(self, code: ErrorCode, message: str, details: dict[str, Any] | None = None):
+    def __init__(
+        self, code: ErrorCode, message: str, details: dict[str, Any] | None = None
+    ):
         super().__init__(code, message, details)
-
 
 class SubscriptionError(WebSocketError):
     """订阅错误"""
@@ -101,13 +99,11 @@ class SubscriptionError(WebSocketError):
     def __init__(self, message: str, details: dict[str, Any] | None = None):
         super().__init__(ErrorCode.SUBSCRIPTION_FAILED, message, details)
 
-
 class DataSourceError(WebSocketError):
     """数据源错误"""
 
     def __init__(self, message: str, details: dict[str, Any] | None = None):
         super().__init__(ErrorCode.DATA_SOURCE_ERROR, message, details)
-
 
 async def handle_websocket_error(
     connection_id: str, error: Exception, send_to_client: bool = True
@@ -125,7 +121,10 @@ async def handle_websocket_error(
     """
     # WebSocket 自定义错误
     if isinstance(error, WebSocketError):
-        logger.warning(f"WebSocket错误 [{connection_id}]: " f"code={error.code.value}, msg={error.message}")
+        logger.warning(
+            f"WebSocket错误 [{connection_id}]: "
+            f"code={error.code.value}, msg={error.message}"
+        )
 
         if send_to_client:
             return error.to_client_message()
@@ -144,8 +143,9 @@ async def handle_websocket_error(
 
     return None
 
-
-def create_error_message(code: ErrorCode, message: str, details: dict[str, Any] | None = None) -> dict[str, Any]:
+def create_error_message(
+    code: ErrorCode, message: str, details: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """
     创建错误消息
 

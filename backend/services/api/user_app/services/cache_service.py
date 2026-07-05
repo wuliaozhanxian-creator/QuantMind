@@ -11,7 +11,6 @@ from backend.shared.redis_sentinel_client import get_redis_sentinel_client
 
 logger = logging.getLogger(__name__)
 
-
 class CacheService:
     """缓存服务"""
 
@@ -29,7 +28,9 @@ class CacheService:
             logger.error(f"Cache get error: {e}")
             return None
 
-    def set(self, key: str, value: bytes, ttl: int | None = None, use_slave: bool = False) -> bool:
+    def set(
+        self, key: str, value: bytes, ttl: int | None = None, use_slave: bool = False
+    ) -> bool:
         """设置缓存"""
         try:
             if ttl:
@@ -141,10 +142,8 @@ class CacheService:
             logger.error(f"Cache decrement error: {e}")
             return None
 
-
 # 全局缓存服务实例
 _cache_service = None
-
 
 def get_cache_service() -> CacheService:
     """获取缓存服务单例"""

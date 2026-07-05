@@ -24,9 +24,15 @@ router = APIRouter(tags=["OpenClaw-QwenPaw"])
 QWENPAW_BASE_URL = os.getenv("QWENPAW_BASE_URL", "http://qwenpaw:8088").rstrip("/")
 QWENPAW_CHANNEL = os.getenv("QWENPAW_CHANNEL", "console")
 QWENPAW_TIMEOUT_SECONDS = float(os.getenv("QWENPAW_TIMEOUT_SECONDS", "60"))
-QWENPAW_SHARED_FILES_DIR = os.getenv("QWENPAW_SHARED_FILES_DIR", "/qwenpaw-shared").rstrip("/")
-QWENPAW_SHARED_VISIBLE_DIR = os.getenv("QWENPAW_SHARED_VISIBLE_DIR", "/app/working").rstrip("/")
-OPENCLAW_MAX_FILE_SIZE_BYTES = int(os.getenv("OPENCLAW_MAX_FILE_SIZE_BYTES", str(50 * 1024 * 1024)))
+QWENPAW_SHARED_FILES_DIR = os.getenv(
+    "QWENPAW_SHARED_FILES_DIR", "/qwenpaw-shared"
+).rstrip("/")
+QWENPAW_SHARED_VISIBLE_DIR = os.getenv(
+    "QWENPAW_SHARED_VISIBLE_DIR", "/app/working"
+).rstrip("/")
+OPENCLAW_MAX_FILE_SIZE_BYTES = int(
+    os.getenv("OPENCLAW_MAX_FILE_SIZE_BYTES", str(50 * 1024 * 1024))
+)
 
 # QwenPaw 上游认证信息
 QWENPAW_AUTH_USERNAME = os.getenv("QWENPAW_AUTH_USERNAME", "")
@@ -71,13 +77,11 @@ _ALLOWED_UPLOAD_SUFFIXES = {
     ".webp",
 }
 
-
 class OpenClawChatRequest(BaseModel):
     message: str
     session_id: str | None = None
     user_id: str | None = None
     attachments: list["OpenClawAttachment"] = []
-
 
 class OpenClawAttachment(BaseModel):
     file_id: str
@@ -88,26 +92,23 @@ class OpenClawAttachment(BaseModel):
     file_path: str
     uploaded_at: str | None = None
 
-
 class OpenClawCreateSessionRequest(BaseModel):
     title: str | None = "新对话"
     session_id: str | None = None
     user_id: str | None = None
 
-
 class OpenClawUpdateSessionTitleRequest(BaseModel):
     title: str
     user_id: str | None = None
 
-
 class OpenClawDeleteFileRequest(BaseModel):
     user_id: str | None = None
 
-
 OpenClawChatRequest.model_rebuild()
 
-
-def _sanitize_headers(headers: Iterable, bearer_token: str | None = None) -> dict[str, str]:
+def _sanitize_headers(
+    headers: Iterable, bearer_token: str | None = None
+) -> dict[str, str]:
     out: dict[str, str] = {}
     for key, value in headers:
         if key.lower() in _HOP_HEADERS:
@@ -117,27 +118,24 @@ def _sanitize_headers(headers: Iterable, bearer_token: str | None = None) -> dic
         out["Authorization"] = f"Bearer {bearer_token}"
     return out
 
-
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
-
 def _resolve_user_id(current_user: dict, explicit_user_id: str | None = None) -> str:
-    resolved = current_user.get("user_id") or current_user.get("sub") or explicit_user_id
+    resolved = (
+        current_user.get("user_id") or current_user.get("sub") or explicit_user_id
+    )
     if resolved is None:
         raise HTTPException(status_code=400, detail="Missing user_id")
     return str(resolved)
 
-
 def _qwenpaw_url(path: str) -> str:
     return f"{QWENPAW_BASE_URL}{path}"
-
 
 def _safe_segment(value: str) -> str:
     sanitized = re.sub(r"[^a-zA-Z0-9._-]", "_", value or "")
     sanitized = sanitized.strip("._")
     return sanitized or "unknown"
-
 
 async def _get_qwenpaw_token() -> str | None:
     """获取并缓存 QwenPaw 系统的 JWT 令牌"""
@@ -153,24 +151,32 @@ async def _get_qwenpaw_token() -> str | None:
         # 如果未配置用户名，视作未启用上游认证，返回 None 尝试免密
         return None
 
-    print(f"[OpenClaw] Initiating service login to QwenPaw for user: {QWENPAW_AUTH_USERNAME}")
+    print(
+        f"[OpenClaw] Initiating service login to QwenPaw for user: {QWENPAW_AUTH_USERNAME}"
+    )
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(
                 f"{QWENPAW_BASE_URL}/api/auth/login",
                 json={
                     "username": QWENPAW_AUTH_USERNAME,
-                    "password": QWENPAW_AUTH_PASSWORD
-                }
+                    "password": QWENPAW_AUTH_PASSWORD,
+                },
             )
             if resp.status_code != 200:
-                print(f"[OpenClaw] QwenPaw login failed: {resp.status_code} {resp.text}")
-                raise HTTPException(status_code=500, detail="QwenPaw upstream login failed")
+                print(
+                    f"[OpenClaw] QwenPaw login failed: {resp.status_code} {resp.text}"
+                )
+                raise HTTPException(
+                    status_code=500, detail="QwenPaw upstream login failed"
+                )
 
             data = resp.json()
             token = data.get("token")
             if not token:
-                print(f"[OpenClaw] QwenPaw login returned NO token (Auth may be disabled). Response: {data}")
+                print(
+                    f"[OpenClaw] QwenPaw login returned NO token (Auth may be disabled). Response: {data}"
+                )
                 # 如果无 Token，返回 None 而不是抛出异常，以便后续尝试免密请求
                 return None
 
@@ -185,24 +191,20 @@ async def _get_qwenpaw_token() -> str | None:
         # 使用统一的异常映射，而不是强制 500
         raise map_upstream_http_error("qwenpaw", e) from None
 
-
 def _attachments_root() -> Path:
     root = Path(QWENPAW_SHARED_FILES_DIR) / "quantmind_uploads"
     root.mkdir(parents=True, exist_ok=True)
     return root
-
 
 def _attachment_meta_root() -> Path:
     root = _attachments_root() / "_meta"
     root.mkdir(parents=True, exist_ok=True)
     return root
 
-
 def _session_attachment_dir(user_id: str, session_id: str) -> Path:
     directory = _attachments_root() / _safe_segment(user_id) / _safe_segment(session_id)
     directory.mkdir(parents=True, exist_ok=True)
     return directory
-
 
 def _visible_session_dir(user_id: str, session_id: str) -> str:
     return "/".join(
@@ -214,12 +216,12 @@ def _visible_session_dir(user_id: str, session_id: str) -> str:
         ]
     )
 
-
 def _session_attachment_index_path(user_id: str, session_id: str) -> Path:
-    meta_dir = _attachment_meta_root() / _safe_segment(user_id) / _safe_segment(session_id)
+    meta_dir = (
+        _attachment_meta_root() / _safe_segment(user_id) / _safe_segment(session_id)
+    )
     meta_dir.mkdir(parents=True, exist_ok=True)
     return meta_dir / "attachments.json"
-
 
 def _load_session_attachments(user_id: str, session_id: str) -> list[dict[str, Any]]:
     index_path = _session_attachment_index_path(user_id, session_id)
@@ -230,14 +232,14 @@ def _load_session_attachments(user_id: str, session_id: str) -> list[dict[str, A
     except Exception:
         return []
 
-
-def _save_session_attachments(user_id: str, session_id: str, attachments: list[dict[str, Any]]) -> None:
+def _save_session_attachments(
+    user_id: str, session_id: str, attachments: list[dict[str, Any]]
+) -> None:
     index_path = _session_attachment_index_path(user_id, session_id)
     index_path.write_text(
         json.dumps(attachments, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
-
 
 def _normalize_attachment(attachment: dict[str, Any]) -> dict[str, Any]:
     return {
@@ -245,11 +247,12 @@ def _normalize_attachment(attachment: dict[str, Any]) -> dict[str, Any]:
         "original_name": str(attachment.get("original_name") or ""),
         "file_name": str(attachment.get("file_name") or ""),
         "file_size": int(attachment.get("file_size") or 0),
-        "content_type": str(attachment.get("content_type") or "application/octet-stream"),
+        "content_type": str(
+            attachment.get("content_type") or "application/octet-stream"
+        ),
         "file_path": str(attachment.get("file_path") or ""),
         "uploaded_at": str(attachment.get("uploaded_at") or _now_iso()),
     }
-
 
 def _build_attachment_prompt(
     attachments: list[OpenClawAttachment],
@@ -262,15 +265,12 @@ def _build_attachment_prompt(
     ]
     for attachment in attachments:
         lines.append(
-
-                f"- 文件名: {attachment.original_name} | "
-                f"路径: {attachment.file_path} | "
-                f"类型: {attachment.content_type} | "
-                f"大小: {attachment.file_size} 字节"
-
+            f"- 文件名: {attachment.original_name} | "
+            f"路径: {attachment.file_path} | "
+            f"类型: {attachment.content_type} | "
+            f"大小: {attachment.file_size} 字节"
         )
     return "\n".join(lines)
-
 
 def _validate_upload_filename(filename: str) -> str:
     if not filename:
@@ -282,7 +282,6 @@ def _validate_upload_filename(filename: str) -> str:
             detail=f"暂不支持的文件类型: {suffix or 'unknown'}",
         )
     return suffix
-
 
 async def _qwenpaw_request(
     method: str,
@@ -313,9 +312,7 @@ async def _qwenpaw_request(
                 _qwenpaw_url(path),
                 params=params,
                 json=json_body,
-                headers=_sanitize_headers(
-                    headers.items()
-                ),
+                headers=_sanitize_headers(headers.items()),
             )
     except httpx.HTTPError as exc:
         raise map_upstream_http_error("qwenpaw", exc) from None
@@ -340,7 +337,6 @@ async def _qwenpaw_request(
         )
     return response
 
-
 async def _resolve_chat(user_id: str, session_id: str) -> dict[str, Any]:
     response = await _qwenpaw_request(
         "GET",
@@ -353,7 +349,6 @@ async def _resolve_chat(user_id: str, session_id: str) -> dict[str, Any]:
             return chat
     raise HTTPException(status_code=404, detail="Session not found")
 
-
 def _map_session(chat: dict[str, Any]) -> dict[str, Any]:
     timestamp = _now_iso()
     meta = chat.get("meta") or {}
@@ -361,13 +356,18 @@ def _map_session(chat: dict[str, Any]) -> dict[str, Any]:
         "session_id": str(chat.get("session_id") or ""),
         "user_id": str(chat.get("user_id") or ""),
         "title": str(chat.get("name") or "新对话"),
-        "created_at": str(chat.get("created_at") or meta.get("created_at") or timestamp),
-        "updated_at": str(chat.get("updated_at") or meta.get("updated_at") or timestamp),
-        "message_count": int(chat.get("message_count") or meta.get("message_count") or 0),
+        "created_at": str(
+            chat.get("created_at") or meta.get("created_at") or timestamp
+        ),
+        "updated_at": str(
+            chat.get("updated_at") or meta.get("updated_at") or timestamp
+        ),
+        "message_count": int(
+            chat.get("message_count") or meta.get("message_count") or 0
+        ),
         "last_message": str(chat.get("last_message") or meta.get("last_message") or ""),
         "upstream_chat_id": str(chat.get("id") or ""),
     }
-
 
 def _extract_text_content(content: Any) -> str:
     if content is None:
@@ -385,7 +385,6 @@ def _extract_text_content(content: Any) -> str:
         return ""
     return str(content)
 
-
 def _map_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     for message in messages:
@@ -398,7 +397,6 @@ def _map_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
             }
         )
     return normalized
-
 
 @router.post("/api/v1/openclaw/chat", include_in_schema=False)
 async def openclaw_chat(
@@ -451,7 +449,7 @@ async def openclaw_chat(
             "POST",
             _qwenpaw_url("/api/agent/process"),
             json=qwenpaw_payload,
-            headers=headers
+            headers=headers,
         )
         response = await client.send(request, stream=True)
     except httpx.HTTPError as exc:
@@ -476,7 +474,9 @@ async def openclaw_chat(
             },
         )
 
-    print(f"[OpenClaw] Chat request accepted: session_id={session_id}, user_id={user_id}")
+    print(
+        f"[OpenClaw] Chat request accepted: session_id={session_id}, user_id={user_id}"
+    )
 
     async def _cleanup() -> None:
         await response.aclose()
@@ -495,7 +495,6 @@ async def openclaw_chat(
         background=BackgroundTask(_cleanup),
     )
 
-
 @router.post("/api/v1/openclaw/files/upload", include_in_schema=False)
 async def upload_openclaw_file(
     file: UploadFile = File(...),
@@ -504,7 +503,9 @@ async def upload_openclaw_file(
     current_user: dict = Depends(get_current_user),
 ):
     # 调试日志：记录接收到的字段
-    print(f"[OpenClaw] File upload request - session_id: {session_id}, user_id: {user_id}, filename: {file.filename}, content_type: {file.content_type}")
+    print(
+        f"[OpenClaw] File upload request - session_id: {session_id}, user_id: {user_id}, filename: {file.filename}, content_type: {file.content_type}"
+    )
 
     resolved_user_id = _resolve_user_id(current_user, user_id)
     _validate_upload_filename(file.filename or "")
@@ -533,16 +534,19 @@ async def upload_openclaw_file(
             "file_name": stored_name,
             "file_size": len(data),
             "content_type": file.content_type or "application/octet-stream",
-            "file_path": (f"{_visible_session_dir(resolved_user_id, session_id)}/" f"{stored_name}"),
+            "file_path": (
+                f"{_visible_session_dir(resolved_user_id, session_id)}/{stored_name}"
+            ),
             "uploaded_at": _now_iso(),
         }
     )
     attachments = _load_session_attachments(resolved_user_id, session_id)
     attachments.append(attachment)
     _save_session_attachments(resolved_user_id, session_id, attachments)
-    print(f"[OpenClaw] File uploaded successfully - file_id: {file_id}, path: {attachment['file_path']}")
+    print(
+        f"[OpenClaw] File uploaded successfully - file_id: {file_id}, path: {attachment['file_path']}"
+    )
     return attachment
-
 
 @router.get("/api/v1/openclaw/files", include_in_schema=False)
 async def list_openclaw_files(
@@ -555,7 +559,6 @@ async def list_openclaw_files(
         "session_id": session_id,
         "files": [_normalize_attachment(item) for item in attachments],
     }
-
 
 @router.delete(
     "/api/v1/openclaw/files/{session_id}/{file_id}",
@@ -578,7 +581,9 @@ async def delete_openclaw_file(
             next_attachments.append(normalized)
             continue
 
-        target_path = _session_attachment_dir(user_id, session_id) / normalized["file_name"]
+        target_path = (
+            _session_attachment_dir(user_id, session_id) / normalized["file_name"]
+        )
         if target_path.exists():
             target_path.unlink()
         deleted = True
@@ -588,7 +593,6 @@ async def delete_openclaw_file(
 
     _save_session_attachments(user_id, session_id, next_attachments)
     return {"deleted": True, "session_id": session_id, "file_id": file_id}
-
 
 @router.get("/api/v1/openclaw/push-messages", include_in_schema=False)
 async def openclaw_push_messages(
@@ -609,7 +613,6 @@ async def openclaw_push_messages(
     messages = data.get("messages") or []
     return {"session_id": session_id, "messages": _map_messages(messages)}
 
-
 @router.get("/api/v1/openclaw/sessions", include_in_schema=False)
 async def list_openclaw_sessions(
     current_user: dict = Depends(get_current_user),
@@ -624,7 +627,9 @@ async def list_openclaw_sessions(
         data = response.json()
     except Exception as exc:
         # 如果上游服务未部署或不可达，返回空列表实现优雅降级
-        print(f"[OpenClaw] Upstream qwenpaw unavailable, returning empty sessions: {exc}")
+        print(
+            f"[OpenClaw] Upstream qwenpaw unavailable, returning empty sessions: {exc}"
+        )
         return []
 
     # 兼容处理：如果上游返回的是 {"chats": [...]} 或其他结构
@@ -633,11 +638,12 @@ async def list_openclaw_sessions(
     elif isinstance(data, list):
         chats = data
     else:
-        print(f"[OpenClaw] Unexpected chats response format for user {user_id}: {type(data)}")
+        print(
+            f"[OpenClaw] Unexpected chats response format for user {user_id}: {type(data)}"
+        )
         chats = []
 
     return [_map_session(chat) for chat in chats if isinstance(chat, dict)]
-
 
 @router.post("/api/v1/openclaw/sessions", include_in_schema=False)
 async def create_openclaw_session(
@@ -656,7 +662,6 @@ async def create_openclaw_session(
     response = await _qwenpaw_request("POST", "/api/chats", json_body=request_payload)
     return _map_session(response.json() or request_payload)
 
-
 @router.get(
     "/api/v1/openclaw/sessions/{session_id}/messages",
     include_in_schema=False,
@@ -673,7 +678,6 @@ async def get_openclaw_session_messages(
         "session_id": session_id,
         "messages": _map_messages(data.get("messages") or []),
     }
-
 
 @router.put(
     "/api/v1/openclaw/sessions/{session_id}/title",
@@ -693,7 +697,6 @@ async def update_openclaw_session_title(
     await _qwenpaw_request("PUT", f"/api/chats/{chat['id']}", json_body=request_payload)
     return {"updated": True, "session_id": session_id, "title": payload.title}
 
-
 @router.delete(
     "/api/v1/openclaw/sessions/{session_id}",
     include_in_schema=False,
@@ -706,7 +709,6 @@ async def delete_openclaw_session(
     chat = await _resolve_chat(user_id, session_id)
     await _qwenpaw_request("DELETE", f"/api/chats/{chat['id']}")
     return {"deleted": True, "session_id": session_id}
-
 
 @router.get("/api/v1/openclaw/health", include_in_schema=False)
 async def openclaw_health(current_user: dict = Depends(get_current_user)):

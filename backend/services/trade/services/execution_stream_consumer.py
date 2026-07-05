@@ -6,7 +6,7 @@ import logging
 import os
 import time
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 from uuid import UUID
 
 import redis
@@ -19,7 +19,6 @@ from backend.shared.database_manager_v2 import get_session
 from backend.shared.notification_publisher import publish_notification_async
 
 logger = logging.getLogger(__name__)
-
 
 class ExecutionStreamConsumer:
     """
@@ -49,10 +48,18 @@ class ExecutionStreamConsumer:
         self.max_retry = int(os.getenv("EXEC_STREAM_MAX_RETRY", "3"))
         self.dlq_prefix = os.getenv("EXEC_STREAM_DLQ_PREFIX", "qm:exec:dlq")
         tenants_raw = os.getenv("EXEC_STREAM_TENANTS", "default")
-        self.tenants = [t.strip() for t in tenants_raw.split(",") if t.strip()] or ["default"]
-        self.stream_redis_host = os.getenv("EXEC_STREAM_REDIS_HOST", os.getenv("REDIS_HOST", "localhost"))
-        self.stream_redis_port = int(os.getenv("EXEC_STREAM_REDIS_PORT", os.getenv("REDIS_PORT", "6379")))
-        self.stream_redis_password = os.getenv("EXEC_STREAM_REDIS_PASSWORD", os.getenv("REDIS_PASSWORD", ""))
+        self.tenants = [t.strip() for t in tenants_raw.split(",") if t.strip()] or [
+            "default"
+        ]
+        self.stream_redis_host = os.getenv(
+            "EXEC_STREAM_REDIS_HOST", os.getenv("REDIS_HOST", "localhost")
+        )
+        self.stream_redis_port = int(
+            os.getenv("EXEC_STREAM_REDIS_PORT", os.getenv("REDIS_PORT", "6379"))
+        )
+        self.stream_redis_password = os.getenv(
+            "EXEC_STREAM_REDIS_PASSWORD", os.getenv("REDIS_PASSWORD", "")
+        )
         self.stream_redis_db = int(os.getenv("EXEC_STREAM_REDIS_DB", "0"))
 
         self._running = False
@@ -93,7 +100,7 @@ class ExecutionStreamConsumer:
             try:
                 self._stream_client.close()
             except Exception:
-                pass
+                logger.debug("ignored exception", exc_info=True)
             self._stream_client = None
         logger.info("Execution stream consumer stopped")
 
@@ -117,7 +124,9 @@ class ExecutionStreamConsumer:
         for stream in self._stream_names():
             try:
                 client.xgroup_create(stream, self.group, id="$", mkstream=True)
-                logger.info("Created stream group: stream=%s group=%s", stream, self.group)
+                logger.info(
+                    "Created stream group: stream=%s group=%s", stream, self.group
+                )
             except Exception as exc:
                 if "BUSYGROUP" not in str(exc):
                     logger.warning("xgroup_create failed stream=%s: %s", stream, exc)
@@ -126,7 +135,9 @@ class ExecutionStreamConsumer:
         try:
             client = self._get_stream_client()
         except Exception as exc:
-            logger.error("Execution stream consumer cannot start: redis unavailable: %s", exc)
+            logger.error(
+                "Execution stream consumer cannot start: redis unavailable: %s", exc
+            )
             return
 
         streams = dict.fromkeys(self._stream_names(), ">")
@@ -152,7 +163,9 @@ class ExecutionStreamConsumer:
                         )
                         if ok:
                             try:
-                                await asyncio.to_thread(client.xack, stream_name, self.group, message_id)
+                                await asyncio.to_thread(
+                                    client.xack, stream_name, self.group, message_id
+                                )
                             except Exception as ack_exc:
                                 logger.warning(
                                     "xack failed stream=%s msg=%s err=%s",
@@ -161,13 +174,21 @@ class ExecutionStreamConsumer:
                                     ack_exc,
                                 )
             except Exception as exc:
-                logger.error("Execution stream consume loop error: %s", exc, exc_info=True)
+                logger.error(
+                    "Execution stream consume loop error: %s", exc, exc_info=True
+                )
                 await asyncio.sleep(1.0)
 
-    async def _process_message(self, *, stream_name: str, message_id: str, fields: dict[str, Any]) -> bool:
+    async def _process_message(
+        self, *, stream_name: str, message_id: str, fields: dict[str, Any]
+    ) -> bool:
         event_type = str(fields.get("event_type") or "").strip()
         if not event_type:
-            logger.warning("skip message without event_type stream=%s msg=%s", stream_name, message_id)
+            logger.warning(
+                "skip message without event_type stream=%s msg=%s",
+                stream_name,
+                message_id,
+            )
             return True
 
         try:
@@ -297,7 +318,9 @@ class ExecutionStreamConsumer:
             )
             return True
         except Exception as exc:
-            logger.error("requeue failed stream=%s msg=%s err=%s", stream_name, message_id, exc)
+            logger.error(
+                "requeue failed stream=%s msg=%s err=%s", stream_name, message_id, exc
+            )
             return False
 
     @staticmethod
@@ -369,7 +392,9 @@ class ExecutionStreamConsumer:
     async def _resolve_order(self, session, fields: dict[str, Any]) -> Order | None:
         order_uuid = self._try_parse_uuid(fields.get("order_id"))
         if order_uuid is not None:
-            result = await session.execute(select(Order).where(Order.order_id == order_uuid).limit(1))
+            result = await session.execute(
+                select(Order).where(Order.order_id == order_uuid).limit(1)
+            )
             order = result.scalar_one_or_none()
             if order is not None:
                 return order
@@ -414,7 +439,9 @@ class ExecutionStreamConsumer:
 
         broker_order_uuid = self._try_parse_uuid(fields.get("broker_order_id"))
         if broker_order_uuid is not None:
-            result = await session.execute(select(Order).where(Order.order_id == broker_order_uuid).limit(1))
+            result = await session.execute(
+                select(Order).where(Order.order_id == broker_order_uuid).limit(1)
+            )
             order = result.scalar_one_or_none()
             if order is not None:
                 return order
@@ -427,11 +454,15 @@ class ExecutionStreamConsumer:
         if exchange_trade_id:
             return exchange_trade_id
 
-        broker_order_id = str(fields.get("broker_order_id") or fields.get("exchange_order_id") or "").strip()
+        broker_order_id = str(
+            fields.get("broker_order_id") or fields.get("exchange_order_id") or ""
+        ).strip()
         exec_id = str(fields.get("exec_id") or "").strip()
         if broker_order_id and exec_id:
             return f"{broker_order_id}:{exec_id}"
-        raise ValueError("order_filled missing exchange_trade_id or broker_order_id+exec_id")
+        raise ValueError(
+            "order_filled missing exchange_trade_id or broker_order_id+exec_id"
+        )
 
     async def _handle_order_submitted(self, fields: dict[str, Any]) -> None:
         async with get_session() as session:
@@ -447,9 +478,9 @@ class ExecutionStreamConsumer:
                 order.status = OrderStatus.SUBMITTED
                 # T4.3: 容错截断 event_id（字段可能缺失/超长）
                 event_id = self._safe_str(fields.get("event_id"), max_len=100)
-                order.remarks = ((order.remarks or "") + f" [STREAM_SUBMITTED event_id={event_id}]")[
-                    -500:
-                ]
+                order.remarks = (
+                    (order.remarks or "") + f" [STREAM_SUBMITTED event_id={event_id}]"
+                )[-500:]
             elif order.status != OrderStatus.SUBMITTED:
                 # T4.3: 订单已在非 PENDING/SUBMITTED 状态，记录异常
                 self._log_report_anomaly(
@@ -474,9 +505,9 @@ class ExecutionStreamConsumer:
                 return
             if order.status not in {OrderStatus.FILLED, OrderStatus.CANCELLED}:
                 order.status = OrderStatus.REJECTED
-                order.remarks = ((order.remarks or "") + f" [STREAM_REJECTED {reason}]")[
-                    -500:
-                ]
+                order.remarks = (
+                    (order.remarks or "") + f" [STREAM_REJECTED {reason}]"
+                )[-500:]
                 await publish_notification_async(
                     user_id=str(order.user_id),
                     tenant_id=str(order.tenant_id or "default"),
@@ -522,7 +553,11 @@ class ExecutionStreamConsumer:
                 )
                 raise
             # 兜底：用 broker_order_id + exec_id 或时间戳生成 key
-            idem_key = f"{broker_order_id}:{exec_id}" if broker_order_id and exec_id else f"fallback:{int(time.time() * 1000)}"
+            idem_key = (
+                f"{broker_order_id}:{exec_id}"
+                if broker_order_id and exec_id
+                else f"fallback:{int(time.time() * 1000)}"
+            )
             self._log_report_anomaly(
                 fields,
                 f"order_filled idempotency key fallback to {idem_key}",
@@ -530,7 +565,9 @@ class ExecutionStreamConsumer:
 
         async with get_session() as session:
             # 幂等检查：已有同 idem_key 的成交则直接返回
-            dup_result = await session.execute(select(Trade).where(Trade.exchange_trade_id == idem_key).limit(1))
+            dup_result = await session.execute(
+                select(Trade).where(Trade.exchange_trade_id == idem_key).limit(1)
+            )
             if dup_result.scalar_one_or_none() is not None:
                 return
 
@@ -606,7 +643,9 @@ class ExecutionStreamConsumer:
 
             if order.status not in {OrderStatus.FILLED, OrderStatus.CANCELLED}:
                 order.status = OrderStatus.CANCELLED
-                order.remarks = ((order.remarks or "") + f" [STREAM_CANCELLED {reason}]")[-500:]
+                order.remarks = (
+                    (order.remarks or "") + f" [STREAM_CANCELLED {reason}]"
+                )[-500:]
 
                 await publish_notification_async(
                     user_id=str(order.user_id),
@@ -620,21 +659,34 @@ class ExecutionStreamConsumer:
 
                 # [Automation] 1分钟超时自动轮转买入逻辑
                 if "timeout" in reason.lower() and order.side.name.upper() == "BUY":
-                    logger.info("Triggering rotate-buy-next for user %s due to order %s timeout", order.user_id, order.order_id)
+                    logger.info(
+                        "Triggering rotate-buy-next for user %s due to order %s timeout",
+                        order.user_id,
+                        order.order_id,
+                    )
 
                     # 尝试异步触发下一只股票买入 (Fire and forget from this context)
                     async def _rotate_task():
                         async with get_session() as rotate_session:
                             from backend.services.trade.redis_client import get_redis
-                            from backend.services.trade.services.trading_engine import TradingEngine
+                            from backend.services.trade.services.trading_engine import (
+                                TradingEngine,
+                            )
 
                             redis_client = get_redis()
                             engine = TradingEngine(rotate_session, redis_client)
 
                             # 获取轮转建议
-                            suggestion = await engine.rotate_buy_next(order.user_id, order.portfolio_id, order.symbol)
+                            suggestion = await engine.rotate_buy_next(
+                                order.user_id, order.portfolio_id, order.symbol
+                            )
                             if suggestion:
-                                logger.info("Rotating from %s to %s for user %s", order.symbol, suggestion['symbol'], order.user_id)
+                                logger.info(
+                                    "Rotating from %s to %s for user %s",
+                                    order.symbol,
+                                    suggestion["symbol"],
+                                    order.user_id,
+                                )
                                 # 理想情况下处理下单逻辑：
                                 # 此处建议由 TradingEngine 进一步封装一个 submit_rotate_order
                                 # 为简化演示，此处记录建议已达成。

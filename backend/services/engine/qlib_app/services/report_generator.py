@@ -2,7 +2,7 @@
 
 import io
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -27,11 +27,12 @@ from reportlab.platypus import (
 
 matplotlib.use("Agg")  # 非 GUI 后端
 
-from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
+from backend.services.engine.qlib_app.utils.structured_logger import (
+    StructuredTaskLogger,
+)
 
 logger = logging.getLogger(__name__)
 task_logger = StructuredTaskLogger(logger, "ReportGenerator")
-
 
 class PDFReportGenerator:
     """PDF 回测报告生成器"""
@@ -131,7 +132,11 @@ class PDFReportGenerator:
             ["股票池", config.get("universe", "N/A")],
             [
                 "创建时间",
-                (result.get("created_at", "N/A")[:19] if result.get("created_at") else "N/A"),
+                (
+                    result.get("created_at", "N/A")[:19]
+                    if result.get("created_at")
+                    else "N/A"
+                ),
             ],
         ]
 
@@ -197,7 +202,9 @@ class PDFReportGenerator:
                 return None
 
             fig, ax = plt.subplots(figsize=(8, 4))
-            ax.plot(pd.to_datetime(df["date"]), df["value"], linewidth=2, color="#4472C4")
+            ax.plot(
+                pd.to_datetime(df["date"]), df["value"], linewidth=2, color="#4472C4"
+            )
             ax.set_xlabel("日期", fontsize=10)
             ax.set_ylabel("权益", fontsize=10)
             ax.grid(True, alpha=0.3)
@@ -211,7 +218,9 @@ class PDFReportGenerator:
 
             return Image(img_buffer, width=6 * inch, height=3 * inch)
         except Exception as e:
-            task_logger.error("generate_equity_curve_failed", "生成权益曲线图失败", error=str(e))
+            task_logger.error(
+                "generate_equity_curve_failed", "生成权益曲线图失败", error=str(e)
+            )
             return None
 
     def _generate_drawdown_curve(self, result: dict[str, Any]) -> Image | None:
@@ -252,7 +261,9 @@ class PDFReportGenerator:
 
             return Image(img_buffer, width=6 * inch, height=3 * inch)
         except Exception as e:
-            task_logger.error("generate_drawdown_curve_failed", "生成回撤曲线图失败", error=str(e))
+            task_logger.error(
+                "generate_drawdown_curve_failed", "生成回撤曲线图失败", error=str(e)
+            )
             return None
 
     def _generate_monthly_returns(self, result: dict[str, Any]) -> Image | None:
@@ -272,12 +283,14 @@ class PDFReportGenerator:
             df["month"] = df["date"].dt.month
 
             # 计算月度收益
-            monthly = df.groupby(["year", "month"])["return"].sum().unstack(fill_value=0)
+            monthly = (
+                df.groupby(["year", "month"])["return"].sum().unstack(fill_value=0)
+            )
 
             fig, ax = plt.subplots(figsize=(10, 4))
             im = ax.imshow(monthly.values * 100, cmap="RdYlGn", aspect="auto")
             ax.set_xticks(np.arange(12))
-            ax.set_xticklabels([f"{i+1}月" for i in range(12)])
+            ax.set_xticklabels([f"{i + 1}月" for i in range(12)])
             ax.set_yticks(np.arange(len(monthly)))
             ax.set_yticklabels(monthly.index)
             plt.colorbar(im, ax=ax, label="收益率 (%)")
@@ -290,7 +303,11 @@ class PDFReportGenerator:
 
             return Image(img_buffer, width=6 * inch, height=3 * inch)
         except Exception as e:
-            task_logger.error("generate_monthly_returns_failed", "生成月度收益热力图失败", error=str(e))
+            task_logger.error(
+                "generate_monthly_returns_failed",
+                "生成月度收益热力图失败",
+                error=str(e),
+            )
             return None
 
     def _generate_position_distribution(self, result: dict[str, Any]) -> Image | None:
@@ -301,7 +318,9 @@ class PDFReportGenerator:
 
         try:
             # 取前 10 大持仓
-            top_positions = sorted(positions, key=lambda x: x.get("weight", 0), reverse=True)[:10]
+            top_positions = sorted(
+                positions, key=lambda x: x.get("weight", 0), reverse=True
+            )[:10]
             labels = [p.get("instrument", "Unknown") for p in top_positions]
             sizes = [p.get("weight", 0) * 100 for p in top_positions]
 
@@ -317,9 +336,12 @@ class PDFReportGenerator:
 
             return Image(img_buffer, width=5 * inch, height=4 * inch)
         except Exception as e:
-            task_logger.error("generate_position_distribution_failed", "生成持仓分布图失败", error=str(e))
+            task_logger.error(
+                "generate_position_distribution_failed",
+                "生成持仓分布图失败",
+                error=str(e),
+            )
             return None
-
 
 class ExcelReportGenerator:
     """Excel 回测报告生成器"""
@@ -365,7 +387,9 @@ class ExcelReportGenerator:
         ws = wb.create_sheet("核心指标")
 
         # 标题样式
-        header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+        header_fill = PatternFill(
+            start_color="4472C4", end_color="4472C4", fill_type="solid"
+        )
         header_font = Font(bold=True, color="FFFFFF")
 
         # 写入数据
@@ -402,7 +426,9 @@ class ExcelReportGenerator:
 
             # 标题样式
             for cell in ws[1]:
-                cell.fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+                cell.fill = PatternFill(
+                    start_color="4472C4", end_color="4472C4", fill_type="solid"
+                )
                 cell.font = Font(bold=True, color="FFFFFF")
 
     def _create_trades_sheet(self, wb: Workbook, result: dict[str, Any]):
@@ -417,7 +443,9 @@ class ExcelReportGenerator:
 
             # 标题样式
             for cell in ws[1]:
-                cell.fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+                cell.fill = PatternFill(
+                    start_color="4472C4", end_color="4472C4", fill_type="solid"
+                )
                 cell.font = Font(bold=True, color="FFFFFF")
 
     def _create_positions_sheet(self, wb: Workbook, result: dict[str, Any]):
@@ -432,7 +460,9 @@ class ExcelReportGenerator:
 
             # 标题样式
             for cell in ws[1]:
-                cell.fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+                cell.fill = PatternFill(
+                    start_color="4472C4", end_color="4472C4", fill_type="solid"
+                )
                 cell.font = Font(bold=True, color="FFFFFF")
 
     def _create_daily_returns_sheet(self, wb: Workbook, result: dict[str, Any]):
@@ -451,5 +481,7 @@ class ExcelReportGenerator:
 
                 # 标题样式
                 for cell in ws[1]:
-                    cell.fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+                    cell.fill = PatternFill(
+                        start_color="4472C4", end_color="4472C4", fill_type="solid"
+                    )
                     cell.font = Font(bold=True, color="FFFFFF")

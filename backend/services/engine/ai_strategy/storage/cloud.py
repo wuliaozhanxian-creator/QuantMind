@@ -2,7 +2,7 @@
 
 import logging
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +13,6 @@ except ImportError:
 
     def get_cos_service():
         return None
-
 
 def save_strategy_to_cos(
     strategy_code: str, strategy_name: str, strategy_id: str, user_id: str | None
@@ -28,7 +27,7 @@ def save_strategy_to_cos(
         user_id: 用户ID
 
     Returns:
-        Dict: 保存结果，包含file_key和file_url
+        dict: 保存结果，包含file_key和file_url
     """
     try:
         cos_service = get_cos_service()

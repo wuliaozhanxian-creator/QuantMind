@@ -37,8 +37,12 @@ class AIStrategyConfig(BaseSettings):
     LLM_TIMEOUT: int = 60  # 秒
 
     # ============ DashScope Embedding配置 ============
-    DASHSCOPE_EMBEDDING_MODEL: str = os.getenv("DASHSCOPE_EMBEDDING_MODEL", "text-embedding-v4")
-    DASHSCOPE_EMBEDDING_TIMEOUT: int = int(os.getenv("DASHSCOPE_EMBEDDING_TIMEOUT", "60"))
+    DASHSCOPE_EMBEDDING_MODEL: str = os.getenv(
+        "DASHSCOPE_EMBEDDING_MODEL", "text-embedding-v4"
+    )
+    DASHSCOPE_EMBEDDING_TIMEOUT: int = int(
+        os.getenv("DASHSCOPE_EMBEDDING_TIMEOUT", "60")
+    )
 
     # ============ DeepSeek配置 ============
     DEEPSEEK_API_KEY: str = os.getenv("DEEPSEEK_API_KEY", "")
@@ -115,8 +119,12 @@ class AIStrategyConfig(BaseSettings):
     OPENCLAW_BASE_URL: str = os.getenv("OPENCLAW_BASE_URL", "http://127.0.0.1:8015")
 
     # ============ Strategy Service 同步配置 ============
-    STRATEGY_SERVICE_URL: str = os.getenv("STRATEGY_SERVICE_URL", "http://127.0.0.1:8001")
-    STRATEGY_SYNC_ENABLED: bool = os.getenv("STRATEGY_SYNC_ENABLED", "true").lower() == "true"
+    STRATEGY_SERVICE_URL: str = os.getenv(
+        "STRATEGY_SERVICE_URL", "http://127.0.0.1:8001"
+    )
+    STRATEGY_SYNC_ENABLED: bool = (
+        os.getenv("STRATEGY_SYNC_ENABLED", "true").lower() == "true"
+    )
 
     # ============ 日志配置 ============
     LOG_LEVEL: str = "INFO"
@@ -293,10 +301,14 @@ def validate_required_config(config: AIStrategyConfig) -> None:
         "DATABASE_URL": config.DATABASE_URL,
     }
 
-    missing = [key for key, value in required_configs.items() if not value or not value.strip()]
+    missing = [
+        key for key, value in required_configs.items() if not value or not value.strip()
+    ]
 
     if missing:
-        error_msg = f"缺少必需的配置项: {', '.join(missing)}. 请检查环境变量或.env文件。"
+        error_msg = (
+            f"缺少必需的配置项: {', '.join(missing)}. 请检查环境变量或.env文件。"
+        )
         raise ValueError(error_msg)
 
     # 验证数据库URL格式
@@ -307,4 +319,6 @@ def validate_required_config(config: AIStrategyConfig) -> None:
 
     # 验证LLM提供商
     if config.LLM_PROVIDER not in ["qwen", "deepseek"]:
-        raise ValueError(f"不支持的LLM提供商: {config.LLM_PROVIDER}. 支持: qwen, deepseek")
+        raise ValueError(
+            f"不支持的LLM提供商: {config.LLM_PROVIDER}. 支持: qwen, deepseek"
+        )

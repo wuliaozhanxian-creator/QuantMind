@@ -18,7 +18,7 @@ import os
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 import docker
 from docker import DockerClient
@@ -56,7 +56,6 @@ _TRAINING_SCRIPT_HOST_PATH = Path(
         str(_HOST_PROJECT_PATH / "docker" / "training" / "train.py"),
     )
 ).expanduser()
-
 
 class LocalDockerOrchestrator:
     def __init__(self):
@@ -303,6 +302,8 @@ class LocalDockerOrchestrator:
                 _TRAINING_IMAGE,
                 command="python /app/train.py --config /workspace/config.yaml",
                 environment={
+                    # T6.5-P3 residual, M4 migration: 训练容器回调仍使用 INTERNAL_CALL_SECRET
+                    # 共享密钥。M4 迁移后将改为注入 SECRET_KEY 供训练容器自行签发 service JWT。
                     "INTERNAL_CALL_SECRET": self.internal_secret,
                     "USE_LOCAL_DATA": "true",
                     "TRAINING_LOCAL_DATA_DIR": _LOCAL_DATA_MOUNT_DIR,
@@ -499,7 +500,7 @@ class LocalDockerOrchestrator:
                 try:
                     c.remove(force=True, v=True)
                 except Exception:
-                    pass
+                    logger.debug("ignored exception", exc_info=True)
                 return
 
             except docker.errors.NotFound:

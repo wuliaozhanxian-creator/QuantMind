@@ -19,17 +19,17 @@ from typing import Optional
 try:
     mp.set_start_method("spawn", force=True)
 except RuntimeError:
-    pass
+    pass  # noqa: BLE001 - 可选配置/依赖未启用，预期静默
 
 from backend.shared.logging_config import setup_logging
 
 setup_logging(service_name="quantmind-oss")
 logger = logging.getLogger(__name__)
 
-
 def get_workers_config() -> dict:
     """获取各服务的 worker 数量配置"""
     import os
+
     # OSS 默认保持 engine 单 worker。
     # 原因：AI-IDE 执行任务状态保存在进程内存中，多 worker 会导致
     # /start 与 /execute/logs/{job_id} 命中不同进程，返回 404 Job not found。
@@ -47,7 +47,6 @@ def get_workers_config() -> dict:
         "stream": int(os.getenv("STREAM_WORKERS", default_workers["stream"])),
     }
 
-
 def get_service_ports() -> dict:
     """获取服务端口配置"""
     return {
@@ -56,7 +55,6 @@ def get_service_ports() -> dict:
         "trade": int(os.getenv("TRADE_PORT", "8002")),
         "stream": int(os.getenv("STREAM_PORT", "8003")),
     }
-
 
 def run_api_service(port: int, workers: int = 1):
     """运行 API 服务"""
@@ -73,7 +71,6 @@ def run_api_service(port: int, workers: int = 1):
         access_log=False,
     )
 
-
 def run_engine_service(port: int, workers: int = 4):
     """运行 Engine 服务"""
     # T8.2: 子进程独立设置 service_name，使 JSON 日志可区分 api/engine/trade/stream
@@ -88,7 +85,6 @@ def run_engine_service(port: int, workers: int = 4):
         workers=workers,
         access_log=False,
     )
-
 
 def run_trade_service(port: int, workers: int = 1):
     """运行 Trade 服务"""
@@ -105,7 +101,6 @@ def run_trade_service(port: int, workers: int = 1):
         access_log=False,
     )
 
-
 def run_stream_service(port: int, workers: int = 1):
     """运行 Stream 服务"""
     # T8.2: 子进程独立设置 service_name，使 JSON 日志可区分 api/engine/trade/stream
@@ -120,7 +115,6 @@ def run_stream_service(port: int, workers: int = 1):
         workers=workers,
         access_log=False,
     )
-
 
 def run_single_service(service_name: str, port: int, workers: int = 1):
     """运行单个服务（用于调试或按需启动）"""
@@ -138,7 +132,6 @@ def run_single_service(service_name: str, port: int, workers: int = 1):
 
     service_runners[service_name](port, workers)
 
-
 def run_celery_worker():
     """运行 Celery Worker（处理异步回测任务）"""
     from celery import concurrency
@@ -146,13 +139,14 @@ def run_celery_worker():
 
     logger.info("Starting Celery Worker for async backtest tasks")
     # 使用 solo 模式单进程执行，避免多进程复杂度
-    celery_app.worker_main([
-        "worker",
-        "--loglevel=info",
-        "--concurrency=1",
-        "--pool=solo",
-    ])
-
+    celery_app.worker_main(
+        [
+            "worker",
+            "--loglevel=info",
+            "--concurrency=1",
+            "--pool=solo",
+        ]
+    )
 
 def run_all_services():
     """运行所有服务（多进程模式）"""
@@ -172,7 +166,9 @@ def run_all_services():
         p = mp.Process(target=runner, args=(port, workers), name=f"quantmind-{name}")
         p.start()
         processes.append((name, p))
-        logger.info(f"Started {name} service (PID: {p.pid}) on port {port} with {workers} workers")
+        logger.info(
+            f"Started {name} service (PID: {p.pid}) on port {port} with {workers} workers"
+        )
 
     # 启动 Celery Worker 进程
     celery_p = mp.Process(target=run_celery_worker, name="quantmind-celery")
@@ -189,7 +185,7 @@ def run_all_services():
     logger.info("=" * 60)
 
     try:
-        for name, p in processes:
+        for _name, p in processes:
             p.join()
     except KeyboardInterrupt:
         logger.info("Shutting down all services...")
@@ -204,7 +200,6 @@ def run_all_services():
                 p.kill()
                 logger.warning(f"Force killed {name} service")
 
-
 def main():
     """主入口"""
     service_mode = os.getenv("SERVICE_MODE", "all").lower().strip()
@@ -216,12 +211,13 @@ def main():
     if service_mode == "all":
         run_all_services()
     elif service_mode in ("api", "engine", "trade", "stream"):
-        run_single_service(service_mode, ports[service_mode], workers_config[service_mode])
+        run_single_service(
+            service_mode, ports[service_mode], workers_config[service_mode]
+        )
     else:
         logger.error(f"Unknown SERVICE_MODE: {service_mode}")
         logger.info("Valid modes: all, api, engine, trade, stream")
         sys.exit(1)
-
 
 if __name__ == "__main__":
     main()

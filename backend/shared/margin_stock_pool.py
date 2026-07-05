@@ -91,7 +91,11 @@ class MarginStockPoolService:
         )
         if code_col is None:
             raise ValueError(f"融资融券清单缺少股票代码列: {self.source_path}")
-        return frozenset(normalize_symbol(value) for value in df[code_col].tolist() if normalize_symbol(value))
+        return frozenset(
+            normalize_symbol(value)
+            for value in df[code_col].tolist()
+            if normalize_symbol(value)
+        )
 
     def _load_from_instrument_text(self) -> frozenset[str]:
         symbols: set[str] = set()
@@ -125,7 +129,11 @@ class MarginStockPoolService:
         )
         if code_col is None:
             raise ValueError(f"融资融券清单缺少股票代码列: {self.source_path}")
-        return frozenset(normalize_symbol(value) for value in df[code_col].tolist() if normalize_symbol(value))
+        return frozenset(
+            normalize_symbol(value)
+            for value in df[code_col].tolist()
+            if normalize_symbol(value)
+        )
 
     def snapshot(self) -> MarginPoolSnapshot:
         current = self._snapshot
@@ -151,7 +159,9 @@ class MarginStockPoolService:
 _SERVICES: dict[str, MarginStockPoolService] = {}
 
 
-def get_margin_stock_pool_service(source_path: str | Path | None = None) -> MarginStockPoolService:
+def get_margin_stock_pool_service(
+    source_path: str | Path | None = None,
+) -> MarginStockPoolService:
     root = Path(__file__).resolve().parents[2]
     resolved = Path(source_path) if source_path else root / "data" / "融资融券.json"
     service_key = str(resolved.resolve())

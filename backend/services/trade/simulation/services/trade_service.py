@@ -24,7 +24,11 @@ class SimTradeService:
     @staticmethod
     def _to_trade_response(fill: SimulationFill) -> SimpleNamespace:
         trade_value = float(fill.gross_amount or 0.0)
-        total_fee = float(fill.commission or 0.0) + float(fill.stamp_duty or 0.0) + float(fill.transfer_fee or 0.0)
+        total_fee = (
+            float(fill.commission or 0.0)
+            + float(fill.stamp_duty or 0.0)
+            + float(fill.transfer_fee or 0.0)
+        )
         return SimpleNamespace(
             id=fill.id,
             trade_id=fill.fill_id,
@@ -114,7 +118,9 @@ class SimTradeService:
             return [self._to_trade_response(fill) for fill in fills]
         return []
 
-    async def get_stats(self, tenant_id: str, user_id: int, portfolio_id: int | None = None) -> dict:
+    async def get_stats(
+        self, tenant_id: str, user_id: int, portfolio_id: int | None = None
+    ) -> dict:
         fill_conditions = [
             SimulationFill.tenant_id == tenant_id,
             SimulationFill.user_id == str(user_id),
@@ -124,10 +130,18 @@ class SimTradeService:
 
         fill_summary_stmt = select(
             func.count(SimulationFill.id).label("total_trades"),
-            func.coalesce(func.sum(SimulationFill.gross_amount), 0.0).label("total_value"),
-            func.coalesce(func.sum(SimulationFill.commission), 0.0).label("total_commission"),
-            func.coalesce(func.sum(case((SimulationFill.side == "buy", 1), else_=0)), 0).label("buy_trades"),
-            func.coalesce(func.sum(case((SimulationFill.side == "sell", 1), else_=0)), 0).label("sell_trades"),
+            func.coalesce(func.sum(SimulationFill.gross_amount), 0.0).label(
+                "total_value"
+            ),
+            func.coalesce(func.sum(SimulationFill.commission), 0.0).label(
+                "total_commission"
+            ),
+            func.coalesce(
+                func.sum(case((SimulationFill.side == "buy", 1), else_=0)), 0
+            ).label("buy_trades"),
+            func.coalesce(
+                func.sum(case((SimulationFill.side == "sell", 1), else_=0)), 0
+            ).label("sell_trades"),
         ).where(and_(*fill_conditions))
         fill_summary_row = (await self.db.execute(fill_summary_stmt)).one()
         if int(fill_summary_row.total_trades or 0) <= 0:
@@ -140,7 +154,10 @@ class SimTradeService:
         if int(fill_summary_row.total_trades or 0) > 0:
             day_bucket = func.date(SimulationFill.executed_at)
             fill_daily_stmt = (
-                select(day_bucket.label("trade_day"), func.count(SimulationFill.id).label("trade_count"))
+                select(
+                    day_bucket.label("trade_day"),
+                    func.count(SimulationFill.id).label("trade_count"),
+                )
                 .where(and_(*fill_conditions))
                 .group_by(day_bucket)
                 .order_by(day_bucket.asc())

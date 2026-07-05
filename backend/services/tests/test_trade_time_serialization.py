@@ -1,7 +1,14 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from backend.services.trade.models.order import OrderSide, OrderStatus, OrderType, PositionSide, TradeAction, TradingMode
+from backend.services.trade.models.order import (
+    OrderSide,
+    OrderStatus,
+    OrderType,
+    PositionSide,
+    TradeAction,
+    TradingMode,
+)
 from backend.services.trade.schemas.order import OrderResponse
 from backend.services.trade.schemas.trade import TradeResponse
 

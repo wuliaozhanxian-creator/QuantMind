@@ -144,8 +144,7 @@ class EmailVerification(Base):
     __tablename__ = "email_verifications"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(String(64), nullable=False,
-                     index=True, comment="用户ID或注册标识")
+    user_id = Column(String(64), nullable=False, index=True, comment="用户ID或注册标识")
     tenant_id = Column(String(64), nullable=False, index=True, comment="租户ID")
     email = Column(String(255), nullable=False, index=True)
 

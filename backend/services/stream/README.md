@@ -167,7 +167,7 @@ psql "$DATABASE_URL" -f backend/db/migrations/20260320_alter_quotes_timestamp_to
 | GET | `/api/v1/quotes/{symbol}` | 获取单只行情（支持 `?source=` 切换数据源）|
 | GET | `/api/v1/klines/{symbol}` | 获取 K 线（`?interval=1d&limit=100`）|
 | GET | `/api/v1/symbols` | 获取全市场标的列表 |
-| POST | `/api/v1/internal/bridge/order` | 内部接口：向在线 QMT Agent 派发下单消息（需 `X-Internal-Call`） |
+| POST | `/api/v1/internal/bridge/order` | 内部接口：向在线 QMT Agent 派发下单消息（需 `X-Service-Token`） |
 | GET | `/health` | 健康检查 |
 | GET | `/metrics` | Prometheus 指标（含降级状态） |
 

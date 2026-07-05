@@ -10,7 +10,7 @@ import sys
 import time as time_module
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -18,6 +18,7 @@ import yaml
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, text
+
 try:
     import exchange_calendars as xcals
 except Exception:
@@ -29,6 +30,7 @@ from backend.services.engine.inference.script_runner import InferenceScriptRunne
 from backend.shared.database_manager_v2 import get_session
 from backend.shared.redis_sentinel_client import get_redis_sentinel_client
 from backend.shared.trading_calendar import calendar_service
+
 try:
     from backend.services.engine.qlib_app.celery_config import celery_app
 except ImportError:
@@ -37,12 +39,21 @@ except ImportError:
 from .db import Base, DataFileRecord, ModelRecord, TrainingJobRecord  # noqa: F401 — ensure all models are registered in Base.metadata before create_all
 
 from .model_management_utils import *
-from .model_management_utils import _enrich_feature_catalog_with_data_coverage, _load_feature_catalog_from_db, _load_feature_catalog_from_file, _resolve_inference_dates_with_calendar, _INFERENCE_LOCK_KEY_PREFIX, _INFERENCE_LOCK_TTL_SEC
+from .model_management_utils import (
+    _enrich_feature_catalog_with_data_coverage,
+    _load_feature_catalog_from_db,
+    _load_feature_catalog_from_file,
+    _resolve_inference_dates_with_calendar,
+    _INFERENCE_LOCK_KEY_PREFIX,
+    _INFERENCE_LOCK_TTL_SEC,
+)
 
 @router.post("", response_model=ModelResponse)
 async def create_model(
     data: ModelCreate,
-    owner_user_id: str | None = Query(None, alias="user_id", description="归属用户ID(可选)"),
+    owner_user_id: str | None = Query(
+        None, alias="user_id", description="归属用户ID(可选)"
+    ),
     current_user: dict = Depends(require_admin),
 ):
     """创建模型（管理员权限）"""
@@ -65,7 +76,6 @@ async def create_model(
         await session.refresh(new_model)
         return new_model
 
-
 @router.get("", response_model=list[ModelResponse])
 async def get_models(
     current_user: dict = Depends(require_admin),
@@ -76,7 +86,9 @@ async def get_models(
     if not os.path.exists(MODELS_ROOT):
         # 如果目录不存在，尝试从数据库回退（兼容旧逻辑）
         async with get_session(read_only=True) as session:
-            stmt = select(ModelRecord).where(ModelRecord.tenant_id == current_user.get("tenant_id", "default"))
+            stmt = select(ModelRecord).where(
+                ModelRecord.tenant_id == current_user.get("tenant_id", "default")
+            )
             result = await session.execute(stmt)
             return result.scalars().all()
 
@@ -95,7 +107,8 @@ async def get_models(
                 # 构建兼容 ModelResponse 的模型对象
                 model_entry = {
                     "id": i + 1,
-                    "name": data.get("version") or os.path.basename(meta_path).replace(".meta.json", ""),
+                    "name": data.get("version")
+                    or os.path.basename(meta_path).replace(".meta.json", ""),
                     "description": f"Weights: {os.path.basename(data.get('output', ''))} | Instruments: {data.get('instruments', 'N/A')}",
                     "source_type": "qlib_model",
                     "start_date": data.get("date_min"),
@@ -111,13 +124,15 @@ async def get_models(
 
     return models
 
-
 from .model_management_ops import router as model_management_ops_router
+
 router.include_router(model_management_ops_router)
 
 @router.post("/run-inference", summary="手动触发每日推理（管理员）")
 async def run_inference(
-    model_file: str = Query("model.bin", description="模型文件名（保留兼容，实际执行 inference.py）"),
+    model_file: str = Query(
+        "model.bin", description="模型文件名（保留兼容，实际执行 inference.py）"
+    ),
     current_user: dict = Depends(require_admin),
 ):
     """
@@ -134,24 +149,33 @@ async def run_inference(
     """
     tz = ZoneInfo("Asia/Shanghai")
     now_local = datetime.now(tz)
-    requested_data_trade_date, data_trade_date, prediction_trade_date, calendar_adjusted = (
-        await _resolve_inference_dates_with_calendar(current_user=current_user, now_local=now_local)
+    (
+        requested_data_trade_date,
+        data_trade_date,
+        prediction_trade_date,
+        calendar_adjusted,
+    ) = await _resolve_inference_dates_with_calendar(
+        current_user=current_user, now_local=now_local
     )
     lock_key = f"{_INFERENCE_LOCK_KEY_PREFIX}:{prediction_trade_date}"
 
     # --- 1. 获取分布式锁（SET NX EX），防止并发 ---
     try:
         redis = get_redis_sentinel_client()
-        acquired = redis.set(lock_key, "admin_manual", ex=_INFERENCE_LOCK_TTL_SEC, nx=True)
+        acquired = redis.set(
+            lock_key, "admin_manual", ex=_INFERENCE_LOCK_TTL_SEC, nx=True
+        )
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Redis 不可用，无法获取并发锁: {e}")
+        raise HTTPException(
+            status_code=503, detail=f"Redis 不可用，无法获取并发锁: {e}"
+        ) from e
 
     if not acquired:
         locked_by = ""
         try:
             locked_by = redis.get(lock_key) or ""
         except Exception:
-            pass
+            pass  # noqa: BLE001 - None
         raise HTTPException(
             status_code=409,
             detail=(
@@ -171,7 +195,7 @@ async def run_inference(
             model_id=None,
         )
     except LookupError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
 
     try:
         result = await asyncio.get_event_loop().run_in_executor(
@@ -185,12 +209,12 @@ async def run_inference(
             ),
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"推理脚本执行异常: {e}")
+        raise HTTPException(status_code=500, detail=f"推理脚本执行异常: {e}") from e
     finally:
         try:
             redis.delete(lock_key)
         except Exception:
-            pass
+            pass  # noqa: BLE001 - None
 
     if not result.success:
         return {
@@ -241,14 +265,15 @@ async def run_inference(
         "lock_ttl_sec": _INFERENCE_LOCK_TTL_SEC,
     }
 
-
 @router.get("/predictions", summary="管理员查询模型预测批次")
 async def list_prediction_runs(
     prediction_date: date | None = Query(None, description="预测交易日 YYYY-MM-DD"),
     tenant_id: str | None = Query(None, description="租户ID，可选"),
     user_id: str | None = Query(None, description="用户ID，可选"),
     run_id: str | None = Query(None, description="运行批次ID，可选"),
-    model_version: str | None = Query("inference_script", description="模型版本过滤（默认 inference_script）"),
+    model_version: str | None = Query(
+        "inference_script", description="模型版本过滤（默认 inference_script）"
+    ),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     current_user: dict = Depends(require_admin),
@@ -343,11 +368,12 @@ async def list_prediction_runs(
         "items": items,
     }
 
-
 @router.get("/predictions/{run_id}", summary="管理员查看预测批次明细")
 async def get_prediction_run_detail(
     run_id: str,
-    prediction_date: date | None = Query(None, description="预测交易日 YYYY-MM-DD，可选"),
+    prediction_date: date | None = Query(
+        None, description="预测交易日 YYYY-MM-DD，可选"
+    ),
     tenant_id: str | None = Query(None, description="租户ID，可选"),
     user_id: str | None = Query(None, description="用户ID，可选"),
     page: int = Query(1, ge=1),
@@ -372,7 +398,9 @@ async def get_prediction_run_detail(
         total_row = (
             (
                 await session.execute(
-                    text(f"SELECT COUNT(*) AS total FROM engine_signal_scores WHERE {where_sql}"),
+                    text(
+                        f"SELECT COUNT(*) AS total FROM engine_signal_scores WHERE {where_sql}"
+                    ),
                     params,
                 )
             )
@@ -460,7 +488,6 @@ async def get_prediction_run_detail(
         "items": items,
     }
 
-
 @router.get("/predictions/{run_id}/export", summary="管理员导出预测批次CSV")
 async def export_prediction_run_csv(
     run_id: str,
@@ -489,8 +516,8 @@ async def export_prediction_run_csv(
     async with get_session(read_only=True) as session:
         # Fetch ALL items for export (no pagination)
         stmt = text(f"""
-            SELECT 
-                symbol, fusion_score, light_score, tft_score, 
+            SELECT
+                symbol, fusion_score, light_score, tft_score,
                 score_rank, signal_side, expected_price, created_at
             FROM engine_signal_scores
             WHERE {where_sql}
@@ -507,23 +534,33 @@ async def export_prediction_run_csv(
     writer = csv.writer(output)
 
     # Header
-    writer.writerow([
-        "symbol", "fusion_score", "light_score", "tft_score",
-        "rank", "side", "expected_price", "created_at"
-    ])
+    writer.writerow(
+        [
+            "symbol",
+            "fusion_score",
+            "light_score",
+            "tft_score",
+            "rank",
+            "side",
+            "expected_price",
+            "created_at",
+        ]
+    )
 
     # Data rows
     for row in rows:
-        writer.writerow([
-            row["symbol"],
-            row["fusion_score"],
-            row["light_score"],
-            row["tft_score"],
-            row["score_rank"],
-            row["signal_side"],
-            row["expected_price"],
-            row["created_at"].isoformat() if row["created_at"] else ""
-        ])
+        writer.writerow(
+            [
+                row["symbol"],
+                row["fusion_score"],
+                row["light_score"],
+                row["tft_score"],
+                row["score_rank"],
+                row["signal_side"],
+                row["expected_price"],
+                row["created_at"].isoformat() if row["created_at"] else "",
+            ]
+        )
 
     output.seek(0)
     filename = f"prediction_{run_id}_{prediction_date or 'export'}.csv"
@@ -531,9 +568,8 @@ async def export_prediction_run_csv(
     return StreamingResponse(
         iter([output.getvalue()]),
         media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename={filename}"}
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
-
 
 @router.get("/{model_id}", response_model=ModelResponse)
 async def get_model(
@@ -543,13 +579,14 @@ async def get_model(
     """获取单个模型（管理员权限）"""
     tenant_id = current_user.get("tenant_id", "default")
     async with get_session(read_only=True) as session:
-        stmt = select(ModelRecord).where(ModelRecord.id == model_id, ModelRecord.tenant_id == tenant_id)
+        stmt = select(ModelRecord).where(
+            ModelRecord.id == model_id, ModelRecord.tenant_id == tenant_id
+        )
         result = await session.execute(stmt)
         model = result.scalar_one_or_none()
         if not model:
             raise HTTPException(status_code=404, detail="模型不存在")
         return model
-
 
 @router.get("/directory/{model_path:path}", summary="获取指定模型目录详情")
 async def get_model_directory_detail(
@@ -569,8 +606,7 @@ async def get_model_directory_detail(
     try:
         return _scan_model_directory(abs_path)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"读取模型目录失败: {e}")
-
+        raise HTTPException(status_code=500, detail=f"读取模型目录失败: {e}") from e
 
 async def ensure_admin_tables():
     """确保管理员相关表存在 - 已禁用自动建表"""

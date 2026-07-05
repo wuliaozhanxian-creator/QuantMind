@@ -14,16 +14,13 @@ from sqlalchemy.orm import Mapped, mapped_column
 from backend.services.trade.models.enums import _CaseInsensitiveEnum
 from backend.services.trade.simulation.models import Base, TimestampMixin
 
-
 class OrderSide(str, enum.Enum):
     BUY = "buy"
     SELL = "sell"
 
-
 class OrderType(str, enum.Enum):
     MARKET = "market"
     LIMIT = "limit"
-
 
 class OrderStatus(str, enum.Enum):
     PENDING = "pending"
@@ -33,10 +30,8 @@ class OrderStatus(str, enum.Enum):
     EXPIRED = "expired"
     REJECTED = "rejected"
 
-
 class TradingMode(_CaseInsensitiveEnum):
     SIMULATION = "SIMULATION"
-
 
 class SimOrder(Base, TimestampMixin):
     """[DEPRECATED] Legacy simulation order model. Use SimulationOrderV2 instead.
@@ -48,10 +43,10 @@ class SimOrder(Base, TimestampMixin):
 
     Runtime order creation must use SimulationOrderV2 via SimOrderService.
     """
+
     __tablename__ = "sim_orders"
 
-    id: Mapped[int] = mapped_column(
-        Integer, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     order_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), unique=True, nullable=False, default=uuid.uuid4, index=True
     )
@@ -63,9 +58,7 @@ class SimOrder(Base, TimestampMixin):
     portfolio_id: Mapped[int] = mapped_column(
         Integer, nullable=False, index=True, default=0
     )
-    strategy_id: Mapped[Optional[int]] = mapped_column(
-        Integer, nullable=True, index=True
-    )
+    strategy_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
 
     symbol: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     side: Mapped[OrderSide] = mapped_column(
@@ -90,43 +83,35 @@ class SimOrder(Base, TimestampMixin):
     )
 
     quantity: Mapped[float] = mapped_column(Float, nullable=False)
-    filled_quantity: Mapped[float] = mapped_column(
-        Float, nullable=False, default=0.0)
-    price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    average_price: Mapped[Optional[float]
-                          ] = mapped_column(Float, nullable=True)
+    filled_quantity: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    average_price: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     # 多空/融券字段（nullable 以兼容历史存量数据）
-    trade_action: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    position_side: Mapped[Optional[str]] = mapped_column(String(16), nullable=True, default="long")
+    trade_action: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    position_side: Mapped[str | None] = mapped_column(
+        String(16), nullable=True, default="long"
+    )
     is_margin_trade: Mapped[bool] = mapped_column(Integer, nullable=False, default=0)
 
-    order_value: Mapped[float] = mapped_column(
-        Float, nullable=False, default=0.0)
-    filled_value: Mapped[float] = mapped_column(
-        Float, nullable=False, default=0.0)
-    commission: Mapped[float] = mapped_column(
-        Float, nullable=False, default=0.0)
+    order_value: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    filled_value: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    commission: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
 
-    submitted_at: Mapped[Optional[datetime]
-                         ] = mapped_column(DateTime, nullable=True)
-    filled_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime, nullable=True)
-    cancelled_at: Mapped[Optional[datetime]
-                         ] = mapped_column(DateTime, nullable=True)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    filled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     execution_model: Mapped[str] = mapped_column(
         String(32), nullable=False, default="synthetic_price"
     )
-    price_source: Mapped[Optional[str]] = mapped_column(
-        String(64), nullable=True)
-    remarks: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    price_source: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    remarks: Mapped[str | None] = mapped_column(String(500), nullable=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     total_fee: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
 
     __table_args__ = (
-        Index("idx_sim_order_tenant_user_status",
-              "tenant_id", "user_id", "status"),
+        Index("idx_sim_order_tenant_user_status", "tenant_id", "user_id", "status"),
         Index(
             "idx_sim_order_tenant_user_created", "tenant_id", "user_id", "created_at"
         ),

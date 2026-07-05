@@ -3,7 +3,7 @@ Role-Based Access Control Service
 角色权限控制服务
 """
 
-from typing import List, Optional, Set
+from typing import Optional
 
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,7 +15,6 @@ from backend.services.api.user_app.models.rbac import (
     user_roles,
 )
 from backend.services.api.user_app.services.cache_service import CacheService
-
 
 class RBACService:
     """RBAC服务"""
@@ -31,7 +30,7 @@ class RBACService:
             select(Role)
             .join(user_roles)
             .where(user_roles.c.user_id == user_id)
-            .where(Role.is_active == True)
+            .where(Role.is_active)
             .order_by(Role.priority.desc())
         )
         result = await self.db.execute(stmt)
@@ -57,7 +56,7 @@ class RBACService:
             select(Permission)
             .join(role_permissions)
             .where(role_permissions.c.role_id.in_(role_ids))
-            .where(Permission.is_active == True)
+            .where(Permission.is_active)
         )
         result = await self.db.execute(stmt)
         permissions = result.scalars().all()
@@ -75,12 +74,16 @@ class RBACService:
         permissions = await self.get_user_permissions(user_id)
         return permission_code in permissions
 
-    async def has_any_permission(self, user_id: str, permission_codes: list[str]) -> bool:
+    async def has_any_permission(
+        self, user_id: str, permission_codes: list[str]
+    ) -> bool:
         """检查用户是否有任意一个权限"""
         permissions = await self.get_user_permissions(user_id)
         return any(code in permissions for code in permission_codes)
 
-    async def has_all_permissions(self, user_id: str, permission_codes: list[str]) -> bool:
+    async def has_all_permissions(
+        self, user_id: str, permission_codes: list[str]
+    ) -> bool:
         """检查用户是否有所有权限"""
         permissions = await self.get_user_permissions(user_id)
         return all(code in permissions for code in permission_codes)
@@ -102,7 +105,9 @@ class RBACService:
 
     async def remove_role_from_user(self, user_id: str, role_id: int):
         """移除用户的角色"""
-        stmt = user_roles.delete().where(and_(user_roles.c.user_id == user_id, user_roles.c.role_id == role_id))
+        stmt = user_roles.delete().where(
+            and_(user_roles.c.user_id == user_id, user_roles.c.role_id == role_id)
+        )
         await self.db.execute(stmt)
         await self.db.commit()
 
@@ -162,7 +167,9 @@ class RBACService:
 
     async def add_permission_to_role(self, role_id: int, permission_id: int):
         """给角色添加权限"""
-        stmt = role_permissions.insert().values(role_id=role_id, permission_id=permission_id)
+        stmt = role_permissions.insert().values(
+            role_id=role_id, permission_id=permission_id
+        )
         await self.db.execute(stmt)
         await self.db.commit()
 
@@ -180,7 +187,6 @@ class RBACService:
         )
         await self.db.execute(stmt)
         await self.db.commit()
-
 
 async def init_default_roles_and_permissions(db: AsyncSession):
     """初始化默认角色和权限"""

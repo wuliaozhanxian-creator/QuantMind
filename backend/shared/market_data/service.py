@@ -11,7 +11,7 @@ import re
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import psycopg2
 import psycopg2.pool
@@ -36,7 +36,6 @@ PG_DSN = f"host={_PG_HOST} port={_PG_PORT} dbname={_PG_NAME} user={_PG_USER} pas
 _pool = None
 _pool_lock = threading.Lock()
 
-
 def _get_pool():
     """获取或创建连接池(双重检查锁)"""
     global _pool
@@ -45,7 +44,6 @@ def _get_pool():
             if _pool is None:
                 _pool = psycopg2.pool.SimpleConnectionPool(5, 20, PG_DSN)
     return _pool
-
 
 def _pg_query(sql: str, params: tuple | None = None) -> list[dict]:
     """同步执行 PG 查询,返回 dict 列表(供 async 方法用 to_thread 包装)"""
@@ -58,15 +56,13 @@ def _pg_query(sql: str, params: tuple | None = None) -> list[dict]:
     finally:
         pool.putconn(conn)
 
-
 def _code6(symbol: str) -> str:
     """提取6位纯数字代码: 600519 / 600519.SH / SH600519 -> 600519"""
     s = symbol.strip().upper()
     for prefix in ("SH", "SZ", "BJ"):
         if s.startswith(prefix):
-            return s[len(prefix):]
+            return s[len(prefix) :]
     return s.split(".")[0]
-
 
 def _exchange_of(code_or_symbol: str) -> str:
     """根据股票代码判断交易所(使用 StockCodeUtil 标准化)"""
@@ -78,7 +74,6 @@ def _exchange_of(code_or_symbol: str) -> str:
     if p.startswith("BJ"):
         return "北交所"
     return "未知"
-
 
 @dataclass
 class MarketData:
@@ -93,7 +88,6 @@ class MarketData:
     volume: int
     adj_close: float | None = None
 
-
 @dataclass
 class StockInfo:
     """股票信息"""
@@ -103,7 +97,6 @@ class StockInfo:
     exchange: str
     industry: str | None = None
     market_cap: float | None = None
-
 
 class MarketDataService:
     """统一市场数据服务(真实数据库查询)"""
@@ -145,7 +138,9 @@ class MarketDataService:
 
             for symbol in symbols:
                 try:
-                    stock_data = await self._get_stock_data_from_db(symbol, start_date, end_date, interval)
+                    stock_data = await self._get_stock_data_from_db(
+                        symbol, start_date, end_date, interval
+                    )
                     result["data"][symbol] = stock_data
                     logger.info(f"成功获取股票 {symbol} 数据: {len(stock_data)} 条记录")
                 except Exception as e:
@@ -164,14 +159,18 @@ class MarketDataService:
             raise
         except Exception as e:
             logger.error(f"获取市场数据失败: {e}")
-            raise RuntimeError(f"市场数据获取失败: {e}")
+            raise RuntimeError(f"市场数据获取失败: {e}") from e
 
     async def _get_stock_data_from_db(
-        self, symbol: str, start_date: datetime, end_date: datetime, interval: str = "1d"
+        self,
+        symbol: str,
+        start_date: datetime,
+        end_date: datetime,
+        interval: str = "1d",
     ) -> list[dict[str, Any]]:
         """从 klines 表获取真实历史数据"""
         code = _code6(symbol)
-        if not re.match(r'^\d{6}$', code):
+        if not re.match(r"^\d{6}$", code):
             return []
         sql = """
             SELECT timestamp, open_price, high_price, low_price, close_price,
@@ -227,7 +226,9 @@ class MarketDataService:
 
             # 从 stocks 表取 exchange / industry
             sym_dot = StockCodeUtil.to_suffix(code)
-            sql2 = "SELECT symbol, name, exchange, industry FROM stocks WHERE symbol = %s"
+            sql2 = (
+                "SELECT symbol, name, exchange, industry FROM stocks WHERE symbol = %s"
+            )
             rows2 = await asyncio.to_thread(_pg_query, sql2, (sym_dot,))
 
             name = ""
@@ -295,12 +296,14 @@ class MarketDataService:
                     WHERE stock_name LIKE %s
                     LIMIT %s
                 """
-                rows2 = await asyncio.to_thread(_pg_query, sql2, (kw, limit - len(results)))
+                rows2 = await asyncio.to_thread(
+                    _pg_query, sql2, (kw, limit - len(results))
+                )
                 existing = {r.symbol for r in results}
                 for r in rows2:
                     sym = r.get("symbol", "")
                     if sym and sym not in existing:
-                        code = _code6(sym)
+                        _code6(sym)
                         results.append(
                             StockInfo(
                                 symbol=sym,
@@ -343,10 +346,8 @@ class MarketDataService:
             logger.error(f"获取股票池失败: {e}")
             return ["SH600519", "SH600036", "SZ000001", "SZ000858"]
 
-
 # 全局实例
 _market_data_service = None
-
 
 def get_market_data_service() -> MarketDataService:
     """获取市场数据服务实例"""
@@ -354,7 +355,6 @@ def get_market_data_service() -> MarketDataService:
     if _market_data_service is None:
         _market_data_service = MarketDataService()
     return _market_data_service
-
 
 # 便捷函数
 async def get_market_data(
@@ -364,18 +364,15 @@ async def get_market_data(
     service = get_market_data_service()
     return await service.get_market_data(symbols, start_date, end_date, timeframe)
 
-
 async def get_stock_info(symbol: str) -> StockInfo | None:
     """获取股票信息便捷函数"""
     service = get_market_data_service()
     return await service.get_stock_info(symbol)
 
-
 async def search_stocks(keyword: str, limit: int = 10) -> list[StockInfo]:
     """搜索股票便捷函数"""
     service = get_market_data_service()
     return await service.search_stocks(keyword, limit)
-
 
 async def get_stock_pool(pool_name: str = "default") -> list[str]:
     """获取股票池便捷函数"""

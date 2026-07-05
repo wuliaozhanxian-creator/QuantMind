@@ -5,7 +5,14 @@ Simulation order schemas.
 from datetime import datetime
 from typing import Optional
 
-from pydantic import UUID4, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    UUID4,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 from backend.services.trade.simulation.models.order import (
     OrderSide,
@@ -14,7 +21,6 @@ from backend.services.trade.simulation.models.order import (
     TradingMode,
 )
 
-
 class SimOrderBase(BaseModel):
     symbol: str = Field(..., min_length=1, max_length=20)
     side: OrderSide
@@ -22,7 +28,6 @@ class SimOrderBase(BaseModel):
     quantity: float = Field(..., gt=0)
     price: float | None = Field(None, gt=0)
     remarks: str | None = Field(None, max_length=500)
-
 
 class SimOrderCreate(SimOrderBase):
     portfolio_id: int = Field(0, ge=0)
@@ -50,10 +55,8 @@ class SimOrderCreate(SimOrderBase):
             raise ValueError("expires_at is required when time_in_force=GTD")
         return self
 
-
 class SimOrderCancelRequest(BaseModel):
     reason: str | None = Field(None, max_length=200)
-
 
 class SimOrderResponse(SimOrderBase):
     model_config = ConfigDict(from_attributes=True)

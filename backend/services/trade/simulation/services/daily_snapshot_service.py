@@ -10,11 +10,12 @@ from typing import Any
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.services.trade.simulation.models.account_daily import SimulationAccountDaily
+from backend.services.trade.simulation.models.account_daily import (
+    SimulationAccountDaily,
+)
 from backend.services.trade.simulation.models.position_daily import (
     SimulationPositionDaily,
 )
-
 
 class SimulationDailySnapshotService:
     def __init__(self, db: AsyncSession):
@@ -50,11 +51,19 @@ class SimulationDailySnapshotService:
         initial_equity = float(
             account_payload.get("initial_equity")
             or account_payload.get("initial_capital")
-            or ((account_payload.get("baseline") or {}).get("initial_equity") if isinstance(account_payload.get("baseline"), dict) else 0.0)
+            or (
+                (account_payload.get("baseline") or {}).get("initial_equity")
+                if isinstance(account_payload.get("baseline"), dict)
+                else 0.0
+            )
             or 0.0
         )
-        total_pnl = float(account_payload.get("total_pnl") or (total_asset - initial_equity))
-        daily_pnl = float(account_payload.get("today_pnl") or account_payload.get("daily_pnl") or 0.0)
+        total_pnl = float(
+            account_payload.get("total_pnl") or (total_asset - initial_equity)
+        )
+        daily_pnl = float(
+            account_payload.get("today_pnl") or account_payload.get("daily_pnl") or 0.0
+        )
         cash = float(account_payload.get("cash") or 0.0)
         available_cash = float(account_payload.get("available_cash") or cash)
         short_market_value = float(account_payload.get("short_market_value") or 0.0)
@@ -98,8 +107,14 @@ class SimulationDailySnapshotService:
             )
             market_value_item = float(pos.get("market_value") or (qty * price))
             unrealized = (
-                (cost_price - price) * qty if side == "short" else (price - cost_price) * qty
-            ) if cost_price > 0 and price > 0 else 0.0
+                (
+                    (cost_price - price) * qty
+                    if side == "short"
+                    else (price - cost_price) * qty
+                )
+                if cost_price > 0 and price > 0
+                else 0.0
+            )
             self.db.add(
                 SimulationPositionDaily(
                     account_id=account_id,

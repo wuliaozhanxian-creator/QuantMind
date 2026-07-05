@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Tuple
 
 from fastapi import FastAPI, Request
 from fastapi.responses import Response
@@ -22,7 +21,9 @@ logger = logging.getLogger(__name__)
 
 
 def _is_client_disconnected_error(exc: Exception) -> bool:
-    if _UvicornClientDisconnected is not None and isinstance(exc, _UvicornClientDisconnected):
+    if _UvicornClientDisconnected is not None and isinstance(
+        exc, _UvicornClientDisconnected
+    ):
         return True
     if isinstance(exc, (ConnectionResetError, BrokenPipeError)):
         return True
@@ -80,7 +81,10 @@ def extract_identity_from_request(request: Request) -> tuple[str, str]:
             try:
                 payload = decode_jwt_token(token)
                 tenant_id = tenant_id or str(payload.get("tenant_id") or "").strip()
-                user_id = user_id or str(payload.get("sub") or payload.get("user_id") or "").strip()
+                user_id = (
+                    user_id
+                    or str(payload.get("sub") or payload.get("user_id") or "").strip()
+                )
             except Exception:
                 # Keep middleware non-blocking for logging purposes.
                 pass
@@ -97,7 +101,9 @@ def install_access_log_middleware(app: FastAPI, service_name: str) -> None:
     """Install standardized access-log middleware."""
 
     uvicorn_access_logger = logging.getLogger("uvicorn.access")
-    if not any(isinstance(f, _UvicornAccessLogFilter) for f in uvicorn_access_logger.filters):
+    if not any(
+        isinstance(f, _UvicornAccessLogFilter) for f in uvicorn_access_logger.filters
+    ):
         uvicorn_access_logger.addFilter(_UvicornAccessLogFilter(("/bridge/",)))
 
     @app.middleware("http")

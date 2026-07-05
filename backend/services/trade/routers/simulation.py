@@ -3,7 +3,7 @@ import os
 import time
 from datetime import date, datetime, time as dt_time, timedelta
 from decimal import Decimal
-from typing import Any, List, Optional
+from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status, File, UploadFile
@@ -53,7 +53,10 @@ from backend.services.trade.simulation.services.simulation_manager import (
 from backend.services.trade.simulation.services.ocr_service import SimulationOCRService
 from backend.services.trade.trade_config import settings
 from backend.shared.database_manager_v2 import get_db_manager, get_session
-from backend.shared.trade_account_cache import write_json_cache, write_trade_account_cache
+from backend.shared.trade_account_cache import (
+    write_json_cache,
+    write_trade_account_cache,
+)
 from backend.shared.trade_redis_keys import normalize_trade_user_id
 from backend.shared.stock_utils import StockCodeUtil
 import logging
@@ -72,26 +75,25 @@ SIMULATION_ACCOUNT_MARKET_QUOTE_TIMEOUT_SECONDS = float(
 SIMULATION_DAILY_REPRICE_READY_TIME = dt_time(
     *map(
         int,
-        (
-            os.getenv("SIMULATION_DAILY_REPRICE_READY_TIME", "03:05")
-            or "03:05"
-        ).split(":"),
+        (os.getenv("SIMULATION_DAILY_REPRICE_READY_TIME", "03:05") or "03:05").split(
+            ":"
+        ),
     )
 )
 SIMULATION_REDIS_PREFERRED_START_TIME = dt_time(
     *map(
         int,
-        (
-            os.getenv("SIMULATION_REDIS_PREFERRED_START_TIME", "09:30")
-            or "09:30"
-        ).split(":"),
+        (os.getenv("SIMULATION_REDIS_PREFERRED_START_TIME", "09:30") or "09:30").split(
+            ":"
+        ),
     )
 )
-SIMULATION_ACCOUNT_CACHE_TTL_SECONDS = float(os.getenv("SIMULATION_ACCOUNT_CACHE_TTL_SECONDS", "5"))
+SIMULATION_ACCOUNT_CACHE_TTL_SECONDS = float(
+    os.getenv("SIMULATION_ACCOUNT_CACHE_TTL_SECONDS", "5")
+)
 _simulation_account_cache: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
 
 router = APIRouter()
-
 
 def _should_prefer_redis_account_snapshot(now: datetime | None = None) -> bool:
     local_now = now.astimezone(_SIMULATION_TZ) if now else datetime.now(_SIMULATION_TZ)
@@ -100,7 +102,6 @@ def _should_prefer_redis_account_snapshot(now: datetime | None = None) -> bool:
         current_time < SIMULATION_DAILY_REPRICE_READY_TIME
         or current_time >= SIMULATION_REDIS_PREFERRED_START_TIME
     )
-
 
 async def _get_latest_price(symbol: str) -> float:
     """
@@ -171,7 +172,6 @@ async def _get_latest_price(symbol: str) -> float:
 
     return price
 
-
 async def _load_latest_close_map(symbols: list[str]) -> dict[str, float]:
     normalized_symbols = sorted(
         {
@@ -203,7 +203,6 @@ async def _load_latest_close_map(symbols: list[str]) -> dict[str, float]:
     except Exception as exc:
         logger.warning("Failed to batch load latest close map: %s", exc)
         return {}
-
 
 def _repair_cost_fallback_positions(
     positions: dict[str, dict[str, float]] | None,
@@ -238,8 +237,7 @@ def _repair_cost_fallback_positions(
         repaired[key] = cloned
     return repaired, repaired_count
 
-
-async def _resolve_symbol_by_name(name: str) -> Optional[str]:
+async def _resolve_symbol_by_name(name: str) -> str | None:
     """
     通过股票名称反查标准 Prefix 代码
     """
@@ -251,7 +249,7 @@ async def _resolve_symbol_by_name(name: str) -> Optional[str]:
         # 清理名称中的特殊字符，如 *ST
         clean_name = name.replace("*", "").strip()
         query = text("""
-            SELECT symbol FROM stock_daily_latest 
+            SELECT symbol FROM stock_daily_latest
             WHERE stock_name LIKE :name
             ORDER BY trade_date DESC LIMIT 1
         """)
@@ -267,12 +265,11 @@ async def _resolve_symbol_by_name(name: str) -> Optional[str]:
 
     return None
 
-
 async def _build_realtime_positions_from_db(
     *,
     tenant_id: str,
     user_id: int,
-    since_at: Optional[datetime] = None,
+    since_at: datetime | None = None,
 ) -> tuple[dict[str, dict[str, float]], float]:
     """[DEPRECATED] 从 sim_trades 聚合当前持仓，并用最新行情重算持仓市值。支持多空双向。
     此函数仅用于审计兼容（account-audit 的 legacy_trade_aggregate 对照源），
@@ -368,7 +365,7 @@ async def _build_realtime_positions_from_db(
         return_exceptions=True,
     )
     latest_price_map: dict[str, float] = {}
-    for sym, price in zip(sorted(symbols), price_pairs):
+    for sym, price in zip(sorted(symbols), price_pairs, strict=False):
         latest_price_map[sym] = float(price) if isinstance(price, (int, float)) else 0.0
 
     for symbol, volume in long_candidates:
@@ -405,12 +402,11 @@ async def _build_realtime_positions_from_db(
 
     return positions, round(total_market_value, 2)
 
-
 async def _build_realtime_positions_from_trade_history(
     *,
     tenant_id: str,
     user_id: str,
-    since_at: Optional[datetime] = None,
+    since_at: datetime | None = None,
     allow_legacy_fallback: bool = False,
 ) -> tuple[dict[str, dict[str, float]], float, str]:
     """优先从 simulation_fills 聚合当前持仓；默认不再隐式回退 legacy sim_trades。"""
@@ -451,7 +447,9 @@ async def _build_realtime_positions_from_trade_history(
 
             if position_side == "short":
                 if trade_action == "sell_to_open":
-                    short_positions[symbol] = short_positions.get(symbol, 0.0) + quantity
+                    short_positions[symbol] = (
+                        short_positions.get(symbol, 0.0) + quantity
+                    )
                 elif trade_action == "buy_to_close":
                     short_positions[symbol] = max(
                         0.0,
@@ -476,8 +474,10 @@ async def _build_realtime_positions_from_trade_history(
             return_exceptions=True,
         )
         latest_price_map: dict[str, float] = {}
-        for sym, price in zip(sorted(symbols), price_pairs):
-            latest_price_map[sym] = float(price) if isinstance(price, (int, float)) else 0.0
+        for sym, price in zip(sorted(symbols), price_pairs, strict=False):
+            latest_price_map[sym] = (
+                float(price) if isinstance(price, (int, float)) else 0.0
+            )
 
         positions: dict[str, dict[str, float]] = {}
         total_market_value = 0.0
@@ -534,7 +534,6 @@ async def _build_realtime_positions_from_trade_history(
     )
     return legacy_positions, legacy_market_value, "legacy_trade_aggregate"
 
-
 def _compute_market_value_from_positions(
     positions: dict[str, dict[str, float]],
 ) -> float:
@@ -546,7 +545,6 @@ def _compute_market_value_from_positions(
         side = str(pos.get("side") or "long").strip().lower()
         total_market_value += -mv if side == "short" else mv
     return round(total_market_value, 2)
-
 
 def _is_cache_payload_structurally_valid(payload: dict[str, Any] | None) -> bool:
     if not isinstance(payload, dict):
@@ -573,7 +571,6 @@ def _is_cache_payload_structurally_valid(payload: dict[str, Any] | None) -> bool
             return False
     return True
 
-
 def _persist_projection_cache(
     *,
     redis: RedisClient,
@@ -590,7 +587,6 @@ def _persist_projection_cache(
         normalize_trade_user_id(user_id) or str(user_id),
         dict(payload),
     )
-
 
 def _extract_position_signature(
     positions: dict[str, dict[str, float]] | None,
@@ -609,12 +605,11 @@ def _extract_position_signature(
             "side": str(pos.get("side") or "long").strip().lower(),
             "volume": round(float(pos.get("volume") or 0.0), 6),
             "available_volume": round(float(pos.get("available_volume") or 0.0), 6),
-                "market_value": round(float(pos.get("market_value") or 0.0), 2),
-                "cost_price": round(float(pos.get("cost_price") or 0.0), 4),
-                "frozen_volume": round(float(pos.get("frozen_volume") or 0.0), 6),
-            }
+            "market_value": round(float(pos.get("market_value") or 0.0), 2),
+            "cost_price": round(float(pos.get("cost_price") or 0.0), 4),
+            "frozen_volume": round(float(pos.get("frozen_volume") or 0.0), 6),
+        }
     return signature
-
 
 def _build_source_account_summary(
     *,
@@ -633,11 +628,7 @@ def _build_source_account_summary(
         else float(account_dict.get("market_value") or 0.0)
     )
     cash = float(
-        (
-            account_dict.get("cash")
-            if account_dict
-            else getattr(account, "cash", 0.0)
-        )
+        (account_dict.get("cash") if account_dict else getattr(account, "cash", 0.0))
         or 0.0
     )
     available_cash = float(
@@ -675,7 +666,6 @@ def _build_source_account_summary(
         "positions": position_signature,
     }
 
-
 def _build_account_reconcile_diff(
     left: dict[str, Any],
     right: dict[str, Any],
@@ -690,7 +680,8 @@ def _build_account_reconcile_diff(
         left_pos = left_positions.get(key) or {}
         right_pos = right_positions.get(key) or {}
         volume_diff = round(
-            float(left_pos.get("volume") or 0.0) - float(right_pos.get("volume") or 0.0),
+            float(left_pos.get("volume") or 0.0)
+            - float(right_pos.get("volume") or 0.0),
             6,
         )
         available_diff = round(
@@ -710,29 +701,35 @@ def _build_account_reconcile_diff(
     return {
         "left_source": left.get("source"),
         "right_source": right.get("source"),
-        "cash_diff": round(float(left.get("cash") or 0.0) - float(right.get("cash") or 0.0), 2),
+        "cash_diff": round(
+            float(left.get("cash") or 0.0) - float(right.get("cash") or 0.0), 2
+        ),
         "available_cash_diff": round(
-            float(left.get("available_cash") or 0.0) - float(right.get("available_cash") or 0.0),
+            float(left.get("available_cash") or 0.0)
+            - float(right.get("available_cash") or 0.0),
             2,
         ),
         "market_value_diff": round(
-            float(left.get("market_value") or 0.0) - float(right.get("market_value") or 0.0),
+            float(left.get("market_value") or 0.0)
+            - float(right.get("market_value") or 0.0),
             2,
         ),
         "total_asset_diff": round(
-            float(left.get("total_asset") or 0.0) - float(right.get("total_asset") or 0.0),
+            float(left.get("total_asset") or 0.0)
+            - float(right.get("total_asset") or 0.0),
             2,
         ),
         "initial_equity_diff": round(
-            float(left.get("initial_equity") or 0.0) - float(right.get("initial_equity") or 0.0),
+            float(left.get("initial_equity") or 0.0)
+            - float(right.get("initial_equity") or 0.0),
             2,
         ),
-        "position_count_diff": int(left.get("position_count") or 0) - int(right.get("position_count") or 0),
+        "position_count_diff": int(left.get("position_count") or 0)
+        - int(right.get("position_count") or 0),
         "positions_only_in_left": sorted(left_keys - right_keys),
         "positions_only_in_right": sorted(right_keys - left_keys),
         "position_quantity_mismatches": position_quantity_mismatches,
     }
-
 
 def _build_account_reconcile_report(
     *,
@@ -751,7 +748,9 @@ def _build_account_reconcile_report(
     redis_summary = _build_source_account_summary(
         source="redis_cache",
         account=redis_account,
-        positions=(redis_account or {}).get("positions") if isinstance(redis_account, dict) else {},
+        positions=(redis_account or {}).get("positions")
+        if isinstance(redis_account, dict)
+        else {},
     )
     projection_summary = _build_source_account_summary(
         source="ledger_projection",
@@ -779,7 +778,9 @@ def _build_account_reconcile_report(
         "trade_history_aggregate": trade_history_summary,
     }
     diffs = {
-        "redis_vs_projection": _build_account_reconcile_diff(redis_summary, projection_summary),
+        "redis_vs_projection": _build_account_reconcile_diff(
+            redis_summary, projection_summary
+        ),
         "redis_vs_trade_history_aggregate": _build_account_reconcile_diff(
             redis_summary,
             trade_history_summary,
@@ -795,8 +796,12 @@ def _build_account_reconcile_report(
             source=legacy_trade_history_source,
             account={
                 "cash": float((redis_account or {}).get("cash") or 0.0),
-                "available_cash": float((redis_account or {}).get("available_cash") or 0.0),
-                "initial_equity": float((redis_account or {}).get("initial_equity") or 0.0),
+                "available_cash": float(
+                    (redis_account or {}).get("available_cash") or 0.0
+                ),
+                "initial_equity": float(
+                    (redis_account or {}).get("initial_equity") or 0.0
+                ),
                 "total_asset": round(
                     float((redis_account or {}).get("cash") or 0.0)
                     + float(legacy_trade_history_market_value or 0.0),
@@ -823,7 +828,6 @@ def _build_account_reconcile_report(
         "sources": sources,
         "diffs": diffs,
     }
-
 
 def _build_cache_payload_from_daily_rows(
     *,
@@ -871,7 +875,8 @@ def _build_cache_payload_from_daily_rows(
             "initial_equity": initial_equity,
             "day_open_equity": max(
                 0.0,
-                float(account_row.total_asset or 0.0) - float(account_row.daily_pnl or 0.0),
+                float(account_row.total_asset or 0.0)
+                - float(account_row.daily_pnl or 0.0),
             ),
             "month_open_equity": initial_equity,
         },
@@ -879,7 +884,6 @@ def _build_cache_payload_from_daily_rows(
         "replayed_snapshot_date": account_row.snapshot_date.isoformat(),
         "replayed_snapshot_at": account_row.snapshot_at.isoformat(),
     }
-
 
 def _build_replay_account_payload(
     account_row: SimulationAccountDaily,
@@ -900,7 +904,10 @@ def _build_replay_account_payload(
         available_balance=Decimal(str(account_row.available_cash or 0.0)),
         frozen_balance=Decimal(str(account_row.frozen_cash or 0.0)),
         market_value=Decimal(
-            str((account_row.long_market_value or 0.0) - (account_row.short_market_value or 0.0))
+            str(
+                (account_row.long_market_value or 0.0)
+                - (account_row.short_market_value or 0.0)
+            )
         ),
         initial_capital=Decimal(str(initial_capital)),
         total_pnl=Decimal(str(total_pnl)),
@@ -911,7 +918,6 @@ def _build_replay_account_payload(
         total_return_ratio=round(total_return_pct / 100.0, 10),
         source="simulation_account_daily",
     )
-
 
 def _build_replay_positions_payload(
     position_rows: list[SimulationPositionDaily],
@@ -932,7 +938,6 @@ def _build_replay_positions_payload(
         )
         for row in position_rows
     ]
-
 
 def _derive_seed_initial_equity_from_positions(
     *,
@@ -973,29 +978,23 @@ def _derive_seed_initial_equity_from_positions(
         return None
     return round(estimated_equity, 2)
 
-
 DEFAULT_INITIAL_CASH = 1_000_000.0
 SIM_AMOUNT_STEP = 100_000
 COOLDOWN_DAYS = 30
 
-
 class AccountResetRequest(BaseModel):
     initial_cash: float | None = None
-
 
 class HoldingItem(BaseModel):
     symbol: str
     quantity: float
-    name: Optional[str] = None
-
+    name: str | None = None
 
 class SyncHoldingsRequest(BaseModel):
-    holdings: List[HoldingItem]
-    available_cash: Optional[float] = None
-
+    holdings: list[HoldingItem]
+    available_cash: float | None = None
 
 # SimulationSettingsRequest removed as it is deprecated.
-
 
 class SimulationSettingsResponse(BaseModel):
     initial_cash: float
@@ -1004,7 +1003,6 @@ class SimulationSettingsResponse(BaseModel):
     can_modify: bool
     cooldown_days: int
     amount_step: int
-
 
 class SimulationFundSnapshotResponse(BaseModel):
     snapshot_date: date
@@ -1021,7 +1019,6 @@ class SimulationFundSnapshotResponse(BaseModel):
     total_return_ratio: float
     source: str
 
-
 class SimulationCorporateActionCreateRequest(BaseModel):
     symbol: str
     action_type: str
@@ -1032,7 +1029,6 @@ class SimulationCorporateActionCreateRequest(BaseModel):
     rights_price: float = 0.0
     source: str = "manual"
     note: str | None = None
-
 
 class SimulationCorporateActionResponse(BaseModel):
     id: int
@@ -1049,7 +1045,6 @@ class SimulationCorporateActionResponse(BaseModel):
     applied_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
-
 
 class SimulationRebalanceJobResponse(BaseModel):
     job_id: str
@@ -1070,13 +1065,11 @@ class SimulationRebalanceJobResponse(BaseModel):
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
-
 class SimulationRebalanceJobCreateRequest(BaseModel):
     strategy_id: str
     schedule_type: str = "manual"
     planned_run_at: datetime | None = None
     window_seconds: int = 300
-
 
 class SimulationCashLedgerResponse(BaseModel):
     id: int
@@ -1095,7 +1088,6 @@ class SimulationCashLedgerResponse(BaseModel):
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
-
 class SimulationPositionDailyResponse(BaseModel):
     snapshot_date: date
     snapshot_at: datetime
@@ -1109,12 +1101,10 @@ class SimulationPositionDailyResponse(BaseModel):
     market_value: float
     unrealized_pnl: float
 
-
 class SimulationReplayResponse(BaseModel):
     snapshot_date: date
     account: SimulationFundSnapshotResponse
     positions: list[SimulationPositionDailyResponse]
-
 
 class SimulationFillTraceResponse(BaseModel):
     fill_id: str
@@ -1134,7 +1124,6 @@ class SimulationFillTraceResponse(BaseModel):
     price_source: str | None = None
     session_phase: str | None = None
 
-
 class SimulationPositionLotTraceResponse(BaseModel):
     id: int
     symbol: str
@@ -1148,7 +1137,6 @@ class SimulationPositionLotTraceResponse(BaseModel):
     status: str
     closed_at: datetime | None = None
 
-
 class SimulationReplayAuditResponse(BaseModel):
     snapshot_date: date
     account: SimulationFundSnapshotResponse
@@ -1157,15 +1145,12 @@ class SimulationReplayAuditResponse(BaseModel):
     cash_ledger: list[SimulationCashLedgerResponse]
     position_lots: list[SimulationPositionLotTraceResponse]
 
-
 class SimulationReplayTradeDateRequest(BaseModel):
     snapshot_date: date
     apply_to_cache: bool = True
 
-
 class SimulationReplayLegacyTradesRequest(BaseModel):
     reset_existing: bool = True
-
 
 class SimulationAccountAuditResponse(BaseModel):
     account_id: str
@@ -1173,7 +1158,6 @@ class SimulationAccountAuditResponse(BaseModel):
     user_id: str
     sources: dict[str, Any]
     diffs: dict[str, Any]
-
 
 @router.get("/settings")
 async def get_simulation_settings(
@@ -1197,7 +1181,6 @@ async def get_simulation_settings(
         },
     }
 
-
 async def _capture_simulation_snapshot(redis: RedisClient) -> None:
     try:
         await SimulationFundSnapshotService.capture_all(redis)
@@ -1211,12 +1194,15 @@ async def _capture_simulation_snapshot(redis: RedisClient) -> None:
             exc_info=True,
         )
 
-
 async def _purge_simulation_history(*, tenant_id: str, user_id: int) -> dict[str, int]:
     """清理当前租户/用户模拟盘历史，供账户重置使用。"""
     stats: dict[str, int] = {}
     normalized_user_id = normalize_trade_user_id(user_id) or str(user_id)
-    legacy_user_id = str(int(normalized_user_id)) if normalized_user_id.isdigit() else normalized_user_id
+    legacy_user_id = (
+        str(int(normalized_user_id))
+        if normalized_user_id.isdigit()
+        else normalized_user_id
+    )
     async with get_session(read_only=False) as session:
         statements = [
             (
@@ -1348,9 +1334,7 @@ async def _purge_simulation_history(*, tenant_id: str, user_id: int) -> dict[str
             stats[table_name] = int(result.rowcount or 0)
     return stats
 
-
 # update_simulation_settings (PUT /settings) removed as it is deprecated.
-
 
 @router.post("/reset")
 async def reset_simulation_account(
@@ -1381,7 +1365,6 @@ async def reset_simulation_account(
         "purged": purge_stats,
     }
 
-
 @router.get("/account")
 async def get_simulation_account(
     auth: AuthContext = Depends(get_auth_context),
@@ -1391,7 +1374,9 @@ async def get_simulation_account(
     Get current simulation account state.
     如果账户不存在，返回空账户（total_asset=0），不自动初始化。
     """
-    cache_enabled = isinstance(redis, RedisClient) and SIMULATION_ACCOUNT_CACHE_TTL_SECONDS > 0
+    cache_enabled = (
+        isinstance(redis, RedisClient) and SIMULATION_ACCOUNT_CACHE_TTL_SECONDS > 0
+    )
     cache_key = (auth.tenant_id, str(auth.user_id))
     now = time.monotonic()
     if cache_enabled:
@@ -1431,12 +1416,18 @@ async def get_simulation_account(
         normalized_user_id = normalize_trade_user_id(auth.user_id) or str(auth.user_id)
         inferred_initial_equity = float(
             (account or {}).get("initial_equity")
-            or (((account or {}).get("baseline") or {}).get("initial_equity") if isinstance((account or {}).get("baseline"), dict) else 0.0)
+            or (
+                ((account or {}).get("baseline") or {}).get("initial_equity")
+                if isinstance((account or {}).get("baseline"), dict)
+                else 0.0
+            )
             or DEFAULT_INITIAL_CASH
         )
         try:
             async with get_session(read_only=False) as session:
-                migrated = await SimulationMigrationService(session).ensure_projection_from_legacy(
+                migrated = await SimulationMigrationService(
+                    session
+                ).ensure_projection_from_legacy(
                     tenant_id=auth.tenant_id,
                     user_id=normalized_user_id,
                     initial_equity=inferred_initial_equity,
@@ -1445,7 +1436,9 @@ async def get_simulation_account(
                     await session.commit()
             if migrated:
                 async with get_session(read_only=True) as session:
-                    projection = await SimulationProjectionService(session).load_projection(
+                    projection = await SimulationProjectionService(
+                        session
+                    ).load_projection(
                         tenant_id=auth.tenant_id,
                         user_id=auth.user_id,
                         latest_price_loader=_get_latest_price,
@@ -1476,7 +1469,9 @@ async def get_simulation_account(
         )
         account = bootstrap_cache_payload
 
-    if projection_account is not None and not _is_cache_payload_structurally_valid(account):
+    if projection_account is not None and not _is_cache_payload_structurally_valid(
+        account
+    ):
         rebuilt_cache_payload = SimulationProjectionService.build_cache_payload(
             account=projection_account,
             positions=projection_positions,
@@ -1516,14 +1511,11 @@ async def get_simulation_account(
     )
     initial_equity = float(settings.get("initial_cash", DEFAULT_INITIAL_CASH))
     reset_anchor_raw = settings.get("last_modified_at")
-    reset_anchor = None
     if isinstance(reset_anchor_raw, str) and reset_anchor_raw.strip():
         try:
-            reset_anchor = datetime.fromisoformat(
-                reset_anchor_raw.replace("Z", "+00:00")
-            )
+            datetime.fromisoformat(reset_anchor_raw.replace("Z", "+00:00"))
         except Exception:
-            reset_anchor = None
+            logger.debug("ignored exception", exc_info=True)
 
     cash = float(
         (projection_account.cash if projection_account is not None else None)
@@ -1572,9 +1564,7 @@ async def get_simulation_account(
                 positions = repaired_positions
         if projection_positions:
             _, _, market_value = (
-                SimulationProjectionService.summarize_position_market_value(
-                    positions
-                )
+                SimulationProjectionService.summarize_position_market_value(positions)
             )
         else:
             market_value = round(
@@ -1624,7 +1614,7 @@ async def get_simulation_account(
                     "side": str(pos.get("side") or "long").lower(),
                 }
                 side = str(pos.get("side") or "long").lower()
-                market_value += (-market_val if side == "short" else market_val)
+                market_value += -market_val if side == "short" else market_val
         market_value = round(market_value, 2)
     else:
         # DB 聚合口径优先时，补齐仓位成本价（来自 Redis 持仓对象）用于浮动盈亏计算。
@@ -1687,11 +1677,17 @@ async def get_simulation_account(
         (projection_account.initial_equity if projection_account is not None else None)
         or account.get("initial_equity")
         or account.get("initial_capital")
-        or ((account.get("baseline") or {}).get("initial_equity") if isinstance(account.get("baseline"), dict) else 0.0)
+        or (
+            (account.get("baseline") or {}).get("initial_equity")
+            if isinstance(account.get("baseline"), dict)
+            else 0.0
+        )
         or 0.0
     )
-    initial_equity = account_initial_equity if account_initial_equity > 0 else float(
-        settings.get("initial_cash", DEFAULT_INITIAL_CASH)
+    initial_equity = (
+        account_initial_equity
+        if account_initial_equity > 0
+        else float(settings.get("initial_cash", DEFAULT_INITIAL_CASH))
     )
     if used_redis_positions_fallback:
         seed_initial_equity = _derive_seed_initial_equity_from_positions(
@@ -1796,7 +1792,6 @@ async def get_simulation_account(
     _simulation_account_cache[cache_key] = (now, payload)
     return payload
 
-
 @router.get("/admin/account-audit", response_model=SimulationAccountAuditResponse)
 async def get_simulation_account_audit(
     auth: AuthContext = Depends(get_auth_context),
@@ -1816,11 +1811,13 @@ async def get_simulation_account_audit(
         projection_account = projection.account
         projection_positions = projection.positions
 
-    trade_history_positions, trade_history_market_value, trade_history_source = (
-        await _build_realtime_positions_from_trade_history(
-            tenant_id=auth.tenant_id,
-            user_id=str(auth.user_id),
-        )
+    (
+        trade_history_positions,
+        trade_history_market_value,
+        trade_history_source,
+    ) = await _build_realtime_positions_from_trade_history(
+        tenant_id=auth.tenant_id,
+        user_id=str(auth.user_id),
     )
     legacy_trade_history_positions: dict[str, dict[str, float]] | None = None
     legacy_trade_history_market_value = 0.0
@@ -1858,7 +1855,6 @@ async def get_simulation_account_audit(
         )
     )
 
-
 @router.post("/snapshots/capture")
 async def capture_simulation_fund_snapshot(
     auth: AuthContext = Depends(get_auth_context),
@@ -1875,7 +1871,6 @@ async def capture_simulation_fund_snapshot(
             "requested_by": str(auth.user_id),
         },
     }
-
 
 @router.get("/snapshots/daily", response_model=list[SimulationFundSnapshotResponse])
 async def list_simulation_fund_snapshots(
@@ -1913,7 +1908,9 @@ async def list_simulation_fund_snapshots(
                     available_balance=Decimal(str(s.available_cash or 0.0)),
                     frozen_balance=Decimal(str(s.frozen_cash or 0.0)),
                     market_value=Decimal(
-                        str((s.long_market_value or 0.0) - (s.short_market_value or 0.0))
+                        str(
+                            (s.long_market_value or 0.0) - (s.short_market_value or 0.0)
+                        )
                     ),
                     initial_capital=Decimal(str(initial_capital)),
                     total_pnl=Decimal(str(total_pnl)),
@@ -1925,7 +1922,9 @@ async def list_simulation_fund_snapshots(
                     source="simulation_account_daily",
                 )
             )
-            previous_total_asset = total_asset if total_asset > 0 else previous_total_asset
+            previous_total_asset = (
+                total_asset if total_asset > 0 else previous_total_asset
+            )
         return list(reversed(responses_v2))
 
     snapshots = await SimulationFundSnapshotService.list_user_daily(
@@ -1971,7 +1970,6 @@ async def list_simulation_fund_snapshots(
         previous_total_asset = total_asset if total_asset > 0 else previous_total_asset
     return list(reversed(responses))
 
-
 @router.get("/positions/daily", response_model=list[SimulationPositionDailyResponse])
 async def list_simulation_position_daily(
     days: int = Query(default=30, ge=1, le=3650),
@@ -2016,7 +2014,6 @@ async def list_simulation_position_daily(
         for row in ordered
     ]
 
-
 @router.get("/cash-ledger", response_model=list[SimulationCashLedgerResponse])
 async def list_simulation_cash_ledger(
     limit: int = Query(default=100, ge=1, le=1000),
@@ -2052,7 +2049,9 @@ async def list_simulation_cash_ledger(
             ref_type=row.ref_type,
             ref_id=row.ref_id,
             amount=float(row.amount or 0.0),
-            balance_after=float(row.balance_after) if row.balance_after is not None else None,
+            balance_after=float(row.balance_after)
+            if row.balance_after is not None
+            else None,
             trade_date=row.trade_date,
             occurred_at=row.occurred_at,
             currency=row.currency,
@@ -2063,10 +2062,9 @@ async def list_simulation_cash_ledger(
         for row in rows
     ]
 
-
 @router.post("/sync/ocr")
 async def ocr_sync_holdings(
-    images: List[UploadFile] = File(...),
+    images: list[UploadFile] = File(...),
     auth: AuthContext = Depends(get_auth_context),
     redis: RedisClient = Depends(get_redis),
 ):
@@ -2109,7 +2107,6 @@ async def ocr_sync_holdings(
 
     return {"success": True, "data": results, "available_cash": available_cash}
 
-
 @router.get("/rebalance-jobs", response_model=list[SimulationRebalanceJobResponse])
 async def list_simulation_rebalance_jobs(
     strategy_id: str | None = Query(default=None),
@@ -2122,7 +2119,8 @@ async def list_simulation_rebalance_jobs(
             select(SimulationRebalanceJob)
             .where(
                 SimulationRebalanceJob.tenant_id == auth.tenant_id,
-                SimulationRebalanceJob.user_id == (normalize_trade_user_id(auth.user_id) or str(auth.user_id)),
+                SimulationRebalanceJob.user_id
+                == (normalize_trade_user_id(auth.user_id) or str(auth.user_id)),
             )
             .order_by(
                 SimulationRebalanceJob.created_at.desc(),
@@ -2131,9 +2129,13 @@ async def list_simulation_rebalance_jobs(
             .limit(limit)
         )
         if strategy_id:
-            stmt = stmt.where(SimulationRebalanceJob.strategy_id == str(strategy_id).strip())
+            stmt = stmt.where(
+                SimulationRebalanceJob.strategy_id == str(strategy_id).strip()
+            )
         if status:
-            stmt = stmt.where(SimulationRebalanceJob.status == str(status).strip().lower())
+            stmt = stmt.where(
+                SimulationRebalanceJob.status == str(status).strip().lower()
+            )
         rows = (await session.execute(stmt)).scalars().all()
     return [
         SimulationRebalanceJobResponse(
@@ -2158,7 +2160,6 @@ async def list_simulation_rebalance_jobs(
         for row in rows
     ]
 
-
 @router.get("/rebalance-jobs/{job_id}", response_model=SimulationRebalanceJobResponse)
 async def get_simulation_rebalance_job(
     job_id: str,
@@ -2176,7 +2177,9 @@ async def get_simulation_rebalance_job(
             )
         ).scalar_one_or_none()
     if row is None:
-        raise HTTPException(status_code=404, detail="Simulation rebalance job not found")
+        raise HTTPException(
+            status_code=404, detail="Simulation rebalance job not found"
+        )
     return SimulationRebalanceJobResponse(
         job_id=row.job_id,
         tenant_id=row.tenant_id,
@@ -2197,8 +2200,11 @@ async def get_simulation_rebalance_job(
         updated_at=row.updated_at,
     )
 
-
-@router.post("/rebalance-jobs", response_model=SimulationRebalanceJobResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/rebalance-jobs",
+    response_model=SimulationRebalanceJobResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def create_simulation_rebalance_job(
     payload: SimulationRebalanceJobCreateRequest,
     auth: AuthContext = Depends(get_auth_context),
@@ -2206,9 +2212,7 @@ async def create_simulation_rebalance_job(
     normalized_user_id = normalize_trade_user_id(auth.user_id) or str(auth.user_id)
     planned_run_at = payload.planned_run_at or datetime.now()
     job_suffix = planned_run_at.strftime("%Y%m%d%H%M%S")
-    job_id = (
-        f"manual_sim_{auth.tenant_id}_{normalized_user_id}_{str(payload.strategy_id).strip()}_{job_suffix}"
-    )
+    job_id = f"manual_sim_{auth.tenant_id}_{normalized_user_id}_{str(payload.strategy_id).strip()}_{job_suffix}"
     async with get_session(read_only=False) as session:
         row = SimulationRebalanceJob(
             job_id=job_id,
@@ -2225,7 +2229,9 @@ async def create_simulation_rebalance_job(
             idempotency_key=job_id,
         )
         if int(payload.window_seconds or 0) > 0:
-            row.window_end_at = planned_run_at + timedelta(seconds=int(payload.window_seconds))
+            row.window_end_at = planned_run_at + timedelta(
+                seconds=int(payload.window_seconds)
+            )
         session.add(row)
         await session.flush()
         await session.refresh(row)
@@ -2249,8 +2255,9 @@ async def create_simulation_rebalance_job(
         updated_at=row.updated_at,
     )
 
-
-@router.get("/corporate-actions", response_model=list[SimulationCorporateActionResponse])
+@router.get(
+    "/corporate-actions", response_model=list[SimulationCorporateActionResponse]
+)
 async def list_simulation_corporate_actions(
     symbol: str | None = Query(default=None),
     status: str | None = Query(default=None),
@@ -2268,9 +2275,13 @@ async def list_simulation_corporate_actions(
             .limit(limit)
         )
         if symbol:
-            stmt = stmt.where(SimulationCorporateAction.symbol == str(symbol).strip().upper())
+            stmt = stmt.where(
+                SimulationCorporateAction.symbol == str(symbol).strip().upper()
+            )
         if status:
-            stmt = stmt.where(SimulationCorporateAction.status == str(status).strip().lower())
+            stmt = stmt.where(
+                SimulationCorporateAction.status == str(status).strip().lower()
+            )
         rows = (await session.execute(stmt)).scalars().all()
     return [
         SimulationCorporateActionResponse(
@@ -2292,8 +2303,11 @@ async def list_simulation_corporate_actions(
         for row in rows
     ]
 
-
-@router.post("/corporate-actions", response_model=SimulationCorporateActionResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/corporate-actions",
+    response_model=SimulationCorporateActionResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def create_simulation_corporate_action(
     payload: SimulationCorporateActionCreateRequest,
     auth: AuthContext = Depends(get_auth_context),
@@ -2331,7 +2345,6 @@ async def create_simulation_corporate_action(
         updated_at=model.updated_at,
     )
 
-
 @router.post("/corporate-actions/apply")
 async def apply_simulation_corporate_actions(
     auth: AuthContext = Depends(get_auth_context),
@@ -2345,7 +2358,6 @@ async def apply_simulation_corporate_actions(
             "requested_by": str(auth.user_id),
         },
     }
-
 
 @router.post("/admin/replay-trade-date")
 async def replay_simulation_trade_date(
@@ -2365,7 +2377,9 @@ async def replay_simulation_trade_date(
             )
         ).scalar_one_or_none()
         if account_row is None:
-            raise HTTPException(status_code=404, detail="Simulation daily snapshot not found")
+            raise HTTPException(
+                status_code=404, detail="Simulation daily snapshot not found"
+            )
         position_rows = list(
             (
                 await session.execute(
@@ -2375,7 +2389,9 @@ async def replay_simulation_trade_date(
                         SimulationPositionDaily.snapshot_date == payload.snapshot_date,
                     )
                 )
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
 
     cache_payload = _build_cache_payload_from_daily_rows(
@@ -2405,7 +2421,6 @@ async def replay_simulation_trade_date(
         },
     }
 
-
 @router.get("/replay/{snapshot_date}", response_model=SimulationReplayResponse)
 async def replay_simulation_snapshot_by_date(
     snapshot_date: date,
@@ -2423,20 +2438,28 @@ async def replay_simulation_snapshot_by_date(
             )
         ).scalar_one_or_none()
         if account_row is None:
-            raise HTTPException(status_code=404, detail="Simulation daily snapshot not found")
+            raise HTTPException(
+                status_code=404, detail="Simulation daily snapshot not found"
+            )
 
         position_rows = (
-            await session.execute(
-                select(SimulationPositionDaily).where(
-                    SimulationPositionDaily.tenant_id == auth.tenant_id,
-                    SimulationPositionDaily.user_id == normalized_user_id,
-                    SimulationPositionDaily.snapshot_date == snapshot_date,
-                ).order_by(
-                    SimulationPositionDaily.symbol.asc(),
-                    SimulationPositionDaily.position_side.asc(),
+            (
+                await session.execute(
+                    select(SimulationPositionDaily)
+                    .where(
+                        SimulationPositionDaily.tenant_id == auth.tenant_id,
+                        SimulationPositionDaily.user_id == normalized_user_id,
+                        SimulationPositionDaily.snapshot_date == snapshot_date,
+                    )
+                    .order_by(
+                        SimulationPositionDaily.symbol.asc(),
+                        SimulationPositionDaily.position_side.asc(),
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
     account_payload = _build_replay_account_payload(account_row)
     positions_payload = _build_replay_positions_payload(position_rows)
@@ -2446,8 +2469,9 @@ async def replay_simulation_snapshot_by_date(
         positions=positions_payload,
     )
 
-
-@router.get("/replay/{snapshot_date}/audit", response_model=SimulationReplayAuditResponse)
+@router.get(
+    "/replay/{snapshot_date}/audit", response_model=SimulationReplayAuditResponse
+)
 async def replay_simulation_snapshot_audit(
     snapshot_date: date,
     auth: AuthContext = Depends(get_auth_context),
@@ -2464,68 +2488,86 @@ async def replay_simulation_snapshot_audit(
             )
         ).scalar_one_or_none()
         if account_row is None:
-            raise HTTPException(status_code=404, detail="Simulation daily snapshot not found")
+            raise HTTPException(
+                status_code=404, detail="Simulation daily snapshot not found"
+            )
 
         position_rows = list(
             (
                 await session.execute(
-                    select(SimulationPositionDaily).where(
+                    select(SimulationPositionDaily)
+                    .where(
                         SimulationPositionDaily.tenant_id == auth.tenant_id,
                         SimulationPositionDaily.user_id == normalized_user_id,
                         SimulationPositionDaily.snapshot_date == snapshot_date,
-                    ).order_by(
+                    )
+                    .order_by(
                         SimulationPositionDaily.symbol.asc(),
                         SimulationPositionDaily.position_side.asc(),
                     )
                 )
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
         fill_rows = list(
             (
                 await session.execute(
-                    select(SimulationFill).where(
+                    select(SimulationFill)
+                    .where(
                         SimulationFill.tenant_id == auth.tenant_id,
                         SimulationFill.user_id == normalized_user_id,
                         SimulationFill.account_id == account_row.account_id,
                         SimulationFill.executed_at <= account_row.snapshot_at,
-                    ).order_by(
+                    )
+                    .order_by(
                         SimulationFill.executed_at.asc(),
                         SimulationFill.id.asc(),
                     )
                 )
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
         ledger_rows = list(
             (
                 await session.execute(
-                    select(SimulationCashLedger).where(
+                    select(SimulationCashLedger)
+                    .where(
                         SimulationCashLedger.tenant_id == auth.tenant_id,
                         SimulationCashLedger.user_id == normalized_user_id,
                         SimulationCashLedger.account_id == account_row.account_id,
                         SimulationCashLedger.occurred_at <= account_row.snapshot_at,
-                    ).order_by(
+                    )
+                    .order_by(
                         SimulationCashLedger.occurred_at.asc(),
                         SimulationCashLedger.id.asc(),
                     )
                 )
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
         lot_rows = list(
             (
                 await session.execute(
-                    select(SimulationPositionLot).where(
+                    select(SimulationPositionLot)
+                    .where(
                         SimulationPositionLot.tenant_id == auth.tenant_id,
                         SimulationPositionLot.user_id == normalized_user_id,
                         SimulationPositionLot.account_id == account_row.account_id,
                         SimulationPositionLot.open_date <= account_row.snapshot_at,
                         (SimulationPositionLot.closed_at.is_(None))
                         | (SimulationPositionLot.closed_at > account_row.snapshot_at),
-                    ).order_by(
+                    )
+                    .order_by(
                         SimulationPositionLot.open_date.asc().nullsfirst(),
                         SimulationPositionLot.id.asc(),
                     )
                 )
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
 
     return SimulationReplayAuditResponse(
@@ -2593,20 +2635,21 @@ async def replay_simulation_snapshot_audit(
         ],
     )
 
-
 @router.post("/admin/rebuild-account")
 async def rebuild_simulation_account_projection(
     auth: AuthContext = Depends(get_auth_context),
     redis: RedisClient = Depends(get_redis),
 ):
     manager = SimulationAccountManager(redis)
-    settings = await manager.get_settings(
+    await manager.get_settings(
         user_id=auth.user_id,
         tenant_id=auth.tenant_id,
         default_initial_cash=DEFAULT_INITIAL_CASH,
         cooldown_days=COOLDOWN_DAYS,
     )
-    current_account = await manager.get_account(auth.user_id, tenant_id=auth.tenant_id) or {}
+    current_account = (
+        await manager.get_account(auth.user_id, tenant_id=auth.tenant_id) or {}
+    )
     async with get_session(read_only=True) as session:
         projection = await SimulationProjectionService(session).load_projection(
             tenant_id=auth.tenant_id,
@@ -2638,7 +2681,6 @@ async def rebuild_simulation_account_projection(
         },
     }
 
-
 @router.post("/admin/replay-legacy-trades")
 async def replay_legacy_simulation_trades(
     payload: SimulationReplayLegacyTradesRequest,
@@ -2658,7 +2700,10 @@ async def replay_legacy_simulation_trades(
         result = await service.replay_legacy_trades(
             tenant_id=auth.tenant_id,
             user_id=normalized_user_id,
-            initial_equity=float(settings.get("initial_cash", DEFAULT_INITIAL_CASH) or DEFAULT_INITIAL_CASH),
+            initial_equity=float(
+                settings.get("initial_cash", DEFAULT_INITIAL_CASH)
+                or DEFAULT_INITIAL_CASH
+            ),
             reset_existing=bool(payload.reset_existing),
         )
     # 回放完成后顺手重建当前缓存投影
@@ -2673,7 +2718,6 @@ async def replay_legacy_simulation_trades(
             "reset_existing": bool(payload.reset_existing),
         },
     }
-
 
 @router.post("/sync/confirm")
 async def confirm_holding_sync(

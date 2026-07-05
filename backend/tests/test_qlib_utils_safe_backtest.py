@@ -18,9 +18,13 @@ def test_safe_backtest_retries_with_benchmark_alias(monkeypatch):
         benchmark = kwargs.get("benchmark")
         calls.append(str(_bench_label(benchmark)))
         if benchmark == "SH000300":
-            raise ValueError("The benchmark ['SH000300'] does not exist. Please provide the right benchmark")
+            raise ValueError(
+                "The benchmark ['SH000300'] does not exist. Please provide the right benchmark"
+            )
         if isinstance(benchmark, pd.Series):
-            raise ValueError("The benchmark ['SH000300'] does not exist. Please provide the right benchmark")
+            raise ValueError(
+                "The benchmark ['SH000300'] does not exist. Please provide the right benchmark"
+            )
         if benchmark == "000300.SH":
             return {"ok": True}, {"ok": True}
         raise AssertionError(f"unexpected benchmark: {benchmark}")
@@ -48,7 +52,9 @@ def test_safe_backtest_disables_benchmark_when_aliases_not_available(monkeypatch
         calls.append(str(_bench_label(benchmark)))
         if isinstance(benchmark, pd.Series):
             return {"ok": True}, {"ok": True}
-        raise ValueError(f"The benchmark ['{benchmark}'] does not exist. Please provide the right benchmark")
+        raise ValueError(
+            f"The benchmark ['{benchmark}'] does not exist. Please provide the right benchmark"
+        )
 
     monkeypatch.setattr(qlib_backtest, "backtest", fake_backtest)
 

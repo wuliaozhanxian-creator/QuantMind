@@ -1,12 +1,11 @@
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
-
 
 @dataclass
 class VectorizedBacktestConfig:
@@ -36,7 +35,6 @@ class VectorizedBacktestConfig:
     trading_days_per_year: int = 252
     risk_free_rate: float = 0.02
 
-
 @dataclass
 class VectorizedBacktestResult:
     success: bool
@@ -57,7 +55,6 @@ class VectorizedBacktestResult:
     performance_metrics: dict = field(default_factory=dict)
     risk_metrics: dict = field(default_factory=dict)
     analysis: dict = field(default_factory=dict)
-
 
 class VectorizedBacktestEngine:
     def __init__(self, config: VectorizedBacktestConfig):
@@ -92,7 +89,8 @@ class VectorizedBacktestEngine:
 
             sig_wide = signals["score"].unstack(level="instrument")
             price_wide = (
-                prices["$close"].unstack(level="instrument")
+                prices["$close"]
+                .unstack(level="instrument")
                 .reindex_like(sig_wide)
                 .ffill()
             )
@@ -132,9 +130,7 @@ class VectorizedBacktestEngine:
             #   carry-over 需携带归一化后的权重，本质上顺序递推；此处用一次
             #   O(n_dates) 的逐日扫描实现，返回已归一化权重。返回值 1-sum 即现金。
             if cfg.handle_limit:
-                weights = self._sequential_limit_carry(
-                    target_indicator, not_tradable
-                )
+                weights = self._sequential_limit_carry(target_indicator, not_tradable)
             else:
                 weight_sums = target_indicator.sum(axis=1)
                 weights = target_indicator.div(
@@ -147,17 +143,13 @@ class VectorizedBacktestEngine:
             asset_returns = price_wide.pct_change().shift(-1)
 
             # 6. Calculate Portfolio Returns
-            portfolio_daily_returns = (
-                (weights * asset_returns).sum(axis=1).fillna(0)
-            )
+            portfolio_daily_returns = (weights * asset_returns).sum(axis=1).fillna(0)
 
             # 7. 佣金对齐：turnover_cost = weight_diff * (commission + slippage)
             #    weight_diff 已含买卖两侧，commission=0.0003 即"双边万三"总成本率
             weight_diff = weights.diff().abs().sum(axis=1)
             turnover_cost = weight_diff * (cfg.commission + cfg.slippage)
-            portfolio_daily_returns = portfolio_daily_returns - turnover_cost.fillna(
-                0
-            )
+            portfolio_daily_returns = portfolio_daily_returns - turnover_cost.fillna(0)
 
             # 去掉因 shift 产生的首尾无效日
             valid_ret_mask = portfolio_daily_returns.index[
@@ -171,9 +163,7 @@ class VectorizedBacktestEngine:
             portfolio_daily_returns = portfolio_daily_returns.loc[valid_ret_mask]
 
             # 8. Equity Curve
-            equity_curve = (
-                (1 + portfolio_daily_returns).cumprod() * cfg.initial_capital
-            )
+            equity_curve = (1 + portfolio_daily_returns).cumprod() * cfg.initial_capital
 
             # 9. Basic Metrics
             total_return = (
@@ -189,11 +179,9 @@ class VectorizedBacktestEngine:
             # -------------------------------------------------------------- #
             trading_days = len(portfolio_daily_returns)
             if cfg.annualize_method == "trading_days":
-                annual_return = (
-                    (1 + total_return)
-                    ** (cfg.trading_days_per_year / max(trading_days, 1))
-                    - 1
-                )
+                annual_return = (1 + total_return) ** (
+                    cfg.trading_days_per_year / max(trading_days, 1)
+                ) - 1
             else:
                 years = (
                     (equity_curve.index[-1] - equity_curve.index[0]).days / 365.25
@@ -221,9 +209,7 @@ class VectorizedBacktestEngine:
             dummy_portfolio = pd.DataFrame(
                 {
                     "account": equity_curve.values,
-                    "cost": turnover_cost.reindex(equity_curve.index)
-                    .fillna(0)
-                    .values
+                    "cost": turnover_cost.reindex(equity_curve.index).fillna(0).values
                     * cfg.initial_capital,
                     "return": portfolio_daily_returns.values,
                 },
@@ -279,9 +265,7 @@ class VectorizedBacktestEngine:
         n_dates = len(target_indicator)
         cols = target_indicator.columns
         prev_w = pd.Series(0.0, index=cols)
-        out = pd.DataFrame(
-            0.0, index=target_indicator.index, columns=cols, dtype=float
-        )
+        out = pd.DataFrame(0.0, index=target_indicator.index, columns=cols, dtype=float)
         for i in range(n_dates):
             tgt = target_indicator.iloc[i]
             nt = not_tradable.iloc[i]

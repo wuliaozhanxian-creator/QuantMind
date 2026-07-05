@@ -86,8 +86,11 @@ async def lifespan(app: FastAPI):
 
         # 预加载股票名称映射到内存
         from backend.shared.stock_name_mapper import get_stock_name_mapper
+
         stock_mapper = get_stock_name_mapper()
-        logger.info(f"✅ Stock name mapper preloaded ({len(stock_mapper._mapping)} stocks)")
+        logger.info(
+            f"✅ Stock name mapper preloaded ({len(stock_mapper._mapping)} stocks)"
+        )
 
         logger.info("✅ QuantMind API initialized")
     except Exception as e:
@@ -114,7 +117,10 @@ install_access_log_middleware(app, service_name="quantmind-api")
 
 # 2. 注册具体业务路由 (高优先级)
 # 使用环境变量或默认路径，Docker 容器中 /data/uploads，本地开发 data/uploads
-uploads_dir = os.environ.get("UPLOADS_DIR", "/data/uploads" if os.path.exists("/data/uploads") else "data/uploads")
+uploads_dir = os.environ.get(
+    "UPLOADS_DIR",
+    "/data/uploads" if os.path.exists("/data/uploads") else "data/uploads",
+)
 os.makedirs(uploads_dir, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
 app.include_router(auth.router, prefix="/api/v1", tags=["Auth"])

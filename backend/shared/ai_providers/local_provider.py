@@ -4,7 +4,7 @@ Local Provider实现 (Ollama, LocalAI等)
 
 import asyncio
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from openai import AsyncOpenAI
 
@@ -21,7 +21,6 @@ from .base import (
 
 logger = get_logger(__name__)
 
-
 class LocalProvider(BaseAIProvider):
     """Local Provider (支持Ollama, LocalAI等本地模型)"""
 
@@ -37,7 +36,8 @@ class LocalProvider(BaseAIProvider):
             api_base = self.config.api_base or "http://localhost:11434/v1"
 
             self.client = AsyncOpenAI(
-                api_key=self.config.api_key or "not-required",  # 本地模型通常不需要API key
+                api_key=self.config.api_key
+                or "not-required",  # 本地模型通常不需要API key
                 base_url=api_base,
                 timeout=self.config.timeout,
                 max_retries=self.config.retry_attempts,
@@ -68,7 +68,7 @@ class LocalProvider(BaseAIProvider):
             )
             return True
         except Exception as e:
-            raise Exception(f"Local model connection test failed: {e}")
+            raise Exception(f"Local model connection test failed: {e}") from e
 
     async def generate_strategy(self, request: StrategyRequest) -> StrategyResponse:
         """生成交易策略"""
@@ -143,7 +143,9 @@ class LocalProvider(BaseAIProvider):
             content = response.choices[0].message.content
 
             # 本地模型通常不提供token使用统计
-            estimated_tokens = self.estimate_tokens(system_prompt + user_prompt + content)
+            estimated_tokens = self.estimate_tokens(
+                system_prompt + user_prompt + content
+            )
             token_usage = {
                 "prompt_tokens": estimated_tokens // 2,
                 "completion_tokens": estimated_tokens // 2,
@@ -152,7 +154,9 @@ class LocalProvider(BaseAIProvider):
 
             # 解析响应
             strategy_response = self._parse_local_response(content, request)
-            strategy_response.generation_time = asyncio.get_event_loop().time() - start_time
+            strategy_response.generation_time = (
+                asyncio.get_event_loop().time() - start_time
+            )
             strategy_response.model_used = self.config.model_name
             strategy_response.token_usage = token_usage
 
@@ -220,7 +224,11 @@ class LocalProvider(BaseAIProvider):
             # 创建一个基本的请求对象用于解析
             dummy_request = StrategyRequest(
                 prompt="Strategy optimization",
-                complexity_level=(self.config.complexity_level if hasattr(self.config, "complexity_level") else None),
+                complexity_level=(
+                    self.config.complexity_level
+                    if hasattr(self.config, "complexity_level")
+                    else None
+                ),
             )
 
             optimized_response = self._parse_local_response(content, dummy_request)
@@ -340,7 +348,9 @@ class LocalProvider(BaseAIProvider):
         # 本地模型的token估算
         return len(text) // 4
 
-    def _parse_local_response(self, content: str, request: StrategyRequest) -> StrategyResponse:
+    def _parse_local_response(
+        self, content: str, request: StrategyRequest
+    ) -> StrategyResponse:
         """解析本地模型响应"""
         try:
             # 尝试提取JSON部分
@@ -370,8 +380,12 @@ class LocalProvider(BaseAIProvider):
                 }
 
             # 解析策略类型
-            strategy_type = self._parse_strategy_type(data.get("strategy_type", "custom"))
-            complexity = self._parse_complexity_level(data.get("complexity_level", "intermediate"))
+            strategy_type = self._parse_strategy_type(
+                data.get("strategy_type", "custom")
+            )
+            complexity = self._parse_complexity_level(
+                data.get("complexity_level", "intermediate")
+            )
 
             # 解析代码
             code_data = data.get("code", {})
@@ -397,7 +411,9 @@ class LocalProvider(BaseAIProvider):
                 parameters.append(param)
 
             return StrategyResponse(
-                strategy_name=data.get("strategy_name", "Local Model Generated Strategy"),
+                strategy_name=data.get(
+                    "strategy_name", "Local Model Generated Strategy"
+                ),
                 description=data.get("description", ""),
                 strategy_type=strategy_type,
                 complexity_level=complexity,
@@ -415,9 +431,12 @@ class LocalProvider(BaseAIProvider):
             return StrategyResponse(
                 strategy_name="Local Model Generated Strategy",
                 description=content,
-                strategy_type=request.strategy_type or self._parse_strategy_type("custom"),
+                strategy_type=request.strategy_type
+                or self._parse_strategy_type("custom"),
                 complexity_level=request.complexity_level,
-                code=StrategyCode(language="python", code=content, dependencies=["pandas", "numpy"]),
+                code=StrategyCode(
+                    language="python", code=content, dependencies=["pandas", "numpy"]
+                ),
                 model_used=self.config.model_name,
                 confidence_score=0.5,
             )

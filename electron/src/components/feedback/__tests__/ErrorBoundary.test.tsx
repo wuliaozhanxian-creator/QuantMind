@@ -28,7 +28,8 @@ describe('ErrorBoundary', () => {
       </ErrorBoundary>
     );
 
-    expect(screen.getByText('抱歉，出现了一些问题')).toBeTruthy();
+    // T2.4 合并后默认 UI 标题为「出现错误」
+    expect(screen.getByText('出现错误')).toBeTruthy();
   });
 
   it('正常情况下应该渲染子组件', () => {
@@ -72,7 +73,8 @@ describe('ErrorBoundary', () => {
       </ErrorBoundary>
     );
 
-    expect(screen.getByText('错误详情:')).toBeTruthy();
+    // T2.4 合并后详情 summary 文案为「错误详情」
+    expect(screen.getByText('错误详情')).toBeTruthy();
   });
 
   it('应该有重试按钮', () => {
@@ -113,7 +115,8 @@ describe('withErrorBoundary', () => {
 
     render(<WrappedComponent />);
 
-    expect(screen.getByText('抱歉，出现了一些问题')).toBeTruthy();
+    // T2.4 合并后默认 UI 标题为「出现错误」
+    expect(screen.getByText('出现错误')).toBeTruthy();
   });
 
   it('正常情况下应该渲染原组件', () => {

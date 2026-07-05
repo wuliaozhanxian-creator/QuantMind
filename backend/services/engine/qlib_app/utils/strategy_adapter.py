@@ -10,7 +10,6 @@ from backend.services.engine.qlib_app.utils.structured_logger import (
 logger = logging.getLogger(__name__)
 task_logger = StructuredTaskLogger(logger, "StrategyAdapter")
 
-
 class StrategyAdapter:
     """
     策略配置适配器中间层

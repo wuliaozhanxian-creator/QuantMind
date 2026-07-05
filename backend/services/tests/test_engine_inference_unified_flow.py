@@ -5,13 +5,18 @@ import types
 
 import pytest
 
-from backend.services.engine.inference.script_runner import ExecutionResult, InferenceScriptRunner
+from backend.services.engine.inference.script_runner import (
+    ExecutionResult,
+    InferenceScriptRunner,
+)
 
 
 def test_runner_dimension_insufficient_returns_failure(monkeypatch, tmp_path: Path):
     model_dir = tmp_path / "model_qlib"
     model_dir.mkdir(parents=True, exist_ok=True)
-    (model_dir / "inference.py").write_text("#!/usr/bin/env python\nprint('main')\n", encoding="utf-8")
+    (model_dir / "inference.py").write_text(
+        "#!/usr/bin/env python\nprint('main')\n", encoding="utf-8"
+    )
 
     runner = InferenceScriptRunner(models_production=str(model_dir))
 
@@ -23,9 +28,13 @@ def test_runner_dimension_insufficient_returns_failure(monkeypatch, tmp_path: Pa
     )
 
     def _never_run(*args, **kwargs):
-        raise AssertionError("inference subprocess should not run when dimension gate fails")
+        raise AssertionError(
+            "inference subprocess should not run when dimension gate fails"
+        )
 
-    monkeypatch.setattr("backend.services.engine.inference.script_runner.subprocess.run", _never_run)
+    monkeypatch.setattr(
+        "backend.services.engine.inference.script_runner.subprocess.run", _never_run
+    )
 
     result = runner.execute("2026-03-20")
     assert result.success is False
@@ -56,7 +65,9 @@ def test_runner_expected_feature_dim_from_metadata_feature_columns(tmp_path: Pat
     assert runner._resolve_expected_feature_dim() == 6
 
 
-def test_runner_independent_model_returns_failure_on_dim_gate(monkeypatch, tmp_path: Path):
+def test_runner_independent_model_returns_failure_on_dim_gate(
+    monkeypatch, tmp_path: Path
+):
     model_dir = tmp_path / "alpha158"
     model_dir.mkdir(parents=True, exist_ok=True)
     (model_dir / "inference.py").write_text(
@@ -84,7 +95,9 @@ def test_runner_independent_model_returns_failure_on_dim_gate(monkeypatch, tmp_p
     assert "dim_not_ready" in (result.error or "")
 
 
-def test_router_service_explicit_alpha158_runs_independently(monkeypatch, tmp_path: Path):
+def test_router_service_explicit_alpha158_runs_independently(
+    monkeypatch, tmp_path: Path
+):
     from backend.services.engine.inference import router_service as router_module
 
     primary_dir = tmp_path / "model_qlib"
@@ -180,7 +193,9 @@ class _FakeRedis:
 
 
 @pytest.mark.anyio
-async def test_run_inference_failure_releases_lock_and_returns_standard_fields(monkeypatch):
+async def test_run_inference_failure_releases_lock_and_returns_standard_fields(
+    monkeypatch,
+):
     import sys
 
     fake_cal = types.SimpleNamespace(
@@ -232,7 +247,9 @@ async def test_run_inference_failure_releases_lock_and_returns_standard_fields(m
 
 
 @pytest.mark.anyio
-async def test_run_inference_success_releases_lock_and_returns_standard_fields(monkeypatch):
+async def test_run_inference_success_releases_lock_and_returns_standard_fields(
+    monkeypatch,
+):
     import sys
 
     fake_cal = types.SimpleNamespace(
@@ -287,6 +304,7 @@ async def test_run_inference_success_releases_lock_and_returns_standard_fields(m
 # 停牌过滤测试（2026-04-26）
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 class TestUntradableFilter:
     """测试停牌股票过滤逻辑。"""
 
@@ -297,11 +315,13 @@ class TestUntradableFilter:
             filter_untradable_rows,
         )
 
-        df = pd.DataFrame({
-            "symbol": ["SH600519", "SH600735", "SZ000001"],
-            "close": [100.0, 50.0, 10.0],
-            "volume": [1000, 0, 500],  # SH600735 零成交
-        })
+        df = pd.DataFrame(
+            {
+                "symbol": ["SH600519", "SH600735", "SZ000001"],
+                "close": [100.0, 50.0, 10.0],
+                "volume": [1000, 0, 500],  # SH600735 零成交
+            }
+        )
 
         result = filter_untradable_rows(df)
 
@@ -316,11 +336,13 @@ class TestUntradableFilter:
             filter_untradable_rows,
         )
 
-        df = pd.DataFrame({
-            "symbol": ["SH600519", "SH600735", "SZ000001"],
-            "close": [100.0, 0.0, 10.0],  # SH600735 价格为 0
-            "volume": [1000, 500, 500],
-        })
+        df = pd.DataFrame(
+            {
+                "symbol": ["SH600519", "SH600735", "SZ000001"],
+                "close": [100.0, 0.0, 10.0],  # SH600735 价格为 0
+                "volume": [1000, 500, 500],
+            }
+        )
 
         result = filter_untradable_rows(df)
 
@@ -334,11 +356,13 @@ class TestUntradableFilter:
             filter_untradable_rows,
         )
 
-        df = pd.DataFrame({
-            "symbol": ["SH600519", "SH600735"],
-            "close": [100.0, -1.0],  # SH600735 负价格
-            "volume": [1000, 500],
-        })
+        df = pd.DataFrame(
+            {
+                "symbol": ["SH600519", "SH600735"],
+                "close": [100.0, -1.0],  # SH600735 负价格
+                "volume": [1000, 500],
+            }
+        )
 
         result = filter_untradable_rows(df)
 
@@ -365,10 +389,12 @@ class TestUntradableFilter:
         )
 
         # 只有 close，无 volume
-        df = pd.DataFrame({
-            "symbol": ["SH600519", "SH600735"],
-            "close": [100.0, 0.0],
-        })
+        df = pd.DataFrame(
+            {
+                "symbol": ["SH600519", "SH600735"],
+                "close": [100.0, 0.0],
+            }
+        )
 
         result = filter_untradable_rows(df)
 
@@ -381,7 +407,9 @@ class TestManagedParquetTemplateDetection:
 
     def test_detects_new_template(self, tmp_path: Path):
         """新版模板应被识别为托管脚本。"""
-        from backend.services.engine.inference.script_runner import InferenceScriptRunner
+        from backend.services.engine.inference.script_runner import (
+            InferenceScriptRunner,
+        )
 
         script = tmp_path / "inference.py"
         script.write_text(
@@ -394,7 +422,9 @@ class TestManagedParquetTemplateDetection:
 
     def test_detects_old_auto_generated_script(self, tmp_path: Path):
         """旧版自动生成脚本应被识别为托管脚本。"""
-        from backend.services.engine.inference.script_runner import InferenceScriptRunner
+        from backend.services.engine.inference.script_runner import (
+            InferenceScriptRunner,
+        )
 
         script = tmp_path / "inference.py"
         script.write_text(
@@ -412,7 +442,9 @@ QuantMind Parquet 数据源推理脚本
 
     def test_rejects_custom_script(self, tmp_path: Path):
         """自定义脚本不应被识别为托管脚本。"""
-        from backend.services.engine.inference.script_runner import InferenceScriptRunner
+        from backend.services.engine.inference.script_runner import (
+            InferenceScriptRunner,
+        )
 
         script = tmp_path / "inference.py"
         script.write_text(

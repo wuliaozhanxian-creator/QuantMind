@@ -13,7 +13,9 @@ async def get_current_user_id(auth: AuthContext = Depends(get_auth_context)) -> 
     try:
         return int(auth.user_id)
     except (TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="Invalid user_id in token")
+        raise HTTPException(
+            status_code=400, detail="Invalid user_id in token"
+        ) from None
 
 
 async def get_current_tenant_id(auth: AuthContext = Depends(get_auth_context)) -> str:

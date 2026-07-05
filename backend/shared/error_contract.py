@@ -19,10 +19,8 @@ except Exception:  # pragma: no cover - optional import path differences
 
 logger = logging.getLogger(__name__)
 
-
 def _request_id_from_state(request: Request) -> str:
     return getattr(getattr(request, "state", None), "request_id", "") or ""
-
 
 def _normalize_message(detail: Any, fallback: str) -> str:
     if isinstance(detail, str) and detail.strip():
@@ -33,20 +31,26 @@ def _normalize_message(detail: Any, fallback: str) -> str:
             return msg
     return fallback
 
-
 def _is_client_disconnected(exc: BaseException) -> bool:
     if ClientDisconnected is not None and isinstance(exc, ClientDisconnected):
         return True
 
-    if exc.__class__.__name__ == "ClientDisconnected" and exc.__class__.__module__.startswith("uvicorn"):
+    if (
+        exc.__class__.__name__ == "ClientDisconnected"
+        and exc.__class__.__module__.startswith("uvicorn")
+    ):
         return True
 
     nested = getattr(exc, "exceptions", None)
     if nested:
         try:
-            return any(_is_client_disconnected(inner) for inner in nested if isinstance(inner, BaseException))
+            return any(
+                _is_client_disconnected(inner)
+                for inner in nested
+                if isinstance(inner, BaseException)
+            )
         except Exception:
-            pass
+            logger.debug("ignored exception", exc_info=True)
 
     cause = getattr(exc, "__cause__", None)
     if isinstance(cause, BaseException) and _is_client_disconnected(cause):
@@ -57,7 +61,6 @@ def _is_client_disconnected(exc: BaseException) -> bool:
         return True
 
     return False
-
 
 def _build_error_payload(
     *,
@@ -80,7 +83,6 @@ def _build_error_payload(
         payload["errors"] = errors
     return payload
 
-
 def install_error_contract_handlers(app: FastAPI) -> None:
     """Install unified exception handlers for HTTP APIs."""
 
@@ -100,7 +102,9 @@ def install_error_contract_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(RequestValidationError)
-    async def _validation_exception_handler(request: Request, exc: RequestValidationError):
+    async def _validation_exception_handler(
+        request: Request, exc: RequestValidationError
+    ):
         return JSONResponse(
             status_code=422,
             content=_build_error_payload(
@@ -115,7 +119,11 @@ def install_error_contract_handlers(app: FastAPI) -> None:
     @app.exception_handler(Exception)
     async def _unhandled_exception_handler(request: Request, exc: Exception):
         if _is_client_disconnected(exc):
-            logger.debug("Client disconnected path=%s request_id=%s", request.url.path, _request_id_from_state(request))
+            logger.debug(
+                "Client disconnected path=%s request_id=%s",
+                request.url.path,
+                _request_id_from_state(request),
+            )
             return JSONResponse(
                 status_code=499,
                 content=_build_error_payload(

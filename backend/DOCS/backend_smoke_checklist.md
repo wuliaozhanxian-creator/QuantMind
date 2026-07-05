@@ -6,8 +6,8 @@
 
 - 已完成数据库 migration 与必要 bootstrap。
 - 根目录 `.env` 已配置：
-  - `INTERNAL_CALL_SECRET`
-  - `SECRET_KEY`
+  - `SECRET_KEY`（签发 service JWT + 用户 JWT，T6.5-P3 后 `INTERNAL_CALL_SECRET` 已废弃）
+  - `JWT_SECRET_KEY`
   - `DATABASE_URL` 或等效 `DB_*`
   - `REDIS_*`
   - 生产/预发浏览器场景下的 `CORS_ALLOWED_ORIGINS`
@@ -91,16 +91,18 @@ curl -i http://127.0.0.1:8000/api/v1/orders
 
 ## 6. 内部密钥联通
 
-使用同一个 `INTERNAL_CALL_SECRET` 验证 `engine` 内部路由：
+使用 `SECRET_KEY` 签发的 service JWT 验证 `engine` 内部路由（T6.5-P3 后服务间认证统一使用 `X-Service-Token`）：
 
 ```bash
+# 生成 service JWT（需 PYTHONPATH 指向项目根目录）
+TOKEN=$(python -c "from backend.shared.auth import create_service_token; print(create_service_token('api'))")
 curl -i http://127.0.0.1:8001/api/v1/nonexistent_endpoint_xyz \
-  -H "X-Internal-Call: ${INTERNAL_CALL_SECRET}"
+  -H "X-Service-Token: ${TOKEN}"
 ```
 
 通过标准：
-- 返回 `404`，说明内部密钥通过且请求进入业务路由层
-- 若返回 `401`，优先排查服务间密钥不一致
+- 返回 `404`，说明 service JWT 通过且请求进入业务路由层
+- 若返回 `401`，优先排查 `SECRET_KEY` 不一致或 service JWT 过期
 
 ## 7. Stream WebSocket
 
@@ -149,7 +151,7 @@ pytest -q backend/services/tests/test_stream_service.py
 
 - 任一服务 `/health` 不可用
 - 任一服务 `/metrics` 缺失
-- `INTERNAL_CALL_SECRET` 不一致导致跨服务 401
+- `SECRET_KEY` 不一致导致跨服务 401（service JWT 验签失败）
 - 生产环境 CORS 仍为 `*`
 - `api -> engine` 或 `api -> trade` 代理出现 5xx
 - `stream` WebSocket 无法握手或订阅

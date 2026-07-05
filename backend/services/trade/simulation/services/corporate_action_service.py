@@ -82,7 +82,9 @@ class SimulationCorporateActionService:
             )
             actions = list((await session.execute(stmt)).scalars().all())
             for action in actions:
-                await cls._apply_action(session=session, action=action, applied_at=cutoff)
+                await cls._apply_action(
+                    session=session, action=action, applied_at=cutoff
+                )
                 applied += 1
         return applied
 
@@ -106,7 +108,9 @@ class SimulationCorporateActionService:
                         SimulationPositionLot.quantity_remaining > 0,
                     )
                 )
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
 
         if normalized_type == "dividend":
@@ -116,7 +120,9 @@ class SimulationCorporateActionService:
             applied_accounts = 0
             for account_id, account_lots in by_account.items():
                 qty = sum(float(lot.quantity_remaining or 0.0) for lot in account_lots)
-                cash = cls.compute_dividend_cash(qty, float(action.cash_dividend_per_share or 0.0))
+                cash = cls.compute_dividend_cash(
+                    qty, float(action.cash_dividend_per_share or 0.0)
+                )
                 if cash <= 0:
                     continue
                 account = await session.get(SimulationAccount, account_id)
@@ -125,7 +131,9 @@ class SimulationCorporateActionService:
                 account.cash = float(account.cash or 0.0) + cash
                 account.available_cash = float(account.available_cash or 0.0) + cash
                 account.total_asset = float(account.total_asset or 0.0) + cash
-                account.equity = float(account.equity or account.total_asset or 0.0) + cash
+                account.equity = (
+                    float(account.equity or account.total_asset or 0.0) + cash
+                )
                 account.last_projected_at = applied_at
                 session.add(
                     SimulationCashLedger(
@@ -153,7 +161,9 @@ class SimulationCorporateActionService:
                 f"dividend_applied_accounts={applied_accounts}",
             )
         elif normalized_type in {"bonus_share", "split", "reverse_split"}:
-            multiplier = cls.compute_share_multiplier(normalized_type, float(action.share_ratio or 0.0))
+            multiplier = cls.compute_share_multiplier(
+                normalized_type, float(action.share_ratio or 0.0)
+            )
             if multiplier <= 0:
                 multiplier = 1.0
             touched_accounts: set[str] = set()
@@ -183,7 +193,9 @@ class SimulationCorporateActionService:
                     account = await session.get(SimulationAccount, account_id)
                     if account is None:
                         continue
-                    delta_qty = old_qty_by_account.get(account_id, 0.0) * (multiplier - 1.0)
+                    delta_qty = old_qty_by_account.get(account_id, 0.0) * (
+                        multiplier - 1.0
+                    )
                     value_delta = round(delta_qty * latest_price, 4)
                     if value_delta > 0:
                         session.add(
@@ -223,7 +235,9 @@ class SimulationCorporateActionService:
                 subscribed_qty = round(subscribed_qty, 6)
                 if subscribed_qty <= 0:
                     continue
-                total_cost = round(subscribed_qty * float(action.rights_price or 0.0), 4)
+                total_cost = round(
+                    subscribed_qty * float(action.rights_price or 0.0), 4
+                )
                 if total_cost <= 0:
                     continue
                 available_cash = float(account.available_cash or 0.0)
@@ -250,7 +264,9 @@ class SimulationCorporateActionService:
                     continue
                 account.cash = float(account.cash or 0.0) - total_cost
                 account.available_cash = available_cash - total_cost
-                account.long_market_value = float(account.long_market_value or 0.0) + total_cost
+                account.long_market_value = (
+                    float(account.long_market_value or 0.0) + total_cost
+                )
                 account.last_projected_at = applied_at
                 session.add(
                     SimulationCashLedger(
@@ -327,7 +343,7 @@ class SimulationCorporateActionService:
             else:
                 long_market_value += market_value
         cash = float(account.cash or 0.0)
-        liabilities = float(account.liabilities or 0.0)
+        float(account.liabilities or 0.0)
         total_asset = round(cash + long_market_value - short_market_value, 4)
         account.long_market_value = round(long_market_value, 4)
         account.short_market_value = round(short_market_value, 4)
@@ -390,5 +406,7 @@ async def run_simulation_corporate_action_worker(interval_seconds: int = 3600) -
         try:
             await SimulationCorporateActionService.apply_due_actions()
         except Exception as exc:
-            logger.error("Simulation corporate action worker failed: %s", exc, exc_info=True)
+            logger.error(
+                "Simulation corporate action worker failed: %s", exc, exc_info=True
+            )
         await asyncio.sleep(max(60, int(interval_seconds or 3600)))

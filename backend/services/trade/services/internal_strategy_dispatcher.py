@@ -2,14 +2,21 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from fastapi import HTTPException
 from sqlalchemy import and_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.services.trade.models.enums import OrderSide, OrderStatus, OrderType, PositionSide, TradeAction, TradingMode
+from backend.services.trade.models.enums import (
+    OrderSide,
+    OrderStatus,
+    OrderType,
+    PositionSide,
+    TradeAction,
+    TradingMode,
+)
 from backend.services.trade.models.order import Order
 from backend.services.trade.portfolio.models import Portfolio
 from backend.services.trade.redis_client import RedisClient
@@ -20,7 +27,9 @@ from backend.services.trade.simulation.models.order import (
     OrderType as SimOrderType,
 )
 from backend.services.trade.simulation.schemas.order import SimOrderCreate
-from backend.services.trade.simulation.services.execution_engine import SimulationExecutionEngine
+from backend.services.trade.simulation.services.execution_engine import (
+    SimulationExecutionEngine,
+)
 from backend.services.trade.simulation.services.order_service import SimOrderService
 from backend.services.trade.simulation.services.order_submission_service import (
     SimulationOrderSubmissionService,
@@ -28,7 +37,9 @@ from backend.services.trade.simulation.services.order_submission_service import 
 from backend.services.trade.services.order_service import OrderService
 from backend.services.trade.services.simulation_manager import SimulationAccountManager
 from backend.services.trade.services.trading_engine import TradingEngine
-from backend.services.trade.routers.real_trading_utils import _fetch_active_portfolio_snapshot
+from backend.services.trade.routers.real_trading_utils import (
+    _fetch_active_portfolio_snapshot,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,11 +58,9 @@ _TRADE_ACTION_ALIAS = {
     "buy_to_close": "buy_to_close",
 }
 
-
 def _normalize_trade_action(raw: Any) -> str | None:
     value = str(getattr(raw, "value", raw) or "").strip().lower()
     return _TRADE_ACTION_ALIAS.get(value, value) or None
-
 
 async def _resolve_portfolio_id(
     *,
@@ -84,7 +93,6 @@ async def _resolve_portfolio_id(
     result = await db.execute(stmt)
     return int(result.scalar_one_or_none() or 0)
 
-
 async def _resolve_virtual_fill_price(
     *,
     symbol: str,
@@ -99,7 +107,9 @@ async def _resolve_virtual_fill_price(
 
     try:
         engine = SimulationExecutionEngine(db, sim_manager)
-        snapshot = await engine._latest_price(symbol, user_id=user_id, tenant_id=tenant_id)
+        snapshot = await engine._latest_price(
+            symbol, user_id=user_id, tenant_id=tenant_id
+        )
         resolved_price = float(snapshot.price or 0.0)
         if resolved_price <= 0:
             raise ValueError("non-positive market snapshot")
@@ -114,8 +124,10 @@ async def _resolve_virtual_fill_price(
             exc,
             exc_info=True,
         )
-        raise HTTPException(status_code=500, detail=f"failed to resolve simulation fill price for {symbol}: {exc}")
-
+        raise HTTPException(
+            status_code=500,
+            detail=f"failed to resolve simulation fill price for {symbol}: {exc}",
+        ) from exc
 
 async def dispatch_internal_strategy_order(
     *,
@@ -132,7 +144,9 @@ async def dispatch_internal_strategy_order(
     try:
         trading_mode = TradingMode(trading_mode_raw)
     except ValueError:
-        raise HTTPException(status_code=400, detail=f"invalid trading_mode: {trading_mode_raw}")
+        raise HTTPException(
+            status_code=400, detail=f"invalid trading_mode: {trading_mode_raw}"
+        ) from None
 
     symbol = str(order_data.get("symbol") or "").strip().upper()
     side_raw = str(order_data.get("side") or "").strip().upper()
@@ -185,7 +199,9 @@ async def dispatch_internal_strategy_order(
         try:
             sim_order_type = SimOrderType(order_type_raw.lower())
         except ValueError:
-            raise HTTPException(status_code=400, detail=f"invalid order_type: {order_type_raw}")
+            raise HTTPException(
+                status_code=400, detail=f"invalid order_type: {order_type_raw}"
+            ) from None
         try:
             submission = await SimulationOrderSubmissionService(
                 db,
@@ -252,7 +268,9 @@ async def dispatch_internal_strategy_order(
                 "order_id": str(submission.order_id or ""),
                 "trade_id": str(submission.trade_id or ""),
                 "client_order_id": str(
-                    getattr(submission, "client_order_id", None) or client_order_id or ""
+                    getattr(submission, "client_order_id", None)
+                    or client_order_id
+                    or ""
                 ),
                 "fill_price": submission.fill_price,
                 "price_source": submission.price_source,
@@ -262,8 +280,10 @@ async def dispatch_internal_strategy_order(
         except HTTPException:
             raise
         except Exception as exc:
-            logger.error("[%s] 虚拟成交失败: %s", trading_mode.value, exc, exc_info=True)
-            raise HTTPException(status_code=500, detail=str(exc))
+            logger.error(
+                "[%s] 虚拟成交失败: %s", trading_mode.value, exc, exc_info=True
+            )
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     try:
         if portfolio_id <= 0:
@@ -272,17 +292,23 @@ async def dispatch_internal_strategy_order(
         try:
             order_type = OrderType(order_type_raw)
         except ValueError:
-            raise HTTPException(status_code=400, detail=f"invalid order_type: {order_type_raw}")
+            raise HTTPException(
+                status_code=400, detail=f"invalid order_type: {order_type_raw}"
+            ) from None
         try:
             position_side = PositionSide(position_side_raw)
         except ValueError:
-            raise HTTPException(status_code=400, detail=f"invalid position_side: {position_side_raw}")
+            raise HTTPException(
+                status_code=400, detail=f"invalid position_side: {position_side_raw}"
+            ) from None
         trade_action = None
         if trade_action_raw:
             try:
                 trade_action = TradeAction(trade_action_raw)
             except ValueError:
-                raise HTTPException(status_code=400, detail=f"invalid trade_action: {trade_action_raw}")
+                raise HTTPException(
+                    status_code=400, detail=f"invalid trade_action: {trade_action_raw}"
+                ) from None
 
         order_service = OrderService(db, redis)
         engine = TradingEngine(db, redis)
@@ -365,7 +391,7 @@ async def dispatch_internal_strategy_order(
         raise
     except Exception as exc:
         logger.error("Internal order dispatch failed: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     risk_result = await engine.check_order_risk(uid, order)
     if not risk_result.get("passed"):

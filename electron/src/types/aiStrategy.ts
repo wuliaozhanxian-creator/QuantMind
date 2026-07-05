@@ -98,7 +98,7 @@ export interface AIStrategyChatMessage {
   content: string;
   timestamp: string;
   type?: 'text' | 'code' | 'chart' | 'error' | 'suggestion';
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 // AI策略模板
@@ -134,6 +134,8 @@ export interface AIStrategy {
   code: string;
   parameters: AIStrategyParams;
   status: 'draft' | 'active' | 'archived';
+  // TODO(T2.6 后续批次): metadata/validation/analysis 位于类型转换边界
+  // (AIStrategy <-> Strategy)，需与 typeConverters 同步改造，暂保留 any。
   metadata: any;
   conversation: AIStrategyChatMessage[];
   template?: AIStrategyTemplate;

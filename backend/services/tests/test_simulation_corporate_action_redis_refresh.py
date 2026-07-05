@@ -196,12 +196,16 @@ async def test_bonus_share_apply_writes_redis_with_updated_quantity(monkeypatch)
         )
 
         ledger_rows = (
-            await session.execute(
-                select(SimulationCashLedger).where(
-                    SimulationCashLedger.ref_type == "corporate_action"
+            (
+                await session.execute(
+                    select(SimulationCashLedger).where(
+                        SimulationCashLedger.ref_type == "corporate_action"
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         await session.commit()
 
     await engine.dispose()

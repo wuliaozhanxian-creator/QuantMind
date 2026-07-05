@@ -51,7 +51,9 @@ def test_get_result_normalizes_trades_on_cache_hit(monkeypatch):
         classmethod(fake_normalize),
     )
 
-    result = asyncio.run(service.get_result(backtest_id="bid", tenant_id="default", user_id="u1"))
+    result = asyncio.run(
+        service.get_result(backtest_id="bid", tenant_id="default", user_id="u1")
+    )
 
     assert called["trades"] == [{"price": 0.54}]
     assert result.trades == [{"price": 3.86}]
@@ -80,7 +82,9 @@ def test_get_result_normalizes_trades_on_persistence_path_and_writes_cache(monke
         classmethod(fake_normalize),
     )
 
-    result = asyncio.run(service.get_result(backtest_id="bid2", tenant_id="default", user_id="u2"))
+    result = asyncio.run(
+        service.get_result(backtest_id="bid2", tenant_id="default", user_id="u2")
+    )
 
     assert called["trades"] == [{"price": 0.54}]
     assert result.trades == [{"price": 3.86}]

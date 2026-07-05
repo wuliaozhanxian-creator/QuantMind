@@ -10,7 +10,7 @@ import logging
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Optional
 
 try:
     from backend.shared.database_pool import get_db, init_default_databases
@@ -34,14 +34,14 @@ except ImportError:
         _has_strategy_storage = False
 
 import asyncio
-from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
+from backend.services.engine.qlib_app.utils.structured_logger import (
+    StructuredTaskLogger,
+)
 
 logger = logging.getLogger(__name__)
 task_logger = StructuredTaskLogger(logger, "UserStrategyLoader")
 
-
 # 文件系统兜底配置（仅 STORAGE_MODE=local 或 DB 不可用时使用）
-
 
 def _find_project_root() -> Path:
     curr = Path(__file__).resolve().parent
@@ -52,7 +52,6 @@ def _find_project_root() -> Path:
             break
         curr = curr.parent
     return Path(__file__).resolve().parents[4]
-
 
 PROJECT_ROOT = _find_project_root()
 USER_STRATEGIES_DIR = PROJECT_ROOT / "user_strategies"
@@ -68,11 +67,9 @@ task_logger.info(
 _STORAGE_MODE = (os.getenv("STORAGE_MODE") or "cos").strip().lower()
 _USE_CLOUD = _has_strategy_storage and _STORAGE_MODE != "local"
 
-
 # ---------------------------------------------------------------------------
 # 文件系统工具（兜底）
 # ---------------------------------------------------------------------------
-
 
 def _load_metadata_from_fs(strategy_path: Path) -> dict | None:
     """从文件系统加载策略元数据（兼容旧格式）。"""
@@ -82,7 +79,12 @@ def _load_metadata_from_fs(strategy_path: Path) -> dict | None:
             with open(json_path, encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
-            task_logger.error("load_metadata_failed", "加载元数据失败", path=str(json_path), error=str(e))
+            task_logger.error(
+                "load_metadata_failed",
+                "加载元数据失败",
+                path=str(json_path),
+                error=str(e),
+            )
     return {
         "id": strategy_path.stem,
         "name": strategy_path.stem.replace("_", " ").title(),
@@ -92,7 +94,6 @@ def _load_metadata_from_fs(strategy_path: Path) -> dict | None:
         "author": "未知",
     }
 
-
 def _validate_code(code: str) -> None:
     """AST 安全检查，防止保存危险代码。"""
     import ast
@@ -100,7 +101,7 @@ def _validate_code(code: str) -> None:
     try:
         tree = ast.parse(code)
     except SyntaxError as e:
-        raise ValueError(f"策略代码存在语法错误: {e}")
+        raise ValueError(f"策略代码存在语法错误: {e}") from e
 
     blacklist = {"os", "sys", "subprocess", "shutil", "pathlib", "pickle", "socket"}
     for node in ast.walk(tree):
@@ -117,11 +118,9 @@ def _validate_code(code: str) -> None:
             if node.attr in {"__subclasses__", "__builtins__"}:
                 raise ValueError(f"检测到潜在的沙箱逃逸代码: {node.attr}")
 
-
 # ---------------------------------------------------------------------------
 # 主类
 # ---------------------------------------------------------------------------
-
 
 class UserStrategyLoader:
     """用户策略加载器（PG+COS 优先，文件系统兜底）。"""
@@ -163,12 +162,20 @@ class UserStrategyLoader:
                     tags=tags,
                 )
             except Exception as e:
-                task_logger.warning("load_strategies_pg_failed", "PG 加载策略失败，降级到文件系统", error=str(e))
+                task_logger.warning(
+                    "load_strategies_pg_failed",
+                    "PG 加载策略失败，降级到文件系统",
+                    error=str(e),
+                )
 
         # 2. 兜底：文件系统扫描
-        return self._load_from_fs(category=category, search=search, tags=tags, user_id=user_id)
+        return self._load_from_fs(
+            category=category, search=search, tags=tags, user_id=user_id
+        )
 
-    def get_strategy(self, strategy_id: str, category: str | None = None) -> dict | None:
+    def get_strategy(
+        self, strategy_id: str, category: str | None = None
+    ) -> dict | None:
         """
         获取单个策略详情（含代码）。
 
@@ -188,12 +195,21 @@ class UserStrategyLoader:
                             "事件循环运行中，跳过 PG 同步获取策略并回退到文件系统",
                             strategy_id=strategy_id,
                         )
-                        return self._get_from_fs(strategy_id=strategy_id, category=category)
-                    return loop.run_until_complete(svc.get(int(strategy_id), resolve_code=True))
+                        return self._get_from_fs(
+                            strategy_id=strategy_id, category=category
+                        )
+                    return loop.run_until_complete(
+                        svc.get(int(strategy_id), resolve_code=True)
+                    )
                 except RuntimeError:
                     return asyncio.run(svc.get(int(strategy_id), resolve_code=True))
             except Exception as e:
-                task_logger.warning("get_strategy_pg_failed", "PG 获取策略失败，回退到文件系统", strategy_id=strategy_id, error=str(e))
+                task_logger.warning(
+                    "get_strategy_pg_failed",
+                    "PG 获取策略失败，回退到文件系统",
+                    strategy_id=strategy_id,
+                    error=str(e),
+                )
 
         # 2. 文件系统兜底（字符串 ID 或 PG 失败）
         return self._get_from_fs(strategy_id=strategy_id, category=category)
@@ -231,19 +247,30 @@ class UserStrategyLoader:
                 result = asyncio.run(
                     svc.save(
                         user_id=user_id,
-                        name=metadata.get("name") or f"策略_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                        name=metadata.get("name")
+                        or f"策略_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
                         code=code,
                         metadata=metadata,
                         strategy_id=strategy_id,
                     )
                 )
-                task_logger.info("save_strategy_pg_success", "策略已保存到 PG+COS", strategy_id=str(result["id"]))
+                task_logger.info(
+                    "save_strategy_pg_success",
+                    "策略已保存到 PG+COS",
+                    strategy_id=str(result["id"]),
+                )
                 return result["id"]
             except Exception as e:
-                task_logger.error("save_strategy_pg_failed", "PG+COS 保存失败，降级到文件系统", error=str(e))
+                task_logger.error(
+                    "save_strategy_pg_failed",
+                    "PG+COS 保存失败，降级到文件系统",
+                    error=str(e),
+                )
 
         # 文件系统兜底保存
-        return self._save_to_fs(code=code, metadata=metadata, category=category, strategy_id=strategy_id)
+        return self._save_to_fs(
+            code=code, metadata=metadata, category=category, strategy_id=strategy_id
+        )
 
     def delete_strategy(self, strategy_id: str, category: str) -> bool:
         """
@@ -256,7 +283,12 @@ class UserStrategyLoader:
                 # 实际部署中应从请求上下文获取 user_id
                 return svc.delete(strategy_id=int(strategy_id), user_id="0")
             except Exception as e:
-                task_logger.warning("delete_strategy_pg_failed", "PG 删除策略失败", strategy_id=strategy_id, error=str(e))
+                task_logger.warning(
+                    "delete_strategy_pg_failed",
+                    "PG 删除策略失败",
+                    strategy_id=strategy_id,
+                    error=str(e),
+                )
 
         # 文件系统兜底
         return self._delete_from_fs(strategy_id=strategy_id, category=category)
@@ -299,18 +331,28 @@ class UserStrategyLoader:
 
                     if search:
                         sl = search.lower()
-                        if sl not in meta.get("name", "").lower() and sl not in meta.get("description", "").lower():
+                        if (
+                            sl not in meta.get("name", "").lower()
+                            and sl not in meta.get("description", "").lower()
+                        ):
                             continue
                     if tags:
                         if not set(meta.get("tags", [])).intersection(set(tags)):
                             continue
                     strategies.append(meta)
                 except Exception as e:
-                    task_logger.error("load_strategy_fs_failed", "加载文件系统策略失败", path=str(py_file), error=str(e))
+                    task_logger.error(
+                        "load_strategy_fs_failed",
+                        "加载文件系统策略失败",
+                        path=str(py_file),
+                        error=str(e),
+                    )
 
         return strategies
 
-    def _get_from_fs(self, strategy_id: str, category: str | None = None) -> dict | None:
+    def _get_from_fs(
+        self, strategy_id: str, category: str | None = None
+    ) -> dict | None:
         search_dirs: list[Path] = []
         if category:
             search_dirs = [self.strategies_dir / category]
@@ -353,7 +395,11 @@ class UserStrategyLoader:
         if not strategy_id:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             prefix = "ai_" if category == "ai_generated" else "strategy_"
-            style_suffix = f"_{metadata.get('style_preference')}" if metadata.get("style_preference") else ""
+            style_suffix = (
+                f"_{metadata.get('style_preference')}"
+                if metadata.get("style_preference")
+                else ""
+            )
             strategy_id = f"{prefix}{ts}{style_suffix}_{uuid4().hex[:4]}"
 
         metadata["id"] = strategy_id
@@ -365,10 +411,14 @@ class UserStrategyLoader:
 
         py_path = save_dir / f"{strategy_id}.py"
         if py_path.exists():
-            bak_ts = datetime.fromtimestamp(py_path.stat().st_mtime).strftime("%Y%m%d_%H%M%S")
+            bak_ts = datetime.fromtimestamp(py_path.stat().st_mtime).strftime(
+                "%Y%m%d_%H%M%S"
+            )
             versions_dir = save_dir / "versions"
             versions_dir.mkdir(exist_ok=True)
-            shutil.copy2(str(py_path), str(versions_dir / f"{strategy_id}_{bak_ts}.py.bak"))
+            shutil.copy2(
+                str(py_path), str(versions_dir / f"{strategy_id}_{bak_ts}.py.bak")
+            )
 
         with open(py_path, "w", encoding="utf-8") as f:
             f.write(code)
@@ -377,7 +427,9 @@ class UserStrategyLoader:
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(metadata, f, ensure_ascii=False, indent=2)
 
-        task_logger.info("save_strategy_fs_success", "策略已保存到文件系统", path=str(py_path))
+        task_logger.info(
+            "save_strategy_fs_success", "策略已保存到文件系统", path=str(py_path)
+        )
         return strategy_id
 
     def _delete_from_fs(self, strategy_id: str, category: str) -> bool:
@@ -397,9 +449,12 @@ class UserStrategyLoader:
         if json_path.exists():
             shutil.move(str(json_path), str(archive_dir / json_path.name))
 
-        task_logger.info("archive_strategy_fs_success", "策略已归档（文件系统）", strategy_id=strategy_id)
+        task_logger.info(
+            "archive_strategy_fs_success",
+            "策略已归档（文件系统）",
+            strategy_id=strategy_id,
+        )
         return True
-
 
 # 全局单例
 user_strategy_loader = UserStrategyLoader()

@@ -35,9 +35,15 @@ class TestAIIDEWorkspaceSecurity:
             json={"content": "print('ok')"},
         )
         assert response.status_code == 200
-        assert (tmp_path / "scripts" / "ok.py").read_text(encoding="utf-8") == "print('ok')"
+        assert (tmp_path / "scripts" / "ok.py").read_text(
+            encoding="utf-8"
+        ) == "print('ok')"
 
     def test_cors_allow_origins_not_wildcard(self):
-        cors_layers = [m for m in ai_ide_main.app.user_middleware if m.cls.__name__ == "CORSMiddleware"]
+        cors_layers = [
+            m
+            for m in ai_ide_main.app.user_middleware
+            if m.cls.__name__ == "CORSMiddleware"
+        ]
         assert len(cors_layers) > 0
         assert "*" not in cors_layers[0].options.get("allow_origins", [])

@@ -20,11 +20,10 @@ import logging
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Any
 from collections.abc import Callable
 
 from sqlalchemy import text
-
 
 @dataclass
 class HealthCheck:
@@ -36,7 +35,6 @@ class HealthCheck:
     duration_ms: float = 0.0
     details: dict[str, Any] = field(default_factory=dict)
 
-
 @dataclass
 class ComponentHealth:
     """组件健康状态"""
@@ -45,7 +43,6 @@ class ComponentHealth:
     status: str
     checks: list[HealthCheck] = field(default_factory=list)
     last_check: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-
 
 class HealthChecker:
     """健康检查器"""
@@ -81,7 +78,9 @@ class HealthChecker:
             duration = (time.time() - start_time) * 1000
 
             if isinstance(result, str):
-                return HealthCheck(name=name, status="healthy", message=result, duration_ms=duration)
+                return HealthCheck(
+                    name=name, status="healthy", message=result, duration_ms=duration
+                )
             elif isinstance(result, dict):
                 return HealthCheck(
                     name=name,
@@ -91,12 +90,16 @@ class HealthChecker:
                     details=result.get("details", {}),
                 )
             else:
-                return HealthCheck(name=name, status="healthy", message="OK", duration_ms=duration)
+                return HealthCheck(
+                    name=name, status="healthy", message="OK", duration_ms=duration
+                )
 
         except Exception as e:
             duration = (time.time() - start_time) * 1000
             self.logger.error(f"Health check '{name}' failed: {e}")
-            return HealthCheck(name=name, status="unhealthy", message=str(e), duration_ms=duration)
+            return HealthCheck(
+                name=name, status="unhealthy", message=str(e), duration_ms=duration
+            )
 
     async def check_all(self) -> dict[str, ComponentHealth]:
         """运行所有健康检查"""
@@ -108,7 +111,9 @@ class HealthChecker:
 
                 # 更新或创建组件健康状态
                 if name not in self.last_results:
-                    self.last_results[name] = ComponentHealth(name=name, status="unknown")
+                    self.last_results[name] = ComponentHealth(
+                        name=name, status="unknown"
+                    )
 
                 component = self.last_results[name]
                 component.checks = [check_result]
@@ -175,7 +180,6 @@ class HealthChecker:
             },
         }
 
-
 class StandardHealthChecks:
     """标准健康检查集合"""
 
@@ -218,7 +222,9 @@ class StandardHealthChecks:
             return HealthCheck(
                 name="redis",
                 status="healthy" if result else "unhealthy",
-                message=("Redis connection successful" if result else "Redis ping failed"),
+                message=(
+                    "Redis connection successful" if result else "Redis ping failed"
+                ),
                 duration_ms=duration,
                 details={"ping_result": result},
             )
@@ -271,7 +277,9 @@ class StandardHealthChecks:
             )
 
     @staticmethod
-    async def disk_space_check(path: str = ".", warning_threshold: float = 0.9) -> HealthCheck:
+    async def disk_space_check(
+        path: str = ".", warning_threshold: float = 0.9
+    ) -> HealthCheck:
         """磁盘空间检查"""
         try:
             import shutil
@@ -333,8 +341,9 @@ class StandardHealthChecks:
                 },
             )
         except Exception as e:
-            return HealthCheck(name="memory", status="unhealthy", message=f"Memory check failed: {e}")
-
+            return HealthCheck(
+                name="memory", status="unhealthy", message=f"Memory check failed: {e}"
+            )
 
 # 向后兼容的简化函数
 def build_health_payload(service: str, extra: dict[str, Any] | None = None) -> dict:
@@ -344,12 +353,10 @@ def build_health_payload(service: str, extra: dict[str, Any] | None = None) -> d
         data.update(extra)
     return {"code": 0, "message": "ok", "data": data}
 
-
 # 创建全局健康检查器实例
 def create_health_checker(service_name: str) -> HealthChecker:
     """创建健康检查器实例"""
     return HealthChecker(service_name)
-
 
 if __name__ == "__main__":
     # 测试健康检查功能
@@ -357,7 +364,9 @@ if __name__ == "__main__":
         checker = HealthChecker("test_service")
 
         # 注册测试检查
-        checker.register_check("test_check", lambda: {"status": "healthy", "message": "Test OK"})
+        checker.register_check(
+            "test_check", lambda: {"status": "healthy", "message": "Test OK"}
+        )
 
         # 运行检查
         result = await checker.get_health_payload()

@@ -1,5 +1,8 @@
 import React from 'react';
 import { Skeleton, Card, Row, Col } from 'antd';
+// T2.4：DashboardSkeleton 统一收敛到 common/DashboardSkeleton（避免两套实现）
+export { DashboardSkeleton } from '../common/DashboardSkeleton';
+import { DashboardSkeleton as CanonicalDashboardSkeleton } from '../common/DashboardSkeleton';
 
 /**
  * Skeleton加载组件
@@ -132,35 +135,8 @@ export const ListSkeleton: React.FC<{ items?: number } & SkeletonLoaderProps> = 
   );
 };
 
-// 仪表板Skeleton（组合多个Skeleton）
-export const DashboardSkeleton: React.FC = () => {
-  return (
-    <div>
-      <Row gutter={[16, 16]}>
-        <Col span={6}>
-          <CardSkeleton />
-        </Col>
-        <Col span={6}>
-          <CardSkeleton />
-        </Col>
-        <Col span={6}>
-          <CardSkeleton />
-        </Col>
-        <Col span={6}>
-          <CardSkeleton />
-        </Col>
-      </Row>
-      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
-        <Col span={16}>
-          <ChartSkeleton height={300} />
-        </Col>
-        <Col span={8}>
-          <ListSkeleton items={3} />
-        </Col>
-      </Row>
-    </div>
-  );
-};
+// 仪表板Skeleton（T2.4：统一收敛到 common/DashboardSkeleton，此处不再单独实现）
+// 详见文件顶部 re-export。
 
 // 详情页Skeleton
 export const DetailSkeleton: React.FC = () => {
@@ -214,7 +190,7 @@ export const SkeletonWrapper: React.FC<{
     case 'list':
       return <ListSkeleton items={items} loading={loading} />;
     case 'dashboard':
-      return <DashboardSkeleton />;
+      return <CanonicalDashboardSkeleton />;
     case 'detail':
       return <DetailSkeleton />;
     case 'card':

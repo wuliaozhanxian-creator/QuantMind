@@ -24,7 +24,9 @@ class TagDictionary(Base):
     tag_category = Column(
         String(32), nullable=False, comment="分类: index/concept/board/custom"
     )
-    source = Column(String(64), nullable=True, comment="数据来源: csi/metadata_json/manual")
+    source = Column(
+        String(64), nullable=True, comment="数据来源: csi/metadata_json/manual"
+    )
     is_active = Column(Boolean, default=True, nullable=False, comment="软停用")
     sort_order = Column(Integer, default=0, nullable=False, comment="展示排序")
     created_at = Column(
@@ -51,7 +53,9 @@ class StockTag(Base):
         primary_key=True,
         autoincrement=True,
     )
-    symbol = Column(String(16), nullable=False, comment="股票代码 Prefix 格式: SH600191")
+    symbol = Column(
+        String(16), nullable=False, comment="股票代码 Prefix 格式: SH600191"
+    )
     tag_code = Column(
         String(64),
         ForeignKey("tag_dictionary.tag_code", ondelete="RESTRICT"),

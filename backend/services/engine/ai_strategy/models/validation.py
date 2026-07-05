@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -27,26 +27,23 @@ except ImportError:
     MarketType = Literal["CN", "US", "HK", "GLOBAL"]
     Timeframe = Literal["1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w", "1M"]
     StrategyStyle = Literal["conservative", "balanced", "aggressive", "custom"]
-    StrategyLength = Literal["short_term",
-                             "medium_term", "long_term", "unlimited"]
+    StrategyLength = Literal["short_term", "medium_term", "long_term", "unlimited"]
     BacktestPeriod = Literal[
         "3months", "6months", "1year", "2years", "5years", "unlimited"
     ]
     ValidationErrorType = Literal["syntax", "logic", "dependency", "parameter"]
     ValidationSeverity = Literal["error", "warning", "info"]
 
-
 class ValidationError(BaseModel):
     """验证错误"""
 
-    line: Optional[int] = Field(None, description="错误行号")
-    column: Optional[int] = Field(None, description="错误列号")
+    line: int | None = Field(None, description="错误行号")
+    column: int | None = Field(None, description="错误列号")
     message: str = Field(..., description="错误消息")
     type: ValidationErrorType = Field(..., description="错误类型")
     severity: ValidationSeverity = Field(..., description="严重程度")
-    code: Optional[str] = Field(None, description="错误代码")
-    suggestion: Optional[str] = Field(None, description="修复建议")
-
+    code: str | None = Field(None, description="错误代码")
+    suggestion: str | None = Field(None, description="修复建议")
 
 class ParameterValidationError(BaseModel):
     """参数验证错误"""
@@ -58,26 +55,23 @@ class ParameterValidationError(BaseModel):
     suggested_value: Any = Field(None, description="建议值")
     rule: str = Field(..., description="验证规则")
 
-
 class ValidationResult(BaseModel):
     """验证结果"""
 
     is_valid: bool = Field(..., description="是否有效")
-    errors: List[ValidationError] = Field(
-        default_factory=list, description="错误列表")
-    warnings: List[ValidationError] = Field(
+    errors: list[ValidationError] = Field(default_factory=list, description="错误列表")
+    warnings: list[ValidationError] = Field(
         default_factory=list, description="警告列表"
     )
-    suggestions: List[str] = Field(default_factory=list, description="建议列表")
+    suggestions: list[str] = Field(default_factory=list, description="建议列表")
     processing_time: int = Field(..., description="处理时间(ms)")
     score: float = Field(..., ge=0, le=100, description="验证得分")
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="元数据")
-
+    metadata: dict[str, Any] = Field(default_factory=dict, description="元数据")
 
 class ParameterValidationRequest(BaseModel):
     """参数验证请求"""
 
-    parameters: Dict[str, Any] = Field(..., description="参数字典")
+    parameters: dict[str, Any] = Field(..., description="参数字典")
     strict_mode: bool = Field(False, description="严格模式")
     include_suggestions: bool = Field(True, description="包含建议")
 
@@ -88,32 +82,28 @@ class ParameterValidationRequest(BaseModel):
             raise ValueError("参数必须是字典类型")
         return v
 
-
 class ParameterValidationResponse(BaseModel):
     """参数验证响应"""
 
     success: bool = Field(..., description="是否成功")
     is_valid: bool = Field(..., description="参数是否有效")
-    errors: List[ParameterValidationError] = Field(
+    errors: list[ParameterValidationError] = Field(
         default_factory=list, description="错误列表"
     )
-    warnings: List[ParameterValidationError] = Field(
+    warnings: list[ParameterValidationError] = Field(
         default_factory=list, description="警告列表"
     )
-    suggestions: List[str] = Field(default_factory=list, description="建议列表")
-    adjusted_parameters: Optional[Dict[str, Any]] = Field(
-        None, description="调整后的参数"
-    )
+    suggestions: list[str] = Field(default_factory=list, description="建议列表")
+    adjusted_parameters: dict[str, Any] | None = Field(None, description="调整后的参数")
     score: float = Field(..., ge=0, le=100, description="验证得分")
     processing_time: int = Field(..., description="处理时间(ms)")
-
 
 class CodeValidationRequest(BaseModel):
     """代码验证请求"""
 
     code: str = Field(..., description="代码内容")
     language: str = Field("python", description="编程语言")
-    parameters: Optional[Dict[str, Any]] = Field(None, description="策略参数")
+    parameters: dict[str, Any] | None = Field(None, description="策略参数")
     stage: str = Field("generation", description="验证阶段")
     strict_mode: bool = Field(False, description="严格模式")
 
@@ -124,35 +114,32 @@ class CodeValidationRequest(BaseModel):
             raise ValueError("代码内容不能为空")
         return v.strip()
 
-
 class CodeValidationResponse(BaseModel):
     """代码验证响应"""
 
     success: bool = Field(..., description="是否成功")
     is_valid: bool = Field(..., description="代码是否有效")
-    syntax_errors: List[ValidationError] = Field(
+    syntax_errors: list[ValidationError] = Field(
         default_factory=list, description="语法错误"
     )
-    logic_errors: List[ValidationError] = Field(
+    logic_errors: list[ValidationError] = Field(
         default_factory=list, description="逻辑错误"
     )
-    warnings: List[ValidationError] = Field(
+    warnings: list[ValidationError] = Field(
         default_factory=list, description="警告列表"
     )
-    suggestions: List[str] = Field(default_factory=list, description="建议列表")
+    suggestions: list[str] = Field(default_factory=list, description="建议列表")
     quality_score: float = Field(..., ge=0, le=100, description="代码质量得分")
     complexity: int = Field(..., description="复杂度")
     processing_time: int = Field(..., description="处理时间(ms)")
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="元数据")
-
+    metadata: dict[str, Any] = Field(default_factory=dict, description="元数据")
 
 class TemplateValidationRequest(BaseModel):
     """模板验证请求"""
 
     template_id: str = Field(..., description="模板ID")
-    parameters: Dict[str, Any] = Field(..., description="参数字典")
+    parameters: dict[str, Any] = Field(..., description="参数字典")
     strict_mode: bool = Field(False, description="严格模式")
-
 
 class TemplateValidationResponse(BaseModel):
     """模板验证响应"""
@@ -161,48 +148,44 @@ class TemplateValidationResponse(BaseModel):
     is_valid: bool = Field(..., description="模板是否有效")
     template_id: str = Field(..., description="模板ID")
     compatibility_score: float = Field(..., ge=0, le=1, description="兼容性得分")
-    errors: List[ParameterValidationError] = Field(
+    errors: list[ParameterValidationError] = Field(
         default_factory=list, description="错误列表"
     )
-    warnings: List[ParameterValidationError] = Field(
+    warnings: list[ParameterValidationError] = Field(
         default_factory=list, description="警告列表"
     )
-    suggestions: List[str] = Field(default_factory=list, description="建议列表")
-    adaptations: List[str] = Field(default_factory=list, description="适配建议")
+    suggestions: list[str] = Field(default_factory=list, description="建议列表")
+    adaptations: list[str] = Field(default_factory=list, description="适配建议")
     processing_time: int = Field(..., description="处理时间(ms)")
-
 
 class BatchValidationRequest(BaseModel):
     """批量验证请求"""
 
-    parameters: Optional[Dict[str, Any]] = Field(None, description="参数字典")
-    code: Optional[str] = Field(None, description="代码内容")
-    template_id: Optional[str] = Field(None, description="模板ID")
-    validation_types: List[str] = Field(
-        default_factory=list, description="验证类型")
+    parameters: dict[str, Any] | None = Field(None, description="参数字典")
+    code: str | None = Field(None, description="代码内容")
+    template_id: str | None = Field(None, description="模板ID")
+    validation_types: list[str] = Field(default_factory=list, description="验证类型")
     strict_mode: bool = Field(False, description="严格模式")
-
 
 class BatchValidationResponse(BaseModel):
     """批量验证响应"""
 
     success: bool = Field(..., description="是否成功")
-    parameter_validation: Optional[ParameterValidationResponse] = Field(
+    parameter_validation: ParameterValidationResponse | None = Field(
         None, description="参数验证结果"
     )
-    code_validation: Optional[CodeValidationResponse] = Field(
+    code_validation: CodeValidationResponse | None = Field(
         None, description="代码验证结果"
     )
-    template_validation: Optional[TemplateValidationResponse] = Field(
+    template_validation: TemplateValidationResponse | None = Field(
         None, description="模板验证结果"
     )
     overall_score: float = Field(..., ge=0, le=100, description="综合得分")
     is_ready_for_generation: bool = Field(..., description="是否准备好生成")
-    next_steps: List[str] = Field(default_factory=list, description="下一步建议")
+    next_steps: list[str] = Field(default_factory=list, description="下一步建议")
     processing_time: int = Field(..., description="处理时间(ms)")
 
     # 验证规则定义
-
 
 class ValidationRule:
     """验证规则基类"""
@@ -222,7 +205,6 @@ class ValidationRule:
     def validate(self, value: Any) -> bool:
         """验证值"""
         raise NotImplementedError("子类必须实现validate方法")
-
 
 class RangeRule(ValidationRule):
     """范围验证规则"""
@@ -259,11 +241,10 @@ class RangeRule(ValidationRule):
         except (ValueError, TypeError):
             return False
 
-
 class EnumRule(ValidationRule):
     """枚举验证规则"""
 
-    def __init__(self, field: str, valid_values: List[Any], message: str = None):
+    def __init__(self, field: str, valid_values: list[Any], message: str = None):
         if message is None:
             message = f"{field}必须是以下值之一: {', '.join(map(str, valid_values))}"
         super().__init__(field, f"enum:{valid_values}", message)
@@ -271,7 +252,6 @@ class EnumRule(ValidationRule):
 
     def validate(self, value: Any) -> bool:
         return value in self.valid_values
-
 
 class RequiredRule(ValidationRule):
     """必需字段验证规则"""
@@ -286,7 +266,6 @@ class RequiredRule(ValidationRule):
 
         # 预定义验证规则
 
-
 STRATEGY_PARAMETER_RULES = [
     # 必需字段
     RequiredRule("description", "策略描述不能为空"),
@@ -295,11 +274,9 @@ STRATEGY_PARAMETER_RULES = [
     # 枚举字段
     EnumRule("market", ["CN", "US", "HK", "GLOBAL"]),
     EnumRule("risk_level", ["low", "medium", "high"]),
-    EnumRule("timeframe", ["1m", "5m", "15m",
-             "30m", "1h", "4h", "1d", "1w", "1M"]),
+    EnumRule("timeframe", ["1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w", "1M"]),
     EnumRule(
-        "strategy_length", ["short_term",
-                            "medium_term", "long_term", "unlimited"]
+        "strategy_length", ["short_term", "medium_term", "long_term", "unlimited"]
     ),
     EnumRule(
         "backtest_period",

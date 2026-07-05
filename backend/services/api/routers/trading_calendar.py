@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import List, Optional
+from typing import Optional
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -12,11 +12,9 @@ from backend.shared.trading_calendar import calendar_service
 
 router = APIRouter(prefix="/api/v1/market-calendar", tags=["Market-Calendar"])
 
-
 class BatchCheckRequest(BaseModel):
     market: str = Field(..., description="市场代码，如 SSE/SZSE/CFFEX")
     dates: list[date] = Field(..., description="待批量判断日期列表")
-
 
 def _owner(current_user: dict) -> tuple[str, str]:
     tenant_id = str(current_user.get("tenant_id") or "default")
@@ -25,11 +23,12 @@ def _owner(current_user: dict) -> tuple[str, str]:
         raise HTTPException(status_code=401, detail="无效用户上下文")
     return tenant_id, user_id
 
-
 @router.get("/is-trading-day")
 async def is_trading_day(
     market: str = Query(..., description="市场代码"),
-    date_value: date = Query(..., alias="date", description="交易日日期，格式 YYYY-MM-DD"),
+    date_value: date = Query(
+        ..., alias="date", description="交易日日期，格式 YYYY-MM-DD"
+    ),
     current_user: dict = Depends(get_current_user),
 ):
     tenant_id, user_id = _owner(current_user)
@@ -47,11 +46,12 @@ async def is_trading_day(
         "user_id": user_id,
     }
 
-
 @router.get("/next-trading-day")
 async def next_trading_day(
     market: str = Query(..., description="市场代码"),
-    date_value: date = Query(..., alias="date", description="基准日期，格式 YYYY-MM-DD"),
+    date_value: date = Query(
+        ..., alias="date", description="基准日期，格式 YYYY-MM-DD"
+    ),
     current_user: dict = Depends(get_current_user),
 ):
     tenant_id, user_id = _owner(current_user)
@@ -69,11 +69,12 @@ async def next_trading_day(
         "user_id": user_id,
     }
 
-
 @router.get("/prev-trading-day")
 async def prev_trading_day(
     market: str = Query(..., description="市场代码"),
-    date_value: date = Query(..., alias="date", description="基准日期，格式 YYYY-MM-DD"),
+    date_value: date = Query(
+        ..., alias="date", description="基准日期，格式 YYYY-MM-DD"
+    ),
     current_user: dict = Depends(get_current_user),
 ):
     tenant_id, user_id = _owner(current_user)
@@ -91,11 +92,12 @@ async def prev_trading_day(
         "user_id": user_id,
     }
 
-
 @router.get("/sessions")
 async def get_sessions(
     market: str = Query(..., description="市场代码"),
-    date_value: date = Query(..., alias="date", description="交易日日期，格式 YYYY-MM-DD"),
+    date_value: date = Query(
+        ..., alias="date", description="交易日日期，格式 YYYY-MM-DD"
+    ),
     current_user: dict = Depends(get_current_user),
 ):
     tenant_id, user_id = _owner(current_user)
@@ -112,7 +114,6 @@ async def get_sessions(
         "tenant_id": tenant_id,
         "user_id": user_id,
     }
-
 
 @router.get("/is-trading-time")
 async def is_trading_time(
@@ -145,7 +146,6 @@ async def is_trading_time(
         "tenant_id": tenant_id,
         "user_id": user_id,
     }
-
 
 @router.post("/batch-check")
 async def batch_check(

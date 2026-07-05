@@ -25,7 +25,9 @@ class TestStrategyStorageService(unittest.IsolatedAsyncioTestCase):
                 "success": True,
                 "url": "https://test.cos/test.py",
             }
-            mock_cos.get_presigned_url.return_value = "https://test.cos/test.py?sign=xxx"
+            mock_cos.get_presigned_url.return_value = (
+                "https://test.cos/test.py?sign=xxx"
+            )
             svc._cos = mock_cos
         else:
             svc._cos = None
@@ -96,14 +98,14 @@ class TestStrategyStorageService(unittest.IsolatedAsyncioTestCase):
     async def test_save_calls_cos_and_db_returns_id(self):
         svc = self._make_service(cos_available=True)
 
-        db_result = {"id": 42}
-
         def fake_upsert(**kw):
             return "42"
 
         svc._db_upsert = fake_upsert
 
-        with patch("backend.shared.strategy_storage._ensure_int_user_id", return_value=1):
+        with patch(
+            "backend.shared.strategy_storage._ensure_int_user_id", return_value=1
+        ):
             result = await svc.save(
                 user_id="1",
                 name="Test Strategy",
@@ -128,7 +130,9 @@ class TestStrategyStorageService(unittest.IsolatedAsyncioTestCase):
 
         svc._db_upsert = fake_upsert
 
-        with patch("backend.shared.strategy_storage._ensure_int_user_id", return_value=1):
+        with patch(
+            "backend.shared.strategy_storage._ensure_int_user_id", return_value=1
+        ):
             result = await svc.save(
                 user_id="1",
                 name="Local Strategy",
@@ -171,7 +175,9 @@ class TestStrategyStorageService(unittest.IsolatedAsyncioTestCase):
             yield mock_session
 
         with (
-            patch("backend.shared.strategy_storage._ensure_int_user_id", return_value=1),
+            patch(
+                "backend.shared.strategy_storage._ensure_int_user_id", return_value=1
+            ),
             patch("backend.shared.strategy_storage.get_db", new=fake_db_ctx),
         ):
             results = svc.list(user_id="1")
@@ -213,7 +219,9 @@ class TestStrategyStorageService(unittest.IsolatedAsyncioTestCase):
             yield mock_session
 
         with (
-            patch("backend.shared.strategy_storage._ensure_int_user_id", return_value=1),
+            patch(
+                "backend.shared.strategy_storage._ensure_int_user_id", return_value=1
+            ),
             patch("backend.shared.strategy_storage.get_db", new=fake_db_ctx),
         ):
             result = svc.delete(strategy_id=1, user_id="1")
@@ -235,7 +243,9 @@ class TestStrategyStorageService(unittest.IsolatedAsyncioTestCase):
             yield mock_session
 
         with (
-            patch("backend.shared.strategy_storage._ensure_int_user_id", return_value=1),
+            patch(
+                "backend.shared.strategy_storage._ensure_int_user_id", return_value=1
+            ),
             patch("backend.shared.strategy_storage.get_db", new=fake_db_ctx),
         ):
             result = svc.delete(strategy_id=999, user_id="1")

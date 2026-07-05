@@ -3,7 +3,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from backend.services.engine.qlib_app.services.strategy_formatter import StrategyFormatterService
+from backend.services.engine.qlib_app.services.strategy_formatter import (
+    StrategyFormatterService,
+)
 
 
 def test_tradedecision_wrapper_runtime_execution():
@@ -17,7 +19,7 @@ from qlib.strategy.base import BaseStrategy
 class LegacyDictStrategy(BaseStrategy):
     def __init__(self, **kwargs):
         pass
-        
+
     def generate_trade_decision(self, *args, **kwargs):
         # Returns a dict of {stock: amount}
         return {"SH600000": 100.0, "SZ000001": -50.0}

@@ -23,7 +23,9 @@ async def error_handler_middleware(request: Request, call_next):
         )
     except ValueError as e:
         logger.warning(f"Validation error: {e}")
-        return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, content={"detail": str(e)})
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST, content={"detail": str(e)}
+        )
     except Exception as e:
         logger.error(f"Unexpected error: {e}", exc_info=True)
         return JSONResponse(

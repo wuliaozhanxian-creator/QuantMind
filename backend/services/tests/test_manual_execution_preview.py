@@ -20,21 +20,50 @@ from backend.services.trade.services.manual_execution_service import (
     _resolve_board_lot_size,
     _should_request_cancel_for_buy_status,
 )
-from backend.services.trade.services.manual_execution_persistence import manual_execution_persistence
+from backend.services.trade.services.manual_execution_persistence import (
+    manual_execution_persistence,
+)
 
 
 def test_build_execution_plan_from_signals_generates_sell_and_buy_orders():
     account_snapshot = {
         "available_cash": 50_000.0,
         "positions": [
-            {"symbol": "600001.SH", "available_volume": 500, "volume": 500, "last_price": 10.0, "market_value": 5_000.0},
-            {"symbol": "600002.SH", "available_volume": 400, "volume": 400, "last_price": 8.0, "market_value": 3_200.0},
+            {
+                "symbol": "600001.SH",
+                "available_volume": 500,
+                "volume": 500,
+                "last_price": 10.0,
+                "market_value": 5_000.0,
+            },
+            {
+                "symbol": "600002.SH",
+                "available_volume": 400,
+                "volume": 400,
+                "last_price": 8.0,
+                "market_value": 3_200.0,
+            },
         ],
     }
     signal_rows = [
-        {"symbol": "600010.SH", "fusion_score": 0.98, "signal_side": None, "expected_price": 12.5},
-        {"symbol": "600011.SH", "fusion_score": 0.95, "signal_side": None, "expected_price": 10.0},
-        {"symbol": "600012.SH", "fusion_score": 0.90, "signal_side": None, "expected_price": 8.0},
+        {
+            "symbol": "600010.SH",
+            "fusion_score": 0.98,
+            "signal_side": None,
+            "expected_price": 12.5,
+        },
+        {
+            "symbol": "600011.SH",
+            "fusion_score": 0.95,
+            "signal_side": None,
+            "expected_price": 10.0,
+        },
+        {
+            "symbol": "600012.SH",
+            "fusion_score": 0.90,
+            "signal_side": None,
+            "expected_price": 8.0,
+        },
     ]
     plan = _build_execution_plan_from_signals(
         signal_rows=signal_rows,
@@ -54,8 +83,18 @@ def test_build_execution_plan_from_signals_generates_sell_and_buy_orders():
 def test_build_execution_plan_from_signals_marks_unexecutable_items_as_skipped():
     account_snapshot = {"available_cash": 20_000.0, "positions": []}
     signal_rows = [
-        {"symbol": "600100.SH", "fusion_score": 0.90, "signal_side": "sell", "expected_price": 12.0},
-        {"symbol": "600101.SH", "fusion_score": 0.88, "signal_side": "buy", "expected_price": 0.0},
+        {
+            "symbol": "600100.SH",
+            "fusion_score": 0.90,
+            "signal_side": "sell",
+            "expected_price": 12.0,
+        },
+        {
+            "symbol": "600101.SH",
+            "fusion_score": 0.88,
+            "signal_side": "buy",
+            "expected_price": 0.0,
+        },
     ]
 
     plan = _build_execution_plan_from_signals(
@@ -68,7 +107,9 @@ def test_build_execution_plan_from_signals_marks_unexecutable_items_as_skipped()
     assert {item["symbol"] for item in plan["skipped_items"]} >= {"600100.SH"}
 
 
-def test_build_execution_plan_applies_fundamental_constraints_and_keeps_explicit_sell(monkeypatch):
+def test_build_execution_plan_applies_fundamental_constraints_and_keeps_explicit_sell(
+    monkeypatch,
+):
     account_snapshot = {
         "available_cash": 20_000.0,
         "positions": [
@@ -82,8 +123,18 @@ def test_build_execution_plan_applies_fundamental_constraints_and_keeps_explicit
         ],
     }
     signal_rows = [
-        {"symbol": "600001.SH", "fusion_score": 0.92, "signal_side": "buy", "expected_price": 10.0},
-        {"symbol": "600002.SH", "fusion_score": 0.90, "signal_side": "buy", "expected_price": 10.0},
+        {
+            "symbol": "600001.SH",
+            "fusion_score": 0.92,
+            "signal_side": "buy",
+            "expected_price": 10.0,
+        },
+        {
+            "symbol": "600002.SH",
+            "fusion_score": 0.90,
+            "signal_side": "buy",
+            "expected_price": 10.0,
+        },
         {"symbol": "600300.SH", "fusion_score": 0.20, "signal_side": "sell"},
     ]
 
@@ -94,7 +145,11 @@ def test_build_execution_plan_applies_fundamental_constraints_and_keeps_explicit
 
     plan = _build_execution_plan_from_signals(
         signal_rows=signal_rows,
-        strategy_params={"strategy_type": "alpha_cross_section", "topk": 2, "f_pe_ttm_max": 25},
+        strategy_params={
+            "strategy_type": "alpha_cross_section",
+            "topk": 2,
+            "f_pe_ttm_max": 25,
+        },
         account_snapshot=account_snapshot,
         trade_date=date(2026, 4, 1),
     )
@@ -111,13 +166,15 @@ def test_build_execution_plan_applies_fundamental_constraints_and_keeps_explicit
 @pytest.mark.asyncio
 async def test_submit_execution_plan_rejects_mismatched_preview_hash():
     service = ManualExecutionService()
-    service.build_execution_preview = AsyncMock(return_value={  # type: ignore[method-assign]
-        "preview_hash": "expected-hash",
-        "summary": {},
-        "sell_orders": [],
-        "buy_orders": [],
-        "skipped_items": [],
-    })
+    service.build_execution_preview = AsyncMock(
+        return_value={  # type: ignore[method-assign]
+            "preview_hash": "expected-hash",
+            "summary": {},
+            "sell_orders": [],
+            "buy_orders": [],
+            "skipped_items": [],
+        }
+    )
 
     with pytest.raises(HTTPException) as exc_info:
         await service.submit_execution_plan(
@@ -299,7 +356,9 @@ def test_preview_hash_is_stable_for_same_payload():
 
 
 @pytest.mark.asyncio
-async def test_create_hosted_task_uses_latest_default_model_run_and_db_signals(monkeypatch):
+async def test_create_hosted_task_uses_latest_default_model_run_and_db_signals(
+    monkeypatch,
+):
     service = ManualExecutionService()
     latest_run = {
         "run_id": "run_latest_default",
@@ -341,7 +400,12 @@ async def test_create_hosted_task_uses_latest_default_model_run_and_db_signals(m
                 trading_mode="REAL",
                 request_payload={"strategy_id": "48", "run_id": "run_latest_default"},
                 run=latest_run,
-                strategy={"id": "48", "name": "测试策略", "is_verified": True, "parameters": {"strategy_type": "TopkDropout"}},
+                strategy={
+                    "id": "48",
+                    "name": "测试策略",
+                    "is_verified": True,
+                    "parameters": {"strategy_type": "TopkDropout"},
+                },
             )
         ),
     )
@@ -394,7 +458,11 @@ async def test_create_hosted_task_uses_latest_default_model_run_and_db_signals(m
         "backend.services.trade.services.manual_execution_service._build_execution_plan_from_signals",
         _fake_plan,
     )
-    monkeypatch.setattr(service, "_persist_task", AsyncMock(return_value={"task_id": "hosted_1", "status": "queued"}))
+    monkeypatch.setattr(
+        service,
+        "_persist_task",
+        AsyncMock(return_value={"task_id": "hosted_1", "status": "queued"}),
+    )
 
     result = await service.create_hosted_task(
         tenant_id="default",
@@ -466,18 +534,30 @@ async def test_create_hosted_task_rejects_expired_default_model_run(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_create_hosted_task_returns_existing_task_when_duplicate_task_id(monkeypatch):
+async def test_create_hosted_task_returns_existing_task_when_duplicate_task_id(
+    monkeypatch,
+):
     service = ManualExecutionService()
 
     monkeypatch.setattr(
         manual_execution_persistence,
         "get_task_any",
-        AsyncMock(return_value={"task_id": "hosted_dup", "status": "completed", "result_json": {}}),
+        AsyncMock(
+            return_value={
+                "task_id": "hosted_dup",
+                "status": "completed",
+                "result_json": {},
+            }
+        ),
     )
     monkeypatch.setattr(
         service,
         "_load_user_default_model_record",
-        AsyncMock(side_effect=AssertionError("duplicate task should short-circuit before model lookup")),
+        AsyncMock(
+            side_effect=AssertionError(
+                "duplicate task should short-circuit before model lookup"
+            )
+        ),
     )
 
     result = await service.create_hosted_task(
@@ -499,7 +579,9 @@ async def test_create_hosted_task_returns_existing_task_when_duplicate_task_id(m
 
 
 @pytest.mark.asyncio
-async def test_get_default_model_hosted_status_distinguishes_latest_run_reasons(monkeypatch):
+async def test_get_default_model_hosted_status_distinguishes_latest_run_reasons(
+    monkeypatch,
+):
     service = ManualExecutionService()
 
     monkeypatch.setattr(
@@ -551,7 +633,9 @@ async def test_get_default_model_hosted_status_distinguishes_latest_run_reasons(
 
 
 @pytest.mark.asyncio
-async def test_get_default_model_hosted_status_accepts_explicit_system_model(monkeypatch):
+async def test_get_default_model_hosted_status_accepts_explicit_system_model(
+    monkeypatch,
+):
     service = ManualExecutionService()
 
     monkeypatch.setattr(
@@ -602,7 +686,9 @@ async def test_get_default_model_hosted_status_accepts_explicit_system_model(mon
 
 
 @pytest.mark.asyncio
-async def test_get_default_model_hosted_status_accepts_system_default_when_latest_run_ready(monkeypatch):
+async def test_get_default_model_hosted_status_accepts_system_default_when_latest_run_ready(
+    monkeypatch,
+):
     service = ManualExecutionService()
 
     monkeypatch.setattr(

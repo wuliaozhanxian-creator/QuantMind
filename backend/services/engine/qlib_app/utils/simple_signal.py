@@ -7,19 +7,18 @@ from qlib.backtest.signal import Signal
 from qlib.data import D
 
 logger = logging.getLogger(__name__)
-from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
+from backend.services.engine.qlib_app.utils.structured_logger import (
+    StructuredTaskLogger,
+)
 
 task_logger = StructuredTaskLogger(logger, "SimpleSignal")
-
 
 def _is_bj_instrument(code: str) -> bool:
     code_str = str(code or "").upper()
     return code_str.startswith("BJ")
 
-
 def _exclude_bj_instruments(codes):
     return [c for c in codes if not _is_bj_instrument(c)]
-
 
 class SimpleSignal(Signal):
     """
@@ -109,21 +108,35 @@ class SimpleSignal(Signal):
                 )
                 return self._universe_instruments
             except Exception as exc:
-                task_logger.warning("read_universe_file_failed", "读取股票池文件失败", path=str(file_path), error=str(exc))
+                task_logger.warning(
+                    "read_universe_file_failed",
+                    "读取股票池文件失败",
+                    path=str(file_path),
+                    error=str(exc),
+                )
 
         try:
-            qlib_instruments = D.list_instruments(D.instruments(universe_str), as_list=True)
+            qlib_instruments = D.list_instruments(
+                D.instruments(universe_str), as_list=True
+            )
             self._universe_instruments = _exclude_bj_instruments(qlib_instruments)
             return self._universe_instruments
         except Exception as exc:
-            task_logger.warning("load_universe_failed", "加载股票池失败，股票池将置空", universe=universe_str, error=str(exc))
+            task_logger.warning(
+                "load_universe_failed",
+                "加载股票池失败，股票池将置空",
+                universe=universe_str,
+                error=str(exc),
+            )
             self._universe_instruments = []
             return self._universe_instruments
 
     @staticmethod
     def _normalize_series(series: pd.Series) -> pd.Series:
         if not isinstance(series.index, pd.MultiIndex):
-            series.index = pd.MultiIndex.from_product([series.index, [0]], names=["datetime", "instrument"])
+            series.index = pd.MultiIndex.from_product(
+                [series.index, [0]], names=["datetime", "instrument"]
+            )
         names = list(series.index.names)
         if names == ["instrument", "datetime"]:
             series = series.swaplevel(0, 1)
@@ -134,12 +147,19 @@ class SimpleSignal(Signal):
     def _lag_series_by_trading_days(self, series: pd.Series) -> pd.Series:
         if self.signal_lag_days <= 0 or series.empty:
             return series
-        if not isinstance(series.index, pd.MultiIndex) or "datetime" not in series.index.names:
+        if (
+            not isinstance(series.index, pd.MultiIndex)
+            or "datetime" not in series.index.names
+        ):
             return series
 
-        date_values = pd.to_datetime(series.index.get_level_values("datetime")).normalize()
+        date_values = pd.to_datetime(
+            series.index.get_level_values("datetime")
+        ).normalize()
         unique_dates = pd.Index(date_values.unique()).sort_values()
-        shifted_dates = unique_dates.to_series(index=unique_dates).shift(-self.signal_lag_days)
+        shifted_dates = unique_dates.to_series(index=unique_dates).shift(
+            -self.signal_lag_days
+        )
         mapped_dates = date_values.map(shifted_dates)
         valid_mask = ~pd.isna(mapped_dates)
         if not valid_mask.any():
@@ -211,16 +231,28 @@ class SimpleSignal(Signal):
                         score_col = "pred" if "pred" in raw.columns else raw.columns[-1]
                         df = (
                             raw[["trade_date", "symbol", score_col]]
-                            .rename(columns={"trade_date": "datetime", "symbol": "instrument", score_col: "score"})
+                            .rename(
+                                columns={
+                                    "trade_date": "datetime",
+                                    "symbol": "instrument",
+                                    score_col: "score",
+                                }
+                            )
                             .assign(datetime=lambda d: pd.to_datetime(d["datetime"]))
                             .set_index(["datetime", "instrument"])
                             .sort_index()
                         )
-                        task_logger.info("parquet_loaded", "SimpleSignal: pred.parquet 加载成功", rows=len(df))
+                        task_logger.info(
+                            "parquet_loaded",
+                            "SimpleSignal: pred.parquet 加载成功",
+                            rows=len(df),
+                        )
                     else:
                         df = pd.read_pickle(self._pred_path)
                 except Exception as e:
-                    task_logger.warning("load_pred_file_failed", "加载预测文件失败", error=str(e))
+                    task_logger.warning(
+                        "load_pred_file_failed", "加载预测文件失败", error=str(e)
+                    )
                     return None
 
             if isinstance(df, pd.Series):
@@ -231,7 +263,11 @@ class SimpleSignal(Signal):
                 series = df.get("score")
 
             if series is None:
-                task_logger.warning("pred_missing_score", "pred.pkl 中找不到 score 列", metric=self.metric)
+                task_logger.warning(
+                    "pred_missing_score",
+                    "pred.pkl 中找不到 score 列",
+                    metric=self.metric,
+                )
                 return None
 
             series = self._normalize_series(series)
@@ -252,7 +288,12 @@ class SimpleSignal(Signal):
             self._pred_series = series
             return self._slice_time(series, start_time, end_time)
         except Exception as exc:
-            task_logger.warning("load_pred_pickle_failed", "读取 pred.pkl 失败", path=self._pred_path, error=str(exc))
+            task_logger.warning(
+                "load_pred_pickle_failed",
+                "读取 pred.pkl 失败",
+                path=self._pred_path,
+                error=str(exc),
+            )
             return None
 
     def _align_instrument_case(self, series: pd.Series) -> pd.Series:
@@ -272,7 +313,11 @@ class SimpleSignal(Signal):
             # 基于当前 universe 的可交易代码判断目标大小写风格
             qlib_instruments = self._get_universe_instruments()
             if not qlib_instruments:
-                task_logger.warning("universe_empty_skip_case_align", "Universe 返回空股票列表，跳过大小写对齐", universe=self.universe)
+                task_logger.warning(
+                    "universe_empty_skip_case_align",
+                    "Universe 返回空股票列表，跳过大小写对齐",
+                    universe=self.universe,
+                )
                 return series
             qlib_set = set(map(str, qlib_instruments))
             pred_set = set(map(str, inst_values))
@@ -344,11 +389,16 @@ class SimpleSignal(Signal):
             )
             return series.sort_index()
         except Exception as exc:
-            task_logger.warning("align_instrument_case_failed", "股票代码大小写对齐失败，保持原始 pred 索引", error=str(exc))
+            task_logger.warning(
+                "align_instrument_case_failed",
+                "股票代码大小写对齐失败，保持原始 pred 索引",
+                error=str(exc),
+            )
             return series
 
-
-    def _find_recent_pred_date(self, target_ts: "pd.Timestamp") -> "pd.Timestamp | None":
+    def _find_recent_pred_date(
+        self, target_ts: "pd.Timestamp"
+    ) -> "pd.Timestamp | None":
         """在已加载的 pred_series 中查找不晚于 target_ts 的最近预测日期（前向填充）。"""
         if self._pred_series is None or self._pred_series.empty:
             return None
@@ -374,8 +424,12 @@ class SimpleSignal(Signal):
                 return pd.Series(dtype=float)
             if series.empty:
                 # 前向填充：当前区间无精确预测时，使用最近的已加载预测
-                target_ts = pd.to_datetime(end_time) if end_time else (
-                    pd.to_datetime(start_time) if start_time else pd.Timestamp.now()
+                target_ts = (
+                    pd.to_datetime(end_time)
+                    if end_time
+                    else (
+                        pd.to_datetime(start_time) if start_time else pd.Timestamp.now()
+                    )
                 )
                 recent_date = self._find_recent_pred_date(target_ts)
                 if recent_date is not None:
@@ -392,7 +446,7 @@ class SimpleSignal(Signal):
                             )
                             return daily
                     except Exception:
-                        pass
+                        logger.debug("ignored exception", exc_info=True)
                 task_logger.info(
                     "pred_signal_empty",
                     "当前请求区间没有可交易预测信号，返回空信号",
@@ -430,12 +484,20 @@ class SimpleSignal(Signal):
         try:
             instruments = self._get_universe_instruments()
             if not instruments:
-                task_logger.warning("universe_empty_return_blank", "Universe 股票池为空，返回空信号", universe=self.universe)
+                task_logger.warning(
+                    "universe_empty_return_blank",
+                    "Universe 股票池为空，返回空信号",
+                    universe=self.universe,
+                )
                 return pd.Series(dtype=float)
             query_start = start_time
             if self.signal_lag_days > 0 and start_time is not None:
-                query_start = pd.to_datetime(start_time) - pd.Timedelta(days=max(10, self.signal_lag_days * 10))
-            df = D.features(instruments, [self.metric], start_time=query_start, end_time=end_time)
+                query_start = pd.to_datetime(start_time) - pd.Timedelta(
+                    days=max(10, self.signal_lag_days * 10)
+                )
+            df = D.features(
+                instruments, [self.metric], start_time=query_start, end_time=end_time
+            )
             if df is not None and not df.empty:
                 series = df[self.metric]
                 series = self._normalize_series(series)
@@ -443,7 +505,9 @@ class SimpleSignal(Signal):
                 if isinstance(series.index, pd.MultiIndex):
                     if "datetime" in series.index.names:
                         dates = series.index.get_level_values("datetime")
-                        target_date = pd.to_datetime(end_time) if end_time else dates.max()
+                        target_date = (
+                            pd.to_datetime(end_time) if end_time else dates.max()
+                        )
                         uniq_dates = pd.Index(dates.unique()).sort_values()
                         if target_date not in uniq_dates:
                             pos = uniq_dates.searchsorted(target_date, side="right") - 1
@@ -451,10 +515,23 @@ class SimpleSignal(Signal):
                                 return pd.Series(dtype=float)
                             target_date = uniq_dates[pos]
                         return series.xs(target_date, level="datetime")
-                    return series.droplevel(level=1) if series.index.nlevels > 1 else series
+                    return (
+                        series.droplevel(level=1)
+                        if series.index.nlevels > 1
+                        else series
+                    )
                 return series
-            task_logger.warning("metric_empty_return_blank", "指标返回空数据，返回空信号", metric=self.metric)
+            task_logger.warning(
+                "metric_empty_return_blank",
+                "指标返回空数据，返回空信号",
+                metric=self.metric,
+            )
             return pd.Series(dtype=float)
         except Exception as exc:
-            task_logger.warning("get_signal_failed", "Error getting signal", metric=self.metric, error=str(exc))
+            task_logger.warning(
+                "get_signal_failed",
+                "Error getting signal",
+                metric=self.metric,
+                error=str(exc),
+            )
             return pd.Series(dtype=float)

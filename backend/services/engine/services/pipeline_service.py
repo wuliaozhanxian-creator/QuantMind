@@ -5,7 +5,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -30,7 +30,6 @@ from backend.services.engine.services.prediction_artifact import (
     build_pred_pkl_from_inference,
 )
 
-
 class PipelineRunRequest(BaseModel):
     prompt: str = Field(..., description="策略生成提示词")
     user_id: str | None = Field(None, description="用户ID")
@@ -38,14 +37,22 @@ class PipelineRunRequest(BaseModel):
 
     provider: str | None = Field(None, description="可选 provider")
     strategy_content: str | None = Field(None, description="直接提供策略代码")
-    use_generated_strategy_for_backtest: bool = Field(False, description="是否将生成代码直接用于回测")
+    use_generated_strategy_for_backtest: bool = Field(
+        False, description="是否将生成代码直接用于回测"
+    )
 
     inference_enabled: bool = Field(False, description="是否执行推理")
     model_id: str | None = Field(None, description="推理模型ID")
-    strategy_id: str | None = Field(None, description="策略ID（可选，用于自动解析生效模型）")
-    inference_data: dict[str, Any] | list[dict[str, Any]] | None = Field(None, description="推理输入")
+    strategy_id: str | None = Field(
+        None, description="策略ID（可选，用于自动解析生效模型）"
+    )
+    inference_data: dict[str, Any] | list[dict[str, Any]] | None = Field(
+        None, description="推理输入"
+    )
     tft_model_id: str | None = Field(None, description="TFT模型ID（可选）")
-    tft_inference_data: dict[str, Any] | list[dict[str, Any]] | None = Field(None, description="TFT推理输入（可选）")
+    tft_inference_data: dict[str, Any] | list[dict[str, Any]] | None = Field(
+        None, description="TFT推理输入（可选）"
+    )
     risk_features: dict[str, dict[str, Any]] | None = Field(
         None,
         description="风控特征（symbol -> {avg_turnover_20d, volatility_20d, industry})",
@@ -65,15 +72,15 @@ class PipelineRunRequest(BaseModel):
     max_short_exposure: float = Field(1.0, ge=0.0, le=3.0, description="最大空头敞口")
     max_leverage: float = Field(1.0, ge=0.0, le=5.0, description="最大总杠杆")
 
-
 class PipelineRunStatus(BaseModel):
     run_id: str
     status: Literal["running", "completed", "failed"]
-    stage: Literal["queued", "generation", "inference", "backtest", "completed", "failed"]
+    stage: Literal[
+        "queued", "generation", "inference", "backtest", "completed", "failed"
+    ]
     error: str | None = None
     created_at: datetime
     updated_at: datetime
-
 
 class PipelineRunResult(BaseModel):
     run_id: str
@@ -98,7 +105,6 @@ class PipelineRunResult(BaseModel):
     error: str | None = None
     created_at: datetime
     updated_at: datetime
-
 
 @dataclass
 class _RunRecord:
@@ -125,7 +131,6 @@ class _RunRecord:
     model_source: str | None = None
     active_data_source: str | None = None
 
-
 class PipelineService:
     def __init__(
         self,
@@ -136,7 +141,9 @@ class PipelineService:
         persistence: PipelinePersistence | None = None,
     ):
         self.inference_service = inference_service or InferenceService()
-        self.inference_router_service = InferenceRouterService(inference_service=self.inference_service)
+        self.inference_router_service = InferenceRouterService(
+            inference_service=self.inference_service
+        )
         self.backtest_service = backtest_service or QlibBacktestService(
             provider_uri=os.getenv("QLIB_PROVIDER_URI", "db/qlib_data"),
             region=os.getenv("QLIB_REGION", "cn"),
@@ -156,7 +163,9 @@ class PipelineService:
         self._tables_ready = True
 
     @staticmethod
-    def _extract_inference_meta(inference_result: dict[str, Any] | None) -> dict[str, Any]:
+    def _extract_inference_meta(
+        inference_result: dict[str, Any] | None,
+    ) -> dict[str, Any]:
         if not isinstance(inference_result, dict):
             return {
                 "fallback_used": None,
@@ -181,9 +190,13 @@ class PipelineService:
             "active_data_source": inference_result.get("active_data_source"),
         }
 
-    async def cleanup_old_runs(self, *, user_id: str, tenant_id: str, keep_days: int = 30) -> int:
+    async def cleanup_old_runs(
+        self, *, user_id: str, tenant_id: str, keep_days: int = 30
+    ) -> int:
         await self._ensure_tables()
-        return await self.persistence.cleanup_old_runs(user_id=user_id, tenant_id=tenant_id, keep_days=keep_days)
+        return await self.persistence.cleanup_old_runs(
+            user_id=user_id, tenant_id=tenant_id, keep_days=keep_days
+        )
 
     async def create_run(self, request: PipelineRunRequest) -> str:
         await self._ensure_tables()
@@ -201,9 +214,15 @@ class PipelineService:
         )
         return run_id
 
-    async def get_status(self, run_id: str, *, user_id: str, tenant_id: str) -> PipelineRunStatus | None:
+    async def get_status(
+        self, run_id: str, *, user_id: str, tenant_id: str
+    ) -> PipelineRunStatus | None:
         rec = self._runs.get(run_id)
-        if rec is not None and rec.request.user_id == user_id and rec.request.tenant_id == tenant_id:
+        if (
+            rec is not None
+            and rec.request.user_id == user_id
+            and rec.request.tenant_id == tenant_id
+        ):
             return PipelineRunStatus(
                 run_id=run_id,
                 status=rec.status,
@@ -213,7 +232,9 @@ class PipelineService:
                 updated_at=rec.updated_at,
             )
 
-        row = await self.persistence.get_run(run_id, user_id=user_id, tenant_id=tenant_id)
+        row = await self.persistence.get_run(
+            run_id, user_id=user_id, tenant_id=tenant_id
+        )
         if row is None:
             return None
         return PipelineRunStatus(
@@ -225,9 +246,15 @@ class PipelineService:
             updated_at=row["updated_at"],
         )
 
-    async def get_result(self, run_id: str, *, user_id: str, tenant_id: str) -> PipelineRunResult | None:
+    async def get_result(
+        self, run_id: str, *, user_id: str, tenant_id: str
+    ) -> PipelineRunResult | None:
         rec = self._runs.get(run_id)
-        if rec is not None and rec.request.user_id == user_id and rec.request.tenant_id == tenant_id:
+        if (
+            rec is not None
+            and rec.request.user_id == user_id
+            and rec.request.tenant_id == tenant_id
+        ):
             if rec.status == "running":
                 return None
             return PipelineRunResult(
@@ -253,7 +280,9 @@ class PipelineService:
                 updated_at=rec.updated_at,
             )
 
-        row = await self.persistence.get_run(run_id, user_id=user_id, tenant_id=tenant_id)
+        row = await self.persistence.get_run(
+            run_id, user_id=user_id, tenant_id=tenant_id
+        )
         if row is None or row["status"] == "running":
             return None
         result_json = row.get("result_json") or {}
@@ -270,15 +299,33 @@ class PipelineService:
             fusion_report=result_json.get("fusion_report"),
             backtest_result=result_json.get("backtest_result"),
             fusion_rules=result_json.get("fusion_rules"),
-            fallback_used=result_json.get("fallback_used", infer_meta.get("fallback_used")),
-            fallback_reason=result_json.get("fallback_reason", infer_meta.get("fallback_reason")),
-            execution_mode=result_json.get("execution_mode", infer_meta.get("execution_mode")),
-            model_switch_used=result_json.get("model_switch_used", infer_meta.get("model_switch_used")),
-            model_switch_reason=result_json.get("model_switch_reason", infer_meta.get("model_switch_reason")),
-            active_model_id=result_json.get("active_model_id", infer_meta.get("active_model_id")),
-            effective_model_id=result_json.get("effective_model_id", infer_meta.get("effective_model_id")),
-            model_source=result_json.get("model_source", infer_meta.get("model_source")),
-            active_data_source=result_json.get("active_data_source", infer_meta.get("active_data_source")),
+            fallback_used=result_json.get(
+                "fallback_used", infer_meta.get("fallback_used")
+            ),
+            fallback_reason=result_json.get(
+                "fallback_reason", infer_meta.get("fallback_reason")
+            ),
+            execution_mode=result_json.get(
+                "execution_mode", infer_meta.get("execution_mode")
+            ),
+            model_switch_used=result_json.get(
+                "model_switch_used", infer_meta.get("model_switch_used")
+            ),
+            model_switch_reason=result_json.get(
+                "model_switch_reason", infer_meta.get("model_switch_reason")
+            ),
+            active_model_id=result_json.get(
+                "active_model_id", infer_meta.get("active_model_id")
+            ),
+            effective_model_id=result_json.get(
+                "effective_model_id", infer_meta.get("effective_model_id")
+            ),
+            model_source=result_json.get(
+                "model_source", infer_meta.get("model_source")
+            ),
+            active_data_source=result_json.get(
+                "active_data_source", infer_meta.get("active_data_source")
+            ),
             error=row.get("error_message") or result_json.get("error"),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
@@ -321,7 +368,9 @@ class PipelineService:
             pred_path: Path | None = None
             signal_path: Path | None = None
             if rec.request.inference_enabled:
-                await self._update_run(run_id=run_id, status="running", stage="inference")
+                await self._update_run(
+                    run_id=run_id, status="running", stage="inference"
+                )
                 inference_result = await self._run_inference(rec.request, run_id=run_id)
                 rec.inference_result = inference_result
                 inference_meta = self._extract_inference_meta(inference_result)
@@ -345,7 +394,10 @@ class PipelineService:
                 signal_path = pred_path
 
                 tft_result: dict[str, Any] | None = None
-                if rec.request.tft_model_id and rec.request.tft_inference_data is not None:
+                if (
+                    rec.request.tft_model_id
+                    and rec.request.tft_inference_data is not None
+                ):
                     tft_result = self._run_tft_inference(rec.request, run_id=run_id)
 
                 try:
@@ -454,7 +506,9 @@ class PipelineService:
                 },
             )
 
-        result = await self.get_result(run_id, user_id=rec.request.user_id, tenant_id=rec.request.tenant_id)
+        result = await self.get_result(
+            run_id, user_id=rec.request.user_id, tenant_id=rec.request.tenant_id
+        )
         if result is None:
             raise RuntimeError("pipeline finished but result is unavailable")
         return result
@@ -488,15 +542,33 @@ class PipelineService:
         rec.backtest_result = result_json.get("backtest_result")
         rec.fusion_rules = result_json.get("fusion_rules")
         infer_meta = self._extract_inference_meta(rec.inference_result)
-        rec.fallback_used = result_json.get("fallback_used", infer_meta.get("fallback_used"))
-        rec.fallback_reason = result_json.get("fallback_reason", infer_meta.get("fallback_reason"))
-        rec.execution_mode = result_json.get("execution_mode", infer_meta.get("execution_mode"))
-        rec.model_switch_used = result_json.get("model_switch_used", infer_meta.get("model_switch_used"))
-        rec.model_switch_reason = result_json.get("model_switch_reason", infer_meta.get("model_switch_reason"))
-        rec.active_model_id = result_json.get("active_model_id", infer_meta.get("active_model_id"))
-        rec.effective_model_id = result_json.get("effective_model_id", infer_meta.get("effective_model_id"))
-        rec.model_source = result_json.get("model_source", infer_meta.get("model_source"))
-        rec.active_data_source = result_json.get("active_data_source", infer_meta.get("active_data_source"))
+        rec.fallback_used = result_json.get(
+            "fallback_used", infer_meta.get("fallback_used")
+        )
+        rec.fallback_reason = result_json.get(
+            "fallback_reason", infer_meta.get("fallback_reason")
+        )
+        rec.execution_mode = result_json.get(
+            "execution_mode", infer_meta.get("execution_mode")
+        )
+        rec.model_switch_used = result_json.get(
+            "model_switch_used", infer_meta.get("model_switch_used")
+        )
+        rec.model_switch_reason = result_json.get(
+            "model_switch_reason", infer_meta.get("model_switch_reason")
+        )
+        rec.active_model_id = result_json.get(
+            "active_model_id", infer_meta.get("active_model_id")
+        )
+        rec.effective_model_id = result_json.get(
+            "effective_model_id", infer_meta.get("effective_model_id")
+        )
+        rec.model_source = result_json.get(
+            "model_source", infer_meta.get("model_source")
+        )
+        rec.active_data_source = result_json.get(
+            "active_data_source", infer_meta.get("active_data_source")
+        )
         self._runs[run_id] = rec
         return rec
 
@@ -515,11 +587,15 @@ class PipelineService:
             raise RuntimeError("strategy generation returned no artifacts")
         return generated.artifacts[0].code
 
-    async def _run_inference(self, request: PipelineRunRequest, *, run_id: str) -> dict[str, Any]:
+    async def _run_inference(
+        self, request: PipelineRunRequest, *, run_id: str
+    ) -> dict[str, Any]:
         if request.inference_data is None:
             raise ValueError("inference_data is required when inference_enabled=true")
         if not request.user_id or not request.tenant_id:
-            raise ValueError("user_id and tenant_id are required when inference_enabled=true")
+            raise ValueError(
+                "user_id and tenant_id are required when inference_enabled=true"
+            )
 
         result = await self.inference_router_service.predict_with_fallback_async(
             request.model_id or "",
@@ -533,7 +609,9 @@ class PipelineService:
             raise RuntimeError(result.get("error") or "inference failed")
         return result
 
-    def _run_tft_inference(self, request: PipelineRunRequest, *, run_id: str) -> dict[str, Any]:
+    def _run_tft_inference(
+        self, request: PipelineRunRequest, *, run_id: str
+    ) -> dict[str, Any]:
         if not request.tft_model_id:
             raise ValueError("tft_model_id is required for TFT inference")
         if request.tft_inference_data is None:
@@ -549,7 +627,9 @@ class PipelineService:
         return result
 
     @staticmethod
-    def _extract_close_price_map(inference_data: dict[str, Any] | list[dict[str, Any]] | None) -> dict[str, float]:
+    def _extract_close_price_map(
+        inference_data: dict[str, Any] | list[dict[str, Any]] | None,
+    ) -> dict[str, float]:
         rows: list[dict[str, Any]]
         if inference_data is None:
             return {}
@@ -562,7 +642,9 @@ class PipelineService:
 
         result: dict[str, float] = {}
         for row in rows:
-            symbol = str(row.get("instrument") or row.get("symbol") or "").upper().strip()
+            symbol = (
+                str(row.get("instrument") or row.get("symbol") or "").upper().strip()
+            )
             if not symbol:
                 continue
             try:
@@ -605,8 +687,14 @@ class PipelineService:
         if isinstance(fusion_report, dict):
             instruments = fusion_report.get("selected_instruments") or []
             scores = fusion_report.get("selected_scores") or []
-            if isinstance(instruments, list) and isinstance(scores, list) and instruments:
-                for idx, (inst, score) in enumerate(zip(instruments, scores)):
+            if (
+                isinstance(instruments, list)
+                and isinstance(scores, list)
+                and instruments
+            ):
+                for idx, (inst, score) in enumerate(
+                    zip(instruments, scores, strict=False)
+                ):
                     symbol = str(inst).upper()
                     score_val = float(score)
                     signals.append(
@@ -623,7 +711,9 @@ class PipelineService:
             symbols = inference_result.get("symbols") or []
             predictions = inference_result.get("predictions") or []
             if isinstance(symbols, list) and isinstance(predictions, list) and symbols:
-                for idx, (inst, score) in enumerate(zip(symbols, predictions)):
+                for idx, (inst, score) in enumerate(
+                    zip(symbols, predictions, strict=False)
+                ):
                     symbol = str(inst).upper()
                     score_val = float(score)
                     signals.append(
@@ -646,7 +736,9 @@ class PipelineService:
         pred_path: Path | None,
     ) -> dict[str, Any]:
         end = request.end_date or datetime.now().strftime("%Y-%m-%d")
-        start = request.start_date or (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+        start = request.start_date or (datetime.now() - timedelta(days=365)).strftime(
+            "%Y-%m-%d"
+        )
 
         signal_value = str(pred_path.resolve()) if pred_path else "<PRED>"
 
@@ -663,7 +755,9 @@ class PipelineService:
                 max_short_exposure=request.max_short_exposure,
                 max_leverage=request.max_leverage,
             ),
-            strategy_content=(strategy_code if request.use_generated_strategy_for_backtest else None),
+            strategy_content=(
+                strategy_code if request.use_generated_strategy_for_backtest else None
+            ),
             start_date=start,
             end_date=end,
             initial_capital=request.initial_capital,

@@ -43,7 +43,9 @@ class QMTAgentBinding(Base):
     # 时间戳
     last_seen_at = Column(DateTime(timezone=True), nullable=True)
     bound_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, default=datetime.utcnow
+    )
     updated_at = Column(
         DateTime(timezone=True),
         nullable=False,
@@ -52,7 +54,9 @@ class QMTAgentBinding(Base):
     )
 
     __table_args__ = (
-        Index("idx_qmt_binding_tenant_account_status", "tenant_id", "account_id", "status"),
+        Index(
+            "idx_qmt_binding_tenant_account_status", "tenant_id", "account_id", "status"
+        ),
         Index("idx_qmt_binding_api_key", "api_key_id"),
     )
 

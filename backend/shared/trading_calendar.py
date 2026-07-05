@@ -4,7 +4,7 @@ import logging
 import json
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
@@ -21,12 +21,32 @@ _DEFAULT_MARKET_TZ: dict[str, str] = {
 
 _DEFAULT_SESSIONS: dict[str, list[dict[str, Any]]] = {
     "SSE": [
-        {"session_name": "AM", "start_time": "09:30:00", "end_time": "11:30:00", "cross_day": False},
-        {"session_name": "PM", "start_time": "13:00:00", "end_time": "15:00:00", "cross_day": False},
+        {
+            "session_name": "AM",
+            "start_time": "09:30:00",
+            "end_time": "11:30:00",
+            "cross_day": False,
+        },
+        {
+            "session_name": "PM",
+            "start_time": "13:00:00",
+            "end_time": "15:00:00",
+            "cross_day": False,
+        },
     ],
     "SZSE": [
-        {"session_name": "AM", "start_time": "09:30:00", "end_time": "11:30:00", "cross_day": False},
-        {"session_name": "PM", "start_time": "13:00:00", "end_time": "15:00:00", "cross_day": False},
+        {
+            "session_name": "AM",
+            "start_time": "09:30:00",
+            "end_time": "11:30:00",
+            "cross_day": False,
+        },
+        {
+            "session_name": "PM",
+            "start_time": "13:00:00",
+            "end_time": "15:00:00",
+            "cross_day": False,
+        },
     ],
 }
 
@@ -35,7 +55,6 @@ _MARKET_TO_XCAL = {
     "SZSE": "XSHG",
     "CFFEX": "XSHG",
 }
-
 
 @dataclass
 class SessionWindow:
@@ -51,7 +70,6 @@ class SessionWindow:
             "end_at": self.end_at.isoformat(),
             "cross_day": self.cross_day,
         }
-
 
 class TradingCalendarService:
     @staticmethod
@@ -92,7 +110,10 @@ class TradingCalendarService:
                 if prev_end_at < local_dt < start_at:
                     prev_name = str(previous.session_name or "").strip().upper()
                     next_name = str(window.session_name or "").strip().upper()
-                    if prev_name in {"AM", "CONTINUOUS_AM"} and next_name in {"PM", "CONTINUOUS_PM"}:
+                    if prev_name in {"AM", "CONTINUOUS_AM"} and next_name in {
+                        "PM",
+                        "CONTINUOUS_PM",
+                    }:
                         return "LUNCH_BREAK"
                     return "CLOSED"
             previous = window
@@ -220,7 +241,11 @@ class TradingCalendarService:
             ZoneInfo(candidate)
             return candidate
         except Exception:
-            logger.warning("Invalid timezone %s for market %s, fallback Asia/Shanghai", candidate, market)
+            logger.warning(
+                "Invalid timezone %s for market %s, fallback Asia/Shanghai",
+                candidate,
+                market,
+            )
             return "Asia/Shanghai"
 
     async def upsert_calendar_day(
@@ -344,7 +369,9 @@ class TradingCalendarService:
     ) -> bool:
         mkt = self._normalize_market(market)
         d = self._normalize_trade_date(trade_date)
-        record = await self._find_day_record(market=mkt, trade_date=d, tenant_id=tenant_id, user_id=user_id)
+        record = await self._find_day_record(
+            market=mkt, trade_date=d, tenant_id=tenant_id, user_id=user_id
+        )
         if record is not None:
             return bool(record["is_trading_day"])
         return self._fallback_is_trading_day(mkt, d)
@@ -401,7 +428,9 @@ class TradingCalendarService:
     ) -> list[SessionWindow]:
         mkt = self._normalize_market(market)
         d = self._normalize_trade_date(trade_date)
-        rows = await self._find_sessions(market=mkt, tenant_id=tenant_id, user_id=user_id)
+        rows = await self._find_sessions(
+            market=mkt, tenant_id=tenant_id, user_id=user_id
+        )
         if not rows:
             rows = _DEFAULT_SESSIONS.get(mkt, [])
         tz_name = self._safe_timezone(
@@ -464,19 +493,25 @@ class TradingCalendarService:
             tenant_id=tenant_id,
             user_id=user_id,
         )
+
         def _coerce_window_dt(value: datetime) -> datetime:
             if value.tzinfo is None and local_dt.tzinfo is not None:
                 return value.replace(tzinfo=local_dt.tzinfo)
             if value.tzinfo is not None and local_dt.tzinfo is None:
                 return value.replace(tzinfo=None)
             return value
+
         market_phase = self._classify_market_phase(
             local_dt=local_dt,
             sessions=sessions,
             is_trading_day=is_trading_day,
         )
         for window in sessions:
-            if _coerce_window_dt(window.start_at) <= local_dt <= _coerce_window_dt(window.end_at):
+            if (
+                _coerce_window_dt(window.start_at)
+                <= local_dt
+                <= _coerce_window_dt(window.end_at)
+            ):
                 return {
                     "is_trading_time": True,
                     "matched_session": window.session_name,
@@ -560,7 +595,9 @@ class TradingCalendarService:
                 item = row.mappings().first()
                 return dict(item) if item else None
             except Exception as exc:
-                logger.warning("query qm_market_calendar_day failed, fallback enabled: %s", exc)
+                logger.warning(
+                    "query qm_market_calendar_day failed, fallback enabled: %s", exc
+                )
                 return None
 
     async def _find_sessions(
@@ -630,7 +667,9 @@ class TradingCalendarService:
                 )
                 return [dict(r) for r in rows.mappings().all()]
             except Exception as exc:
-                logger.warning("query qm_market_trading_session failed, fallback enabled: %s", exc)
+                logger.warning(
+                    "query qm_market_trading_session failed, fallback enabled: %s", exc
+                )
                 return []
 
     def _fallback_is_trading_day(self, market: str, d: date) -> bool:
@@ -645,8 +684,9 @@ class TradingCalendarService:
             cal = xcals.get_calendar(calendar_name)
             return bool(cal.is_session(d))
         except Exception:
-            logger.warning("exchange_calendars fallback failed for market=%s date=%s", market, d)
+            logger.warning(
+                "exchange_calendars fallback failed for market=%s date=%s", market, d
+            )
             return True
-
 
 calendar_service = TradingCalendarService()

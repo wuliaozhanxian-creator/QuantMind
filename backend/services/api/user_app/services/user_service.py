@@ -4,7 +4,7 @@ User Service - 用户业务逻辑
 
 import logging
 from datetime import datetime
-from typing import List, Optional
+from typing import Optional
 
 from sqlalchemy import or_, select, update
 
@@ -20,14 +20,15 @@ from backend.shared.redis_sentinel_client import get_redis_sentinel_client
 
 logger = logging.getLogger(__name__)
 
-
 class UserService:
     """用户服务"""
 
     def __init__(self):
         self.redis_client = get_redis_sentinel_client()
 
-    async def get_user_by_id(self, user_id: str, tenant_id: str, use_cache: bool = True) -> User | None:
+    async def get_user_by_id(
+        self, user_id: str, tenant_id: str, use_cache: bool = True
+    ) -> User | None:
         """根据ID获取用户"""
         # 尝试从缓存获取
         if use_cache:
@@ -43,7 +44,7 @@ class UserService:
                 select(User).where(
                     User.user_id == user_id,
                     User.tenant_id == tenant_id,
-                    User.is_deleted == False,
+                    not User.is_deleted,
                 )
             )
             user = result.scalar_one_or_none()
@@ -52,7 +53,9 @@ class UserService:
                 # 缓存用户信息
                 cache_key = f"user:{tenant_id}:{user_id}"
                 # 简化：实际应序列化整个对象
-                self.redis_client.setex(cache_key, settings.CACHE_TTL_USER_PROFILE, user.username.encode())
+                self.redis_client.setex(
+                    cache_key, settings.CACHE_TTL_USER_PROFILE, user.username.encode()
+                )
 
             return user
 
@@ -63,7 +66,7 @@ class UserService:
                 select(User).where(
                     User.username == username,
                     User.tenant_id == tenant_id,
-                    User.is_deleted == False,
+                    not User.is_deleted,
                 )
             )
             return result.scalar_one_or_none()
@@ -75,7 +78,7 @@ class UserService:
                 select(User).where(
                     User.email == email,
                     User.tenant_id == tenant_id,
-                    User.is_deleted == False,
+                    not User.is_deleted,
                 )
             )
             return result.scalar_one_or_none()
@@ -87,7 +90,7 @@ class UserService:
                 select(User).where(
                     User.phone_number == phone,
                     User.tenant_id == tenant_id,
-                    User.is_deleted == False,
+                    not User.is_deleted,
                 )
             )
             return result.scalar_one_or_none()
@@ -104,7 +107,7 @@ class UserService:
         async with get_session(read_only=True) as session:
             # 构建查询
             stmt = select(User).where(
-                User.is_deleted == False,
+                not User.is_deleted,
                 User.tenant_id == tenant_id,
             )
 
@@ -139,7 +142,7 @@ class UserService:
                 select(User).where(
                     User.user_id == user_id,
                     User.tenant_id == tenant_id,
-                    User.is_deleted == False,
+                    not User.is_deleted,
                 )
             )
             user = result.scalar_one_or_none()
@@ -200,7 +203,9 @@ class UserService:
             logger.info(f"User soft deleted: {user_id}")
             return result.rowcount > 0
 
-    async def get_user_detail(self, user_id: str, tenant_id: str) -> UserDetailResponse | None:
+    async def get_user_detail(
+        self, user_id: str, tenant_id: str
+    ) -> UserDetailResponse | None:
         """获取用户详细信息（包含档案）"""
         async with get_session(read_only=True) as session:
             # 获取用户
@@ -208,7 +213,7 @@ class UserService:
                 select(User).where(
                     User.user_id == user_id,
                     User.tenant_id == tenant_id,
-                    User.is_deleted == False,
+                    not User.is_deleted,
                 )
             )
             user = user_result.scalar_one_or_none()

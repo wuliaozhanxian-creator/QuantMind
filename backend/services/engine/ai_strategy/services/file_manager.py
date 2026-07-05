@@ -9,7 +9,7 @@ import os
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, BinaryIO, Dict, List, Optional
+from typing import Any, BinaryIO, Optional
 
 # 导入共享枚举
 try:
@@ -17,7 +17,6 @@ try:
 except ImportError:
     MessageRole = str
     MessageType = str
-
 
 class FileInfo:
     """文件信息"""
@@ -61,7 +60,6 @@ class FileInfo:
             "tags": self.tags,
         }
 
-
 class FileManager:
     """文件管理器"""
 
@@ -98,7 +96,9 @@ class FileManager:
         """计算文件哈希"""
         return hashlib.sha256(file_content).hexdigest()
 
-    def _detect_category(self, filename: str, content_type: str, user_category: str = None) -> str:
+    def _detect_category(
+        self, filename: str, content_type: str, user_category: str = None
+    ) -> str:
         """检测文件类别"""
         if user_category and user_category != "auto":
             return user_category
@@ -232,7 +232,10 @@ class FileManager:
                 if not self.user_files[user_id]:
                     del self.user_files[user_id]
 
-            if file_info.category in self.category_files and file_id in self.category_files[file_info.category]:
+            if (
+                file_info.category in self.category_files
+                and file_id in self.category_files[file_info.category]
+            ):
                 self.category_files[file_info.category].remove(file_id)
                 if not self.category_files[file_info.category]:
                     del self.category_files[file_info.category]
@@ -274,7 +277,9 @@ class FileManager:
 
         return {"files": files, "total": total, "limit": limit, "offset": offset}
 
-    def list_files_by_category(self, category: str, limit: int = 100, offset: int = 0) -> dict[str, Any]:
+    def list_files_by_category(
+        self, category: str, limit: int = 100, offset: int = 0
+    ) -> dict[str, Any]:
         """按类别列出文件"""
         if category not in self.category_files:
             return {"files": [], "total": 0, "limit": limit, "offset": offset}
@@ -373,14 +378,16 @@ class FileManager:
         for file_path in temp_dir.glob("*"):
             if file_path.is_file():
                 # 检查文件年龄
-                file_age = current_time - datetime.fromtimestamp(file_path.stat().st_mtime)
+                file_age = current_time - datetime.fromtimestamp(
+                    file_path.stat().st_mtime
+                )
 
                 if file_age > timedelta(days=max_age_days):
                     try:
                         file_path.unlink()
                         deleted_count += 1
                     except (OSError, PermissionError):
-                        pass
+                        pass  # noqa: BLE001 - 已知 OS 错误，预期静默
 
         return deleted_count
 
@@ -391,12 +398,16 @@ class FileManager:
 
         category_stats = {}
         for category, file_ids in self.category_files.items():
-            category_size = sum(self.files[fid].size for fid in file_ids if fid in self.files)
+            category_size = sum(
+                self.files[fid].size for fid in file_ids if fid in self.files
+            )
             category_stats[category] = {"count": len(file_ids), "size": category_size}
 
         user_stats = {}
         for user_id, file_ids in self.user_files.items():
-            user_size = sum(self.files[fid].size for fid in file_ids if fid in self.files)
+            user_size = sum(
+                self.files[fid].size for fid in file_ids if fid in self.files
+            )
             user_stats[user_id] = {"count": len(file_ids), "size": user_size}
 
         return {
@@ -408,7 +419,6 @@ class FileManager:
             "storage_limit": None,  # 可以设置存储限制
             "last_cleanup": None,
         }
-
 
 # 全局文件管理器实例
 file_manager = FileManager()

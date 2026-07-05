@@ -20,6 +20,7 @@ class _CaseInsensitiveEnum(str, Enum):
                 return member
         return None
 
+
 class Exchange(str, Enum):
     SSE = "SSE"
     SZSE = "SZSE"
@@ -29,6 +30,7 @@ class Exchange(str, Enum):
     CZCE = "CZCE"
     CFFEX = "CFFEX"
     INE = "INE"
+
 
 class OrderSide(_CaseInsensitiveEnum):
     BUY = "buy"
@@ -46,16 +48,19 @@ class TradeAction(_CaseInsensitiveEnum):
     SELL_TO_OPEN = "sell_to_open"
     BUY_TO_CLOSE = "buy_to_close"
 
+
 class OrderType(_CaseInsensitiveEnum):
     MARKET = "market"
     LIMIT = "limit"
     STOP = "stop"
     STOP_LIMIT = "stop_limit"
 
+
 class TimeInForce(str, Enum):
     GTC = "GTC"
     IOC = "IOC"
     FOK = "FOK"
+
 
 class OrderStatus(_CaseInsensitiveEnum):
     PENDING = "pending"
@@ -67,6 +72,7 @@ class OrderStatus(_CaseInsensitiveEnum):
     EXPIRED = "expired"
     OPEN = "submitted"
     PARTIAL = "partially_filled"
+
 
 class TradingMode(_CaseInsensitiveEnum):
     SIMULATION = "SIMULATION"

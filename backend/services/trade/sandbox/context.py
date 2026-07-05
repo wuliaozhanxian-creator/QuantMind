@@ -1,7 +1,6 @@
 import json
 import time
-from typing import Any, Dict, List
-
+from typing import Any
 
 class SandboxContext:
     """
@@ -33,9 +32,18 @@ class SandboxContext:
 
     def log(self, message: str):
         """收集策略日志并作为信号抛给引擎"""
-        self.signals_queue.append({"type": "log", "timestamp": self._current_time, "message": str(message)})
+        self.signals_queue.append(
+            {"type": "log", "timestamp": self._current_time, "message": str(message)}
+        )
 
-    def _add_order_signal(self, symbol: str, quantity: int, price: float, side: str, order_type: str = "limit"):
+    def _add_order_signal(
+        self,
+        symbol: str,
+        quantity: int,
+        price: float,
+        side: str,
+        order_type: str = "limit",
+    ):
         signal = {
             "type": "order",
             "tenant_id": self.tenant_id,
@@ -43,11 +51,24 @@ class SandboxContext:
             "strategy_id": self.strategy_id,
             "run_id": self.run_id,
             "timestamp": self._current_time,
-            "data": {"symbol": symbol, "quantity": quantity, "price": price, "side": side, "order_type": order_type},
+            "data": {
+                "symbol": symbol,
+                "quantity": quantity,
+                "price": price,
+                "side": side,
+                "order_type": order_type,
+            },
         }
         self.signals_queue.append(signal)
 
-    def order(self, symbol: str, quantity: int, price: float, side: str, order_type: str = "limit"):
+    def order(
+        self,
+        symbol: str,
+        quantity: int,
+        price: float,
+        side: str,
+        order_type: str = "limit",
+    ):
         """
         直接下单接口：发送订单信号到沙箱引擎。
         参数:
@@ -94,7 +115,6 @@ class SandboxContext:
         self.signals_queue.clear()
         return signals
 
-
 def create_sandbox_context(
     tenant_id: str,
     user_id: str,
@@ -103,4 +123,6 @@ def create_sandbox_context(
     exec_config: dict,
     live_trade_config: dict | None = None,
 ) -> SandboxContext:
-    return SandboxContext(tenant_id, user_id, strategy_id, run_id, exec_config, live_trade_config)
+    return SandboxContext(
+        tenant_id, user_id, strategy_id, run_id, exec_config, live_trade_config
+    )

@@ -16,13 +16,13 @@ from backend.shared.file_upload_service import file_upload_service
 
 router = APIRouter(prefix="/files", tags=["Files"])
 
-
 class DeleteFileRequest(BaseModel):
     file_key: str
     user_id: str
 
-
-def _resolve_effective_user_id(optional_user: dict | None, requested_user_id: str) -> str:
+def _resolve_effective_user_id(
+    optional_user: dict | None, requested_user_id: str
+) -> str:
     """
     Resolve effective user_id for file operations.
 
@@ -36,7 +36,6 @@ def _resolve_effective_user_id(optional_user: dict | None, requested_user_id: st
     if not effective_user_id:
         raise HTTPException(status_code=400, detail="缺少 user_id")
     return effective_user_id
-
 
 @router.post("/upload")
 async def upload_file(
@@ -55,7 +54,6 @@ async def upload_file(
         tags=[],
     )
     return result
-
 
 @router.delete("/delete")
 async def delete_file(

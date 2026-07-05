@@ -28,7 +28,6 @@ from backend.shared.stock_utils import StockCodeUtil
 # SQL 注入防护：合法列名/表名正则（仅允许字母数字下划线）
 _VALID_IDENT_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
-
 def _sha256_file(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
@@ -36,10 +35,8 @@ def _sha256_file(path: Path) -> str:
             h.update(chunk)
     return h.hexdigest()
 
-
 def _sha256_bytes(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
-
 
 def _parse_json_object(content: bytes, label: str) -> dict[str, Any]:
     try:
@@ -49,7 +46,6 @@ def _parse_json_object(content: bytes, label: str) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise RuntimeError(f"{label} 不是有效 JSON 对象")
     return payload
-
 
 def _http_get_json(url: str, headers: dict[str, str]) -> dict[str, Any]:
     req = urllib.request.Request(url, headers=headers, method="GET")
@@ -62,24 +58,20 @@ def _http_get_json(url: str, headers: dict[str, str]) -> dict[str, Any]:
         return payload
     raise RuntimeError("Invalid JSON payload from official data update API")
 
-
 def _download_bytes(url: str) -> bytes:
     req = urllib.request.Request(url, method="GET")
     with urllib.request.urlopen(req, timeout=300) as resp:
         return resp.read()
 
-
 def _download_file(url: str, target: Path) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(_download_bytes(url))
-
 
 def _manifest_file_by_kind(files: list[dict[str, Any]], kind: str) -> dict[str, Any] | None:
     for item in files:
         if isinstance(item, dict) and str(item.get("kind") or "").strip() == kind:
             return item
     return None
-
 
 def _assert_entry_consistency(
     api_entry: dict[str, Any] | None,
@@ -103,7 +95,6 @@ def _assert_entry_consistency(
             f"{kind} 元数据不一致: API 返回的 size={api_size}，manifest.json 中为 {manifest_size}"
         )
 
-
 def _sync_dir(src: Path, dst: Path) -> int:
     if not src.exists():
         return 0
@@ -118,7 +109,6 @@ def _sync_dir(src: Path, dst: Path) -> int:
         copied += 1
     return copied
 
-
 def _to_python_value(v: Any) -> Any:
     if pd.isna(v):
         return None
@@ -128,7 +118,6 @@ def _to_python_value(v: Any) -> Any:
         except Exception:
             return v
     return v
-
 
 def _normalize_iso_date(value: Any) -> str | None:
     raw = str(value or "").strip()
@@ -141,7 +130,6 @@ def _normalize_iso_date(value: Any) -> str | None:
         return parsed.date().isoformat()
     except Exception:
         return None
-
 
 def _scan_local_qlib_last_date(project_root: Path) -> str | None:
     calendars_path = project_root / "db" / "qlib_data" / "calendars" / "day.txt"
@@ -156,7 +144,6 @@ def _scan_local_qlib_last_date(project_root: Path) -> str | None:
         return _normalize_iso_date(lines[-1]) if lines else None
     except Exception:
         return None
-
 
 def _scan_local_feature_snapshots_last_date(project_root: Path) -> str | None:
     snapshot_dir = project_root / "db" / "feature_snapshots"
@@ -177,7 +164,6 @@ def _scan_local_feature_snapshots_last_date(project_root: Path) -> str | None:
         except Exception:
             continue
     return None
-
 
 async def _scan_local_stock_daily_latest_last_date() -> str | None:
     db_host = os.getenv("DB_HOST", "127.0.0.1")
@@ -201,7 +187,6 @@ async def _scan_local_stock_daily_latest_last_date() -> str | None:
     finally:
         await conn.close()
 
-
 def _scan_local_status(project_root: Path) -> dict[str, Any]:
     qlib_last_date = _scan_local_qlib_last_date(project_root)
     feature_last_date = _scan_local_feature_snapshots_last_date(project_root)
@@ -217,7 +202,6 @@ def _scan_local_status(project_root: Path) -> dict[str, Any]:
         "overall_watermark_trade_date": overall_watermark,
     }
 
-
 def _should_skip_download(local_status: dict[str, Any], remote_trade_date: str | None) -> bool:
     if not remote_trade_date:
         return False
@@ -229,7 +213,6 @@ def _should_skip_download(local_status: dict[str, Any], remote_trade_date: str |
     if not all(available_dates):
         return False
     return min(str(x) for x in available_dates if x) >= remote_trade_date
-
 
 async def _upsert_stock_daily_latest(parquet_path: Path) -> int:
     if not parquet_path.exists():
@@ -312,14 +295,12 @@ async def _upsert_stock_daily_latest(parquet_path: Path) -> int:
     finally:
         await conn.close()
 
-
 def _extract_bundle(bundle_path: Path, target_dir: Path) -> None:
     target_dir.mkdir(parents=True, exist_ok=True)
     cmd = ["tar", "--zstd", "-xf", str(bundle_path), "-C", str(target_dir)]
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if proc.returncode != 0:
         raise RuntimeError(f"解压失败: {proc.stderr or proc.stdout}")
-
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="拉取并应用官方增量数据包")
@@ -476,7 +457,6 @@ def main() -> int:
 
     print(json.dumps(result, ensure_ascii=False))
     return 0
-
 
 if __name__ == "__main__":
     try:

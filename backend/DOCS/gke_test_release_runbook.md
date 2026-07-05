@@ -45,6 +45,7 @@ export DB_USER="admin"
 export DB_PASSWORD="admin123"
 export SQL_INSTANCE_CONNECTION_NAME="your-project:asia-east1:quantmind-test-pg"
 
+# T6.5-P3 residual, M4 migration: INTERNAL_CALL_SECRET 已废弃（仅训练容器回调用），服务间认证改用 SECRET_KEY 签发的 service JWT
 export INTERNAL_CALL_SECRET="quantmind_internal_secret_2026"
 export SECRET_KEY="replace-with-real-secret"
 export JWT_SECRET_KEY="replace-with-real-jwt-secret"

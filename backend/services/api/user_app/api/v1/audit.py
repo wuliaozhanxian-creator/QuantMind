@@ -18,7 +18,6 @@ from backend.services.api.user_app.services.audit_service import AuditLogService
 
 router = APIRouter(prefix="/audit")
 
-
 class AuditLogResponse(BaseModel):
     """审计日志响应"""
 
@@ -37,14 +36,12 @@ class AuditLogResponse(BaseModel):
     created_at: datetime
     duration_ms: int | None
 
-
 class ResponseModel(BaseModel):
     """统一响应模型"""
 
     code: int = 200
     message: str = "success"
     data: dict = {}
-
 
 @router.get("/my-logs", response_model=ResponseModel)
 async def get_my_logs(
@@ -99,9 +96,10 @@ async def get_my_logs(
         },
     }
 
-
 @router.get("/my-statistics", response_model=ResponseModel)
-async def get_my_statistics(current_user: dict = Depends(get_current_user), db=Depends(get_db)):
+async def get_my_statistics(
+    current_user: dict = Depends(get_current_user), db=Depends(get_db)
+):
     """
     获取当前用户的操作统计
     """
@@ -113,7 +111,6 @@ async def get_my_statistics(current_user: dict = Depends(get_current_user), db=D
     )
 
     return {"code": 200, "message": "success", "data": stats}
-
 
 @router.get("/users/{user_id}/logs", response_model=ResponseModel)
 async def get_user_logs(
@@ -170,7 +167,6 @@ async def get_user_logs(
         },
     }
 
-
 @router.get("/recent", response_model=ResponseModel)
 async def get_recent_logs(
     limit: int = Query(100, ge=1, le=500, description="数量限制"),
@@ -214,7 +210,6 @@ async def get_recent_logs(
         },
     }
 
-
 @router.get("/failed", response_model=ResponseModel)
 async def get_failed_actions(
     limit: int = Query(100, ge=1, le=500, description="数量限制"),
@@ -251,14 +246,17 @@ async def get_failed_actions(
         },
     }
 
-
 @router.get("/statistics", response_model=ResponseModel)
-async def get_overall_statistics(current_user: dict = Depends(require_permission("system.audit")), db=Depends(get_db)):
+async def get_overall_statistics(
+    current_user: dict = Depends(require_permission("system.audit")), db=Depends(get_db)
+):
     """
     获取整体操作统计（需要system.audit权限）
     """
     audit_service = AuditLogService(db)
 
-    stats = await audit_service.get_action_statistics(tenant_id=current_user["tenant_id"])
+    stats = await audit_service.get_action_statistics(
+        tenant_id=current_user["tenant_id"]
+    )
 
     return {"code": 200, "message": "success", "data": stats}

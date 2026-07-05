@@ -5,7 +5,7 @@
 import time
 from collections import defaultdict, deque
 from datetime import datetime
-from typing import List, Optional
+from typing import Optional
 
 import psutil
 
@@ -17,7 +17,6 @@ from ..models.performance import (
     SystemPerformance,
 )
 from ..provider_registry import REGISTRY
-
 
 class PerformanceMonitor:
     """性能监控器"""
@@ -43,7 +42,9 @@ class PerformanceMonitor:
 
         self.active_alerts = {}
 
-    def record_request_start(self, provider_name: str, request_type: str = "generation"):
+    def record_request_start(
+        self, provider_name: str, request_type: str = "generation"
+    ):
         """记录请求开始"""
         request_id = f"{provider_name}_{request_type}_{int(time.time() * 1000)}"
         self.request_stats[provider_name]["ongoing_requests"][request_id] = {
@@ -52,7 +53,9 @@ class PerformanceMonitor:
         }
         return request_id
 
-    def record_request_end(self, provider_name: str, request_id: str, success: bool, response_time: float):
+    def record_request_end(
+        self, provider_name: str, request_id: str, success: bool, response_time: float
+    ):
         """记录请求结束"""
         stats = self.request_stats[provider_name]
 
@@ -118,13 +121,19 @@ class PerformanceMonitor:
             success_rate=success_rate,
             error_rate=error_rate,
             last_request_time=stats["last_request"] or datetime.now(),
-            status=("healthy" if success_rate >= 95 and avg_response_time < 30000 else "degraded"),
+            status=(
+                "healthy"
+                if success_rate >= 95 and avg_response_time < 30000
+                else "degraded"
+            ),
         )
 
     def get_system_performance(self) -> SystemPerformance:
         """获取系统性能统计"""
         total_requests = sum(stats["total"] for stats in self.request_stats.values())
-        successful_requests = sum(stats["success"] for stats in self.request_stats.values())
+        successful_requests = sum(
+            stats["success"] for stats in self.request_stats.values()
+        )
         failed_requests = total_requests - successful_requests
 
         # 计算平均响应时间
@@ -132,7 +141,11 @@ class PerformanceMonitor:
         for stats in self.request_stats.values():
             all_response_times.extend(stats["response_times"])
 
-        avg_response_time = sum(all_response_times) / len(all_response_times) if all_response_times else 0
+        avg_response_time = (
+            sum(all_response_times) / len(all_response_times)
+            if all_response_times
+            else 0
+        )
 
         # 获取系统资源使用情况
         try:
@@ -179,7 +192,9 @@ class PerformanceMonitor:
         error_rate = (stats["failed"] / stats["total"]) * 100
 
         response_times = list(stats["response_times"])
-        avg_response_time = sum(response_times) / len(response_times) if response_times else 0
+        avg_response_time = (
+            sum(response_times) / len(response_times) if response_times else 0
+        )
 
         # 检查错误率告警
         if error_rate > self.alert_thresholds["error_rate"]:
@@ -219,7 +234,10 @@ class PerformanceMonitor:
 
         # 检查系统资源告警
         system_perf = self.get_system_performance()
-        if system_perf.memory_usage and system_perf.memory_usage > self.alert_thresholds["memory_usage"]:
+        if (
+            system_perf.memory_usage
+            and system_perf.memory_usage > self.alert_thresholds["memory_usage"]
+        ):
             self._create_alert(
                 "memory_usage",
                 "high",
@@ -230,7 +248,10 @@ class PerformanceMonitor:
                 self.alert_thresholds["memory_usage"],
             )
 
-        if system_perf.cpu_usage and system_perf.cpu_usage > self.alert_thresholds["cpu_usage"]:
+        if (
+            system_perf.cpu_usage
+            and system_perf.cpu_usage > self.alert_thresholds["cpu_usage"]
+        ):
             self._create_alert(
                 "cpu_usage",
                 "high",
@@ -305,7 +326,6 @@ class PerformanceMonitor:
             }
         else:
             self.request_stats.clear()
-
 
 # 全局性能监控器实例
 performance_monitor = PerformanceMonitor()

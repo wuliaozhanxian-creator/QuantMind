@@ -4,7 +4,7 @@ import logging
 import os
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import pandas as pd
 from redis import Redis
@@ -17,7 +17,6 @@ logger = logging.getLogger(__name__)
 _SIGNAL_STREAM_PREFIX = "qm:signal:stream"
 _SIGNAL_LATEST_PREFIX = "qm:signal:latest"
 _SIGNAL_STREAM_MAXLEN = 200000
-
 
 class VectorizedMatcher:
     """
@@ -71,9 +70,16 @@ class VectorizedMatcher:
         """
         启动监听循环。受 ENABLE_VECTORIZED_MATCHER 环境变量控制（默认 false）。
         """
-        enabled = os.getenv("ENABLE_VECTORIZED_MATCHER", "false").lower() in {"1", "true", "yes", "on"}
+        enabled = os.getenv("ENABLE_VECTORIZED_MATCHER", "false").lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
         if not enabled:
-            logger.info("[VectorizedMatcher] 未启用（ENABLE_VECTORIZED_MATCHER 未设置），跳过。")
+            logger.info(
+                "[VectorizedMatcher] 未启用（ENABLE_VECTORIZED_MATCHER 未设置），跳过。"
+            )
             return
 
         self.is_running = True
@@ -81,11 +87,15 @@ class VectorizedMatcher:
         pubsub = self.redis.pubsub()
         await asyncio.to_thread(pubsub.subscribe, self.SIGNAL_EVENT_CHANNEL)
 
-        logger.info("[VectorizedMatcher] 已启动，监听频道: %s", self.SIGNAL_EVENT_CHANNEL)
+        logger.info(
+            "[VectorizedMatcher] 已启动，监听频道: %s", self.SIGNAL_EVENT_CHANNEL
+        )
 
         try:
             while self.is_running:
-                message = await asyncio.to_thread(pubsub.get_message, ignore_subscribe_defaults=True, timeout=1.0)
+                message = await asyncio.to_thread(
+                    pubsub.get_message, ignore_subscribe_defaults=True, timeout=1.0
+                )
                 if message and message["type"] == "message":
                     event_data = json.loads(message["data"])
                     logger.info("[VectorizedMatcher] 收到信号更新通知: %s", event_data)
@@ -154,7 +164,9 @@ class VectorizedMatcher:
                 latest_users.setdefault(tenant_id, set()).add(user_id)
                 fallback_count += 1
 
-                pool_scores = s_scores[s_scores.index.isin(universe)] if universe else s_scores
+                pool_scores = (
+                    s_scores[s_scores.index.isin(universe)] if universe else s_scores
+                )
                 selected = pool_scores.nlargest(topk)
 
                 tenant_events = stream_events.setdefault(tenant_id, [])
@@ -182,7 +194,9 @@ class VectorizedMatcher:
 
         logger.info(
             "[VectorizedMatcher] 策略扫描完成: 总=%d 跳过(已有推理)=%d 兜底=%d",
-            len(all_strategies_raw), skipped_count, fallback_count,
+            len(all_strategies_raw),
+            skipped_count,
+            fallback_count,
         )
 
         if not stream_events:
@@ -194,18 +208,24 @@ class VectorizedMatcher:
         # 写入 latest run key，Runner 用它校验信号时效性
         for tenant_id, users in latest_users.items():
             for user_id in users:
-                pipeline.set(f"{_SIGNAL_LATEST_PREFIX}:{tenant_id}:{user_id}", run_id, ex=86400)
+                pipeline.set(
+                    f"{_SIGNAL_LATEST_PREFIX}:{tenant_id}:{user_id}", run_id, ex=86400
+                )
         for tenant_id, events in stream_events.items():
             stream = f"{_SIGNAL_STREAM_PREFIX}:{tenant_id}"
             for event in events:
-                pipeline.xadd(stream, event, maxlen=_SIGNAL_STREAM_MAXLEN, approximate=True)
+                pipeline.xadd(
+                    stream, event, maxlen=_SIGNAL_STREAM_MAXLEN, approximate=True
+                )
                 total_published += 1
         if total_published:
             pipeline.execute()
             elapsed = loop.time() - start_time
             logger.info(
                 "[VectorizedMatcher] 批量匹配完成: 产生 %d 笔信号事件, 耗时 %.3fs, run_id=%s",
-                total_published, elapsed, run_id,
+                total_published,
+                elapsed,
+                run_id,
             )
 
     async def _consume_sandbox_signals(self):
@@ -223,9 +243,8 @@ class VectorizedMatcher:
             try:
                 self._stream_redis.close()
             except Exception:
-                pass
+                logger.debug("ignored exception", exc_info=True)
             self._stream_redis = None
-
 
 # 单例
 vectorized_matcher = VectorizedMatcher()

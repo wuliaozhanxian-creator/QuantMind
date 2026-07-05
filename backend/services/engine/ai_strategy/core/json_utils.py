@@ -7,10 +7,9 @@ JSON处理工具模块
 import json
 import logging
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
-
 
 def fix_incomplete_json(json_str: str) -> str:
     """尝试修复不完整的JSON字符串
@@ -99,7 +98,6 @@ def fix_incomplete_json(json_str: str) -> str:
 
     return json_str
 
-
 def extract_json_from_content(content: str) -> dict[str, Any] | None:
     """从文本内容中提取JSON对象
 
@@ -116,7 +114,7 @@ def extract_json_from_content(content: str) -> dict[str, Any] | None:
     try:
         return json.loads(content)
     except json.JSONDecodeError:
-        pass
+        pass  # noqa: BLE001 - JSON 解析失败，预期静默
 
         # 尝试提取JSON代码块
     json_match = re.search(r"```json\s*\n(.*?)\n```", content, re.DOTALL)
@@ -145,7 +143,6 @@ def extract_json_from_content(content: str) -> dict[str, Any] | None:
             logger.warning(f"JSON对象解析失败: {e}")
 
     return None
-
 
 def extract_python_code_from_json(result: dict[str, Any], content: str = "") -> str:
     """从JSON结果中提取Python代码
@@ -181,7 +178,9 @@ def extract_python_code_from_json(result: dict[str, Any], content: str = "") -> 
 
                 # 尝试查找JSON对象
         if not python_code:
-            json_obj_match = re.search(r'\{[\s\S]*?"python_code"[\s\S]*?\}', rationale_content)
+            json_obj_match = re.search(
+                r'\{[\s\S]*?"python_code"[\s\S]*?\}', rationale_content
+            )
             if json_obj_match:
                 try:
                     json_data = json.loads(json_obj_match.group())
@@ -194,7 +193,9 @@ def extract_python_code_from_json(result: dict[str, Any], content: str = "") -> 
 
                     # 尝试提取Python代码块
         if not python_code:
-            code_match = re.search(r"```python\n(.*?)\n```", rationale_content, re.DOTALL)
+            code_match = re.search(
+                r"```python\n(.*?)\n```", rationale_content, re.DOTALL
+            )
             if code_match:
                 python_code = code_match.group(1)
                 logger.info("从rationale中的Python代码块提取到代码")
@@ -202,7 +203,9 @@ def extract_python_code_from_json(result: dict[str, Any], content: str = "") -> 
 
                 # 如果还是没有，尝试从原始内容中提取
     if not python_code and content:
-        python_code_match = re.search(r'"python_code":\s*"(.*?)(?:"\s*(?:,|}))', content, re.DOTALL)
+        python_code_match = re.search(
+            r'"python_code":\s*"(.*?)(?:"\s*(?:,|}))', content, re.DOTALL
+        )
         if not python_code_match:
             # 尝试另一种模式
             python_code_match = re.search(
@@ -222,7 +225,6 @@ def extract_python_code_from_json(result: dict[str, Any], content: str = "") -> 
                 logger.warning(f"提取部分代码失败: {e}")
 
     return ""
-
 
 def decode_python_code(encoded_code: str) -> str:
     """解码转义的Python代码
@@ -252,8 +254,9 @@ def decode_python_code(encoded_code: str) -> str:
 
     return python_code
 
-
-def create_fallback_strategy_result(description: str, content: str = "") -> dict[str, Any]:
+def create_fallback_strategy_result(
+    description: str, content: str = ""
+) -> dict[str, Any]:
     """创建回退策略结果
 
     Args:

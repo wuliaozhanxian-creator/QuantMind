@@ -35,9 +35,7 @@ from backend.services.trade.services.risk_control import (
     reload_default_engine,
 )
 
-
 # ─── 公共 fixtures / helpers ─────────────────────────────────────────────────
-
 
 def make_order(
     symbol: str = "SH600000",
@@ -63,7 +61,6 @@ def make_order(
         tenant_id=tenant_id,
     )
 
-
 def make_rule(
     rule_id: str,
     rule_type: str,
@@ -81,11 +78,9 @@ def make_rule(
         priority=priority,
     )
 
-
 def run(coro):
     """同步执行 async 协程 (兼容无 event loop 的测试上下文)。"""
     return asyncio.get_event_loop().run_until_complete(coro)
-
 
 class _FakeAsyncSession:
     """模拟 AsyncSession，捕获 add/commit/rollback 用于审计落库验证。"""
@@ -104,20 +99,17 @@ class _FakeAsyncSession:
     async def rollback(self) -> None:
         self.rollbacks += 1
 
-
 # ─── 板块识别 / 涨跌停价计算 ─────────────────────────────────────────────────
-
 
 @pytest.mark.unit
 def test_detect_board_prefix_format():
     """SH600000 前缀格式板块识别 (AGENTS.md 强制格式)"""
     assert detect_board("SH600000") == "MAIN"
     assert detect_board("SZ000001") == "MAIN"
-    assert detect_board("SZ300001") == "GEM"      # 创业板
-    assert detect_board("SH688001") == "STAR"     # 科创板
-    assert detect_board("BJ430001") == "BJ"       # 北交所
+    assert detect_board("SZ300001") == "GEM"  # 创业板
+    assert detect_board("SH688001") == "STAR"  # 科创板
+    assert detect_board("BJ430001") == "BJ"  # 北交所
     assert detect_board("BJ830001") == "BJ"
-
 
 @pytest.mark.unit
 def test_detect_board_suffix_and_numeric_compatible():
@@ -126,14 +118,12 @@ def test_detect_board_suffix_and_numeric_compatible():
     assert detect_board("300001.SZ") == "GEM"
     assert detect_board("688001") == "STAR"
 
-
 @pytest.mark.unit
 def test_compute_limit_prices_main_board():
     """主板 ±10%"""
     up, down = compute_limit_prices(10.0, "MAIN", {})
     assert up == 11.0
     assert down == 9.0
-
 
 @pytest.mark.unit
 def test_compute_limit_prices_star_board_20pct():
@@ -142,7 +132,6 @@ def test_compute_limit_prices_star_board_20pct():
     assert up == pytest.approx(12.0)
     assert down == pytest.approx(8.0)
 
-
 @pytest.mark.unit
 def test_compute_limit_prices_st_stock_5pct():
     """ST 股 ±5% (params.is_st=True 触发)"""
@@ -150,9 +139,7 @@ def test_compute_limit_prices_st_stock_5pct():
     assert up == 10.5
     assert down == 9.5
 
-
 # ─── 1. PRICE_LIMIT ──────────────────────────────────────────────────────────
-
 
 @pytest.mark.asyncio
 @pytest.mark.unit
@@ -164,7 +151,6 @@ async def test_price_limit_pass():
     engine = RiskControlEngine([rule])
     result = await engine.check(order, context=ctx)
     assert result.passed
-
 
 @pytest.mark.asyncio
 @pytest.mark.unit
@@ -179,7 +165,6 @@ async def test_price_limit_reject_above_limit_up():
     assert result.rule_id == "price_limit"
     assert "涨停价" in result.message
 
-
 @pytest.mark.asyncio
 @pytest.mark.unit
 async def test_price_limit_reject_below_limit_down():
@@ -192,7 +177,6 @@ async def test_price_limit_reject_below_limit_down():
     assert result.action == RuleAction.REJECT.value
     assert "跌停价" in result.message
 
-
 @pytest.mark.asyncio
 @pytest.mark.unit
 async def test_price_limit_star_board_20pct():
@@ -203,7 +187,6 @@ async def test_price_limit_star_board_20pct():
     engine = RiskControlEngine([rule])
     result = await engine.check(order, context=ctx)
     assert result.passed
-
 
 @pytest.mark.asyncio
 @pytest.mark.unit
@@ -222,9 +205,7 @@ async def test_price_limit_block_near_limit_buy():
     assert result.action == RuleAction.REJECT.value
     assert "涨停" in result.message
 
-
 # ─── 2. POSITION_LIMIT ───────────────────────────────────────────────────────
-
 
 @pytest.mark.asyncio
 @pytest.mark.unit
@@ -237,12 +218,14 @@ async def test_position_limit_pass():
         priority=20,
     )
     order = make_order(side="buy", order_value=5000.0)  # 5% of 100k
-    account = {"portfolio_value": 100000.0, "current_position_value": 0.0,
-               "total_position_value": 0.0}
+    account = {
+        "portfolio_value": 100000.0,
+        "current_position_value": 0.0,
+        "total_position_value": 0.0,
+    }
     engine = RiskControlEngine([rule])
     result = await engine.check(order, account=account)
     assert result.passed
-
 
 @pytest.mark.asyncio
 @pytest.mark.unit
@@ -255,13 +238,15 @@ async def test_position_limit_reject_single_exceed():
         priority=20,
     )
     order = make_order(side="buy", order_value=15000.0)  # 15% of 100k
-    account = {"portfolio_value": 100000.0, "current_position_value": 0.0,
-               "total_position_value": 0.0}
+    account = {
+        "portfolio_value": 100000.0,
+        "current_position_value": 0.0,
+        "total_position_value": 0.0,
+    }
     engine = RiskControlEngine([rule])
     result = await engine.check(order, account=account)
     assert result.action == RuleAction.REJECT.value
     assert "单股持仓占比" in result.message
-
 
 @pytest.mark.asyncio
 @pytest.mark.unit
@@ -274,16 +259,17 @@ async def test_position_limit_reject_total_exceed():
         priority=20,
     )
     order = make_order(side="buy", order_value=30000.0)  # 当前 60% + 30% = 90% > 80%
-    account = {"portfolio_value": 100000.0, "current_position_value": 0.0,
-               "total_position_value": 60000.0}
+    account = {
+        "portfolio_value": 100000.0,
+        "current_position_value": 0.0,
+        "total_position_value": 60000.0,
+    }
     engine = RiskControlEngine([rule])
     result = await engine.check(order, account=account)
     assert result.action == RuleAction.REJECT.value
     assert "总仓位占比" in result.message
 
-
 # ─── 3. ORDER_LIMIT ──────────────────────────────────────────────────────────
-
 
 @pytest.mark.asyncio
 @pytest.mark.unit
@@ -299,7 +285,6 @@ async def test_order_limit_pass():
     engine = RiskControlEngine([rule])
     result = await engine.check(order)
     assert result.passed
-
 
 @pytest.mark.asyncio
 @pytest.mark.unit
@@ -317,7 +302,6 @@ async def test_order_limit_reject_too_large():
     assert result.action == RuleAction.REJECT.value
     assert "超过上限" in result.message
 
-
 @pytest.mark.asyncio
 @pytest.mark.unit
 async def test_order_limit_reject_too_small():
@@ -334,9 +318,7 @@ async def test_order_limit_reject_too_small():
     assert result.action == RuleAction.REJECT.value
     assert "低于下限" in result.message
 
-
 # ─── 4. FREQUENCY_LIMIT ──────────────────────────────────────────────────────
-
 
 @pytest.mark.asyncio
 @pytest.mark.unit
@@ -352,7 +334,6 @@ async def test_frequency_limit_pass():
     engine = RiskControlEngine([rule])
     result = await engine.check(make_order(), context=ctx)
     assert result.passed
-
 
 @pytest.mark.asyncio
 @pytest.mark.unit
@@ -370,7 +351,6 @@ async def test_frequency_limit_reject_daily_exceed():
     assert result.action == RuleAction.REJECT.value
     assert "日内交易次数" in result.message
 
-
 @pytest.mark.asyncio
 @pytest.mark.unit
 async def test_frequency_limit_reject_symbol_exceed():
@@ -387,9 +367,7 @@ async def test_frequency_limit_reject_symbol_exceed():
     assert result.action == RuleAction.REJECT.value
     assert "SH600000" in result.message
 
-
 # ─── 5. CAPITAL_CHECK ────────────────────────────────────────────────────────
-
 
 @pytest.mark.asyncio
 @pytest.mark.unit
@@ -406,7 +384,6 @@ async def test_capital_check_buy_pass():
     engine = RiskControlEngine([rule])
     result = await engine.check(order, account=account)
     assert result.passed
-
 
 @pytest.mark.asyncio
 @pytest.mark.unit
@@ -425,7 +402,6 @@ async def test_capital_check_buy_reject_insufficient_cash():
     assert result.action == RuleAction.REJECT.value
     assert "可用资金不足" in result.message
 
-
 @pytest.mark.asyncio
 @pytest.mark.unit
 async def test_capital_check_sell_reject_insufficient_position():
@@ -438,9 +414,7 @@ async def test_capital_check_sell_reject_insufficient_position():
     assert result.action == RuleAction.REJECT.value
     assert "可用持仓不足" in result.message
 
-
 # ─── 引擎行为：优先级 / WARN / disabled / 异常隔离 ────────────────────────────
-
 
 @pytest.mark.asyncio
 @pytest.mark.unit
@@ -449,7 +423,9 @@ async def test_engine_priority_order_reject_stops_early():
     # price_limit priority=10 会先命中 REJECT，capital_check priority=50 不应执行
     price_rule = make_rule("price_limit", RuleType.PRICE_LIMIT.value, priority=10)
     capital_rule = make_rule("capital_check", RuleType.CAPITAL_CHECK.value, priority=50)
-    order = make_order(side="buy", price=11.5, order_value=1000000.0)  # 超涨停 + 资金不足
+    order = make_order(
+        side="buy", price=11.5, order_value=1000000.0
+    )  # 超涨停 + 资金不足
     account = {"available_cash": 100.0}
     ctx = {"prev_close": 10.0}
     engine = RiskControlEngine([capital_rule, price_rule])  # 传入顺序打乱
@@ -457,7 +433,6 @@ async def test_engine_priority_order_reject_stops_early():
     assert result.action == RuleAction.REJECT.value
     # 应被 price_limit (priority=10) 命中
     assert result.rule_id == "price_limit"
-
 
 @pytest.mark.asyncio
 @pytest.mark.unit
@@ -484,7 +459,6 @@ async def test_engine_warn_continues_and_accumulates():
     assert result.rule_id == "order_limit_warn"
     assert len(result.violations) >= 1
 
-
 @pytest.mark.asyncio
 @pytest.mark.unit
 async def test_engine_disabled_rule_skipped():
@@ -500,7 +474,6 @@ async def test_engine_disabled_rule_skipped():
     engine = RiskControlEngine([disabled_rule])
     result = await engine.check(order)
     assert result.passed  # disabled -> 跳过 -> PASS
-
 
 @pytest.mark.asyncio
 @pytest.mark.unit
@@ -519,9 +492,7 @@ async def test_engine_rule_exception_does_not_crash(monkeypatch):
     assert result.action == RuleAction.REJECT.value
     assert "rule_internal_error" in result.message
 
-
 # ─── 配置加载 (YAML) + 热加载 ────────────────────────────────────────────────
-
 
 @pytest.mark.unit
 def test_config_load_from_yaml(tmp_path):
@@ -553,14 +524,12 @@ rules:
     assert rules[0].rule_type == RuleType.PRICE_LIMIT.value
     assert rules[1].enabled is False
 
-
 @pytest.mark.unit
 def test_config_load_missing_file_returns_empty():
     """配置文件不存在时返回空列表 (不抛异常)"""
     loader = RiskRuleLoader(Path("/nonexistent/risk_rules.yaml"))
     rules = loader.load()
     assert rules == []
-
 
 @pytest.mark.unit
 def test_hot_reload_detects_mtime_change(tmp_path):
@@ -573,9 +542,10 @@ def test_hot_reload_detects_mtime_change(tmp_path):
 
     # 修改文件 (确保 mtime 推进)
     time.sleep(0.05)
-    cfg.write_text("rules:\n  - rule_id: x\n    rule_type: ORDER_LIMIT\n", encoding="utf-8")
+    cfg.write_text(
+        "rules:\n  - rule_id: x\n    rule_type: ORDER_LIMIT\n", encoding="utf-8"
+    )
     assert loader.has_changed() is True
-
 
 @pytest.mark.asyncio
 @pytest.mark.unit
@@ -602,13 +572,13 @@ async def test_check_and_reload_updates_engine(tmp_path):
     reloaded_again = loader.check_and_reload(engine)
     assert reloaded_again is False
 
-
 @pytest.mark.asyncio
 @pytest.mark.unit
 async def test_default_engine_loads_project_config():
     """默认引擎单例从 config/risk_rules.yaml 加载 5 类规则"""
     # 重置单例 (模块级缓存)
     import backend.services.trade.services.risk_control as rc_mod
+
     rc_mod._default_engine = None
     rc_mod._default_loader = None
 
@@ -620,9 +590,7 @@ async def test_default_engine_loads_project_config():
     assert RuleType.FREQUENCY_LIMIT.value in rule_types
     assert RuleType.CAPITAL_CHECK.value in rule_types
 
-
 # ─── ORM 规则转换 / 合并 ─────────────────────────────────────────────────────
-
 
 @pytest.mark.unit
 def test_orm_rule_conversion():
@@ -642,13 +610,16 @@ def test_orm_rule_conversion():
     assert cfg.params == {"max_value": 200000}
     assert cfg.priority == 5
 
-
 @pytest.mark.unit
 def test_merge_file_and_orm_rules():
     """合并：ORM 同 rule_id 覆盖 file，新增追加"""
     file_rule = make_rule("price_limit", RuleType.PRICE_LIMIT.value, priority=10)
-    orm_rule = make_rule("price_limit", RuleType.PRICE_LIMIT.value,
-                         params={"main_board_pct": 0.05}, priority=5)
+    orm_rule = make_rule(
+        "price_limit",
+        RuleType.PRICE_LIMIT.value,
+        params={"main_board_pct": 0.05},
+        priority=5,
+    )
     orm_new = make_rule("custom_rule", RuleType.ORDER_LIMIT.value, priority=99)
     merged = RiskRuleLoader.merge([file_rule], [orm_rule, orm_new])
     by_id = {r.rule_id: r for r in merged}
@@ -659,9 +630,7 @@ def test_merge_file_and_orm_rules():
     # ORM 新增
     assert "custom_rule" in by_id
 
-
 # ─── 审计日志 ────────────────────────────────────────────────────────────────
-
 
 @pytest.mark.asyncio
 @pytest.mark.unit
@@ -670,18 +639,21 @@ async def test_audit_callback_invoked_on_reject():
     calls: list[tuple] = []
 
     async def audit_cb(event_type, rule, order_info, details):
-        calls.append((event_type, rule.rule_id, order_info.get("symbol"), details.get("message")))
+        calls.append(
+            (event_type, rule.rule_id, order_info.get("symbol"), details.get("message"))
+        )
 
     rule = make_rule("price_limit", RuleType.PRICE_LIMIT.value, priority=10)
     engine = RiskControlEngine([rule], audit_callback=audit_cb)
     order = make_order(symbol="SH600000", side="buy", price=11.5)
-    await engine.check(order, context={"prev_close": 10.0, "tenant_id": "default", "user_id": "1"})
+    await engine.check(
+        order, context={"prev_close": 10.0, "tenant_id": "default", "user_id": "1"}
+    )
 
     assert len(calls) == 1
     assert calls[0][0] == RuleAction.REJECT.value
     assert calls[0][1] == "price_limit"
     assert calls[0][2] == "SH600000"
-
 
 @pytest.mark.asyncio
 @pytest.mark.unit
@@ -697,7 +669,6 @@ async def test_audit_callback_skipped_on_pass():
     await engine.check(make_order(order_value=5000.0))
     assert calls == []
 
-
 @pytest.mark.asyncio
 @pytest.mark.unit
 async def test_audit_service_persist_to_fake_db():
@@ -708,7 +679,12 @@ async def test_audit_service_persist_to_fake_db():
     fake_db = _FakeAsyncSession()
     audit = RiskAuditService(fake_db)
     rule = make_rule("price_limit", RuleType.PRICE_LIMIT.value, priority=10)
-    order_info = {"order_id": "ord-1", "symbol": "SH600000", "tenant_id": "default", "user_id": "1"}
+    order_info = {
+        "order_id": "ord-1",
+        "symbol": "SH600000",
+        "tenant_id": "default",
+        "user_id": "1",
+    }
     details = {"message": "超过涨停价", "limit_up": 11.0, "price": 11.5}
 
     await audit.log_rule_hit(RuleAction.REJECT.value, rule, order_info, details)
@@ -725,7 +701,6 @@ async def test_audit_service_persist_to_fake_db():
     assert entry.order_info["symbol"] == "SH600000"
     assert "limit_up" in entry.hit_details
 
-
 @pytest.mark.asyncio
 @pytest.mark.unit
 async def test_audit_service_no_db_session_graceful_skip():
@@ -738,7 +713,6 @@ async def test_audit_service_no_db_session_graceful_skip():
     await audit.log_rule_hit(
         RuleAction.WARN.value, rule, {"symbol": "SH600000"}, {"message": "warn"}
     )
-
 
 @pytest.mark.asyncio
 @pytest.mark.unit
@@ -759,7 +733,6 @@ async def test_audit_service_persist_failure_rolls_back():
     )
     assert fake_db.rollbacks == 1
 
-
 @pytest.mark.asyncio
 @pytest.mark.unit
 async def test_audit_service_log_rule_reload():
@@ -778,40 +751,63 @@ async def test_audit_service_log_rule_reload():
     assert entry.rule_id == "new_rule"
     assert entry.hit_details["change_type"] == "ADDED"
 
-
 # ─── 全链路集成 ──────────────────────────────────────────────────────────────
-
 
 @pytest.mark.asyncio
 @pytest.mark.unit
 async def test_full_engine_all_rules_pass():
     """5 类规则全部加载，合规订单 -> PASS"""
     rules = [
-        make_rule("price_limit", RuleType.PRICE_LIMIT.value,
-                  params={"main_board_pct": 0.10}, priority=10),
-        make_rule("position_limit", RuleType.POSITION_LIMIT.value,
-                  params={"max_single_position_pct": 0.10, "max_total_position_pct": 1.0},
-                  priority=20),
-        make_rule("order_limit", RuleType.ORDER_LIMIT.value,
-                  params={"max_order_value": 1000000.0, "min_order_value": 100.0}, priority=30),
-        make_rule("frequency_limit", RuleType.FREQUENCY_LIMIT.value,
-                  params={"max_daily_trades": 100, "max_per_symbol_trades": 5}, priority=40),
-        make_rule("capital_check", RuleType.CAPITAL_CHECK.value,
-                  params={"commission_rate_buy": 0.0003, "min_commission": 5.0}, priority=50),
+        make_rule(
+            "price_limit",
+            RuleType.PRICE_LIMIT.value,
+            params={"main_board_pct": 0.10},
+            priority=10,
+        ),
+        make_rule(
+            "position_limit",
+            RuleType.POSITION_LIMIT.value,
+            params={"max_single_position_pct": 0.10, "max_total_position_pct": 1.0},
+            priority=20,
+        ),
+        make_rule(
+            "order_limit",
+            RuleType.ORDER_LIMIT.value,
+            params={"max_order_value": 1000000.0, "min_order_value": 100.0},
+            priority=30,
+        ),
+        make_rule(
+            "frequency_limit",
+            RuleType.FREQUENCY_LIMIT.value,
+            params={"max_daily_trades": 100, "max_per_symbol_trades": 5},
+            priority=40,
+        ),
+        make_rule(
+            "capital_check",
+            RuleType.CAPITAL_CHECK.value,
+            params={"commission_rate_buy": 0.0003, "min_commission": 5.0},
+            priority=50,
+        ),
     ]
-    order = make_order(symbol="SH600000", side="buy", price=10.0, quantity=100, order_value=1000.0)
+    order = make_order(
+        symbol="SH600000", side="buy", price=10.0, quantity=100, order_value=1000.0
+    )
     account = {
         "portfolio_value": 100000.0,
         "available_cash": 50000.0,
         "current_position_value": 0.0,
         "total_position_value": 0.0,
     }
-    context = {"prev_close": 10.0, "daily_trade_count": 3, "symbol_trade_count": 1,
-               "tenant_id": "default", "user_id": "1"}
+    context = {
+        "prev_close": 10.0,
+        "daily_trade_count": 3,
+        "symbol_trade_count": 1,
+        "tenant_id": "default",
+        "user_id": "1",
+    }
     engine = RiskControlEngine(rules)
     result = await engine.check(order, account=account, context=context)
     assert result.passed, f"expected PASS, got {result.action}: {result.message}"
-
 
 @pytest.mark.asyncio
 @pytest.mark.unit
@@ -819,25 +815,37 @@ async def test_full_engine_reject_by_capital_when_others_pass():
     """价格/仓位/限额/频次都过，但资金不足 -> REJECT by capital_check"""
     rules = [
         make_rule("price_limit", RuleType.PRICE_LIMIT.value, priority=10),
-        make_rule("position_limit", RuleType.POSITION_LIMIT.value,
-                  params={"max_single_position_pct": 0.50}, priority=20),
-        make_rule("order_limit", RuleType.ORDER_LIMIT.value,
-                  params={"max_order_value": 1000000.0, "min_order_value": 100.0}, priority=30),
+        make_rule(
+            "position_limit",
+            RuleType.POSITION_LIMIT.value,
+            params={"max_single_position_pct": 0.50},
+            priority=20,
+        ),
+        make_rule(
+            "order_limit",
+            RuleType.ORDER_LIMIT.value,
+            params={"max_order_value": 1000000.0, "min_order_value": 100.0},
+            priority=30,
+        ),
         make_rule("frequency_limit", RuleType.FREQUENCY_LIMIT.value, priority=40),
         make_rule("capital_check", RuleType.CAPITAL_CHECK.value, priority=50),
     ]
-    order = make_order(symbol="SH600000", side="buy", price=10.0, quantity=1000, order_value=10000.0)
-    account = {"available_cash": 100.0, "portfolio_value": 100000.0,
-               "current_position_value": 0.0, "total_position_value": 0.0}
+    order = make_order(
+        symbol="SH600000", side="buy", price=10.0, quantity=1000, order_value=10000.0
+    )
+    account = {
+        "available_cash": 100.0,
+        "portfolio_value": 100000.0,
+        "current_position_value": 0.0,
+        "total_position_value": 0.0,
+    }
     context = {"prev_close": 10.0, "daily_trade_count": 0, "symbol_trade_count": 0}
     engine = RiskControlEngine(rules)
     result = await engine.check(order, account=account, context=context)
     assert result.action == RuleAction.REJECT.value
     assert result.rule_id == "capital_check"
 
-
 # ─── RiskService 桥接 (check_order_risk_engine) ──────────────────────────────
-
 
 @pytest.mark.asyncio
 @pytest.mark.unit
@@ -857,9 +865,12 @@ async def test_risk_service_bridge_returns_compatible_structure(monkeypatch):
     # 屏蔽 ORM 规则查询 (避免真实 DB)
     async def fake_list_rules(self, active_only=True):
         return []
+
     monkeypatch.setattr(RiskService, "list_rules", fake_list_rules)
 
-    order = make_order(symbol="SH600000", side="buy", price=10.0, quantity=100, order_value=1000.0)
+    order = make_order(
+        symbol="SH600000", side="buy", price=10.0, quantity=100, order_value=1000.0
+    )
     result = await svc.check_order_risk_engine(
         user_id=1,
         order=order,
@@ -875,8 +886,8 @@ async def test_risk_service_bridge_returns_compatible_structure(monkeypatch):
     assert isinstance(result["violations"], list)
     assert result["passed"] is True
 
-
 if __name__ == "__main__":
     # 兼容直接运行：python backend/tests/test_risk_control.py
     import sys
+
     sys.exit(pytest.main([__file__, "-v", "-p", "asyncio"]))

@@ -1,6 +1,6 @@
 import logging
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
@@ -15,9 +15,7 @@ router = APIRouter()
 inference_service = InferenceService()
 inference_router_service = InferenceRouterService(inference_service=inference_service)
 
-
 # Request/Response Models
-
 
 class PredictionRequest(BaseModel):
     model_id: str | None = None
@@ -25,11 +23,9 @@ class PredictionRequest(BaseModel):
     data: dict[str, Any] | list[dict[str, Any]]
     model_config = {"protected_namespaces": ()}
 
-
 class ModelLoadRequest(BaseModel):
     model_id: str
     model_config = {"protected_namespaces": ()}
-
 
 class PredictionResponse(BaseModel):
     status: str
@@ -46,7 +42,6 @@ class PredictionResponse(BaseModel):
     error: str | None = None
     model_config = {"protected_namespaces": ()}
 
-
 class ModelInfo(BaseModel):
     status: str
     model_id: str
@@ -54,17 +49,15 @@ class ModelInfo(BaseModel):
     error: str | None = None
     model_config = {"protected_namespaces": ()}
 
-
 @router.get("/models")
 async def list_models():
-    """List all available models."""
+    """list all available models."""
     try:
         models = inference_service.list_models()
         return {"status": "success", "count": len(models), "models": models}
     except Exception as e:
         logger.error(f"Failed to list models: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @router.get("/models/{model_id}")
 async def get_model_info(model_id: str):
@@ -78,8 +71,7 @@ async def get_model_info(model_id: str):
         raise
     except Exception as e:
         logger.error(f"Failed to get model info: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @router.post("/models/load")
 async def load_model(request: ModelLoadRequest) -> ModelInfo:
@@ -87,14 +79,15 @@ async def load_model(request: ModelLoadRequest) -> ModelInfo:
     try:
         result = inference_service.load_model(request.model_id)
         if result["status"] == "error":
-            raise HTTPException(status_code=400, detail=result.get("error", "Failed to load model"))
+            raise HTTPException(
+                status_code=400, detail=result.get("error", "Failed to load model")
+            )
         return result
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to load model: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @router.delete("/models/{model_id}")
 async def unload_model(model_id: str):
@@ -102,17 +95,20 @@ async def unload_model(model_id: str):
     try:
         result = inference_service.unload_model(model_id)
         if result["status"] == "error":
-            raise HTTPException(status_code=400, detail=result.get("error", "Failed to unload model"))
+            raise HTTPException(
+                status_code=400, detail=result.get("error", "Failed to unload model")
+            )
         return result
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to unload model: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @router.post("/predict")
-async def predict(request: PredictionRequest, http_request: Request) -> PredictionResponse:
+async def predict(
+    request: PredictionRequest, http_request: Request
+) -> PredictionResponse:
     """Generate prediction using a loaded model."""
     trace_id = f"predict_{uuid.uuid4().hex[:12]}"
     try:
@@ -126,14 +122,15 @@ async def predict(request: PredictionRequest, http_request: Request) -> Predicti
             trace_id=trace_id,
         )
         if result["status"] == "error":
-            raise HTTPException(status_code=400, detail=result.get("error", "Prediction failed"))
+            raise HTTPException(
+                status_code=400, detail=result.get("error", "Prediction failed")
+            )
         return result
     except HTTPException:
         raise
     except Exception as e:
         logger.error("Prediction failed, trace_id=%s error=%s", trace_id, e)
-        raise HTTPException(status_code=500, detail=str(e))
-
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @router.get("/buffer/stats")
 async def buffer_stats():
@@ -143,4 +140,4 @@ async def buffer_stats():
         return {"status": "success", "buffer": stats}
     except Exception as e:
         logger.error(f"Failed to get buffer stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e

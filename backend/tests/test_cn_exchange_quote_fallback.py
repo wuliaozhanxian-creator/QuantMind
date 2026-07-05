@@ -42,7 +42,9 @@ def test_get_close_falls_back_to_previous_valid_quote():
         }
     )
 
-    price = exchange.get_close("SH600000", pd.Timestamp("2026-03-25"), pd.Timestamp("2026-03-25"))
+    price = exchange.get_close(
+        "SH600000", pd.Timestamp("2026-03-25"), pd.Timestamp("2026-03-25")
+    )
 
     assert price == pytest.approx(12.34)
 
@@ -55,7 +57,9 @@ def test_get_factor_falls_back_to_previous_valid_quote():
         }
     )
 
-    factor = exchange.get_factor("SH600000", pd.Timestamp("2026-03-25"), pd.Timestamp("2026-03-25"))
+    factor = exchange.get_factor(
+        "SH600000", pd.Timestamp("2026-03-25"), pd.Timestamp("2026-03-25")
+    )
 
     assert factor == pytest.approx(0.256)
 

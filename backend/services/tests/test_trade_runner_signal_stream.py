@@ -1,7 +1,6 @@
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 from backend.services.trade.runner import main as runner_main
-
 
 class _FakeResponse:
     def __init__(self, payload: dict[str, Any], status_code: int = 200):
@@ -15,7 +14,6 @@ class _FakeResponse:
     def json(self) -> dict[str, Any]:
         return self._payload
 
-
 class _FakeRedis:
     def __init__(self, records: list[tuple[str, dict[str, str]]]):
         self.records = records
@@ -27,7 +25,9 @@ class _FakeRedis:
         _ = (args, kwargs)
         if not self.records:
             return []
-        messages = [(f"1-{idx+1}", fields) for idx, (_, fields) in enumerate(self.records)]
+        messages = [
+            (f"1-{idx + 1}", fields) for idx, (_, fields) in enumerate(self.records)
+        ]
         self.records = []
         return [("qm:signal:stream:default", messages)]
 
@@ -40,7 +40,9 @@ class _FakeRedis:
         _ = (key, value, nx, ex)
         return True
 
-    def xadd(self, stream_name: str, fields: dict[str, str], maxlen: int, approximate: bool):
+    def xadd(
+        self, stream_name: str, fields: dict[str, str], maxlen: int, approximate: bool
+    ):
         _ = (stream_name, maxlen, approximate)
         self.exec_events.append(fields)
         return "2-1"
@@ -48,7 +50,6 @@ class _FakeRedis:
     def xgroup_create(self, stream_name: str, groupname: str, id: str, mkstream: bool):
         _ = (stream_name, groupname, id, mkstream)
         return True
-
 
 def test_runner_consume_signal_stream_and_post_internal_order(monkeypatch):
     signal_event = {
@@ -77,7 +78,9 @@ def test_runner_consume_signal_stream_and_post_internal_order(monkeypatch):
             }
         )
 
-    def _fake_post(url: str, json: dict[str, Any], headers: dict[str, str], timeout: int):
+    def _fake_post(
+        url: str, json: dict[str, Any], headers: dict[str, str], timeout: int
+    ):
         assert url.endswith("/order")
         assert headers["X-User-Id"] == "u1"
         assert json["client_order_id"] == "coid-1"
@@ -97,7 +100,9 @@ def test_runner_consume_signal_stream_and_post_internal_order(monkeypatch):
     monkeypatch.setattr(runner_main, "_current_local_ts", lambda: 1_710_310_800.0)
     monkeypatch.setattr(runner_main, "_is_rebalance_day", lambda _ts, _cfg: True)
     monkeypatch.setattr(runner_main, "fetch_market_snapshot", lambda _redis: {})
-    monkeypatch.setattr(runner_main, "_acquire_idempotency_lock", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        runner_main, "_acquire_idempotency_lock", lambda *_args, **_kwargs: True
+    )
 
     processed = runner_main.process_cycle(
         user_id="u1",
@@ -118,7 +123,6 @@ def test_runner_consume_signal_stream_and_post_internal_order(monkeypatch):
     assert processed is True
     assert len(fake_redis.order_posts) == 1
     assert len(fake_redis.acked) == 1
-
 
 def test_runner_skip_other_user_signal_and_no_order(monkeypatch):
     signal_event = {

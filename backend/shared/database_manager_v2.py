@@ -34,7 +34,6 @@ from sqlalchemy.ext.asyncio import (
 
 logger = logging.getLogger(__name__)
 
-
 class DatabaseConfig:
     """数据库配置"""
 
@@ -43,8 +42,12 @@ class DatabaseConfig:
         self.database_url = os.getenv("DATABASE_URL", "").strip()
 
         # 2. 备选：从散装环境变量加载（独立服务模式）
-        self.master_host = os.getenv("DB_MASTER_HOST", os.getenv("DB_HOST", "127.0.0.1"))
-        self.master_port = int(os.getenv("DB_MASTER_PORT", os.getenv("DB_PORT", "5432")))
+        self.master_host = os.getenv(
+            "DB_MASTER_HOST", os.getenv("DB_HOST", "127.0.0.1")
+        )
+        self.master_port = int(
+            os.getenv("DB_MASTER_PORT", os.getenv("DB_PORT", "5432"))
+        )
         self.database = os.getenv("DB_NAME", "quantmind")
         self.username = os.getenv("DB_USER", "postgres")
         self.password = os.getenv("DB_PASSWORD", "")
@@ -52,13 +55,19 @@ class DatabaseConfig:
         # 初始化从库列表
         self.slave_hosts = os.getenv("DB_SLAVE_HOSTS", "")
         self.slave_list = [
-            (host.split(":")[0], int(host.split(":")[1])) for host in self.slave_hosts.split(",") if host
+            (host.split(":")[0], int(host.split(":")[1]))
+            for host in self.slave_hosts.split(",")
+            if host
         ]
 
         if self.database_url:
-            logger.info(f"Using DATABASE_URL: {self.database_url.split('@')[-1]}")  # 隐藏密码
+            logger.info(
+                f"Using DATABASE_URL: {self.database_url.split('@')[-1]}"
+            )  # 隐藏密码
         else:
-            logger.info(f"Database direct connect mode: {self.master_host}:{self.master_port}/{self.database}")
+            logger.info(
+                f"Database direct connect mode: {self.master_host}:{self.master_port}/{self.database}"
+            )
 
         # 连接池配置
         self.pool_size = int(os.getenv("DB_POOL_SIZE", "20"))
@@ -95,14 +104,16 @@ class DatabaseConfig:
         # 物理修正解析
         host = resolve_to_ip(self.master_host)
 
-        return f"postgresql+asyncpg://{user}:{password}@" f"{host}:{self.master_port}/{self.database}"
+        return (
+            f"postgresql+asyncpg://{user}:{password}@"
+            f"{host}:{self.master_port}/{self.database}"
+        )
 
     def get_slave_url(self, host: str, port: int) -> str:
         """获取从库连接URL"""
         user = urllib.parse.quote(self.username)
         password = urllib.parse.quote(self.password)
         return f"postgresql+asyncpg://{user}:{password}@{host}:{port}/{self.database}"
-
 
 class DatabaseManager:
     """数据库连接池管理器"""
@@ -178,7 +189,10 @@ class DatabaseManager:
                 logger.error(f"Failed to initialize slave database {idx}: {e}")
 
         self._initialized = True
-        logger.info("Database connection pools initialized: " f"1 master, {len(self._slave_engines)} slaves")
+        logger.info(
+            "Database connection pools initialized: "
+            f"1 master, {len(self._slave_engines)} slaves"
+        )
 
         # 执行健康检查
         await self.health_check()
@@ -230,7 +244,9 @@ class DatabaseManager:
 
         # 轮询选择从库
         factory = self._slave_session_factories[self._current_slave_index]
-        self._current_slave_index = (self._current_slave_index + 1) % len(self._slave_session_factories)
+        self._current_slave_index = (self._current_slave_index + 1) % len(
+            self._slave_session_factories
+        )
 
         async with factory() as session:
             try:
@@ -245,7 +261,9 @@ class DatabaseManager:
                 await session.close()
 
     @asynccontextmanager
-    async def get_session(self, read_only: bool = False) -> AsyncGenerator[AsyncSession, None]:
+    async def get_session(
+        self, read_only: bool = False
+    ) -> AsyncGenerator[AsyncSession, None]:
         """
         获取数据库会话 (自动读写分离)
 
@@ -262,11 +280,14 @@ class DatabaseManager:
     # 健康检查超时硬约束：2s，与 readiness.PROBE_TIMEOUT_SECONDS 保持一致
     HEALTH_CHECK_TIMEOUT_SECONDS: float = 2.0
 
-    async def _probe_engine(self, engine: AsyncEngine, timeout: float = HEALTH_CHECK_TIMEOUT_SECONDS) -> bool:
+    async def _probe_engine(
+        self, engine: AsyncEngine, timeout: float = HEALTH_CHECK_TIMEOUT_SECONDS
+    ) -> bool:
         """探测单个引擎连通性，带超时约束。
 
         数据库不可用时避免长时间阻塞，超时即视为不健康。
         """
+
         async def _do_probe():
             async with engine.connect() as conn:
                 await conn.execute(text("SELECT 1"))
@@ -349,10 +370,8 @@ class DatabaseManager:
         self._initialized = False
         logger.info("All database connections closed")
 
-
 # 全局数据库管理器实例
 _db_manager: DatabaseManager | None = None
-
 
 def get_db_manager() -> DatabaseManager:
     """获取全局数据库管理器实例"""
@@ -360,7 +379,6 @@ def get_db_manager() -> DatabaseManager:
     if _db_manager is None:
         _db_manager = DatabaseManager()
     return _db_manager
-
 
 @asynccontextmanager
 async def get_session(read_only: bool = False) -> AsyncGenerator[AsyncSession, None]:
@@ -380,12 +398,10 @@ async def get_session(read_only: bool = False) -> AsyncGenerator[AsyncSession, N
     async with db_manager.get_session(read_only=read_only) as session:
         yield session
 
-
 async def init_database():
     """初始化数据库连接池"""
     db_manager = get_db_manager()
     await db_manager.initialize()
-
 
 async def close_database():
     """关闭数据库连接池"""

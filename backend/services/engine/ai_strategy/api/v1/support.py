@@ -5,7 +5,7 @@
 
 import logging
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
@@ -39,7 +39,6 @@ except Exception:  # pragma: no cover
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
 
 @router.get("/templates")
 async def list_templates(
@@ -83,7 +82,6 @@ async def list_templates(
     except Exception as exc:
         return error(ErrorCode.INTERNAL_ERROR, f"获取模板列表失败: {exc}")
 
-
 @router.get("/templates/{template_id}")
 async def get_template(template_id: str):
     """获取策略模板详情"""
@@ -96,7 +94,6 @@ async def get_template(template_id: str):
         return success(template.model_dump())
     except Exception as exc:
         return error(ErrorCode.INTERNAL_ERROR, f"获取模板详情失败: {exc}")
-
 
 @router.post("/templates/match")
 async def match_templates(request: TemplateMatchRequest):
@@ -117,22 +114,40 @@ async def match_templates(request: TemplateMatchRequest):
     except Exception as exc:
         return error(ErrorCode.INTERNAL_ERROR, f"模板匹配失败: {exc}")
 
-
 @router.get("/templates/categories")
 async def get_template_categories():
     """获取所有策略类别"""
     try:
         categories = [
-            {"value": "trend", "label": "趋势策略", "description": "基于市场趋势的策略"},
-            {"value": "mean_reversion", "label": "均值回归", "description": "基于价格回归的策略"},
-            {"value": "momentum", "label": "动量策略", "description": "基于价格动量的策略"},
-            {"value": "breakout", "label": "突破策略", "description": "基于价格突破的策略"},
-            {"value": "arbitrage", "label": "套利策略", "description": "基于价格差异的策略"},
+            {
+                "value": "trend",
+                "label": "趋势策略",
+                "description": "基于市场趋势的策略",
+            },
+            {
+                "value": "mean_reversion",
+                "label": "均值回归",
+                "description": "基于价格回归的策略",
+            },
+            {
+                "value": "momentum",
+                "label": "动量策略",
+                "description": "基于价格动量的策略",
+            },
+            {
+                "value": "breakout",
+                "label": "突破策略",
+                "description": "基于价格突破的策略",
+            },
+            {
+                "value": "arbitrage",
+                "label": "套利策略",
+                "description": "基于价格差异的策略",
+            },
         ]
         return success({"categories": categories})
     except Exception as exc:
         return error(ErrorCode.INTERNAL_ERROR, f"获取策略类别失败: {exc}")
-
 
 @router.get("/templates/stats")
 async def get_template_stats():
@@ -152,13 +167,14 @@ async def get_template_stats():
             "total_templates": len(BUILTIN_TEMPLATES),
             "category_distribution": category_stats,
             "complexity_distribution": complexity_stats,
-            "avg_min_capital": sum(t.min_capital for t in BUILTIN_TEMPLATES) // len(BUILTIN_TEMPLATES),
-            "avg_max_symbols": sum(t.max_symbols for t in BUILTIN_TEMPLATES) // len(BUILTIN_TEMPLATES),
+            "avg_min_capital": sum(t.min_capital for t in BUILTIN_TEMPLATES)
+            // len(BUILTIN_TEMPLATES),
+            "avg_max_symbols": sum(t.max_symbols for t in BUILTIN_TEMPLATES)
+            // len(BUILTIN_TEMPLATES),
         }
         return success(stats)
     except Exception as exc:
         return error(ErrorCode.INTERNAL_ERROR, f"获取模板统计失败: {exc}")
-
 
 @router.post("/validate/parameters")
 async def validate_parameters(request: ParameterValidationRequest):
@@ -169,7 +185,6 @@ async def validate_parameters(request: ParameterValidationRequest):
     except Exception as exc:
         return error(ErrorCode.INTERNAL_ERROR, f"参数验证失败: {exc}")
 
-
 @router.post("/validate/code")
 async def validate_code(request: CodeValidationRequest):
     """验证策略代码"""
@@ -179,16 +194,16 @@ async def validate_code(request: CodeValidationRequest):
     except Exception as exc:
         return error(ErrorCode.INTERNAL_ERROR, f"代码验证失败: {exc}")
 
-
 @router.post("/validate/template")
 async def validate_template(request: TemplateValidationRequest):
     """验证模板兼容性"""
     try:
-        result = unified_validator.template_validator.validate_template_compatibility(request)
+        result = unified_validator.template_validator.validate_template_compatibility(
+            request
+        )
         return success(result.model_dump())
     except Exception as exc:
         return error(ErrorCode.INTERNAL_ERROR, f"模板验证失败: {exc}")
-
 
 @router.post("/validate/batch")
 async def validate_batch(request: BatchValidationRequest):
@@ -198,7 +213,6 @@ async def validate_batch(request: BatchValidationRequest):
         return success(result.model_dump())
     except Exception as exc:
         return error(ErrorCode.INTERNAL_ERROR, f"批量验证失败: {exc}")
-
 
 @router.get("/validate/rules")
 async def get_validation_rules():
@@ -223,14 +237,17 @@ async def get_validation_rules():
                 "total_rules": len(rules_info),
                 "categories": {
                     "required": len([r for r in rules_info if r["rule"] == "required"]),
-                    "enum": len([r for r in rules_info if r["rule"].startswith("enum")]),
-                    "range": len([r for r in rules_info if r["rule"].startswith("range")]),
+                    "enum": len(
+                        [r for r in rules_info if r["rule"].startswith("enum")]
+                    ),
+                    "range": len(
+                        [r for r in rules_info if r["rule"].startswith("range")]
+                    ),
                 },
             }
         )
     except Exception as exc:
         return error(ErrorCode.INTERNAL_ERROR, f"获取验证规则失败: {exc}")
-
 
 @router.get("/validate/metrics")
 async def get_validation_metrics():
@@ -257,7 +274,6 @@ async def get_validation_metrics():
         )
     except Exception as exc:
         return error(ErrorCode.INTERNAL_ERROR, f"获取验证指标失败: {exc}")
-
 
 @router.post("/validate/realtime")
 async def validate_realtime(
@@ -299,11 +315,25 @@ async def validate_realtime(
             "summary": {
                 "parameter_validation": (
                     {
-                        "is_valid": (result.parameter_validation.is_valid if result.parameter_validation else None),
-                        "score": (result.parameter_validation.score if result.parameter_validation else None),
-                        "error_count": (len(result.parameter_validation.errors) if result.parameter_validation else 0),
+                        "is_valid": (
+                            result.parameter_validation.is_valid
+                            if result.parameter_validation
+                            else None
+                        ),
+                        "score": (
+                            result.parameter_validation.score
+                            if result.parameter_validation
+                            else None
+                        ),
+                        "error_count": (
+                            len(result.parameter_validation.errors)
+                            if result.parameter_validation
+                            else 0
+                        ),
                         "warning_count": (
-                            len(result.parameter_validation.warnings) if result.parameter_validation else 0
+                            len(result.parameter_validation.warnings)
+                            if result.parameter_validation
+                            else 0
                         ),
                     }
                     if result.parameter_validation
@@ -311,26 +341,52 @@ async def validate_realtime(
                 ),
                 "code_validation": (
                     {
-                        "is_valid": (result.code_validation.is_valid if result.code_validation else None),
-                        "quality_score": (result.code_validation.quality_score if result.code_validation else None),
+                        "is_valid": (
+                            result.code_validation.is_valid
+                            if result.code_validation
+                            else None
+                        ),
+                        "quality_score": (
+                            result.code_validation.quality_score
+                            if result.code_validation
+                            else None
+                        ),
                         "syntax_error_count": (
-                            len(result.code_validation.syntax_errors) if result.code_validation else 0
+                            len(result.code_validation.syntax_errors)
+                            if result.code_validation
+                            else 0
                         ),
                         "logic_error_count": (
-                            len(result.code_validation.logic_errors) if result.code_validation else 0
+                            len(result.code_validation.logic_errors)
+                            if result.code_validation
+                            else 0
                         ),
-                        "complexity": (result.code_validation.complexity if result.code_validation else None),
+                        "complexity": (
+                            result.code_validation.complexity
+                            if result.code_validation
+                            else None
+                        ),
                     }
                     if result.code_validation
                     else None
                 ),
                 "template_validation": (
                     {
-                        "is_valid": (result.template_validation.is_valid if result.template_validation else None),
-                        "compatibility_score": (
-                            result.template_validation.compatibility_score if result.template_validation else None
+                        "is_valid": (
+                            result.template_validation.is_valid
+                            if result.template_validation
+                            else None
                         ),
-                        "error_count": (len(result.template_validation.errors) if result.template_validation else 0),
+                        "compatibility_score": (
+                            result.template_validation.compatibility_score
+                            if result.template_validation
+                            else None
+                        ),
+                        "error_count": (
+                            len(result.template_validation.errors)
+                            if result.template_validation
+                            else 0
+                        ),
                     }
                     if result.template_validation
                     else None
@@ -341,12 +397,13 @@ async def validate_realtime(
     except Exception as exc:
         return error(ErrorCode.INTERNAL_ERROR, f"实时验证失败: {exc}")
 
-
 @router.get("/health")
 async def api_health_with_validation():
     """API健康检查（包含验证服务状态）"""
     active = get_provider_name()
-    providers = {name: {"is_healthy": True, "active": name == active} for name in REGISTRY.keys()}
+    providers = {
+        name: {"is_healthy": True, "active": name == active} for name in REGISTRY.keys()
+    }
     validation_status = {
         "parameter_validator": True,
         "code_validator": True,
@@ -371,7 +428,6 @@ async def api_health_with_validation():
         }
     )
 
-
 @router.get("/performance/system")
 async def get_system_performance():
     """获取系统性能统计"""
@@ -383,7 +439,6 @@ async def get_system_performance():
     except Exception as exc:
         return error(ErrorCode.INTERNAL_ERROR, f"获取系统性能失败: {exc}")
 
-
 @router.get("/performance/providers/{provider_name}")
 async def get_provider_performance(provider_name: str):
     """获取Provider性能统计"""
@@ -394,7 +449,6 @@ async def get_provider_performance(provider_name: str):
         return success(perf.model_dump())
     except Exception as exc:
         return error(ErrorCode.INTERNAL_ERROR, f"获取Provider性能失败: {exc}")
-
 
 @router.get("/performance")
 async def get_performance_overview():
@@ -414,7 +468,6 @@ async def get_performance_overview():
     except Exception as exc:
         return error(ErrorCode.INTERNAL_ERROR, f"获取性能指标失败: {exc}")
 
-
 @router.get("/performance/providers")
 async def get_all_providers_performance():
     """获取所有Provider性能统计"""
@@ -431,7 +484,6 @@ async def get_all_providers_performance():
     except Exception as exc:
         return error(ErrorCode.INTERNAL_ERROR, f"获取Provider性能列表失败: {exc}")
 
-
 @router.post("/performance/history")
 async def get_performance_history(request):
     """获取性能历史数据"""
@@ -444,7 +496,6 @@ async def get_performance_history(request):
         return success(history.model_dump())
     except Exception as exc:
         return error(ErrorCode.INTERNAL_ERROR, f"获取性能历史失败: {exc}")
-
 
 @router.get("/performance/alerts")
 async def get_active_alerts():
@@ -462,7 +513,6 @@ async def get_active_alerts():
     except Exception as exc:
         return error(ErrorCode.INTERNAL_ERROR, f"获取告警列表失败: {exc}")
 
-
 @router.post("/performance/alerts/{alert_id}/resolve")
 async def resolve_alert(alert_id: str):
     """解决告警"""
@@ -473,7 +523,6 @@ async def resolve_alert(alert_id: str):
         return success({"message": f"告警 {alert_id} 已解决"})
     except Exception as exc:
         return error(ErrorCode.INTERNAL_ERROR, f"解决告警失败: {exc}")
-
 
 @router.post("/performance/reset")
 async def reset_performance_stats(provider_name: str = None):
@@ -486,7 +535,6 @@ async def reset_performance_stats(provider_name: str = None):
     except Exception as exc:
         return error(ErrorCode.INTERNAL_ERROR, f"重置性能统计失败: {exc}")
 
-
 @router.post("/files/upload")
 async def upload_file(
     file_content,
@@ -494,9 +542,11 @@ async def upload_file(
     user_id: str,
     category: str = "auto",
     description: str = "",
-    tags: list = [],
+    tags: list = None,
 ):
     """上传文件"""
+    if tags is None:
+        tags = []
     try:
         from ...services.file_manager import file_manager
 
@@ -505,11 +555,12 @@ async def upload_file(
         else:
             file_obj = file_content
 
-        file_info = file_manager.upload_file(file_obj, filename, user_id, category, description, tags)
+        file_info = file_manager.upload_file(
+            file_obj, filename, user_id, category, description, tags
+        )
         return success(file_info.to_dict())
     except Exception as exc:
         return error(ErrorCode.INTERNAL_ERROR, f"文件上传失败: {exc}")
-
 
 @router.get("/files/{file_id}")
 async def get_file_info(file_id: str):
@@ -523,7 +574,6 @@ async def get_file_info(file_id: str):
         return success(file_info.to_dict())
     except Exception as exc:
         return error(ErrorCode.INTERNAL_ERROR, f"获取文件信息失败: {exc}")
-
 
 @router.get("/files/{file_id}/content")
 async def get_file_content(file_id: str):
@@ -539,11 +589,12 @@ async def get_file_content(file_id: str):
         return StreamingResponse(
             iter([content]),
             media_type=file_info.content_type,
-            headers={"Content-Disposition": f"attachment; filename={file_info.filename}"},
+            headers={
+                "Content-Disposition": f"attachment; filename={file_info.filename}"
+            },
         )
     except Exception as exc:
         return error(ErrorCode.INTERNAL_ERROR, f"获取文件内容失败: {exc}")
-
 
 @router.get("/files/{file_id}/download")
 async def download_file(file_id: str):
@@ -558,7 +609,6 @@ async def download_file(file_id: str):
     except Exception as exc:
         return error(ErrorCode.INTERNAL_ERROR, f"下载文件失败: {exc}")
 
-
 @router.delete("/files/{file_id}")
 async def delete_file(file_id: str, user_id: str):
     """删除文件"""
@@ -572,9 +622,10 @@ async def delete_file(file_id: str, user_id: str):
     except Exception as exc:
         return error(ErrorCode.INTERNAL_ERROR, f"删除文件失败: {exc}")
 
-
 @router.get("/files")
-async def list_user_files(user_id: str, category: str = None, limit: int = 100, offset: int = 0):
+async def list_user_files(
+    user_id: str, category: str = None, limit: int = 100, offset: int = 0
+):
     """列出用户文件"""
     try:
         from ...services.file_manager import file_manager
@@ -583,7 +634,6 @@ async def list_user_files(user_id: str, category: str = None, limit: int = 100, 
         return success(result)
     except Exception as exc:
         return error(ErrorCode.INTERNAL_ERROR, f"获取文件列表失败: {exc}")
-
 
 @router.get("/files/category/{category}")
 async def list_files_by_category(category: str, limit: int = 100, offset: int = 0):
@@ -596,9 +646,10 @@ async def list_files_by_category(category: str, limit: int = 100, offset: int = 
     except Exception as exc:
         return error(ErrorCode.INTERNAL_ERROR, f"获取类别文件失败: {exc}")
 
-
 @router.get("/files/search")
-async def search_files(query: str, user_id: str = None, category: str = None, limit: int = 100):
+async def search_files(
+    query: str, user_id: str = None, category: str = None, limit: int = 100
+):
     """搜索文件"""
     try:
         from ...services.file_manager import file_manager
@@ -614,9 +665,10 @@ async def search_files(query: str, user_id: str = None, category: str = None, li
     except Exception as exc:
         return error(ErrorCode.INTERNAL_ERROR, f"搜索文件失败: {exc}")
 
-
 @router.put("/files/{file_id}/metadata")
-async def update_file_metadata(file_id: str, user_id: str, description: str = None, tags: list = None):
+async def update_file_metadata(
+    file_id: str, user_id: str, description: str = None, tags: list = None
+):
     """更新文件元数据"""
     try:
         from ...services.file_manager import file_manager
@@ -627,7 +679,6 @@ async def update_file_metadata(file_id: str, user_id: str, description: str = No
         return success({"message": f"文件 {file_id} 元数据已更新"})
     except Exception as exc:
         return error(ErrorCode.INTERNAL_ERROR, f"更新文件元数据失败: {exc}")
-
 
 @router.post("/files/cleanup")
 async def cleanup_temp_files(max_age_days: int = 7):
@@ -644,7 +695,6 @@ async def cleanup_temp_files(max_age_days: int = 7):
         )
     except Exception as exc:
         return error(ErrorCode.INTERNAL_ERROR, f"清理临时文件失败: {exc}")
-
 
 @router.get("/files/stats")
 async def get_file_stats_endpoint():

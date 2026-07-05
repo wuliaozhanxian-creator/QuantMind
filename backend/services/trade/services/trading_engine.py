@@ -26,13 +26,11 @@ from backend.shared.trade_account_cache import write_trade_account_cache
 
 logger = logging.getLogger(__name__)
 
-
 def _safe_schedule_notification(coro):
     try:
         asyncio.create_task(coro)
     except Exception:
         logger.debug("notification task schedule skipped")
-
 
 class TradingEngine:
     """
@@ -67,8 +65,12 @@ class TradingEngine:
             qmt_host=getattr(settings, "QMT_HOST", "127.0.0.1"),
             qmt_port=getattr(settings, "QMT_PORT", 18080),
             redis_client=self.redis,
-            market_url=getattr(settings, "MARKET_DATA_SERVICE_URL", "http://stream-gateway:8003"),
-            stream_base_url=getattr(settings, "MARKET_DATA_SERVICE_URL", "http://stream-gateway:8003"),
+            market_url=getattr(
+                settings, "MARKET_DATA_SERVICE_URL", "http://stream-gateway:8003"
+            ),
+            stream_base_url=getattr(
+                settings, "MARKET_DATA_SERVICE_URL", "http://stream-gateway:8003"
+            ),
         )
         self._broker_cache[mode] = broker
         return broker
@@ -86,7 +88,9 @@ class TradingEngine:
 
         # ===== 阶段1：本地持久化 SUBMITTED（本地优先原则）=====
         try:
-            await self.order_service.transition_order_status(order, OrderStatus.SUBMITTED)
+            await self.order_service.transition_order_status(
+                order, OrderStatus.SUBMITTED
+            )
         except Exception as persist_exc:
             # 本地落库失败：绝不调用 broker，避免外部提交后本地无记录。
             logger.error(
@@ -170,7 +174,9 @@ class TradingEngine:
             "success": not is_rejected,
             "order_id": str(order.order_id),
             "status": order.status.value,
-            "message": "Order submitted successfully" if not is_rejected else "Order rejected",
+            "message": "Order submitted successfully"
+            if not is_rejected
+            else "Order rejected",
         }
 
     async def _execute_via_broker(self, order: Order, tenant_id: str = "default"):
@@ -187,7 +193,11 @@ class TradingEngine:
             )
 
             is_qmt_broker = broker.__class__.__name__ == "QMTBroker"
-            side_arg = getattr(order.side, "name", str(order.side)).upper() if is_qmt_broker else str(order.side.value)
+            side_arg = (
+                getattr(order.side, "name", str(order.side)).upper()
+                if is_qmt_broker
+                else str(order.side.value)
+            )
             order_type_arg = (
                 getattr(order.order_type, "name", str(order.order_type)).upper()
                 if is_qmt_broker
@@ -206,14 +216,24 @@ class TradingEngine:
                 place_order_kwargs["client_order_id"] = order.client_order_id
             if "trade_action" in inspect.signature(broker.place_order).parameters:
                 place_order_kwargs["trade_action"] = (
-                    str(getattr(order.trade_action, "value", order.trade_action) or "").strip().lower() or None
+                    str(getattr(order.trade_action, "value", order.trade_action) or "")
+                    .strip()
+                    .lower()
+                    or None
                 )
             if "position_side" in inspect.signature(broker.place_order).parameters:
                 place_order_kwargs["position_side"] = (
-                    str(getattr(order.position_side, "value", order.position_side) or "").strip().lower() or None
+                    str(
+                        getattr(order.position_side, "value", order.position_side) or ""
+                    )
+                    .strip()
+                    .lower()
+                    or None
                 )
             if "is_margin_trade" in inspect.signature(broker.place_order).parameters:
-                place_order_kwargs["is_margin_trade"] = bool(getattr(order, "is_margin_trade", False))
+                place_order_kwargs["is_margin_trade"] = bool(
+                    getattr(order, "is_margin_trade", False)
+                )
 
             result = await broker.place_order(**place_order_kwargs)
 
@@ -243,7 +263,10 @@ class TradingEngine:
             if result.exchange_order_id:
                 order.exchange_order_id = result.exchange_order_id
 
-            has_immediate_fill = float(result.filled_quantity or 0) > 0 and float(result.filled_price or 0) > 0
+            has_immediate_fill = (
+                float(result.filled_quantity or 0) > 0
+                and float(result.filled_price or 0) > 0
+            )
             if has_immediate_fill:
                 await self.trade_service.create_trade(
                     order=order,
@@ -313,7 +336,9 @@ class TradingEngine:
 
         except asyncio.TimeoutError:
             # 关键：超时绝对不能直接标记为失败，因为单子可能已经发给交易所了
-            logger.error(f"⚠️ 下单请求超时 (ID: {order.order_id})。状态未知，进入人工核实流程。")
+            logger.error(
+                f"⚠️ 下单请求超时 (ID: {order.order_id})。状态未知，进入人工核实流程。"
+            )
             marker = "[AWAITING_BRIDGE_ACK]"
             timeout_marker = "[BRIDGE_ACK_TIMEOUT_PENDING_REVIEW]"
             base_remarks = (order.remarks or "").strip()
@@ -336,9 +361,13 @@ class TradingEngine:
                 )
             )
         except Exception as e:
-            logger.error(f"❌ Broker 执行崩溃 (ID: {order.order_id}): {e}", exc_info=True)
+            logger.error(
+                f"❌ Broker 执行崩溃 (ID: {order.order_id}): {e}", exc_info=True
+            )
             # 对于非超时类的明确异常，可以尝试标记为拒绝
-            await self.order_service.transition_order_status(order, OrderStatus.REJECTED, remarks=f"执行异常: {str(e)}")
+            await self.order_service.transition_order_status(
+                order, OrderStatus.REJECTED, remarks=f"执行异常: {str(e)}"
+            )
             _safe_schedule_notification(
                 publish_notification_async(
                     user_id=str(order.user_id),
@@ -404,7 +433,7 @@ class TradingEngine:
                     extra={
                         "user_id": user_id,
                         "broker": broker.__class__.__name__,
-                        "keys": sorted(list(account.keys())),
+                        "keys": sorted(account.keys()),
                     },
                 )
                 return
@@ -413,7 +442,9 @@ class TradingEngine:
             account_data = dict(account)
             account_data.setdefault("timestamp", datetime.now().isoformat())
 
-            key = write_trade_account_cache(self.redis, tenant_id, user_id, account_data)
+            key = write_trade_account_cache(
+                self.redis, tenant_id, user_id, account_data
+            )
             logger.info("Account state synced to Redis: %s", key)
 
         except Exception as e:
@@ -435,7 +466,11 @@ class TradingEngine:
                         tenant_id=str(order.tenant_id or "default"),
                         client_order_id=str(order.client_order_id or ""),
                         symbol=str(order.symbol or ""),
-                        side=str(order.side.value if hasattr(order.side, "value") else order.side or ""),
+                        side=str(
+                            order.side.value
+                            if hasattr(order.side, "value")
+                            else order.side or ""
+                        ),
                     )
                 except Exception as broker_err:
                     logger.warning(
@@ -462,7 +497,10 @@ class TradingEngine:
         # 1. Estimate order value if it's 0 (Market Order)
         # Market orders arrive with order_value=0; must estimate from real-time quote.
         order_val = float(order.order_value or 0)
-        is_market_order = str(getattr(order.order_type, "value", order.order_type) or "").lower() == "market"
+        is_market_order = (
+            str(getattr(order.order_type, "value", order.order_type) or "").lower()
+            == "market"
+        )
         if order_val <= 0 and order.quantity > 0:
             try:
                 broker = self._get_broker(order.trading_mode)
@@ -474,7 +512,9 @@ class TradingEngine:
                     # Persist estimated value so downstream checks all read the same figure
                     await self.db.commit()
                     await self.db.refresh(order)
-                    logger.info(f"Estimated market order value for risk check: {order_val}")
+                    logger.info(
+                        f"Estimated market order value for risk check: {order_val}"
+                    )
             except Exception as e:
                 logger.warning(f"Failed to estimate market order value: {e}")
 
@@ -514,7 +554,7 @@ class TradingEngine:
                         Portfolio.id == order.portfolio_id,
                         Portfolio.user_id == user_id,
                         Portfolio.tenant_id == order.tenant_id,
-                        Portfolio.is_deleted == False,
+                        not Portfolio.is_deleted,
                     )
                 )
                 .limit(1)
@@ -557,7 +597,9 @@ class TradingEngine:
 
         # 兼容兜底：若本地库读取不到，再尝试旧远程接口。
         if available_cash <= 0:
-            available_cash = await remote_service.get_portfolio_cash(order.portfolio_id, user_id)
+            available_cash = await remote_service.get_portfolio_cash(
+                order.portfolio_id, user_id
+            )
         if portfolio_value <= 0:
             portfolio_value = available_cash
 
@@ -590,7 +632,9 @@ class TradingEngine:
 
         return result
 
-    async def rotate_buy_next(self, user_id: int, portfolio_id: int, original_symbol: str) -> dict | None:
+    async def rotate_buy_next(
+        self, user_id: int, portfolio_id: int, original_symbol: str
+    ) -> dict | None:
         """
         [Automation] 轮转买入下一只：
         当 original_symbol 因超时撤单时，从备选池中挑选下一只高权重股票买入。
@@ -608,7 +652,9 @@ class TradingEngine:
 
             # 2. 获取备选池 (从 Redis 或 DB 获取该策略的预设权重)
             # 方案：读取该租户/用户的实时活跃配置
-            active_key = f"trade:active_strategy:{portfolio.tenant_id}:{str(user_id).zfill(8)}"
+            active_key = (
+                f"trade:active_strategy:{portfolio.tenant_id}:{str(user_id).zfill(8)}"
+            )
             active_data_raw = self.redis.client.get(active_key)
             if not active_data_raw:
                 return None
@@ -616,29 +662,37 @@ class TradingEngine:
             active_data = json.loads(active_data_raw)
             # 假设备选池在 live_trade_config.target_list 或类似字段中
             live_cfg = active_data.get("live_trade_config") or {}
-            target_list = live_cfg.get("target_list") or [] # [{symbol, weight}, ...]
+            target_list = live_cfg.get("target_list") or []  # [{symbol, weight}, ...]
 
             if not target_list:
                 logger.warning("Rotate-buy-next: No target_list found in live_config")
                 return None
 
             # 按权重降序
-            sorted_targets = sorted(target_list, key=lambda x: float(x.get("weight", 0)), reverse=True)
+            sorted_targets = sorted(
+                target_list, key=lambda x: float(x.get("weight", 0)), reverse=True
+            )
 
             # 3. 过滤掉已经持仓的，以及今天已经尝试过且未成功的
             # 获取当前持仓
             from backend.services.trade.models.position import Position
-            pos_stmt = select(Position.symbol).where(and_(Position.portfolio_id == portfolio_id, Position.quantity > 0))
+
+            pos_stmt = select(Position.symbol).where(
+                and_(Position.portfolio_id == portfolio_id, Position.quantity > 0)
+            )
             pos_res = await self.db.execute(pos_stmt)
             current_symbols = set(pos_res.scalars().all())
 
             # 获取今日已报订单 (排除撤单或成交的？不，这里应该过滤掉今天所有已尝试的，避免死循环)
             from datetime import date
+
             today = date.today()
-            order_stmt = select(Order.symbol).where(and_(
-                Order.portfolio_id == portfolio_id,
-                Order.created_at >= datetime.combine(today, datetime.min.time())
-            ))
+            order_stmt = select(Order.symbol).where(
+                and_(
+                    Order.portfolio_id == portfolio_id,
+                    Order.created_at >= datetime.combine(today, datetime.min.time()),
+                )
+            )
             order_res = await self.db.execute(order_stmt)
             tried_symbols = set(order_res.scalars().all())
 
@@ -646,20 +700,27 @@ class TradingEngine:
             next_target = None
             for target in sorted_targets:
                 sym = target.get("symbol")
-                if sym == original_symbol: continue
-                if sym in current_symbols: continue
-                if sym in tried_symbols: continue
+                if sym == original_symbol:
+                    continue
+                if sym in current_symbols:
+                    continue
+                if sym in tried_symbols:
+                    continue
                 next_target = target
                 break
 
             if not next_target:
-                logger.info("Rotate-buy-next: No available backup stocks in target_list")
+                logger.info(
+                    "Rotate-buy-next: No available backup stocks in target_list"
+                )
                 return None
 
             # 5. 计算买入数量 (简单按组合剩余可用资金或预设权重计算)
             # 此处简单复用原单的价格/数量逻辑（或根据剩余可用资金重算的逻辑）
             # 注意：实际生产中需要精确计算。
-            logger.info("Rotate-buy-next: matched next target %s", next_target['symbol'])
+            logger.info(
+                "Rotate-buy-next: matched next target %s", next_target["symbol"]
+            )
 
             # 推送通知
             await publish_notification_async(
@@ -668,7 +729,7 @@ class TradingEngine:
                 title="触发权重轮转补位",
                 content=f"由于 {original_symbol} 挂单超时已撤销，系统自动按权重尝试买入下一只备选：{next_target['symbol']}",
                 type="trading",
-                level="info"
+                level="info",
             )
 
             # 此处返回建议，实际上可能需要创建一个新的 Order 对象并调用 submit_order

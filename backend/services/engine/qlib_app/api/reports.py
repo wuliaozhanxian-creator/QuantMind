@@ -8,20 +8,20 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
+from backend.services.engine.qlib_app.utils.structured_logger import (
+    StructuredTaskLogger,
+)
 
 router = APIRouter(prefix="/qlib/reports", tags=["reports"])
 
 logger = logging.getLogger(__name__)
 task_logger = StructuredTaskLogger(logger, "ReportsAPI")
 
-
 def get_qlib_service() -> Any:
     """依赖注入：获取Qlib服务实例"""
     from qlib_app.main import qlib_service
 
     return qlib_service
-
 
 @router.get("/{backtest_id}/pdf")
 async def export_pdf_report(backtest_id: str, service: Any = Depends(get_qlib_service)):
@@ -42,7 +42,7 @@ async def export_pdf_report(backtest_id: str, service: Any = Depends(get_qlib_se
             raise HTTPException(
                 status_code=503,
                 detail=f"PDF 报告导出依赖缺失: {e.name}. 请安装 reportlab/Pillow 等依赖后重试。",
-            )
+            ) from e
 
         # 获取回测结果
         result = await service.get_result(backtest_id)
@@ -60,17 +60,22 @@ async def export_pdf_report(backtest_id: str, service: Any = Depends(get_qlib_se
         return StreamingResponse(
             io.BytesIO(pdf_bytes),
             media_type="application/pdf",
-            headers={"Content-Disposition": f"attachment; filename=backtest_{backtest_id}.pdf"},
+            headers={
+                "Content-Disposition": f"attachment; filename=backtest_{backtest_id}.pdf"
+            },
         )
     except HTTPException:
         raise
     except Exception as e:
         task_logger.exception("export_pdf_failed", "导出 PDF 报告失败", error=str(e))
-        raise HTTPException(status_code=500, detail=f"导出 PDF 报告失败: {str(e)}")
-
+        raise HTTPException(
+            status_code=500, detail=f"导出 PDF 报告失败: {str(e)}"
+        ) from e
 
 @router.get("/{backtest_id}/excel")
-async def export_excel_report(backtest_id: str, service: Any = Depends(get_qlib_service)):
+async def export_excel_report(
+    backtest_id: str, service: Any = Depends(get_qlib_service)
+):
     """
     导出 Excel 回测报告
 
@@ -87,7 +92,7 @@ async def export_excel_report(backtest_id: str, service: Any = Depends(get_qlib_
             raise HTTPException(
                 status_code=503,
                 detail=f"Excel 报告导出依赖缺失: {e.name}. 请安装 openpyxl 等依赖后重试。",
-            )
+            ) from e
 
         # 获取回测结果
         result = await service.get_result(backtest_id)
@@ -105,10 +110,16 @@ async def export_excel_report(backtest_id: str, service: Any = Depends(get_qlib_
         return StreamingResponse(
             io.BytesIO(excel_bytes),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": f"attachment; filename=backtest_{backtest_id}.xlsx"},
+            headers={
+                "Content-Disposition": f"attachment; filename=backtest_{backtest_id}.xlsx"
+            },
         )
     except HTTPException:
         raise
     except Exception as e:
-        task_logger.exception("export_excel_failed", "导出 Excel 报告失败", error=str(e))
-        raise HTTPException(status_code=500, detail=f"导出 Excel 报告失败: {str(e)}")
+        task_logger.exception(
+            "export_excel_failed", "导出 Excel 报告失败", error=str(e)
+        )
+        raise HTTPException(
+            status_code=500, detail=f"导出 Excel 报告失败: {str(e)}"
+        ) from e

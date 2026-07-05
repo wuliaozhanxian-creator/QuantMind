@@ -1,15 +1,16 @@
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from openai import OpenAI
 
 try:
     from ...ai_strategy_config import get_config as _get_config
 except ImportError:
-    from backend.services.engine.ai_strategy.ai_strategy_config import get_config as _get_config
+    from backend.services.engine.ai_strategy.ai_strategy_config import (
+        get_config as _get_config,
+    )
 
 ai_strategy_config = _get_config()
-
 
 class DashScopeClient:
     """Minimal wrapper around DashScope (OpenAI-compatible) APIs."""
@@ -22,7 +23,9 @@ class DashScopeClient:
         self.api_key = api_key or os.getenv("DASHSCOPE_API_KEY")
         if not self.api_key:
             raise RuntimeError("DASHSCOPE_API_KEY is not configured")
-        self.base_url = base_url or os.getenv("DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+        self.base_url = base_url or os.getenv(
+            "DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        )
         self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
 
     def get_embedding(
@@ -54,6 +57,5 @@ class DashScopeClient:
             return resp.model
         except Exception as exc:
             raise RuntimeError("DashScope health check failed") from exc
-
 
 __all__ = ["DashScopeClient"]

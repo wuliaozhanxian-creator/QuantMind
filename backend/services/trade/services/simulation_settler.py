@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,14 +23,17 @@ from backend.shared.auth import create_service_token
 
 logger = logging.getLogger(__name__)
 
-
 class SimulationSettler:
     """
     模拟交易结算器：负责无需 Pod 的“公式化”模拟盘运行逻辑
     """
 
     async def run_daily_settlement(
-        self, db: AsyncSession, user_id: str | int, strategy_id: str, tenant_id: str = "default"
+        self,
+        db: AsyncSession,
+        user_id: str | int,
+        strategy_id: str,
+        tenant_id: str = "default",
     ):
         """
         执行一次模拟盘的“每日步进”
@@ -46,7 +49,9 @@ class SimulationSettler:
         # 1. 获取当前账户状态
         tenant_id = str(tenant_id or "default")
         normalized_user_id = str(user_id)
-        account_data = await sim_manager.get_account(normalized_user_id, tenant_id=tenant_id)
+        account_data = await sim_manager.get_account(
+            normalized_user_id, tenant_id=tenant_id
+        )
         if not account_data:
             logger.error(f"找不到用户 {user_id} 的模拟账户")
             return
@@ -115,14 +120,18 @@ class SimulationSettler:
                     user_id=int(normalized_user_id),
                     data=SimOrderCreate(
                         portfolio_id=0,
-                        strategy_id=int(strategy_id) if str(strategy_id).isdigit() else None,
+                        strategy_id=int(strategy_id)
+                        if str(strategy_id).isdigit()
+                        else None,
                         symbol=symbol,
                         side=side,
                         order_type=OrderType.MARKET,
                         quantity=abs(int(delta_volume)),
                         price=real_price,
                         remarks="simulation_settler_rebalance",
-                        trade_action="buy_to_open" if delta_volume > 0 else "sell_to_close",
+                        trade_action="buy_to_open"
+                        if delta_volume > 0
+                        else "sell_to_close",
                         position_side="long",
                         is_margin_trade=False,
                     ),
@@ -133,7 +142,9 @@ class SimulationSettler:
 
                 execution_result = await execution_engine.execute_order(order)
                 if not execution_result.success:
-                    await execution_engine.mark_rejected(order, execution_result.message)
+                    await execution_engine.mark_rejected(
+                        order, execution_result.message
+                    )
                     logger.warning(
                         "[SimSettle] 虚拟成交拒绝: symbol=%s qty=%s reason=%s",
                         symbol,
@@ -191,7 +202,7 @@ class SimulationSettler:
         try:
             headers["X-Service-Token"] = create_service_token("trade")
         except Exception:
-            pass  # SECRET_KEY 未配置或 jose 未安装
+            logger.debug("ignored exception", exc_info=True)
         results = {}
 
         async with httpx.AsyncClient() as client:
@@ -280,6 +291,5 @@ class SimulationSettler:
             "SH600519": 0.2,
             "SZ000001": 0.1,
         }
-
 
 settler = SimulationSettler()

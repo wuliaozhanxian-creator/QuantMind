@@ -30,13 +30,15 @@ from backend.services.trade.simulation.services.simulation_manager import (
 )
 from backend.services.trade.trade_config import settings
 from backend.shared.auth import create_service_token
-from backend.shared.trade_account_cache import write_json_cache, write_trade_account_cache
+from backend.shared.trade_account_cache import (
+    write_json_cache,
+    write_trade_account_cache,
+)
 from backend.shared.trading_calendar import calendar_service
 from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
 _SHARED_HTTP_CLIENT: httpx.AsyncClient | None = None
-
 
 class ExecutionResult:
     def __init__(
@@ -62,7 +64,6 @@ class ExecutionResult:
         self.session_phase = session_phase
         self.message = message
 
-
 @dataclass
 class MarketSnapshot:
     price: float
@@ -70,7 +71,6 @@ class MarketSnapshot:
     limit_up: bool = False
     limit_down: bool = False
     suspended: bool = False
-
 
 @dataclass
 class ExecutionWindowDecision:
@@ -82,7 +82,6 @@ class ExecutionWindowDecision:
     current_trade_date: date | None = None
     target_trade_date: date | None = None
     final_state: str | None = None
-
 
 class SimulationExecutionEngine:
     def __init__(self, db: AsyncSession, manager: SimulationAccountManager):
@@ -224,7 +223,9 @@ class SimulationExecutionEngine:
                 final_state="rejected",
             )
 
-        market_phase = str(trading_state.get("market_phase") or "").strip().upper() or None
+        market_phase = (
+            str(trading_state.get("market_phase") or "").strip().upper() or None
+        )
         session_phase = self._map_session_phase(trading_state.get("matched_session"))
         if tif == "DAY" and target_trade_date is not None:
             if current_trade_date > target_trade_date:
@@ -238,7 +239,10 @@ class SimulationExecutionEngine:
                     target_trade_date=target_trade_date,
                     final_state="expired",
                 )
-            if current_trade_date == target_trade_date and market_phase == "AFTER_CLOSE":
+            if (
+                current_trade_date == target_trade_date
+                and market_phase == "AFTER_CLOSE"
+            ):
                 return ExecutionWindowDecision(
                     can_execute=False,
                     retryable=False,
@@ -288,12 +292,16 @@ class SimulationExecutionEngine:
             session_phase=session_phase,
             current_trade_date=current_trade_date,
             target_trade_date=(
-                target_trade_date if tif == "DAY" and target_trade_date is not None else next_trade_date
+                target_trade_date
+                if tif == "DAY" and target_trade_date is not None
+                else next_trade_date
             ),
             final_state="queued",
         )
 
-    async def _ensure_trading_session(self, order: Any) -> tuple[str | None, str | None]:
+    async def _ensure_trading_session(
+        self, order: Any
+    ) -> tuple[str | None, str | None]:
         """Backward-compatible wrapper for older tests/callers."""
         decision = await self.assess_execution_window(order)
         if not decision.can_execute:
@@ -311,7 +319,9 @@ class SimulationExecutionEngine:
                 "cash": float(projection_account.cash or 0.0),
                 "available_cash": float(projection_account.available_cash or 0.0),
                 "market_value": float(projection_account.long_market_value or 0.0),
-                "short_market_value": float(projection_account.short_market_value or 0.0),
+                "short_market_value": float(
+                    projection_account.short_market_value or 0.0
+                ),
                 "total_asset": float(projection_account.total_asset or 0.0),
                 "liabilities": float(projection_account.liabilities or 0.0),
                 "maintenance_margin_ratio": float(
@@ -320,7 +330,9 @@ class SimulationExecutionEngine:
                 "initial_equity": float(projection_account.initial_equity or 0.0),
             }
 
-        account = await self.manager.get_account(order.user_id, tenant_id=order.tenant_id)
+        account = await self.manager.get_account(
+            order.user_id, tenant_id=order.tenant_id
+        )
         if account:
             return dict(account)
 
@@ -329,7 +341,9 @@ class SimulationExecutionEngine:
             tenant_id=order.tenant_id,
             default_initial_cash=1_000_000.0,
         )
-        initial_cash = float(settings_payload.get("initial_cash", 1_000_000.0) or 1_000_000.0)
+        initial_cash = float(
+            settings_payload.get("initial_cash", 1_000_000.0) or 1_000_000.0
+        )
         return {
             "cash": initial_cash,
             "available_cash": initial_cash,
@@ -427,8 +441,8 @@ class SimulationExecutionEngine:
 
             query_with_limits = text("""
                 SELECT close, adj_factor, limit_up_today, limit_down_today, volume
-                FROM stock_daily_latest 
-                WHERE symbol = :symbol 
+                FROM stock_daily_latest
+                WHERE symbol = :symbol
                 ORDER BY trade_date DESC LIMIT 1
             """)
             try:
@@ -459,8 +473,8 @@ class SimulationExecutionEngine:
                 # 兼容少数字段尚未完成迁移的环境
                 query_legacy = text("""
                     SELECT close, adj_factor
-                    FROM stock_daily_latest 
-                    WHERE symbol = :symbol 
+                    FROM stock_daily_latest
+                    WHERE symbol = :symbol
                     ORDER BY trade_date DESC LIMIT 1
                 """)
                 legacy_result = await self.db.execute(
@@ -493,7 +507,9 @@ class SimulationExecutionEngine:
         )
 
     async def execute_order(self, order: Any) -> ExecutionResult:
-        expires_at = self._normalize_runtime_datetime(getattr(order, "expires_at", None))
+        expires_at = self._normalize_runtime_datetime(
+            getattr(order, "expires_at", None)
+        )
         if expires_at is not None and expires_at <= datetime.now():
             return ExecutionResult(
                 success=False,
@@ -546,9 +562,11 @@ class SimulationExecutionEngine:
         position_side = (
             str(getattr(order, "position_side", None) or "long").strip() or "long"
         )
-        is_margin_trade = bool(getattr(order, "is_margin_trade", False))
+        bool(getattr(order, "is_margin_trade", False))
         if side == "sell" and position_side.lower() == "long":
-            available_qty = await SimulationProjectionService(self.db).get_available_quantity(
+            available_qty = await SimulationProjectionService(
+                self.db
+            ).get_available_quantity(
                 tenant_id=order.tenant_id,
                 user_id=order.user_id,
                 symbol=order.symbol,
@@ -612,8 +630,13 @@ class SimulationExecutionEngine:
                 return ExecutionResult(
                     success=False, message="Insufficient cash for buy order"
                 )
-        if position_side.lower() == "short" and str(trade_action or "").lower() == "buy_to_close":
-            available_short = await SimulationProjectionService(self.db).get_available_quantity(
+        if (
+            position_side.lower() == "short"
+            and str(trade_action or "").lower() == "buy_to_close"
+        ):
+            available_short = await SimulationProjectionService(
+                self.db
+            ).get_available_quantity(
                 tenant_id=order.tenant_id,
                 user_id=order.user_id,
                 symbol=order.symbol,
@@ -621,7 +644,8 @@ class SimulationExecutionEngine:
             )
             if available_short + 1e-6 < float(order.quantity or 0.0):
                 return ExecutionResult(
-                    success=False, message="Insufficient short holdings for buy-to-close order"
+                    success=False,
+                    message="Insufficient short holdings for buy-to-close order",
                 )
 
         return ExecutionResult(
@@ -648,7 +672,9 @@ class SimulationExecutionEngine:
             tenant_id=order.tenant_id,
             user_id=str(order.user_id),
             account_id=account_id,
-            strategy_id=str(order.strategy_id) if order.strategy_id is not None else None,
+            strategy_id=str(order.strategy_id)
+            if order.strategy_id is not None
+            else None,
             portfolio_id=int(order.portfolio_id or 0),
             symbol=order.symbol,
             side=str(order.side.value),
@@ -704,7 +730,9 @@ class SimulationExecutionEngine:
 
         projection_order = (
             await self.db.execute(
-                select(SimulationOrderV2).where(SimulationOrderV2.order_id == order.order_id)
+                select(SimulationOrderV2).where(
+                    SimulationOrderV2.order_id == order.order_id
+                )
             )
         ).scalar_one_or_none()
         if projection_order is not None:
@@ -729,7 +757,9 @@ class SimulationExecutionEngine:
         order.remarks = f"Execution rejected: {message}"
         projection_order = (
             await self.db.execute(
-                select(SimulationOrderV2).where(SimulationOrderV2.order_id == order.order_id)
+                select(SimulationOrderV2).where(
+                    SimulationOrderV2.order_id == order.order_id
+                )
             )
         ).scalar_one_or_none()
         if projection_order is not None:
@@ -744,7 +774,9 @@ class SimulationExecutionEngine:
         order.remarks = f"Execution expired: {message}"
         projection_order = (
             await self.db.execute(
-                select(SimulationOrderV2).where(SimulationOrderV2.order_id == order.order_id)
+                select(SimulationOrderV2).where(
+                    SimulationOrderV2.order_id == order.order_id
+                )
             )
         ).scalar_one_or_none()
         if projection_order is not None:

@@ -16,7 +16,9 @@ class SimulationCorporateAction(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     symbol: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     action_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
-    ex_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    ex_date: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True, index=True
+    )
     effective_date: Mapped[datetime | None] = mapped_column(
         DateTime, nullable=True, index=True
     )
@@ -27,7 +29,9 @@ class SimulationCorporateAction(Base, TimestampMixin):
     rights_price: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     source: Mapped[str] = mapped_column(String(64), nullable=False, default="manual")
     note: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", index=True)
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="pending", index=True
+    )
     applied_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     __table_args__ = (

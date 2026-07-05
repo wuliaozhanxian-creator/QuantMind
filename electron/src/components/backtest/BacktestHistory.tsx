@@ -271,8 +271,8 @@ export const BacktestHistory: React.FC<BacktestHistoryProps> = ({
         </div>
       </div>
 
-      {/* 列表内容 */}
-      <div className="overflow-auto max-h-[600px]">
+      {/* 列表内容（T2.5：移动端横向滚动） */}
+      <div className="overflow-auto max-h-[600px] qm-table-scroll">
         {isLoading ? (
           <div className="flex items-center justify-center py-20">
             <RefreshCw className="w-8 h-8 text-blue-400 animate-spin" />

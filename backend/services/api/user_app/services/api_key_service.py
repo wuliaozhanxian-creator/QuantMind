@@ -1,7 +1,7 @@
 import secrets
 import string
 from datetime import datetime
-from typing import List, Optional, Tuple
+from typing import Optional
 
 from passlib.context import CryptContext
 from sqlalchemy import select
@@ -20,7 +20,6 @@ from backend.services.api.user_app.schemas.api_key import (
 # Reuse the same pwd_context if possible, or create a specific one
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-
 class ApiKeyService:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -28,11 +27,15 @@ class ApiKeyService:
     def _generate_keys(self, env: str = "live") -> tuple[str, str]:
         """Generate Access Key and Secret Key"""
         # Access Key: qm_{env}_{16_random_alnum}
-        random_part = "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(16))
+        random_part = "".join(
+            secrets.choice(string.ascii_letters + string.digits) for _ in range(16)
+        )
         access_key = f"qm_{env}_{random_part}"
 
         # Secret Key: sk_{32_random_alnum}
-        secret_part = "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(32))
+        secret_part = "".join(
+            secrets.choice(string.ascii_letters + string.digits) for _ in range(32)
+        )
         secret_key = f"sk_{secret_part}"
 
         return access_key, secret_key
@@ -43,7 +46,9 @@ class ApiKeyService:
     def verify_secret(self, secret: str, hashed_secret: str) -> bool:
         return pwd_context.verify(secret, hashed_secret)
 
-    async def create_api_key(self, user_id: str, tenant_id: str, data: ApiKeyCreate) -> ApiKeyResponse:
+    async def create_api_key(
+        self, user_id: str, tenant_id: str, data: ApiKeyCreate
+    ) -> ApiKeyResponse:
         access_key, secret_key = self._generate_keys()
         secret_hash = self._hash_secret(secret_key)
 
@@ -88,9 +93,13 @@ class ApiKeyService:
         keys = result.scalars().all()
         return [ApiKeyInfo.from_orm(k) for k in keys]
 
-    async def update_api_key(self, user_id: str, access_key: str, data: ApiKeyUpdate) -> ApiKeyInfo | None:
+    async def update_api_key(
+        self, user_id: str, access_key: str, data: ApiKeyUpdate
+    ) -> ApiKeyInfo | None:
         # First ensure it belongs to user
-        stmt = select(ApiKey).where(ApiKey.access_key == access_key, ApiKey.user_id == user_id)
+        stmt = select(ApiKey).where(
+            ApiKey.access_key == access_key, ApiKey.user_id == user_id
+        )
         result = await self.db.execute(stmt)
         key = result.scalar_one_or_none()
 
@@ -109,7 +118,9 @@ class ApiKeyService:
         return ApiKeyInfo.from_orm(key)
 
     async def delete_api_key(self, user_id: str, access_key: str) -> bool:
-        stmt = select(ApiKey).where(ApiKey.access_key == access_key, ApiKey.user_id == user_id)
+        stmt = select(ApiKey).where(
+            ApiKey.access_key == access_key, ApiKey.user_id == user_id
+        )
         result = await self.db.execute(stmt)
         key = result.scalar_one_or_none()
 
@@ -138,7 +149,9 @@ class ApiKeyService:
 
         return key
 
-    async def bootstrap_default_key(self, user_id: str, tenant_id: str) -> ApiKeyBootstrapResponse:
+    async def bootstrap_default_key(
+        self, user_id: str, tenant_id: str
+    ) -> ApiKeyBootstrapResponse:
         existing = await self.get_user_keys(user_id=user_id, tenant_id=tenant_id)
         if existing:
             latest = existing[0]

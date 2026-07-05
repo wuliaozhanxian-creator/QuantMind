@@ -81,8 +81,9 @@ async def _scan_once() -> int:
             try:
                 order.status = OrderStatus.EXPIRED
                 order.remarks = (
-                    order.remarks or ""
-                ) + f" [EXPIRED: submitted_at={order.submitted_at}, timeout={_TIMEOUT_MINUTES}m]"
+                    (order.remarks or "")
+                    + f" [EXPIRED: submitted_at={order.submitted_at}, timeout={_TIMEOUT_MINUTES}m]"
+                )
                 expired_count += 1
                 logger.warning(
                     "order %s expired after %d min (submitted_at=%s)",
@@ -105,7 +106,11 @@ async def _scan_once() -> int:
                         action_url="/trading",
                     )
                 except Exception as notify_exc:
-                    logger.warning("notify failed for expired order %s: %s", order.order_id, notify_exc)
+                    logger.warning(
+                        "notify failed for expired order %s: %s",
+                        order.order_id,
+                        notify_exc,
+                    )
             except Exception as exc:
                 logger.error("failed to expire order %s: %s", order.order_id, exc)
 
@@ -185,9 +190,15 @@ async def _scan_bridge_ack_timeout_once() -> int:
                         action_url="/trading",
                     )
                 except Exception as notify_exc:
-                    logger.warning("notify failed for bridge timeout order %s: %s", order.order_id, notify_exc)
+                    logger.warning(
+                        "notify failed for bridge timeout order %s: %s",
+                        order.order_id,
+                        notify_exc,
+                    )
             except Exception as exc:
-                logger.error("failed to flag bridge timeout order %s: %s", order.order_id, exc)
+                logger.error(
+                    "failed to flag bridge timeout order %s: %s", order.order_id, exc
+                )
 
         if orders:
             await db.commit()
@@ -345,9 +356,7 @@ async def _notify_reconcile(
             action_url="/trading",
         )
     except Exception as exc:
-        logger.warning(
-            "notify failed for reconcile order %s: %s", order.order_id, exc
-        )
+        logger.warning("notify failed for reconcile order %s: %s", order.order_id, exc)
 
 
 async def _mark_reconcile_failed(order: Order) -> None:
@@ -391,8 +400,7 @@ async def _reconcile_single_order(order: Order, broker) -> None:
         attempts += 1
         remarks = _write_query_attempts(remarks, attempts)
         remarks = (
-            f"{remarks} [RECONCILE_QUERY_FAIL: "
-            f"broker unavailable, attempts={attempts}]"
+            f"{remarks} [RECONCILE_QUERY_FAIL: broker unavailable, attempts={attempts}]"
         ).strip()
         order.remarks = remarks
         logger.warning(
@@ -560,9 +568,7 @@ async def _reconcile_queued_orders_once() -> int:
                 await _reconcile_single_order(order, broker)
                 processed_count += 1
             except Exception as exc:
-                logger.error(
-                    "reconcile order %s failed: %s", order.order_id, exc
-                )
+                logger.error("reconcile order %s failed: %s", order.order_id, exc)
 
         await db.commit()
 
@@ -593,7 +599,9 @@ async def _scan_pending_orders_for_query_once() -> int:
         return 0
 
     min_age_cutoff = datetime.now() - timedelta(seconds=_QMT_ORDER_POLL_MIN_AGE_SEC)
-    poll_recheck_cutoff = datetime.now() - timedelta(seconds=_QMT_ORDER_POLL_INTERVAL_SEC)
+    poll_recheck_cutoff = datetime.now() - timedelta(
+        seconds=_QMT_ORDER_POLL_INTERVAL_SEC
+    )
     processed_count = 0
 
     async with get_session() as db:
@@ -632,9 +640,7 @@ async def _scan_pending_orders_for_query_once() -> int:
                 await _poll_single_order(order, broker, client_order_id)
                 processed_count += 1
             except Exception as exc:
-                logger.error(
-                    "poll order %s failed: %s", order.order_id, exc
-                )
+                logger.error("poll order %s failed: %s", order.order_id, exc)
 
         if orders:
             await db.commit()
@@ -649,7 +655,7 @@ def _parse_poll_last_query(remarks: str | None) -> datetime | None:
     match = _QMT_ORDER_POLL_LAST_QUERY_RE.search(remarks)
     if not match:
         return None
-    raw = match.group(0)[len(_QMT_ORDER_POLL_LAST_QUERY_MARKER):-1]
+    raw = match.group(0)[len(_QMT_ORDER_POLL_LAST_QUERY_MARKER) : -1]
     try:
         return datetime.fromisoformat(raw)
     except (ValueError, TypeError):
@@ -684,9 +690,7 @@ async def _poll_single_order(order: Order, broker, client_order_id: str) -> None
     try:
         result = await broker.query_order(client_order_id)
     except Exception as exc:
-        logger.warning(
-            "poll order %s query failed: %s", order.order_id, exc
-        )
+        logger.warning("poll order %s query failed: %s", order.order_id, exc)
         return
 
     status = str(getattr(result, "status", "") or "").upper()
@@ -736,9 +740,7 @@ async def _poll_single_order(order: Order, broker, client_order_id: str) -> None
     elif status == "CANCELLED":
         order.status = OrderStatus.CANCELLED
         order.cancelled_at = datetime.now()
-        order.remarks = (
-            f"{(order.remarks or '').strip()} [POLL_CANCELLED]"
-        ).strip()
+        order.remarks = (f"{(order.remarks or '').strip()} [POLL_CANCELLED]").strip()
         logger.info("order %s poll confirmed CANCELLED", order.order_id)
         await _notify_reconcile(
             order,
@@ -749,9 +751,7 @@ async def _poll_single_order(order: Order, broker, client_order_id: str) -> None
 
     elif status == "REJECTED":
         order.status = OrderStatus.REJECTED
-        order.remarks = (
-            f"{(order.remarks or '').strip()} [POLL_REJECTED]"
-        ).strip()
+        order.remarks = (f"{(order.remarks or '').strip()} [POLL_REJECTED]").strip()
         logger.info("order %s poll confirmed REJECTED", order.order_id)
         await _notify_reconcile(
             order,
@@ -762,9 +762,7 @@ async def _poll_single_order(order: Order, broker, client_order_id: str) -> None
 
     else:
         # STILL_PENDING 或未知状态：仅记录查询时间，等待下次轮询
-        logger.debug(
-            "order %s poll still pending (status=%s)", order.order_id, status
-        )
+        logger.debug("order %s poll still pending (status=%s)", order.order_id, status)
 
 
 async def run_order_timeout_scanner() -> None:
@@ -788,7 +786,10 @@ async def run_order_timeout_scanner() -> None:
         try:
             bridge_count = await _scan_bridge_ack_timeout_once()
             if bridge_count:
-                logger.info("Order timeout scanner: flagged %d bridge-timeout order(s) for review", bridge_count)
+                logger.info(
+                    "Order timeout scanner: flagged %d bridge-timeout order(s) for review",
+                    bridge_count,
+                )
 
             now = datetime.now()
             # 对账候选扫描：将待核查订单入队 + 对账闭环查询
@@ -807,7 +808,9 @@ async def run_order_timeout_scanner() -> None:
                         "Order timeout scanner: reconciled %d order(s) via broker query",
                         closed_count,
                     )
-                next_reconcile_scan = now + timedelta(seconds=max(1, _RECONCILE_SCAN_INTERVAL))
+                next_reconcile_scan = now + timedelta(
+                    seconds=max(1, _RECONCILE_SCAN_INTERVAL)
+                )
 
             # T4.3: 订单状态查询轮询 — 主动查询已提交未成交订单的柜台回报
             if now >= next_poll_scan:

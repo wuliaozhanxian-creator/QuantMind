@@ -3,16 +3,17 @@
 import json
 import logging
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from backend.services.engine.qlib_app.schemas.backtest import QlibBacktestResult
 from backend.services.engine.qlib_app.services.risk_analyzer import RiskAnalyzer
 from backend.shared.utils import normalize_user_id
-from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
+from backend.services.engine.qlib_app.utils.structured_logger import (
+    StructuredTaskLogger,
+)
 
 logger = logging.getLogger(__name__)
 task_logger = StructuredTaskLogger(logger, "BacktestServiceQuery")
-
 
 class QlibBacktestServiceQueryMixin:
     """Qlib 回测结果、历史、状态与管理逻辑 mixin"""
@@ -29,7 +30,11 @@ class QlibBacktestServiceQueryMixin:
             if not self._initialized:
                 self.initialize()
         except Exception as exc:
-            task_logger.warning("initialize_failed", "get_result 初始化 Qlib 失败，将继续返回原始结果", error=str(exc))
+            task_logger.warning(
+                "initialize_failed",
+                "get_result 初始化 Qlib 失败，将继续返回原始结果",
+                error=str(exc),
+            )
 
         normalized_user_id = normalize_user_id(user_id) if user_id else None
         cache_key = (
@@ -41,11 +46,17 @@ class QlibBacktestServiceQueryMixin:
             try:
                 cached_result = self._cache.get_backtest_result(cache_key)
                 if cached_result:
-                    task_logger.debug("cache_hit_result", "从缓存读取回测结果", backtest_id=backtest_id)
+                    task_logger.debug(
+                        "cache_hit_result",
+                        "从缓存读取回测结果",
+                        backtest_id=backtest_id,
+                    )
                     model = QlibBacktestResult(**cached_result)
                     return self._normalize_result_trades(model)
             except Exception as e:
-                task_logger.warning("cache_read_result_failed", "从缓存读取失败", error=str(e))
+                task_logger.warning(
+                    "cache_read_result_failed", "从缓存读取失败", error=str(e)
+                )
 
         # 1. 尝试从内存获取
         run = self._runs.get(backtest_id)
@@ -82,11 +93,15 @@ class QlibBacktestServiceQueryMixin:
                     try:
                         self._cache.set_backtest_result(cache_key, result.dict())
                     except Exception as e:
-                        task_logger.warning("cache_write_result_failed", "写入缓存失败", error=str(e))
+                        task_logger.warning(
+                            "cache_write_result_failed", "写入缓存失败", error=str(e)
+                        )
 
         return result
 
-    def _normalize_result_trades(self, result: QlibBacktestResult | None) -> QlibBacktestResult | None:
+    def _normalize_result_trades(
+        self, result: QlibBacktestResult | None
+    ) -> QlibBacktestResult | None:
         if result is None:
             return None
         try:
@@ -94,7 +109,11 @@ class QlibBacktestServiceQueryMixin:
             if isinstance(trades, list) and trades:
                 result.trades = RiskAnalyzer.normalize_trades_for_display(trades)
         except Exception as exc:
-            task_logger.warning("normalize_result_trades_failed", "Failed to normalize result trades for display", error=str(exc))
+            task_logger.warning(
+                "normalize_result_trades_failed",
+                "Failed to normalize result trades for display",
+                error=str(exc),
+            )
         return result
 
     async def get_status(
@@ -114,7 +133,10 @@ class QlibBacktestServiceQueryMixin:
                     "progress": 0.0,
                     "message": "Backtest not found",
                 }
-            if normalized_user_id is not None and run.get("user_id") != normalized_user_id:
+            if (
+                normalized_user_id is not None
+                and run.get("user_id") != normalized_user_id
+            ):
                 return {
                     "backtest_id": backtest_id,
                     "status": "not_found",
@@ -157,7 +179,11 @@ class QlibBacktestServiceQueryMixin:
                 "backtest_id": backtest_id,
                 "status": result.status,
                 "progress": 1.0,
-                "message": ("Completed" if result.status == "completed" else result.error_message),
+                "message": (
+                    "Completed"
+                    if result.status == "completed"
+                    else result.error_message
+                ),
             }
 
         return {
@@ -167,7 +193,9 @@ class QlibBacktestServiceQueryMixin:
             "message": "Backtest not found",
         }
 
-    async def list_history(self, user_id: str, tenant_id: str, limit: int = 10) -> list[QlibBacktestResult]:
+    async def list_history(
+        self, user_id: str, tenant_id: str, limit: int = 10
+    ) -> list[QlibBacktestResult]:
         """获取用户历史（优先从缓存读取）"""
         user_id = normalize_user_id(user_id)
         history_limit = max(1, int(limit))
@@ -176,18 +204,33 @@ class QlibBacktestServiceQueryMixin:
             try:
                 cached_history = self._cache.get_user_history(f"{tenant_id}:{user_id}")
                 if cached_history:
-                    task_logger.debug("cache_hit_history", "从缓存读取用户历史", user_id=user_id, tenant_id=tenant_id)
-                    cached_items = [QlibBacktestResult(**item) for item in cached_history]
+                    task_logger.debug(
+                        "cache_hit_history",
+                        "从缓存读取用户历史",
+                        user_id=user_id,
+                        tenant_id=tenant_id,
+                    )
+                    cached_items = [
+                        QlibBacktestResult(**item) for item in cached_history
+                    ]
                     return cached_items[:history_limit]
             except Exception as e:
-                task_logger.warning("cache_read_history_failed", "从缓存读取历史失败", error=str(e))
+                task_logger.warning(
+                    "cache_read_history_failed", "从缓存读取历史失败", error=str(e)
+                )
 
         results: list[QlibBacktestResult] = []
         for run in self._runs.values():
-            if run.get("user_id") == user_id and run.get("tenant_id") == tenant_id and run.get("result"):
+            if (
+                run.get("user_id") == user_id
+                and run.get("tenant_id") == tenant_id
+                and run.get("result")
+            ):
                 results.append(run["result"])
 
-        persisted = await self._persistence.list_history(user_id, tenant_id=tenant_id, limit=history_limit)
+        persisted = await self._persistence.list_history(
+            user_id, tenant_id=tenant_id, limit=history_limit
+        )
         for item in persisted:
             if all(existing.backtest_id != item.backtest_id for existing in results):
                 results.append(item)
@@ -197,9 +240,13 @@ class QlibBacktestServiceQueryMixin:
 
         if self._cache and results:
             try:
-                self._cache.set_user_history(f"{tenant_id}:{user_id}", [r.dict() for r in results])
+                self._cache.set_user_history(
+                    f"{tenant_id}:{user_id}", [r.dict() for r in results]
+                )
             except Exception as e:
-                task_logger.warning("cache_write_history_failed", "写入历史缓存失败", error=str(e))
+                task_logger.warning(
+                    "cache_write_history_failed", "写入历史缓存失败", error=str(e)
+                )
 
         return results
 
@@ -251,7 +298,9 @@ class QlibBacktestServiceQueryMixin:
                 ex=3600,
             )
         except Exception as re:
-            task_logger.warning("redis_progress_failed", "Redis 进度推送失败", error=str(re))
+            task_logger.warning(
+                "redis_progress_failed", "Redis 进度推送失败", error=str(re)
+            )
 
     def _build_config_payload(
         self, request: Any, signal_meta: dict[str, Any] | None = None
@@ -265,20 +314,26 @@ class QlibBacktestServiceQueryMixin:
         symbol = request.market_state_symbol or request.benchmark
         window = request.market_state_window
         strategy_total_position = (
-            request.strategy_total_position if request.strategy_total_position is not None else 1.0
+            request.strategy_total_position
+            if request.strategy_total_position is not None
+            else 1.0
         )
 
         try:
-            risk_series, position_by_state = self._market_state_service.build_risk_degree_series(
-                symbol=symbol,
-                start_date=request.start_date,
-                end_date=request.end_date,
-                window=window,
-                style=request.style,
-                strategy_total_position=strategy_total_position,
+            risk_series, position_by_state = (
+                self._market_state_service.build_risk_degree_series(
+                    symbol=symbol,
+                    start_date=request.start_date,
+                    end_date=request.end_date,
+                    window=window,
+                    style=request.style,
+                    strategy_total_position=strategy_total_position,
+                )
             )
         except Exception as exc:
-            task_logger.warning("market_state_failed", "动态仓位计算失败", error=str(exc))
+            task_logger.warning(
+                "market_state_failed", "动态仓位计算失败", error=str(exc)
+            )
             return {"risk_degree": strategy_total_position}
 
         if not risk_series:
@@ -305,13 +360,20 @@ class QlibBacktestServiceQueryMixin:
             return normalized
         return signal
 
-    async def delete_backtest(self, backtest_id: str, user_id: str, tenant_id: str) -> bool:
+    async def delete_backtest(
+        self, backtest_id: str, user_id: str, tenant_id: str
+    ) -> bool:
         """删除回测记录"""
         user_id = normalize_user_id(user_id)
         if backtest_id in self._runs:
             run = self._runs[backtest_id]
             if run.get("user_id") != user_id or run.get("tenant_id") != tenant_id:
-                task_logger.warning("delete_backtest_denied", "用户无权删除回测", user_id=user_id, backtest_id=backtest_id)
+                task_logger.warning(
+                    "delete_backtest_denied",
+                    "用户无权删除回测",
+                    user_id=user_id,
+                    backtest_id=backtest_id,
+                )
                 return False
             del self._runs[backtest_id]
 
@@ -322,7 +384,9 @@ class QlibBacktestServiceQueryMixin:
         if success and self._cache:
             try:
                 # 清理单条结果缓存
-                cache_key = f"{tenant_id}:{user_id}:{backtest_id}" if tenant_id else backtest_id
+                cache_key = (
+                    f"{tenant_id}:{user_id}:{backtest_id}" if tenant_id else backtest_id
+                )
                 self._cache.delete_backtest_result(cache_key)
 
                 # 清理状态缓存
@@ -332,13 +396,24 @@ class QlibBacktestServiceQueryMixin:
                 history_key = f"{tenant_id}:{user_id}" if tenant_id else user_id
                 self._cache.invalidate_user_history(history_key)
 
-                task_logger.info("delete_backtest_cache_cleared", "回测 Redis 缓存已清理", backtest_id=backtest_id, user_id=user_id)
+                task_logger.info(
+                    "delete_backtest_cache_cleared",
+                    "回测 Redis 缓存已清理",
+                    backtest_id=backtest_id,
+                    user_id=user_id,
+                )
             except Exception as e:
-                task_logger.warning("delete_backtest_cache_clear_failed", "同步清理 Redis 缓存失败", error=str(e))
+                task_logger.warning(
+                    "delete_backtest_cache_clear_failed",
+                    "同步清理 Redis 缓存失败",
+                    error=str(e),
+                )
 
         return success
 
-    async def compare_backtests(self, id1: str, id2: str, user_id: str, tenant_id: str) -> dict[str, Any]:
+    async def compare_backtests(
+        self, id1: str, id2: str, user_id: str, tenant_id: str
+    ) -> dict[str, Any]:
         """对比两个回测结果"""
         user_id = normalize_user_id(user_id)
         summary_fields = [
@@ -382,7 +457,9 @@ class QlibBacktestServiceQueryMixin:
         )
 
         if len(results) < 2:
-            raise ValueError(f"无法找到足够的回测结果进行对比（需要2个，找到{len(results)}个）")
+            raise ValueError(
+                f"无法找到足够的回测结果进行对比（需要2个，找到{len(results)}个）"
+            )
 
         result1 = next((r for r in results if r.backtest_id == id1), None)
         result2 = next((r for r in results if r.backtest_id == id2), None)

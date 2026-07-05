@@ -17,7 +17,9 @@ STREAM_SERVICE_URL = os.getenv("STREAM_SERVICE_URL", "http://127.0.0.1:8003")
 
 def _get_stream_ws_url(path: str, query_params: dict) -> str:
     """构建 stream 服务的 WebSocket URL."""
-    ws_url = STREAM_SERVICE_URL.replace("http://", "ws://").replace("https://", "wss://")
+    ws_url = STREAM_SERVICE_URL.replace("http://", "ws://").replace(
+        "https://", "wss://"
+    )
     full_url = f"{ws_url}{path}"
     if query_params:
         query_str = "&".join(f"{k}={v}" for k, v in query_params.items())
@@ -48,9 +50,9 @@ async def _proxy_websocket(websocket: WebSocket, target_path: str):
                         elif message.get("type") == "websocket.disconnect":
                             break
                 except WebSocketDisconnect:
-                    pass
+                    pass  # noqa: BLE001 - WebSocket 断开，预期静默
                 except Exception:
-                    pass
+                    pass  # noqa: BLE001 - None
 
             async def forward_to_client():
                 try:
@@ -62,7 +64,7 @@ async def _proxy_websocket(websocket: WebSocket, target_path: str):
                         else:
                             await websocket.send_text(message)
                 except Exception:
-                    pass
+                    pass  # noqa: BLE001 - None
 
             # 并行执行双向转发
             done, pending = await asyncio.wait(

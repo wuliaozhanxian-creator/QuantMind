@@ -32,4 +32,6 @@ def check_pred(path):
 
 
 if __name__ == "__main__":
-    check_pred(r"e:\code\quantmind\research\data_adapter\qlib_data\predictions\pred.pkl")
+    check_pred(
+        r"e:\code\quantmind\research\data_adapter\qlib_data\predictions\pred.pkl"
+    )

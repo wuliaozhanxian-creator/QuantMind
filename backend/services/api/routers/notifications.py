@@ -9,12 +9,14 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, field_validator
 
-from backend.services.api.user_app.middleware.auth import get_current_user, require_admin
+from backend.services.api.user_app.middleware.auth import (
+    get_current_user,
+    require_admin,
+)
 from backend.services.api.user_app.services import NotificationService
 from backend.shared.database_manager_v2 import get_session
 
 router = APIRouter(prefix="/notifications", tags=["通知中心"])
-
 
 class NotificationResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -37,7 +39,6 @@ class NotificationResponse(BaseModel):
     def default_is_read(cls, value):
         return False if value is None else value
 
-
 class NotificationListData(BaseModel):
     items: list[NotificationResponse]
     total: int
@@ -45,12 +46,10 @@ class NotificationListData(BaseModel):
     type_counts: dict[str, int]
     has_more: bool
 
-
 class NotificationListEnvelope(BaseModel):
     code: int
     message: str = "ok"
     data: NotificationListData
-
 
 class SystemAnnouncementRequest(BaseModel):
     title: str
@@ -61,10 +60,8 @@ class SystemAnnouncementRequest(BaseModel):
     user_id: str
     tenant_id: str = "default"
 
-
 class ClearNotificationsRequest(BaseModel):
     days: int | None = None
-
 
 @router.get("", response_model=NotificationListEnvelope)
 async def list_notifications(
@@ -79,7 +76,12 @@ async def list_notifications(
     """
     async with get_session(read_only=True) as session:
         service = NotificationService(session)
-        notifications, total, unread_count, type_counts = await service.get_user_notifications(
+        (
+            notifications,
+            total,
+            unread_count,
+            type_counts,
+        ) = await service.get_user_notifications(
             user_id=current_user["user_id"],
             tenant_id=current_user["tenant_id"],
             is_read=is_read,
@@ -99,7 +101,6 @@ async def list_notifications(
             ),
         )
 
-
 @router.post("/{notification_id}/read")
 async def mark_read(
     notification_id: int,
@@ -118,7 +119,6 @@ async def mark_read(
 
     return {"code": 200, "message": "已标记"}
 
-
 @router.post("/read-all")
 async def mark_all_read(
     current_user: dict = Depends(get_current_user),
@@ -134,7 +134,6 @@ async def mark_all_read(
         )
 
     return {"code": 200, "message": f"已标记 {count} 条通知", "data": {"count": count}}
-
 
 @router.post("/clear")
 async def clear_notifications(
@@ -158,9 +157,16 @@ async def clear_notifications(
         )
 
     if days is None:
-        return {"code": 200, "message": f"已清除 {count} 条通知", "data": {"count": count}}
-    return {"code": 200, "message": f"已清除最近 {days} 天内的 {count} 条通知", "data": {"count": count}}
-
+        return {
+            "code": 200,
+            "message": f"已清除 {count} 条通知",
+            "data": {"count": count},
+        }
+    return {
+        "code": 200,
+        "message": f"已清除最近 {days} 天内的 {count} 条通知",
+        "data": {"count": count},
+    }
 
 @router.post("/system-announcement")
 async def create_system_announcement(

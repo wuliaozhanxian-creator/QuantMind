@@ -13,12 +13,13 @@ from backend.services.api.user_app.models.kyc import IdentityVerification
 
 logger = logging.getLogger(__name__)
 
-
 class KYCService:
     def __init__(self, session):
         self.session = session
 
-    async def get_verification(self, user_id: str, tenant_id: str) -> IdentityVerification | None:
+    async def get_verification(
+        self, user_id: str, tenant_id: str
+    ) -> IdentityVerification | None:
         """获取用户的实名认证记录"""
         result = await self.session.execute(
             select(IdentityVerification).where(

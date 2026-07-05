@@ -32,11 +32,17 @@ async def list_comments(
     """List comments for a post."""
     tenant_id = principal.tenant_id
     current_user = principal.user_id
-    base = select(CommentRecord).where(CommentRecord.post_id == post_id, CommentRecord.tenant_id == tenant_id)
+    base = select(CommentRecord).where(
+        CommentRecord.post_id == post_id, CommentRecord.tenant_id == tenant_id
+    )
     count_stmt = select(func.count()).select_from(base.subquery())
     total = (await session.execute(count_stmt)).scalar_one() or 0
 
-    stmt = base.order_by(desc(CommentRecord.created_at)).offset((page - 1) * page_size).limit(page_size)
+    stmt = (
+        base.order_by(desc(CommentRecord.created_at))
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
     result = await session.execute(stmt)
     items = result.scalars().all()
 
@@ -78,7 +84,9 @@ async def list_comments(
                     "avatar": author.get("avatar"),
                 },
                 "createdAt": int(c.created_at.timestamp() * 1000),
-                "updatedAt": (int(c.updated_at.timestamp() * 1000) if c.updated_at else None),
+                "updatedAt": (
+                    int(c.updated_at.timestamp() * 1000) if c.updated_at else None
+                ),
                 "likes": c.likes,
                 "isLiked": c.id in user_liked_comment_ids,
                 "parentId": c.parent_id,
@@ -111,7 +119,9 @@ async def create_comment(
     tenant_id = principal.tenant_id
     current_user = principal.user_id or ""
     validate_text(comment.content, field="content")
-    post_stmt = select(PostRecord).where(PostRecord.id == post_id, PostRecord.tenant_id == tenant_id)
+    post_stmt = select(PostRecord).where(
+        PostRecord.id == post_id, PostRecord.tenant_id == tenant_id
+    )
     post = (await session.execute(post_stmt)).scalar_one_or_none()
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
@@ -154,7 +164,11 @@ async def create_comment(
         "content": db_comment.content,
         "author": author,
         "createdAt": int(db_comment.created_at.timestamp() * 1000),
-        "updatedAt": (int(db_comment.updated_at.timestamp() * 1000) if db_comment.updated_at else None),
+        "updatedAt": (
+            int(db_comment.updated_at.timestamp() * 1000)
+            if db_comment.updated_at
+            else None
+        ),
         "likes": db_comment.likes,
         "isLiked": False,
         "parentId": db_comment.parent_id,
@@ -177,7 +191,9 @@ async def update_comment(
     """Update a comment (requires ownership)."""
     tenant_id = principal.tenant_id
     current_user = principal.user_id or ""
-    stmt = select(CommentRecord).where(CommentRecord.id == comment_id, CommentRecord.tenant_id == tenant_id)
+    stmt = select(CommentRecord).where(
+        CommentRecord.id == comment_id, CommentRecord.tenant_id == tenant_id
+    )
     db_comment = (await session.execute(stmt)).scalar_one_or_none()
     if not db_comment:
         raise HTTPException(status_code=404, detail="Comment not found")
@@ -212,13 +228,17 @@ async def delete_comment(
     """Delete a comment (requires authentication and ownership)."""
     tenant_id = principal.tenant_id
     current_user = principal.user_id or ""
-    stmt = select(CommentRecord).where(CommentRecord.id == int(comment_id), CommentRecord.tenant_id == tenant_id)
+    stmt = select(CommentRecord).where(
+        CommentRecord.id == int(comment_id), CommentRecord.tenant_id == tenant_id
+    )
     db_comment = (await session.execute(stmt)).scalar_one_or_none()
     if not db_comment:
         raise HTTPException(status_code=404, detail="Comment not found")
     if db_comment.author_id != current_user:
         raise HTTPException(status_code=403, detail="Forbidden")
-    post_stmt = select(PostRecord).where(PostRecord.id == db_comment.post_id, PostRecord.tenant_id == tenant_id)
+    post_stmt = select(PostRecord).where(
+        PostRecord.id == db_comment.post_id, PostRecord.tenant_id == tenant_id
+    )
     post = (await session.execute(post_stmt)).scalar_one_or_none()
     await session.delete(db_comment)
     if post and post.comments > 0:

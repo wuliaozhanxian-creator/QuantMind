@@ -51,7 +51,9 @@ class RiskAuditLog(Base):
     )
 
     __table_args__ = (
-        Index("idx_risk_audit_tenant_user_created", "tenant_id", "user_id", "created_at"),
+        Index(
+            "idx_risk_audit_tenant_user_created", "tenant_id", "user_id", "created_at"
+        ),
         Index("idx_risk_audit_rule_type_created", "rule_type", "created_at"),
     )
 

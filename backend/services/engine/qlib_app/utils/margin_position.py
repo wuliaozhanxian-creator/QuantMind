@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Optional
 from collections.abc import Iterator
 
 import numpy as np
@@ -32,10 +32,11 @@ except ImportError:
     HAS_QLIB = False
 
 logger = logging.getLogger(__name__)
-from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
+from backend.services.engine.qlib_app.utils.structured_logger import (
+    StructuredTaskLogger,
+)
 
 task_logger = StructuredTaskLogger(logger, "MarginPosition")
-
 
 class MarginPosition(Position):
     """
@@ -72,7 +73,9 @@ class MarginPosition(Position):
             stock_value += info["amount"] * info["price"]
         return stock_value + self.position.get("short_proceeds", 0.0)
 
-    def _buy_stock(self, stock_id: str, trade_val: float, cost: float, trade_price: float) -> None:
+    def _buy_stock(
+        self, stock_id: str, trade_val: float, cost: float, trade_price: float
+    ) -> None:
         """买入逻辑：区分 正常买入多头 和 买入平仓空头"""
         old_amount = self.get_stock_amount(stock_id)
 
@@ -90,7 +93,9 @@ class MarginPosition(Position):
 
             # 扣减对应的冻结资金基数
             short_entry_val = entry_price * cover_amount
-            self.position["short_proceeds"] = max(0.0, self.position["short_proceeds"] - short_entry_val)
+            self.position["short_proceeds"] = max(
+                0.0, self.position["short_proceeds"] - short_entry_val
+            )
 
             # 更新持仓数量
             self.position[stock_id]["amount"] += trade_amount
@@ -107,7 +112,9 @@ class MarginPosition(Position):
             # 正常买入多头：直接扣减可用现金
             super()._buy_stock(stock_id, trade_val, cost, trade_price)
 
-    def _sell_stock(self, stock_id: str, trade_val: float, cost: float, trade_price: float) -> None:
+    def _sell_stock(
+        self, stock_id: str, trade_val: float, cost: float, trade_price: float
+    ) -> None:
         """卖出逻辑：区分 卖出多头 和 融券开空"""
         old_amount = self.get_stock_amount(stock_id)
 
@@ -122,11 +129,15 @@ class MarginPosition(Position):
             self.position["short_proceeds"] += trade_val
 
             if old_amount == 0:
-                self._init_stock(stock_id=stock_id, amount=-trade_amount, price=trade_price)
+                self._init_stock(
+                    stock_id=stock_id, amount=-trade_amount, price=trade_price
+                )
             else:
                 # 更新空头持仓的平均入场价
                 new_amount = old_amount - trade_amount
-                new_avg_price = (abs(old_amount) * self.get_stock_price(stock_id) + trade_val) / abs(new_amount)
+                new_avg_price = (
+                    abs(old_amount) * self.get_stock_price(stock_id) + trade_val
+                ) / abs(new_amount)
                 self.position[stock_id]["amount"] = new_amount
                 self.position[stock_id]["price"] = new_avg_price
         else:
@@ -141,7 +152,6 @@ class MarginPosition(Position):
             else:
                 super()._sell_stock(stock_id, trade_val, cost, trade_price)
 
-
 class MarginAccount(Account):
     """
     支持计息与真实多空结算的账户类：
@@ -154,7 +164,9 @@ class MarginAccount(Account):
         self._last_interest_date = None
         self._pre_trade_snapshot: tuple[float, float] | None = None
 
-    def update_order(self, order: Order, trade_val: float, cost: float, trade_price: float) -> None:
+    def update_order(
+        self, order: Order, trade_val: float, cost: float, trade_price: float
+    ) -> None:
         if self.current_position.skip_update():
             return
 
@@ -175,7 +187,9 @@ class MarginAccount(Account):
         self._apply_daily_interest(t_start, t_end, trade_exchange)
 
         # 2. 调用父类更新账户状态（包含计算当前净值等）
-        return super().update_state(t_start, t_end, trade_exchange, level_infra, **kwargs)
+        return super().update_state(
+            t_start, t_end, trade_exchange, level_infra, **kwargs
+        )
 
     def _apply_daily_interest(self, t_start, t_end, trade_exchange):
         """计算并从现金中扣除当日融资融券利息 (按 365 自然日)"""
@@ -228,7 +242,9 @@ class MarginAccount(Account):
                     days_diff=days_diff,
                 )
 
-    def _update_state_from_order(self, order, trade_val: float, cost: float, trade_price: float) -> None:
+    def _update_state_from_order(
+        self, order, trade_val: float, cost: float, trade_price: float
+    ) -> None:
         """修正 Qlib 内置的 PnL 统计逻辑，确保多空对冲下的收益率计算正确"""
         if not self.is_port_metr_enabled():
             return
@@ -257,7 +273,6 @@ class MarginAccount(Account):
                 profit = 0.0
             self.accum_info.add_return_value(profit)
 
-
 def ensure_margin_backtest_support() -> str:
     """注册 MarginPosition 并 Patch Qlib 账户工厂"""
     import qlib.backtest as qlib_backtest_module
@@ -271,7 +286,9 @@ def ensure_margin_backtest_support() -> str:
 
     original_create_account_instance = qlib_backtest_module.create_account_instance
 
-    def _create_account_instance_with_margin_v2(start_time, end_time, benchmark, account, pos_type="Position"):
+    def _create_account_instance_with_margin_v2(
+        start_time, end_time, benchmark, account, pos_type="Position"
+    ):
         if pos_type != "MarginPosition":
             return original_create_account_instance(
                 start_time=start_time,
@@ -307,6 +324,8 @@ def ensure_margin_backtest_support() -> str:
             ),
         )
 
-    qlib_backtest_module.create_account_instance = _create_account_instance_with_margin_v2
+    qlib_backtest_module.create_account_instance = (
+        _create_account_instance_with_margin_v2
+    )
     qlib_backtest_module._quantmind_margin_account_patched_v2 = True
     return "MarginPosition"

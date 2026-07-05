@@ -6,13 +6,12 @@ API规范和模型定义.
 import logging
 import time
 from enum import Enum
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Optional
 
 from fastapi import FastAPI
 from pydantic import BaseModel, ConfigDict
 
 logger = logging.getLogger(__name__)
-
 
 class ServiceStatus(str, Enum):
     """服务状态."""
@@ -21,7 +20,6 @@ class ServiceStatus(str, Enum):
     UNHEALTHY = "unhealthy"
     UNKNOWN = "unknown"
 
-
 class HealthCheckResponse(BaseModel):
     """健康检查响应."""
 
@@ -29,7 +27,6 @@ class HealthCheckResponse(BaseModel):
     service: str
     version: str | None = None
     details: dict[str, Any] | None = None
-
 
 class ErrorCode(Enum):
     """错误码枚举"""
@@ -57,7 +54,6 @@ class ErrorCode(Enum):
     PAYMENT_ERROR = 3004  # 支付错误
     QUOTA_EXCEEDED = 3005  # 配额超额
 
-
 class ResponseType(Enum):
     """响应类型枚举"""
 
@@ -65,7 +61,6 @@ class ResponseType(Enum):
     ERROR = "error"  # 错误响应
     WARNING = "warning"  # 警告响应
     INFO = "info"  # 信息响应
-
 
 class StandardResponse(BaseModel):
     """标准API响应"""
@@ -79,7 +74,6 @@ class StandardResponse(BaseModel):
     timestamp: float
     request_id: str | None = None
 
-
 class PaginatedResponse(BaseModel):
     """分页响应"""
 
@@ -91,7 +85,6 @@ class PaginatedResponse(BaseModel):
     has_next: bool
     has_prev: bool
 
-
 class ErrorResponse(BaseModel):
     """错误响应"""
 
@@ -101,7 +94,6 @@ class ErrorResponse(BaseModel):
     details: dict[str, Any] | None = None
     timestamp: float
     request_id: str | None = None
-
 
 class APISpec:
     """API规范类"""
@@ -192,7 +184,6 @@ class APISpec:
         openapi_spec = self.generate_openapi()
         return str(openapi_spec)
 
-
 def create_success_response(
     data: Any = None,
     message: str = "Operation successful",
@@ -206,7 +197,6 @@ def create_success_response(
         data=data,
         timestamp=time.time(),
     )
-
 
 def create_error_response(
     error_code: ErrorCode,
@@ -227,8 +217,9 @@ def create_error_response(
         request_id=request_id,
     )
 
-
-def create_paginated_response(items: list[Any], total: int, page: int, page_size: int) -> PaginatedResponse:
+def create_paginated_response(
+    items: list[Any], total: int, page: int, page_size: int
+) -> PaginatedResponse:
     """创建分页响应"""
     total_pages = (total + page_size - 1) // page_size
 
@@ -241,7 +232,6 @@ def create_paginated_response(items: list[Any], total: int, page: int, page_size
         has_next=page < total_pages,
         has_prev=page > 1,
     )
-
 
 class APIRouter:
     """标准API路由器"""

@@ -37,7 +37,6 @@ from backend.scripts.etl_scheduler import (
     STATUS_SKIPPED,
 )
 
-
 # ============================================================
 # CronSchedule 测试
 # ============================================================
@@ -79,7 +78,6 @@ class TestCronSchedule:
         with pytest.raises(ValueError, match="越界"):
             CronSchedule.parse("60 18 * * *")
 
-
 # ============================================================
 # TaskSpec 测试
 # ============================================================
@@ -95,7 +93,6 @@ class TestTaskSpec:
     def test_invalid_cron_rejected(self):
         with pytest.raises(ValueError):
             TaskSpec(name="t1", cron="bad", callable=lambda: {})
-
 
 # ============================================================
 # ETLScheduler 测试
@@ -152,7 +149,9 @@ class TestETLScheduler:
         sched = ETLScheduler(state_path=tmp_path / "state.json")
         sched.register(TaskSpec(name="a", callable=lambda: calls.append("a") or {}))
         sched.register(
-            TaskSpec(name="b", callable=lambda: calls.append("b") or {}, depends_on=["a"])
+            TaskSpec(
+                name="b", callable=lambda: calls.append("b") or {}, depends_on=["a"]
+            )
         )
         record = sched.run_now("b", triggered_by="manual")
         assert record.status == STATUS_SUCCESS
@@ -164,9 +163,7 @@ class TestETLScheduler:
 
         sched = ETLScheduler(state_path=tmp_path / "state.json")
         sched.register(TaskSpec(name="a", callable=fail))
-        sched.register(
-            TaskSpec(name="b", callable=lambda: {}, depends_on=["a"])
-        )
+        sched.register(TaskSpec(name="b", callable=lambda: {}, depends_on=["a"]))
         record = sched.run_now("b", triggered_by="manual")
         # b 应被跳过（a 失败）
         assert record.status == STATUS_SKIPPED
@@ -184,9 +181,7 @@ class TestETLScheduler:
 
     def test_status_snapshot(self, tmp_path):
         sched = ETLScheduler(state_path=tmp_path / "state.json")
-        sched.register(
-            TaskSpec(name="t1", cron="0 18 * * 1-5", callable=lambda: {})
-        )
+        sched.register(TaskSpec(name="t1", cron="0 18 * * 1-5", callable=lambda: {}))
         snap = sched.status_snapshot()
         assert snap["scheduler_running"] is False
         assert "t1" in snap["tasks"]
@@ -204,7 +199,6 @@ class TestETLScheduler:
         record = sched.run_now("bad")
         assert record.status == STATUS_FAILED
         assert record.return_code == 3
-
 
 # ============================================================
 # 告警与监控状态测试
@@ -244,7 +238,6 @@ class TestAlerts:
         snap = store.snapshot()
         assert len(snap["alignment_anomalies"]) == 1
 
-
 # ============================================================
 # 数据缺口检测测试（mock DB）
 # ============================================================
@@ -266,7 +259,6 @@ class _FakeResult:
 
     def scalar(self):
         return self._scalars[0] if self._scalars else None
-
 
 class _FakeSession:
     """模拟异步 DB session，按 SQL 关键词路由返回预设数据"""
@@ -302,7 +294,6 @@ class _FakeSession:
             return _FakeResult(self.datasets.get("symbols", []))
         return _FakeResult([])
 
-
 def _patch_get_session(monkeypatch, datasets):
     """patch backend.shared.database_manager_v2.get_session 与脚本内导入的 get_session"""
     fake_session = _FakeSession(datasets)
@@ -321,7 +312,6 @@ def _patch_get_session(monkeypatch, datasets):
     monkeypatch.setattr(etl_data_quality, "get_session", fake_get_session)
     monkeypatch.setattr(etl_alignment_monitor, "get_session", fake_get_session)
     return fake_session
-
 
 class TestDataGapDetection:
     def test_detect_no_calendar_returns_no_calendar_status(self, tmp_path, monkeypatch):
@@ -420,7 +410,6 @@ class TestDataGapDetection:
         )
         assert _classify_status(rep2) == "warning"
 
-
 # ============================================================
 # 对齐异常检测测试（mock DB）
 # ============================================================
@@ -431,7 +420,9 @@ class TestAlignmentMonitor:
 
         store = etl_alerts.MonitorStateStore(path=tmp_path / "monitor.json")
         monkeypatch.setattr(etl_alerts, "get_monitor_state_store", lambda: store)
-        monkeypatch.setattr(etl_alignment_monitor, "get_monitor_state_store", lambda: store)
+        monkeypatch.setattr(
+            etl_alignment_monitor, "get_monitor_state_store", lambda: store
+        )
         monkeypatch.setattr(etl_alerts, "_build_redis_client", lambda: None)
 
         _patch_get_session(monkeypatch, {"max_date": None})
@@ -450,14 +441,17 @@ class TestAlignmentMonitor:
 
         store = etl_alerts.MonitorStateStore(path=tmp_path / "monitor.json")
         monkeypatch.setattr(etl_alerts, "get_monitor_state_store", lambda: store)
-        monkeypatch.setattr(etl_alignment_monitor, "get_monitor_state_store", lambda: store)
+        monkeypatch.setattr(
+            etl_alignment_monitor, "get_monitor_state_store", lambda: store
+        )
         monkeypatch.setattr(etl_alerts, "_build_redis_client", lambda: None)
         # 阻止参考池加载
         monkeypatch.setattr(
             etl_alignment_monitor, "load_reference_symbols", lambda: set()
         )
         monkeypatch.setattr(
-            etl_alignment_monitor, "_get_historical_max_symbols",
+            etl_alignment_monitor,
+            "_get_historical_max_symbols",
             lambda lookback_days=30: asyncio.sleep(0, result=set()) or _async_set(),
         )
 
@@ -483,13 +477,16 @@ class TestAlignmentMonitor:
 
         store = etl_alerts.MonitorStateStore(path=tmp_path / "monitor.json")
         monkeypatch.setattr(etl_alerts, "get_monitor_state_store", lambda: store)
-        monkeypatch.setattr(etl_alignment_monitor, "get_monitor_state_store", lambda: store)
+        monkeypatch.setattr(
+            etl_alignment_monitor, "get_monitor_state_store", lambda: store
+        )
         monkeypatch.setattr(etl_alerts, "_build_redis_client", lambda: None)
         monkeypatch.setattr(
             etl_alignment_monitor, "load_reference_symbols", lambda: set()
         )
         monkeypatch.setattr(
-            etl_alignment_monitor, "_get_historical_max_symbols",
+            etl_alignment_monitor,
+            "_get_historical_max_symbols",
             lambda lookback_days=30: _async_set(),
         )
 
@@ -510,11 +507,9 @@ class TestAlignmentMonitor:
         # date_lag 不应有（今天），但可能有 symbol_mismatch（历史集合空）
         assert "date_lag" not in cats or result["summary"]["total_anomalies"] >= 0
 
-
 async def _async_set():
     """辅助：返回空集合的协程（用于 mock async 函数）"""
     return set()
-
 
 # ============================================================
 # 监控端点测试（FastAPI TestClient）

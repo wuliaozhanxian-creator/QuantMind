@@ -8,7 +8,6 @@ from backend.shared.redis_sentinel_client import get_redis_sentinel_client
 
 logger = logging.getLogger(__name__)
 
-
 class RedisCache:
     def __init__(self):
         self._client = None
@@ -45,9 +44,7 @@ class RedisCache:
             logger.warning(f"Redis delete failed ({key}): {exc}")
             return False
 
-
 cache = RedisCache()
-
 
 def get_cache_key(prefix: str, *args: Any) -> str:
     return f"portfolio:{prefix}:" + ":".join(str(arg) for arg in args)

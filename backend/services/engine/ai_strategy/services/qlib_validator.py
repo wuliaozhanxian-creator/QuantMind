@@ -16,15 +16,16 @@ import re
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Optional
 
 logger = logging.getLogger(__name__)
-
 
 class ValidationCheck:
     """单项验证结果"""
 
-    def __init__(self, type: str, passed: bool, message: str, details: str | None = None):
+    def __init__(
+        self, type: str, passed: bool, message: str, details: str | None = None
+    ):
         self.type = type
         self.passed = passed
         self.message = message
@@ -35,7 +36,6 @@ class ValidationCheck:
         if self.details:
             result["details"] = self.details
         return result
-
 
 class ValidationResult:
     """验证结果"""
@@ -63,7 +63,6 @@ class ValidationResult:
             "warnings": self.warnings,
             "execution_preview": self.execution_preview,
         }
-
 
 class QlibValidator:
     """Qlib策略代码验证器"""
@@ -122,7 +121,9 @@ class QlibValidator:
         """
         self.timeout = timeout
 
-    async def validate_code(self, code: str, context: dict | None = None, mode: str = "full") -> ValidationResult:
+    async def validate_code(
+        self, code: str, context: dict | None = None, mode: str = "full"
+    ) -> ValidationResult:
         """
         验证Qlib策略代码
 
@@ -176,7 +177,9 @@ class QlibValidator:
         """检查Python语法"""
         try:
             ast.parse(code)
-            return ValidationCheck(type="syntax", passed=True, message="Python语法检查通过")
+            return ValidationCheck(
+                type="syntax", passed=True, message="Python语法检查通过"
+            )
         except SyntaxError as e:
             return ValidationCheck(
                 type="syntax",
@@ -185,7 +188,9 @@ class QlibValidator:
                 details=f"行 {e.lineno}: {e.text}",
             )
         except Exception as e:
-            return ValidationCheck(type="syntax", passed=False, message=f"代码解析失败: {str(e)}")
+            return ValidationCheck(
+                type="syntax", passed=False, message=f"代码解析失败: {str(e)}"
+            )
 
     def _check_imports(self, code: str) -> ValidationCheck:
         """检查导入语句（安全性检查）"""
@@ -237,7 +242,9 @@ class QlibValidator:
             )
 
         except Exception as e:
-            return ValidationCheck(type="import", passed=False, message=f"导入检查失败: {str(e)}")
+            return ValidationCheck(
+                type="import", passed=False, message=f"导入检查失败: {str(e)}"
+            )
 
     def _check_config(self, code: str) -> ValidationCheck:
         """检查STRATEGY_CONFIG配置"""
@@ -246,7 +253,9 @@ class QlibValidator:
         match = re.search(config_pattern, code)
 
         if not match:
-            return ValidationCheck(type="config", passed=False, message="未找到STRATEGY_CONFIG配置")
+            return ValidationCheck(
+                type="config", passed=False, message="未找到STRATEGY_CONFIG配置"
+            )
 
         # 检查必需字段
         config_str = match.group(0)
@@ -264,7 +273,9 @@ class QlibValidator:
                 message=f"STRATEGY_CONFIG缺少必需字段: {', '.join(missing_fields)}",
             )
 
-        return ValidationCheck(type="config", passed=True, message="STRATEGY_CONFIG配置验证通过")
+        return ValidationCheck(
+            type="config", passed=True, message="STRATEGY_CONFIG配置验证通过"
+        )
 
     def _check_strategy_class(self, code: str) -> ValidationCheck:
         """检查策略类定义"""
@@ -272,10 +283,14 @@ class QlibValidator:
             tree = ast.parse(code)
 
             # 查找类定义
-            class_definitions = [node for node in ast.walk(tree) if isinstance(node, ast.ClassDef)]
+            class_definitions = [
+                node for node in ast.walk(tree) if isinstance(node, ast.ClassDef)
+            ]
 
             if not class_definitions:
-                return ValidationCheck(type="strategy", passed=False, message="未找到策略类定义")
+                return ValidationCheck(
+                    type="strategy", passed=False, message="未找到策略类定义"
+                )
 
             # 检查是否有继承BaseStrategy的类
             has_strategy_class = False
@@ -304,7 +319,9 @@ class QlibValidator:
             )
 
         except Exception as e:
-            return ValidationCheck(type="strategy", passed=False, message=f"策略类检查失败: {str(e)}")
+            return ValidationCheck(
+                type="strategy", passed=False, message=f"策略类检查失败: {str(e)}"
+            )
 
     def _get_name(self, node) -> str:
         """获取AST节点名称"""
@@ -342,12 +359,18 @@ class QlibValidator:
                     details=result.stderr,
                 )
 
-            return ValidationCheck(type="sandbox", passed=True, message="沙箱执行测试通过")
+            return ValidationCheck(
+                type="sandbox", passed=True, message="沙箱执行测试通过"
+            )
 
         except subprocess.TimeoutExpired:
-            return ValidationCheck(type="sandbox", passed=False, message=f"执行超时（>{self.timeout}秒）")
+            return ValidationCheck(
+                type="sandbox", passed=False, message=f"执行超时（>{self.timeout}秒）"
+            )
         except Exception as e:
-            return ValidationCheck(type="sandbox", passed=False, message=f"沙箱执行失败: {str(e)}")
+            return ValidationCheck(
+                type="sandbox", passed=False, message=f"沙箱执行失败: {str(e)}"
+            )
 
     def _generate_preview(self, code: str, context: dict) -> dict:
         """生成执行预览"""
@@ -393,10 +416,8 @@ class QlibValidator:
 
         return warnings
 
-
 # 单例
 _validator_instance: QlibValidator | None = None
-
 
 def get_qlib_validator() -> QlibValidator:
     """获取验证器单例"""

@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, Optional
-
+from typing import Any, Optional
 
 def _stringify(value: Any) -> str:
     if value is None:
@@ -19,16 +18,22 @@ def _stringify(value: Any) -> str:
             return str(value)
     return str(value)
 
-
 class StructuredTaskLogger:
     """将普通 logger 封装为固定 key=value 风格输出。"""
 
-    def __init__(self, base_logger: logging.Logger, component: str, context: dict[str, Any] | None = None):
+    def __init__(
+        self,
+        base_logger: logging.Logger,
+        component: str,
+        context: dict[str, Any] | None = None,
+    ):
         self._base_logger = base_logger
         self._component = component.strip()
         self._context = {k: v for k, v in (context or {}).items() if v is not None}
 
-    def _build_message(self, event: str, message: str | None = None, **fields: Any) -> str:
+    def _build_message(
+        self, event: str, message: str | None = None, **fields: Any
+    ) -> str:
         parts = [f"event={event}"]
         if message:
             parts.append(f"message={_stringify(message)}")

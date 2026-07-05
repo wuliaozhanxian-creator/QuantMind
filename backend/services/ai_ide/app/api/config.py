@@ -52,4 +52,4 @@ async def save_llm_config(config: LLMConfig):
 
     except Exception as e:
         logger.error(f"Failed to save config: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e

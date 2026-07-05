@@ -5,7 +5,7 @@
 """
 
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -13,14 +13,12 @@ from pydantic import BaseModel, Field
 # 基础风险指标
 # ============================================================================
 
-
 class BasicRiskRequest(BaseModel):
     """基础风险分析请求"""
 
     backtest_id: str = Field(..., description="回测ID")
     user_id: str = Field(..., description="用户ID")
     tenant_id: str = Field("default", description="租户ID")
-
 
 class BasicRiskMetrics(BaseModel):
     """基础风险指标"""
@@ -48,20 +46,17 @@ class BasicRiskMetrics(BaseModel):
     best_day_return: float = Field(..., description="最佳单日收益")
     worst_day_return: float = Field(..., description="最差单日收益")
 
-
 class TimeSeriesData(BaseModel):
     """时间序列数据"""
 
     dates: list[str] = Field(..., description="日期列表")
     values: list[float] = Field(..., description="数值列表")
 
-
 class HistogramData(BaseModel):
     """直方图数据"""
 
     bins: list[float] = Field(..., description="区间边界")
     counts: list[int] = Field(..., description="频数")
-
 
 class BasicRiskResponse(BaseModel):
     """基础风险分析响应"""
@@ -80,11 +75,9 @@ class BasicRiskResponse(BaseModel):
     analyzed_at: datetime = Field(default_factory=datetime.now, description="分析时间")
     data_points: int = Field(..., description="数据点数量")
 
-
 # ============================================================================
 # 绩效分析
 # ============================================================================
-
 
 class PerformanceRequest(BaseModel):
     """绩效分析请求"""
@@ -94,7 +87,6 @@ class PerformanceRequest(BaseModel):
     tenant_id: str = Field("default", description="租户ID")
     rolling_window: int | None = Field(30, description="滚动窗口大小（天）")
 
-
 class MonthlyReturn(BaseModel):
     """月度收益"""
 
@@ -102,7 +94,6 @@ class MonthlyReturn(BaseModel):
     month: int
     return_pct: float
     trading_days: int
-
 
 class PercentileData(BaseModel):
     """分位数数据"""
@@ -114,7 +105,6 @@ class PercentileData(BaseModel):
     p75: float = Field(..., description="75%分位数")
     p95: float = Field(..., description="95%分位数")
     p99: float = Field(..., description="99%分位数")
-
 
 class PerformanceResponse(BaseModel):
     """绩效分析响应"""
@@ -136,11 +126,9 @@ class PerformanceResponse(BaseModel):
     analyzed_at: datetime = Field(default_factory=datetime.now, description="分析时间")
     rolling_window: int = Field(..., description="滚动窗口大小")
 
-
 # ============================================================================
 # 交易统计（待实现）
 # ============================================================================
-
 
 class TradeStatsRequest(BaseModel):
     """交易统计分析请求"""
@@ -149,13 +137,14 @@ class TradeStatsRequest(BaseModel):
     user_id: str = Field(..., description="用户ID")
     tenant_id: str = Field("default", description="租户ID")
 
-
 class TradeStatsMetrics(BaseModel):
     """交易统计指标"""
 
     win_rate: float = Field(..., description="胜率")
     profit_loss_ratio: float = Field(..., description="盈亏比")
-    profit_loss_days_ratio: float = Field(..., description="盈亏天数比（盈利交易日/亏损交易日）")
+    profit_loss_days_ratio: float = Field(
+        ..., description="盈亏天数比（盈利交易日/亏损交易日）"
+    )
     real_win_rate: float = Field(..., description="真实胜率（已平仓闭环单笔）")
     avg_win_return: float = Field(..., description="盈利交易平均收益率")
     avg_loss_return: float = Field(..., description="亏损交易平均亏损率绝对值")
@@ -174,7 +163,6 @@ class TradeStatsMetrics(BaseModel):
     profit_factor: float = Field(..., description="利润因子")
     metric_basis: str = Field(..., description="指标计算口径")
 
-
 class TradeStatsResponse(BaseModel):
     """交易统计响应"""
 
@@ -184,11 +172,9 @@ class TradeStatsResponse(BaseModel):
     trade_frequency_series: TimeSeriesData = Field(..., description="交易频率序列")
     analyzed_at: datetime = Field(default_factory=datetime.now, description="分析时间")
 
-
 # ============================================================================
 # 基准对比（待实现）
 # ============================================================================
-
 
 class BenchmarkComparisonRequest(BaseModel):
     """基准对比请求"""
@@ -197,7 +183,6 @@ class BenchmarkComparisonRequest(BaseModel):
     benchmark_id: str = Field(..., description="基准ID")
     user_id: str = Field(..., description="用户ID")
     tenant_id: str = Field("default", description="租户ID")
-
 
 class BenchmarkMetrics(BaseModel):
     """基准对比指标"""
@@ -210,7 +195,6 @@ class BenchmarkMetrics(BaseModel):
     downside_capture: float = Field(..., description="下行捕获比")
     correlation: float = Field(..., description="相关系数")
 
-
 class BenchmarkComparisonResponse(BaseModel):
     """基准对比响应"""
 
@@ -221,11 +205,9 @@ class BenchmarkComparisonResponse(BaseModel):
     analyzed_at: datetime = Field(default_factory=datetime.now, description="分析时间")
     benchmark_id: str = Field(..., description="基准ID")
 
-
 # ============================================================================
 # 持仓分析（待实现）
 # ============================================================================
-
 
 class PositionAnalysisRequest(BaseModel):
     """持仓分析请求"""
@@ -233,7 +215,6 @@ class PositionAnalysisRequest(BaseModel):
     backtest_id: str = Field(..., description="回测ID")
     user_id: str = Field(..., description="用户ID")
     tenant_id: str = Field("default", description="租户ID")
-
 
 class PositionSummary(BaseModel):
     """持仓摘要"""
@@ -243,14 +224,12 @@ class PositionSummary(BaseModel):
     weight: float = Field(..., description="持仓权重")
     sector: str | None = Field(None, description="行业")
 
-
 class SectorAllocation(BaseModel):
     """行业配置"""
 
     sector: str = Field(..., description="行业")
     weight: float = Field(..., description="权重")
     contribution: float | None = Field(None, description="收益贡献")
-
 
 class PositionAnalysisResponse(BaseModel):
     """持仓分析响应"""
@@ -261,11 +240,9 @@ class PositionAnalysisResponse(BaseModel):
     holdings_count: int = Field(..., description="持仓数量")
     analyzed_at: datetime = Field(default_factory=datetime.now, description="分析时间")
 
-
 # ============================================================================
 # 因子分析
 # ============================================================================
-
 
 class FactorAnalysisRequest(BaseModel):
     """因子/信号质量分析请求"""
@@ -275,7 +252,6 @@ class FactorAnalysisRequest(BaseModel):
     tenant_id: str = Field("default", description="租户ID")
     n_groups: int = Field(5, description="分层数量", ge=2, le=10)
 
-
 class StratifiedGroupReturn(BaseModel):
     """分层收益数据"""
 
@@ -284,22 +260,21 @@ class StratifiedGroupReturn(BaseModel):
     total_return: float = Field(..., description="累计收益率")
     volatility: float = Field(..., description="年化波动率")
 
-
 class FactorAnalysisResponse(BaseModel):
     """因子分析响应"""
 
     rank_ic: float | None = Field(None, description="平均 Rank IC")
     rank_ic_std: float | None = Field(None, description="Rank IC 标准差")
     icir: float | None = Field(None, description="ICIR（IC 信息比率）")
-    stratified_returns: list[StratifiedGroupReturn] = Field(default_factory=list, description="分层收益（多空分层）")
+    stratified_returns: list[StratifiedGroupReturn] = Field(
+        default_factory=list, description="分层收益（多空分层）"
+    )
     data_available: bool = Field(..., description="是否有足够数据进行因子分析")
     analyzed_at: datetime = Field(default_factory=datetime.now, description="分析时间")
-
 
 # ============================================================================
 # 风格归因
 # ============================================================================
-
 
 class StyleAttributionRequest(BaseModel):
     """风格归因分析请求"""
@@ -309,7 +284,6 @@ class StyleAttributionRequest(BaseModel):
     tenant_id: str = Field("default", description="租户ID")
     benchmark: str = Field("SH000300", description="基准指数代码")
 
-
 class StyleFactorExposure(BaseModel):
     """单个风格因子暴露"""
 
@@ -318,11 +292,12 @@ class StyleFactorExposure(BaseModel):
     benchmark: float = Field(..., description="基准暴露（标准化）")
     active: float = Field(..., description="主动暴露（组合-基准）")
 
-
 class StyleAttributionResponse(BaseModel):
     """风格归因响应"""
 
-    factors: list[StyleFactorExposure] = Field(default_factory=list, description="各风格因子暴露明细")
+    factors: list[StyleFactorExposure] = Field(
+        default_factory=list, description="各风格因子暴露明细"
+    )
     analysis_date: str | None = Field(None, description="分析截面日期")
     data_available: bool = Field(..., description="是否有足够数据进行风格归因")
     analyzed_at: datetime = Field(default_factory=datetime.now, description="分析时间")

@@ -7,8 +7,7 @@
 import os
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, List, Optional
-
+from typing import Optional
 
 class Environment(Enum):
     """环境类型"""
@@ -16,7 +15,6 @@ class Environment(Enum):
     DEVELOPMENT = "development"
     TESTING = "testing"
     PRODUCTION = "production"
-
 
 @dataclass
 class DataSourceConfig:
@@ -28,7 +26,9 @@ class DataSourceConfig:
 
     # 本地数据库配置
     use_local_db: bool = True
-    db_url: str = os.getenv("DATABASE_URL", "postgresql+psycopg2://postgres:@localhost:5432/quantmind")
+    db_url: str = os.getenv(
+        "DATABASE_URL", "postgresql+psycopg2://postgres:@localhost:5432/quantmind"
+    )
 
     # 请求配置
     request_timeout: int = 30  # 请求超时时间（秒）
@@ -38,7 +38,6 @@ class DataSourceConfig:
     # 并发配置
     max_concurrent_requests: int = 10  # 最大并发请求数
     rate_limit_per_second: int = 50  # 每秒最大请求数
-
 
 @dataclass
 class CacheConfig:
@@ -73,7 +72,6 @@ class CacheConfig:
                 "search_result": 600,  # 搜索结果：10分钟
                 "hot_stocks": 300,  # 热门股票：5分钟
             }
-
 
 @dataclass
 class DataConfig:
@@ -157,7 +155,6 @@ class DataConfig:
                 },
             }
 
-
 @dataclass
 class LoggingConfig:
     """日志配置"""
@@ -178,7 +175,6 @@ class LoggingConfig:
                 "stock_query.controllers": "INFO",
                 "shared.cache": "WARNING",
             }
-
 
 @dataclass
 class WebConfig:
@@ -206,7 +202,6 @@ class WebConfig:
 
         if self.cors_headers is None:
             self.cors_headers = ["Content-Type", "Authorization"]
-
 
 class StockQueryConfig:
     """股票查询功能主配置类"""
@@ -250,14 +245,20 @@ class StockQueryConfig:
     def _load_from_environment(self):
         """从环境变量加载配置"""
         # 数据源配置
-        self.datasource.tushare_token = os.environ.get("TUSHARE_TOKEN", self.datasource.tushare_token)
+        self.datasource.tushare_token = os.environ.get(
+            "TUSHARE_TOKEN", self.datasource.tushare_token
+        )
         self.datasource.db_url = os.environ.get("DATABASE_URL", self.datasource.db_url)
-        self.datasource.request_timeout = int(os.environ.get("API_TIMEOUT", self.datasource.request_timeout))
+        self.datasource.request_timeout = int(
+            os.environ.get("API_TIMEOUT", self.datasource.request_timeout)
+        )
 
         # 缓存配置
         self.cache.redis_host = os.environ.get("REDIS_HOST", self.cache.redis_host)
         self.cache.redis_port = int(os.environ.get("REDIS_PORT", self.cache.redis_port))
-        self.cache.redis_password = os.environ.get("REDIS_PASSWORD", self.cache.redis_password)
+        self.cache.redis_password = os.environ.get(
+            "REDIS_PASSWORD", self.cache.redis_password
+        )
 
         # Web配置
         self.web.host = os.environ.get("WEB_HOST", self.web.host)
@@ -287,7 +288,9 @@ class StockQueryConfig:
         afternoon_start = time.fromisoformat(trading_hours["afternoon_start"])
         afternoon_end = time.fromisoformat(trading_hours["afternoon_end"])
 
-        return (morning_start <= now <= morning_end) or (afternoon_start <= now <= afternoon_end)
+        return (morning_start <= now <= morning_end) or (
+            afternoon_start <= now <= afternoon_end
+        )
 
     def to_dict(self) -> dict:
         """转换为字典格式"""
@@ -300,41 +303,35 @@ class StockQueryConfig:
             "web": self.web.__dict__,
         }
 
-
 # 全局配置实例
-config = StockQueryConfig(environment=Environment(os.environ.get("ENVIRONMENT", "development")))
-
+config = StockQueryConfig(
+    environment=Environment(os.environ.get("ENVIRONMENT", "development"))
+)
 
 # 便捷访问函数
 def get_config() -> StockQueryConfig:
     """获取配置实例"""
     return config
 
-
 def get_api_config() -> WebConfig:
     """获取API配置"""
     return config.web
-
 
 def get_cache_config() -> CacheConfig:
     """获取缓存配置"""
     return config.cache
 
-
 def get_data_config() -> DataConfig:
     """获取数据配置"""
     return config.data
-
 
 def get_logging_config() -> LoggingConfig:
     """获取日志配置"""
     return config.logging
 
-
 def get_web_config() -> WebConfig:
     """获取Web配置"""
     return config.web
-
 
 if __name__ == "__main__":
     # 配置测试

@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -22,14 +22,12 @@ router = APIRouter(prefix="/strategy-backtest-loop", tags=["strategy-backtest-lo
 _persistence = StrategyLoopPersistence()
 _tables_ready = False
 
-
 async def _ensure_tables() -> None:
     global _tables_ready
     if _tables_ready:
         return
     await _persistence.ensure_tables()
     _tables_ready = True
-
 
 class StrategyBacktestLoopRequest(BaseModel):
     prompt: str = Field(..., description="策略描述")
@@ -41,8 +39,9 @@ class StrategyBacktestLoopRequest(BaseModel):
     max_iterations: int = Field(10, description="最大迭代次数")
     backtest_period: str = Field("2y", description="回测周期")
     initial_capital: float = Field(100000, description="初始资金")
-    custom_requirements: list[str] = Field(default_factory=list, description="自定义要求")
-
+    custom_requirements: list[str] = Field(
+        default_factory=list, description="自定义要求"
+    )
 
 class LoopStatusResponse(BaseModel):
     task_id: str
@@ -55,7 +54,6 @@ class LoopStatusResponse(BaseModel):
     estimated_time_remaining: int | None = None
     errors: list[str] = []
 
-
 class LoopResultResponse(BaseModel):
     task_id: str
     success: bool
@@ -66,19 +64,21 @@ class LoopResultResponse(BaseModel):
     execution_time: float
     all_iterations: list[dict[str, Any]]
 
-
 def _get_celery_app():
     from qlib_app.celery_config import celery_app
 
     return celery_app
 
-
 @router.post("/start", response_model=dict[str, str])
-async def start_strategy_backtest_loop(request: StrategyBacktestLoopRequest, req: Request):
+async def start_strategy_backtest_loop(
+    request: StrategyBacktestLoopRequest, req: Request
+):
     auth_user_id, auth_tenant_id = get_authenticated_identity(req)
     await _ensure_tables()
     try:
-        from backend.services.engine.tasks.celery_tasks import run_strategy_backtest_loop
+        from backend.services.engine.tasks.celery_tasks import (
+            run_strategy_backtest_loop,
+        )
 
         task_id = str(uuid.uuid4())
         payload = request.model_dump()
@@ -96,14 +96,15 @@ async def start_strategy_backtest_loop(request: StrategyBacktestLoopRequest, req
         return {"task_id": task_id, "status": "started"}
     except Exception as e:
         logger.error("Failed to enqueue strategy-backtest loop: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
-
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @router.get("/status/{task_id}", response_model=LoopStatusResponse)
 async def get_loop_status(task_id: str, req: Request):
     auth_user_id, auth_tenant_id = get_authenticated_identity(req)
     await _ensure_tables()
-    task_row = await _persistence.get_task(task_id, user_id=auth_user_id, tenant_id=auth_tenant_id)
+    task_row = await _persistence.get_task(
+        task_id, user_id=auth_user_id, tenant_id=auth_tenant_id
+    )
     if task_row is None:
         raise HTTPException(status_code=404, detail="Task not found")
 
@@ -120,7 +121,9 @@ async def get_loop_status(task_id: str, req: Request):
         "FAILURE": "failed",
         "REVOKED": "cancelled",
     }
-    status = task_row.get("status") or state_to_status.get(async_result.state, async_result.state.lower())
+    status = task_row.get("status") or state_to_status.get(
+        async_result.state, async_result.state.lower()
+    )
 
     return LoopStatusResponse(
         task_id=task_id,
@@ -131,15 +134,18 @@ async def get_loop_status(task_id: str, req: Request):
         progress_percentage=float(info.get("progress_percentage", 0.0) or 0.0),
         best_score=float(info.get("best_score", 0.0) or 0.0),
         estimated_time_remaining=info.get("estimated_time_remaining"),
-        errors=list(info.get("errors", [])) if isinstance(info.get("errors"), list) else [],
+        errors=list(info.get("errors", []))
+        if isinstance(info.get("errors"), list)
+        else [],
     )
-
 
 @router.get("/result/{task_id}", response_model=LoopResultResponse)
 async def get_loop_result(task_id: str, req: Request):
     auth_user_id, auth_tenant_id = get_authenticated_identity(req)
     await _ensure_tables()
-    task_row = await _persistence.get_task(task_id, user_id=auth_user_id, tenant_id=auth_tenant_id)
+    task_row = await _persistence.get_task(
+        task_id, user_id=auth_user_id, tenant_id=auth_tenant_id
+    )
     if task_row is None:
         raise HTTPException(status_code=404, detail="Task not found")
 
@@ -168,42 +174,51 @@ async def get_loop_result(task_id: str, req: Request):
         all_iterations=list(payload.get("all_iterations") or []),
     )
 
-
 @router.delete("/task/{task_id}")
 async def cancel_loop_task(task_id: str, req: Request):
     auth_user_id, auth_tenant_id = get_authenticated_identity(req)
     await _ensure_tables()
-    task_row = await _persistence.get_task(task_id, user_id=auth_user_id, tenant_id=auth_tenant_id)
+    task_row = await _persistence.get_task(
+        task_id, user_id=auth_user_id, tenant_id=auth_tenant_id
+    )
     if task_row is None:
         raise HTTPException(status_code=404, detail="Task not found")
     try:
         celery_app = _get_celery_app()
         celery_app.control.revoke(task_id, terminate=True)
-        await _persistence.update_task(task_id=task_id, status="cancelled", updated_at=datetime.now())
+        await _persistence.update_task(
+            task_id=task_id, status="cancelled", updated_at=datetime.now()
+        )
         return {"message": "Task cancelled successfully", "task_id": task_id}
     except Exception as e:
-        logger.error("Strategy-backtest loop task cancel failed: %s, error: %s", task_id, e)
-        raise HTTPException(status_code=500, detail=str(e))
-
+        logger.error(
+            "Strategy-backtest loop task cancel failed: %s, error: %s", task_id, e
+        )
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @router.get("/tasks")
 async def list_running_tasks(req: Request):
     auth_user_id, auth_tenant_id = get_authenticated_identity(req)
     await _ensure_tables()
-    rows = await _persistence.list_tasks(user_id=auth_user_id, tenant_id=auth_tenant_id, limit=100)
+    rows = await _persistence.list_tasks(
+        user_id=auth_user_id, tenant_id=auth_tenant_id, limit=100
+    )
     return {
         "tasks": [
             {
                 "task_id": item.get("task_id"),
                 "status": item.get("status"),
                 "error": item.get("error_message"),
-                "created_at": item.get("created_at").isoformat() if item.get("created_at") else None,
-                "updated_at": item.get("updated_at").isoformat() if item.get("updated_at") else None,
+                "created_at": item.get("created_at").isoformat()
+                if item.get("created_at")
+                else None,
+                "updated_at": item.get("updated_at").isoformat()
+                if item.get("updated_at")
+                else None,
             }
             for item in rows
         ]
     }
-
 
 @router.get("/config/templates")
 async def get_loop_templates():

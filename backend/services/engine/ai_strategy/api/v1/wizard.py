@@ -20,7 +20,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 from textwrap import dedent
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 from urllib.parse import unquote_plus
 from uuid import uuid4
 
@@ -57,7 +57,6 @@ except ImportError:
 
                 def get_db():
                     raise ImportError("Cannot find database_pool module")
-
 
 from backend.shared.redis_sentinel_client import get_redis_sentinel_client
 
@@ -149,10 +148,11 @@ router.include_router(generation_router)
 router.include_router(pool_management_router)
 
 _QLIB_TASK_TTL_SECONDS = int(os.getenv("QLIB_GENERATE_TASK_TTL_SECONDS", "3600"))
-_QLIB_TASK_REDIS_PREFIX = os.getenv("QLIB_GENERATE_TASK_REDIS_PREFIX", "quantmind:strategy:generate_qlib:task:").strip()
+_QLIB_TASK_REDIS_PREFIX = os.getenv(
+    "QLIB_GENERATE_TASK_REDIS_PREFIX", "quantmind:strategy:generate_qlib:task:"
+).strip()
 _qlib_task_lock = asyncio.Lock()
 _qlib_tasks: dict[str, dict[str, Any]] = {}
-
 
 def _strip_markdown_fences(code: str) -> str:
     """将 LLM 返回的 markdown 代码围栏剥离为纯 Python。"""
@@ -162,14 +162,15 @@ def _strip_markdown_fences(code: str) -> str:
     if "```" not in s:
         return s + "\n"
     try:
-        m = re.search(r"```(?:python)?\s*(.*?)\s*```", s, flags=re.IGNORECASE | re.DOTALL)
+        m = re.search(
+            r"```(?:python)?\s*(.*?)\s*```", s, flags=re.IGNORECASE | re.DOTALL
+        )
         if m:
             return (m.group(1) or "").strip() + "\n"
     except Exception:
-        pass
+        logger.debug("ignored exception", exc_info=True)
     lines = [ln for ln in s.splitlines() if not ln.strip().startswith("```")]
     return "\n".join(lines).strip() + "\n"
-
 
 def _trace_id(request: Request | None) -> str | None:
     if not request:
@@ -179,7 +180,6 @@ def _trace_id(request: Request | None) -> str | None:
         or request.headers.get("X-Trace-Id")
         or request.headers.get("X-Request-Id")
     )
-
 
 async def _cleanup_expired_qlib_tasks() -> None:
     now = datetime.now().timestamp()
@@ -191,10 +191,8 @@ async def _cleanup_expired_qlib_tasks() -> None:
     for task_id in expired_ids:
         _qlib_tasks.pop(task_id, None)
 
-
 def _qlib_task_cache_key(task_id: str) -> str:
     return f"{_QLIB_TASK_REDIS_PREFIX}{task_id}"
-
 
 async def _save_qlib_task_to_redis(task_id: str, task: dict[str, Any]) -> None:
     def _write() -> None:
@@ -208,8 +206,9 @@ async def _save_qlib_task_to_redis(task_id: str, task: dict[str, Any]) -> None:
     try:
         await asyncio.to_thread(_write)
     except Exception as exc:
-        logger.warning("save qlib task to redis failed: task_id=%s err=%s", task_id, exc)
-
+        logger.warning(
+            "save qlib task to redis failed: task_id=%s err=%s", task_id, exc
+        )
 
 async def _load_qlib_task_from_redis(task_id: str) -> dict[str, Any] | None:
     def _read() -> bytes | None:
@@ -219,7 +218,9 @@ async def _load_qlib_task_from_redis(task_id: str) -> dict[str, Any] | None:
     try:
         raw = await asyncio.to_thread(_read)
     except Exception as exc:
-        logger.warning("load qlib task from redis failed: task_id=%s err=%s", task_id, exc)
+        logger.warning(
+            "load qlib task from redis failed: task_id=%s err=%s", task_id, exc
+        )
         return None
 
     if not raw:
@@ -231,19 +232,21 @@ async def _load_qlib_task_from_redis(task_id: str) -> dict[str, Any] | None:
             return json.loads(raw)
         return None
     except Exception as exc:
-        logger.warning("decode qlib task from redis failed: task_id=%s err=%s", task_id, exc)
+        logger.warning(
+            "decode qlib task from redis failed: task_id=%s err=%s", task_id, exc
+        )
         return None
-
 
 async def _save_qlib_task(task_id: str, updates: dict[str, Any]) -> None:
     async with _qlib_task_lock:
         await _cleanup_expired_qlib_tasks()
-        task = _qlib_tasks.get(task_id) or await _load_qlib_task_from_redis(task_id) or {}
+        task = (
+            _qlib_tasks.get(task_id) or await _load_qlib_task_from_redis(task_id) or {}
+        )
         task.update(updates)
         task["updated_at_ts"] = datetime.now().timestamp()
         _qlib_tasks[task_id] = task
         await _save_qlib_task_to_redis(task_id, task)
-
 
 async def _get_qlib_task(task_id: str) -> dict[str, Any] | None:
     async with _qlib_task_lock:
@@ -257,11 +260,9 @@ async def _get_qlib_task(task_id: str) -> dict[str, Any] | None:
             return None
         return dict(task)
 
-
 # ============================================================================
 #  Step 1: 股票池选择 — 条件解析
 # ============================================================================
-
 
 @router.post("/parse-conditions", response_model=ParseResponse)
 async def parse_conditions(body: ParseRequest, request: Request):
@@ -273,13 +274,11 @@ async def parse_conditions(body: ParseRequest, request: Request):
         raise
     except Exception as e:
         logger.error("parse_conditions failed: %s", e)
-        raise HTTPException(status_code=400, detail=f"解析失败: {e}")
-
+        raise HTTPException(status_code=400, detail=f"解析失败: {e}") from e
 
 # ============================================================================
 #  Step 2: 股票池确认 — 执行查询
 # ============================================================================
-
 
 @router.post("/query-pool", response_model=QueryPoolResponse)
 async def query_pool(body: QueryPoolRequest, request: Request):
@@ -303,19 +302,21 @@ async def query_pool(body: QueryPoolRequest, request: Request):
         traceback.print_exc()
         err_text = str(e)
         logger.error(f"query_pool failed: {err_text}")
-        if "UndefinedColumn" in err_text or ("column" in err_text.lower() and "does not exist" in err_text.lower()):
+        if "UndefinedColumn" in err_text or (
+            "column" in err_text.lower() and "does not exist" in err_text.lower()
+        ):
             raise HTTPException(
                 status_code=422,
                 detail="股票池筛选字段与当前数据库结构不匹配，请联系管理员同步字段映射。",
-            )
-        raise HTTPException(status_code=500, detail=f"查询失败 (AI Strategy): {err_text}")
-
+            ) from e
+        raise HTTPException(
+            status_code=500, detail=f"查询失败 (AI Strategy): {err_text}"
+        ) from e
 
 # ============================================================================
 #  文本解析（自然语言 → DSL/SQL）
 #  _simple_parse_text / _parse_trade_text 尚未迁移到 steps/，暂保留于路由层
 # ============================================================================
-
 
 def _simple_parse_text(text_input: str):
     """基于正则的本地文本解析（无需 LLM）"""
@@ -358,7 +359,7 @@ def _simple_parse_text(text_input: str):
     )
     is_float_cap = "流通" in s
     cap_factor = "float_mv" if is_float_cap else "market_cap"
-    
+
     if m_cap_range:
         low_val = _cap_to_yuan(m_cap_range.group(1), m_cap_range.group(2))
         high_val = _cap_to_yuan(m_cap_range.group(3), m_cap_range.group(4))
@@ -404,7 +405,9 @@ def _simple_parse_text(text_input: str):
         cap_range = (10.0 * TOTAL_MV_PER_YI, 100.0 * TOTAL_MV_PER_YI)
         factors.append("market_cap")
         local_hit = True
-        suggestions.append("已按“小市值10亿-100亿”默认阈值处理，可手动指定市值范围提升精度")
+        suggestions.append(
+            "已按“小市值10亿-100亿”默认阈值处理，可手动指定市值范围提升精度"
+        )
 
     m_pe_range = re.search(
         r"(?:PE|市盈率)(?:区间|范围)?(?:在|是)?(\d+(?:\.\d+)?)(?:到|至|~|-|—|和)(\d+(?:\.\d+)?)(?:之间|区间|范围内|以内)?",
@@ -551,7 +554,18 @@ def _simple_parse_text(text_input: str):
                     local_hit = True
                     loose_mode_hits.append("PB“约/左右”已按±20%宽松区间处理")
 
-    if any(k in s for k in ("金融股", "金融板块", "金融行业", "券商股", "证券股", "银行股", "保险股")):
+    if any(
+        k in s
+        for k in (
+            "金融股",
+            "金融板块",
+            "金融行业",
+            "券商股",
+            "证券股",
+            "银行股",
+            "保险股",
+        )
+    ):
         # 兼容当前库内行业值（仅有 industry 一列，常见为细分行业名）
         industry_list = ["金融", "银行", "保险", "证券"]
         factors.append("industry")
@@ -560,7 +574,9 @@ def _simple_parse_text(text_input: str):
     else:
         inds = re.findall(r"行业[:：]\s*([\u4e00-\u9fa5,，\s]+)", s)
         if inds:
-            industry_list = [x.strip() for x in re.split(r"[,，\s]+", inds[0]) if x.strip()]
+            industry_list = [
+                x.strip() for x in re.split(r"[,，\s]+", inds[0]) if x.strip()
+            ]
             if industry_list:
                 factors.append("industry")
                 local_hit = True
@@ -649,11 +665,11 @@ def _simple_parse_text(text_input: str):
         # 数据库中 roe 通常是小数，如 0.15 代表 15%。
         # 用户输入 15，需除以 100 换算。
         if low is not None and high is not None:
-            parts.append(f"roe >= {low/100.0} AND roe <= {high/100.0}")
+            parts.append(f"roe >= {low / 100.0} AND roe <= {high / 100.0}")
         elif low is not None:
-            parts.append(f"roe >= {low/100.0}")
+            parts.append(f"roe >= {low / 100.0}")
         elif high is not None:
-            parts.append(f"roe <= {high/100.0}")
+            parts.append(f"roe <= {high / 100.0}")
 
     if is_st_flag is not None:
         parts.append(f"is_st == {is_st_flag}")
@@ -684,9 +700,9 @@ def _simple_parse_text(text_input: str):
         if roe_range:
             low, high = roe_range
             if low is not None:
-                sql_parts.append(f"roe >= {low/100.0}")
+                sql_parts.append(f"roe >= {low / 100.0}")
             if high is not None:
-                sql_parts.append(f"roe <= {high/100.0}")
+                sql_parts.append(f"roe <= {high / 100.0}")
         if is_st_flag is not None:
             sql_parts.append(f"is_st = {is_st_flag}")
         if hs300_flag is not None:
@@ -697,7 +713,14 @@ def _simple_parse_text(text_input: str):
         industry_alias_map: dict[str, list[str]] = {
             # 金融
             # 先保留业务词本身（如“金融”），再扩展到可能的细分别名，避免只匹配别名导致 0 结果。
-            "金融": ["金融", "金融信息服务", "货币金融服务", "资本市场服务", "保险业", "其他金融业"],
+            "金融": [
+                "金融",
+                "金融信息服务",
+                "货币金融服务",
+                "资本市场服务",
+                "保险业",
+                "其他金融业",
+            ],
             "银行": ["银行", "银行业", "货币金融服务"],
             "保险": ["保险", "保险业"],
             "证券": ["证券", "证券、期货业", "资本市场服务", "其他金融业"],
@@ -742,11 +765,33 @@ def _simple_parse_text(text_input: str):
             # 地产基建
             "地产": ["房地产业", "房屋建筑业"],
             "房地产": ["房地产业", "房屋建筑业"],
-            "基建": ["土木工程建筑业", "建筑装饰和其他建筑业", "建筑安装业", "房屋建筑业"],
-            "建筑": ["土木工程建筑业", "建筑装饰和其他建筑业", "建筑安装业", "房屋建筑业"],
+            "基建": [
+                "土木工程建筑业",
+                "建筑装饰和其他建筑业",
+                "建筑安装业",
+                "房屋建筑业",
+            ],
+            "建筑": [
+                "土木工程建筑业",
+                "建筑装饰和其他建筑业",
+                "建筑安装业",
+                "房屋建筑业",
+            ],
             # 交通运输与公用事业
-            "交通运输": ["道路运输业", "铁路运输业", "航空运输业", "水上运输业", "仓储业", "邮政业"],
-            "公用事业": ["电力、热力生产和供应业", "燃气生产和供应业", "水的生产和供应业", "公共设施管理业"],
+            "交通运输": [
+                "道路运输业",
+                "铁路运输业",
+                "航空运输业",
+                "水上运输业",
+                "仓储业",
+                "邮政业",
+            ],
+            "公用事业": [
+                "电力、热力生产和供应业",
+                "燃气生产和供应业",
+                "水的生产和供应业",
+                "公共设施管理业",
+            ],
             "环保": ["生态保护和环境治理业"],
             # 传媒文娱
             "传媒": ["新闻和出版业", "广播、电视、电影和影视录音制作业", "文化艺术业"],
@@ -778,10 +823,11 @@ def _simple_parse_text(text_input: str):
         dsl = "SELECT symbol WHERE " + (" AND ".join(parts) if parts else "true")
     mapping = {"factors": factors, "industry": industry_list, "local_hit": local_hit}
     if not parts and not industry_list:
-        suggestions.append("未识别具体条件, 可尝试使用: 市值100-300, PE 15-20, 行业: 计算机")
+        suggestions.append(
+            "未识别具体条件, 可尝试使用: 市值100-300, PE 15-20, 行业: 计算机"
+        )
     suggestions.extend(loose_mode_hits)
     return dsl, mapping, suggestions
-
 
 @router.post("/parse-text", response_model=ParseResponse)
 async def parse_text(body: ParseTextRequest, request: Request):
@@ -818,15 +864,38 @@ async def parse_text(body: ParseTextRequest, request: Request):
         # 检查是否成功生成 SQL
         if sql:
             # 修复 LLM 可能生成的错误表名（重复拼接）
-            sql = re.sub(r"stock_daily_latest_latest", "stock_daily_latest", sql, flags=re.IGNORECASE)
-            sql = re.sub(r"stock_selection_selection", "stock_selection", sql, flags=re.IGNORECASE)
+            sql = re.sub(
+                r"stock_daily_latest_latest",
+                "stock_daily_latest",
+                sql,
+                flags=re.IGNORECASE,
+            )
+            sql = re.sub(
+                r"stock_selection_selection",
+                "stock_selection",
+                sql,
+                flags=re.IGNORECASE,
+            )
 
             # 适配表名规范（仅替换未正确使用 LATEST_TABLE 的情况）
             if "from stock_selection" in sql.lower():
-                sql = re.sub(r"from\s+stock_selection", f"from {LATEST_TABLE}", sql, flags=re.IGNORECASE)
-            if "from stock_daily" in sql.lower() and "from stock_daily_latest" not in sql.lower():
-                sql = re.sub(r"from\s+stock_daily(?!\s_latest)", f"from {LATEST_TABLE}", sql, flags=re.IGNORECASE)
-            
+                sql = re.sub(
+                    r"from\s+stock_selection",
+                    f"from {LATEST_TABLE}",
+                    sql,
+                    flags=re.IGNORECASE,
+                )
+            if (
+                "from stock_daily" in sql.lower()
+                and "from stock_daily_latest" not in sql.lower()
+            ):
+                sql = re.sub(
+                    r"from\s+stock_daily(?!\s_latest)",
+                    f"from {LATEST_TABLE}",
+                    sql,
+                    flags=re.IGNORECASE,
+                )
+
             # 若生成的是全市场 SQL，自动对齐口径
             if _is_full_market_sql(sql):
                 sql = _build_full_market_sql()
@@ -864,20 +933,9 @@ async def parse_text(body: ParseTextRequest, request: Request):
             dsl, mapping, suggestions = _simple_parse_text(body.text)
             return ParseResponse(dsl=dsl, mapping=mapping, suggestions=suggestions)
         except Exception as fallback_exc:
-            logger.warning(
-                "parse_text fallback parse also failed: %s", fallback_exc
-            )
-            raise HTTPException(status_code=400, detail=f"解析完全失败: {e}")
-    except Exception as e:
-        logger.error("parse_text failed: %s", e)
-        try:
-            dsl, mapping, suggestions = _simple_parse_text(body.text)
-            return ParseResponse(dsl=dsl, mapping=mapping, suggestions=suggestions)
-        except Exception as fallback_exc:
-            logger.warning(
-                "parse_text fallback parse also failed: %s", fallback_exc
-            )
-            raise HTTPException(status_code=400, detail=f"解析失败: {e}")
-
+            logger.warning("parse_text fallback parse also failed: %s", fallback_exc)
+            raise HTTPException(
+                status_code=400, detail=f"解析完全失败: {e}"
+            ) from fallback_exc
 
 # ============================================================================

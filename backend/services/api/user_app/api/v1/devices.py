@@ -2,8 +2,6 @@
 设备管理API路由
 """
 
-from typing import List
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict
 
@@ -84,7 +82,7 @@ async def trust_device(
             "message": "设备已信任",
         }
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
 
 
 @router.post("/untrust")
@@ -111,7 +109,7 @@ async def untrust_device(
             "message": "已取消信任",
         }
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
 
 
 @router.delete("/{device_id}")
@@ -138,4 +136,4 @@ async def remove_device(
             "message": "设备已移除",
         }
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e

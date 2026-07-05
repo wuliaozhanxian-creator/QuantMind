@@ -79,7 +79,10 @@ def test_stop_strategy_refuses_to_kill_shared_worker(monkeypatch) -> None:
     manager._active_runs = {"default_u1_s1": 31, "default_u2_s2": 31}
 
     killed: list[int] = []
-    monkeypatch.setattr("backend.services.trade.sandbox.manager.os.kill", lambda pid, sig: killed.append(pid))
+    monkeypatch.setattr(
+        "backend.services.trade.sandbox.manager.os.kill",
+        lambda pid, sig: killed.append(pid),
+    )
 
     stopped = manager.stop_strategy("default", "u1", "s1")
     assert stopped is False

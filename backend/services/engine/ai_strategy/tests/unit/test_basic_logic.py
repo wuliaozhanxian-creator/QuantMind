@@ -210,7 +210,9 @@ class TestSelectionEngineBasic:
         dangerous_query = "'; DROP TABLE stock_selection; --"
 
         # 安全查询
-        assert not any(keyword in safe_query.upper() for keyword in ["DROP", "DELETE", "TRUNCATE"])
+        assert not any(
+            keyword in safe_query.upper() for keyword in ["DROP", "DELETE", "TRUNCATE"]
+        )
 
         # 危险查询
         assert any(keyword in dangerous_query.upper() for keyword in dangerous_keywords)

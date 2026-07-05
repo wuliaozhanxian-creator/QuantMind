@@ -4,20 +4,17 @@ import csv
 from pathlib import Path
 from typing import Any
 
-
 def to_float_or(value: Any, default: float = 0.0) -> float:
     try:
         return float(value)
     except Exception:
         return float(default)
 
-
 def to_int_or(value: Any, default: int = 0) -> int:
     try:
         return int(value)
     except Exception:
         return int(default)
-
 
 def read_shap_summary_rows(file_path: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
@@ -32,7 +29,9 @@ def read_shap_summary_rows(file_path: Path) -> list[dict[str, Any]]:
                     "feature": feature,
                     "mean_abs_shap": to_float_or((raw or {}).get("mean_abs_shap"), 0.0),
                     "mean_shap": to_float_or((raw or {}).get("mean_shap"), 0.0),
-                    "positive_ratio": to_float_or((raw or {}).get("positive_ratio"), 0.0),
+                    "positive_ratio": to_float_or(
+                        (raw or {}).get("positive_ratio"), 0.0
+                    ),
                 }
             )
     rows.sort(key=lambda item: float(item.get("mean_abs_shap") or 0.0), reverse=True)

@@ -32,11 +32,11 @@ from backend.shared.qmt_bridge_auth import (
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 ALLOWED_AGENT_TYPE = "qmt"
 
-
 async def resolve_api_key(session: AsyncSession, access_key: str) -> ApiKey | None:
-    result = await session.execute(select(ApiKey).where(ApiKey.access_key == access_key))
+    result = await session.execute(
+        select(ApiKey).where(ApiKey.access_key == access_key)
+    )
     return result.scalar_one_or_none()
-
 
 def validate_api_key_secret(key: ApiKey | None, secret_key: str) -> str | None:
     if key is None:
@@ -48,7 +48,6 @@ def validate_api_key_secret(key: ApiKey | None, secret_key: str) -> str | None:
     if not secret_key or not pwd_context.verify(secret_key, key.secret_hash):
         return "secret_key_invalid"
     return None
-
 
 async def get_active_binding(
     session: AsyncSession,
@@ -67,7 +66,6 @@ async def get_active_binding(
         .limit(1)
     )
     return result.scalar_one_or_none()
-
 
 async def get_or_create_binding(
     session: AsyncSession,
@@ -109,7 +107,10 @@ async def get_or_create_binding(
         await session.flush()
         return binding, True
 
-    if binding.account_id != account_id or binding.client_fingerprint != client_fingerprint:
+    if (
+        binding.account_id != account_id
+        or binding.client_fingerprint != client_fingerprint
+    ):
         if not force_rebind:
             raise ValueError("binding_conflict")
         # force_rebind=True：覆盖旧设备绑定信息
@@ -124,7 +125,6 @@ async def get_or_create_binding(
     binding.last_seen_at = utcnow()
     await session.flush()
     return binding, False
-
 
 async def reset_binding(
     session: AsyncSession,
@@ -143,7 +143,6 @@ async def reset_binding(
     binding.status = "inactive"
     await session.flush()
     return True
-
 
 __all__ = [
     "ALLOWED_AGENT_TYPE",

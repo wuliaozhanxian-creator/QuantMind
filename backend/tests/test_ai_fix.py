@@ -10,7 +10,9 @@ from backend.services.engine.qlib_app.schemas.backtest import QlibAIFixRequest
 @pytest.mark.asyncio
 async def test_ai_fix_strategy_logic():
     # Mock request
-    request = QlibAIFixRequest(backtest_id="test_id", error_message="SyntaxError", full_error="Traceback...")
+    request = QlibAIFixRequest(
+        backtest_id="test_id", error_message="SyntaxError", full_error="Traceback..."
+    )
 
     # Mock dependencies
     mock_run_data = MagicMock()
@@ -23,17 +25,24 @@ async def test_ai_fix_strategy_logic():
     }
 
     with (
-        patch("backend.services.engine.qlib_app.services.backtest_persistence.BacktestPersistence") as MockPersistence,
-        patch("backend.services.engine.ai_strategy.services.strategy_service.StrategyService") as MockAI,
-        patch("backend.services.engine.qlib_app.services.user_strategy_loader.UserStrategyLoader") as MockLoader,
+        patch(
+            "backend.services.engine.qlib_app.services.backtest_persistence.BacktestPersistence"
+        ) as MockPersistence,
+        patch(
+            "backend.services.engine.ai_strategy.services.strategy_service.StrategyService"
+        ) as MockAI,
+        patch(
+            "backend.services.engine.qlib_app.services.user_strategy_loader.UserStrategyLoader"
+        ) as MockLoader,
     ):
-
         # Setup mocks
         persistence_instance = MockPersistence.return_value
         persistence_instance.get_result = AsyncMock(return_value=mock_run_data)
 
         ai_instance = MockAI.return_value
-        ai_instance.generate_strategy_direct = AsyncMock(return_value="import qlib\nprint('fixed')")
+        ai_instance.generate_strategy_direct = AsyncMock(
+            return_value="import qlib\nprint('fixed')"
+        )
 
         loader_instance = MockLoader.return_value
         loader_instance.save_strategy = MagicMock(return_value="new_id_123")
@@ -60,7 +69,9 @@ async def test_ai_fix_strategy_no_code():
     mock_run_data = MagicMock()
     mock_run_data.config = {}  # No code
 
-    with patch("backend.services.engine.qlib_app.services.backtest_persistence.BacktestPersistence") as MockPersistence:
+    with patch(
+        "backend.services.engine.qlib_app.services.backtest_persistence.BacktestPersistence"
+    ) as MockPersistence:
         persistence_instance = MockPersistence.return_value
         persistence_instance.get_result = AsyncMock(return_value=mock_run_data)
 

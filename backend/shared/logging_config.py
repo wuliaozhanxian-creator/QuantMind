@@ -11,7 +11,6 @@ from typing import Any
 
 from config.settings import settings
 
-
 class JsonLogFormatter(logging.Formatter):
     """输出结构化 JSON 日志，兼容 LOG_FORMAT=json 的运行时配置。
 
@@ -38,20 +37,23 @@ class JsonLogFormatter(logging.Formatter):
             payload["stack_info"] = self.formatStack(record.stack_info)
         return json.dumps(payload, ensure_ascii=False)
 
-
-def _build_formatter(log_format: str, service_name: str = "quantmind") -> logging.Formatter:
+def _build_formatter(
+    log_format: str, service_name: str = "quantmind"
+) -> logging.Formatter:
     fmt = str(log_format or "").strip()
     if fmt.lower() == "json":
         return JsonLogFormatter(service_name=service_name, datefmt="%Y-%m-%d %H:%M:%S")
     try:
-        return logging.Formatter(fmt=fmt or "%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+        return logging.Formatter(
+            fmt=fmt or "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
     except ValueError:
         # 配置被写成了非 logging.Formatter 兼容格式时，回退到安全默认值。
         return logging.Formatter(
             fmt="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",
         )
-
 
 def setup_logging(service_name: str = "quantmind"):
     """设置日志配置
@@ -116,7 +118,6 @@ def setup_logging(service_name: str = "quantmind"):
 
     logging.info(f"Logging configured for service: {service_name}")
 
-
 def get_logger(name: str) -> logging.Logger:
     """获取指定名称的日志器
 
@@ -127,7 +128,6 @@ def get_logger(name: str) -> logging.Logger:
         配置好的日志器实例
     """
     return logging.getLogger(name)
-
 
 class LoggerMixin:
     """日志器混入类，为类提供日志功能"""

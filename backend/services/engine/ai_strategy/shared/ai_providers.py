@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import List, Optional
+from typing import Optional
 
 from pydantic import BaseModel, Field
-
 
 class StrategyType(str, Enum):
     momentum = "momentum"
@@ -12,12 +11,10 @@ class StrategyType(str, Enum):
     breakout = "breakout"
     factor = "factor"
 
-
 class ComplexityLevel(str, Enum):
     simple = "simple"
     intermediate = "intermediate"
     advanced = "advanced"
-
 
 class StrategyRequest(BaseModel):
     prompt: str = Field(..., description="策略描述")

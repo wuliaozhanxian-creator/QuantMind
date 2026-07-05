@@ -10,7 +10,7 @@ import logging
 import time
 import uuid
 from contextlib import asynccontextmanager
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -29,7 +29,6 @@ from .ws_config import ws_config
 # from .qmt_pusher import qmt_pusher  # QMT 功能已移除
 
 logger = logging.getLogger(__name__)
-
 
 async def _extract_ws_auth_metadata(websocket: WebSocket) -> dict[str, Any]:
     """解析并校验 WS 鉴权信息，返回连接元数据。"""
@@ -62,13 +61,15 @@ async def _extract_ws_auth_metadata(websocket: WebSocket) -> dict[str, Any]:
                         "connected_at": time.time(),
                     }
         except Exception:
-            pass
+            logger.debug("ignored exception", exc_info=True)
         try:
             payload = auth_manager.verify_token(token)
         except Exception:
             payload = decode_jwt_token(token)
         tenant_id = tenant_id or str(payload.get("tenant_id") or "").strip()
-        user_id = user_id or str(payload.get("sub") or payload.get("user_id") or "").strip()
+        user_id = (
+            user_id or str(payload.get("sub") or payload.get("user_id") or "").strip()
+        )
 
     if not tenant_id:
         tenant_id = "default"
@@ -82,8 +83,9 @@ async def _extract_ws_auth_metadata(websocket: WebSocket) -> dict[str, Any]:
         "connected_at": time.time(),
     }
 
-
-async def _disconnect_stale_bridge_connections(current_connection_id: str, metadata: dict[str, Any]) -> None:
+async def _disconnect_stale_bridge_connections(
+    current_connection_id: str, metadata: dict[str, Any]
+) -> None:
     if str(metadata.get("auth_source") or "") != "bridge_session":
         return
 
@@ -93,11 +95,17 @@ async def _disconnect_stale_bridge_connections(current_connection_id: str, metad
             continue
         if str(current_metadata.get("auth_source") or "") != "bridge_session":
             continue
-        if str(current_metadata.get("tenant_id") or "") != str(metadata.get("tenant_id") or ""):
+        if str(current_metadata.get("tenant_id") or "") != str(
+            metadata.get("tenant_id") or ""
+        ):
             continue
-        if str(current_metadata.get("user_id") or "") != str(metadata.get("user_id") or ""):
+        if str(current_metadata.get("user_id") or "") != str(
+            metadata.get("user_id") or ""
+        ):
             continue
-        if str(current_metadata.get("binding_id") or "") != str(metadata.get("binding_id") or ""):
+        if str(current_metadata.get("binding_id") or "") != str(
+            metadata.get("binding_id") or ""
+        ):
             continue
         same_binding.append(connection_id)
 
@@ -107,7 +115,6 @@ async def _disconnect_stale_bridge_connections(current_connection_id: str, metad
             code=1008,
             reason="Superseded by a newer bridge session",
         )
-
 
 async def handle_message(connection_id: str, message: dict):
     """
@@ -136,12 +143,18 @@ async def handle_message(connection_id: str, message: dict):
         # 订阅主题
         if action:
             symbols = message.get("symbols", []) or []
-            topics = [f"stock.{str(symbol).strip()}" for symbol in symbols if str(symbol).strip()]
+            topics = [
+                f"stock.{str(symbol).strip()}"
+                for symbol in symbols
+                if str(symbol).strip()
+            ]
             for topic in topics:
                 await manager.subscribe(connection_id, topic)
                 if topic.startswith("stock."):
                     await quote_pusher.subscribe_quote(topic.split("stock.", 1)[1])
-            await manager.send_message(connection_id, {"type": "subscribed", "symbols": symbols})
+            await manager.send_message(
+                connection_id, {"type": "subscribed", "symbols": symbols}
+            )
         else:
             topic = message.get("topic")
             if topic:
@@ -166,25 +179,35 @@ async def handle_message(connection_id: str, message: dict):
                     pass  # trade_pusher handles broadcasting; no extra per-client setup needed
                 elif topic.startswith("notification."):
                     pass  # notification_pusher handles broadcasting
-                await manager.send_message(connection_id, {"type": "subscribed", "topic": topic})
+                await manager.send_message(
+                    connection_id, {"type": "subscribed", "topic": topic}
+                )
 
     elif msg_type == "unsubscribe":
         # 取消订阅
         if action:
             symbols = message.get("symbols", []) or []
-            topics = [f"stock.{str(symbol).strip()}" for symbol in symbols if str(symbol).strip()]
+            topics = [
+                f"stock.{str(symbol).strip()}"
+                for symbol in symbols
+                if str(symbol).strip()
+            ]
             for topic in topics:
                 await manager.unsubscribe(connection_id, topic)
                 if topic.startswith("stock.") and topic not in manager.subscriptions:
                     await quote_pusher.unsubscribe_quote(topic.split("stock.", 1)[1])
-            await manager.send_message(connection_id, {"type": "unsubscribed", "symbols": symbols})
+            await manager.send_message(
+                connection_id, {"type": "unsubscribed", "symbols": symbols}
+            )
         else:
             topic = message.get("topic")
             if topic:
                 await manager.unsubscribe(connection_id, topic)
                 if topic.startswith("stock.") and topic not in manager.subscriptions:
                     await quote_pusher.unsubscribe_quote(topic.split("stock.", 1)[1])
-                await manager.send_message(connection_id, {"type": "unsubscribed", "topic": topic})
+                await manager.send_message(
+                    connection_id, {"type": "unsubscribed", "topic": topic}
+                )
 
     # QMT 功能已移除 - 以下代码已注释
     # elif msg_type == "qmt_query":
@@ -210,7 +233,6 @@ async def handle_message(connection_id: str, message: dict):
 
     else:
         logger.warning(f"未知消息类型: {msg_type}")
-
 
 class WebSocketServer:
     """WebSocket服务器"""
@@ -272,7 +294,7 @@ class WebSocketServer:
             try:
                 await self.heartbeat_task
             except asyncio.CancelledError:
-                pass
+                pass  # noqa: BLE001 - asyncio 任务取消信号，预期静默处理
 
         # 断开所有连接
         await manager.disconnect_all()
@@ -289,10 +311,8 @@ class WebSocketServer:
                 logger.error(f"心跳检测错误: {e}")
                 await asyncio.sleep(1)
 
-
 # 全局服务器实例
 server = WebSocketServer()
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -305,7 +325,6 @@ async def lifespan(app: FastAPI):
     await server.stop()
     logger.info("WebSocket server stopped")
 
-
 # 创建FastAPI应用
 app = FastAPI(title="QuantMind WebSocket Server", lifespan=lifespan)
 
@@ -317,7 +336,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -393,7 +411,6 @@ async def websocket_endpoint(websocket: WebSocket):
         # 连接断开后重算行情订阅，防止单连接取消误伤全局订阅
         await quote_pusher.reconcile_subscriptions(manager.subscriptions.keys())
 
-
 @app.get("/")
 async def root():
     """根路径"""
@@ -404,7 +421,6 @@ async def root():
         "stats": manager.get_stats(),
     }
 
-
 @app.get("/health")
 async def health_check():
     """健康检查"""
@@ -413,7 +429,6 @@ async def health_check():
         "connections": len(manager.active_connections),
         "running": server.running,
     }
-
 
 if __name__ == "__main__":
     import uvicorn

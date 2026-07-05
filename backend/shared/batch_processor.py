@@ -10,14 +10,13 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, Generic, List, Optional, TypeVar
+from typing import Any, Generic, Optional, TypeVar
 from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 R = TypeVar("R")
-
 
 @dataclass
 class BatchRequest(Generic[T]):
@@ -29,7 +28,6 @@ class BatchRequest(Generic[T]):
     result: Any | None = None
     error: Exception | None = None
     completed: bool = False
-
 
 class BatchProcessor(Generic[T, R]):
     """批量处理器.
@@ -67,7 +65,9 @@ class BatchProcessor(Generic[T, R]):
             "errors": 0,
         }
 
-        logger.info(f"批量处理器初始化: batch_size={batch_size}, max_wait={max_wait_time}s")
+        logger.info(
+            f"批量处理器初始化: batch_size={batch_size}, max_wait={max_wait_time}s"
+        )
 
     async def submit(self, data: T, request_id: str | None = None) -> R:
         """提交请求.
@@ -197,7 +197,6 @@ class BatchProcessor(Generic[T, R]):
             "is_processing": self._processing,
         }
 
-
 class ConcurrencyLimiter:
     """并发限制器.
 
@@ -284,7 +283,9 @@ class ConcurrencyLimiter:
     def get_stats(self) -> dict[str, Any]:
         """获取统计信息."""
         success_rate = (
-            self._stats["completed_tasks"] / self._stats["total_tasks"] if self._stats["total_tasks"] > 0 else 0.0
+            self._stats["completed_tasks"] / self._stats["total_tasks"]
+            if self._stats["total_tasks"] > 0
+            else 0.0
         )
 
         return {
@@ -292,7 +293,6 @@ class ConcurrencyLimiter:
             "active_tasks": self._active_tasks,
             "success_rate": success_rate,
         }
-
 
 class RequestDeduplicator:
     """请求去重器.
@@ -404,7 +404,11 @@ class RequestDeduplicator:
     def get_stats(self) -> dict[str, Any]:
         """获取统计信息."""
         total = self._stats["total_requests"]
-        hit_rate = (self._stats["cache_hits"] + self._stats["pending_hits"]) / total if total > 0 else 0.0
+        hit_rate = (
+            (self._stats["cache_hits"] + self._stats["pending_hits"]) / total
+            if total > 0
+            else 0.0
+        )
 
         return {
             **self._stats,
@@ -418,7 +422,6 @@ class RequestDeduplicator:
         async with self._lock:
             self._cache.clear()
             self._timestamps.clear()
-
 
 class BulkOperationManager:
     """批量操作管理器.
@@ -497,10 +500,8 @@ class BulkOperationManager:
             "deduplication": self.deduplicator.get_stats(),
         }
 
-
 # 全局批量操作管理器
 _global_bulk_manager: BulkOperationManager | None = None
-
 
 def get_bulk_manager() -> BulkOperationManager:
     """获取全局批量操作管理器.
@@ -512,7 +513,6 @@ def get_bulk_manager() -> BulkOperationManager:
     if _global_bulk_manager is None:
         _global_bulk_manager = BulkOperationManager()
     return _global_bulk_manager
-
 
 def set_bulk_manager(manager: BulkOperationManager):
     """设置全局批量操作管理器.

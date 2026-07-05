@@ -86,7 +86,12 @@ def _publish_signals_to_redis(signals: list):
         host = os.getenv("REDIS_HOST", "127.0.0.1")
         port = int(os.getenv("REDIS_PORT", "6379"))
         password = os.getenv("REDIS_PASSWORD", None)
-        client = redis.Redis(host=host, port=port, password=password, db=int(os.getenv("REDIS_DB_TRADE", "2")))
+        client = redis.Redis(
+            host=host,
+            port=port,
+            password=password,
+            db=int(os.getenv("REDIS_DB_TRADE", "2")),
+        )
 
         for sig in signals:
             client.rpush("trade:simulation:signals", json.dumps(sig))
@@ -125,14 +130,20 @@ def sandbox_worker_main(task_queue: Queue):
             code_str = task.get("code_str", "")
 
             # 构建沙箱上下文 SDK
-            ctx = create_sandbox_context(tenant_id, user_id, strategy_id, run_id, exec_config, live_trade_config)
+            ctx = create_sandbox_context(
+                tenant_id, user_id, strategy_id, run_id, exec_config, live_trade_config
+            )
 
-            print(f"[Sandbox Worker {os.getpid()}] Starting strategy {strategy_id} for user {user_id}")
+            print(
+                f"[Sandbox Worker {os.getpid()}] Starting strategy {strategy_id} for user {user_id}"
+            )
 
             # 阻塞执行受限环境
             _restricted_execute(code_str, ctx)
 
-            print(f"[Sandbox Worker {os.getpid()}] Strategy {strategy_id} execution finished.")
+            print(
+                f"[Sandbox Worker {os.getpid()}] Strategy {strategy_id} execution finished."
+            )
 
         except Exception as e:
             print(f"[Sandbox Worker {os.getpid()}] Task Error: {e}")

@@ -4,12 +4,11 @@ Client library for communicating with AI Inference Service
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import requests
 
 logger = logging.getLogger(__name__)
-
 
 class AIInferenceClient:
     """Client for AI Inference Service API."""
@@ -29,10 +28,10 @@ class AIInferenceClient:
 
     def list_models(self) -> list[dict[str, Any]]:
         """
-        List all available models.
+        list all available models.
 
         Returns:
-            List of model metadata dictionaries
+            list of model metadata dictionaries
         """
         try:
             response = self.session.get(f"{self.base_url}/api/v1/inference/models")
@@ -54,7 +53,9 @@ class AIInferenceClient:
             Model metadata or None if not found
         """
         try:
-            response = self.session.get(f"{self.base_url}/api/v1/inference/models/{model_id}")
+            response = self.session.get(
+                f"{self.base_url}/api/v1/inference/models/{model_id}"
+            )
             response.raise_for_status()
             data = response.json()
             return data.get("model")
@@ -95,7 +96,9 @@ class AIInferenceClient:
             True if successful
         """
         try:
-            response = self.session.delete(f"{self.base_url}/api/v1/inference/models/{model_id}")
+            response = self.session.delete(
+                f"{self.base_url}/api/v1/inference/models/{model_id}"
+            )
             response.raise_for_status()
             data = response.json()
             return data.get("status") == "success"
@@ -103,7 +106,9 @@ class AIInferenceClient:
             logger.error(f"Failed to unload model {model_id}: {e}")
             return False
 
-    def predict(self, model_id: str, data: dict[str, Any] | list[dict[str, Any]]) -> dict[str, Any] | None:
+    def predict(
+        self, model_id: str, data: dict[str, Any] | list[dict[str, Any]]
+    ) -> dict[str, Any] | None:
         """
         Generate prediction using a model.
 
@@ -133,7 +138,7 @@ class AIInferenceClient:
 
         Args:
             model_id: Model identifier
-            symbols: List of symbol codes
+            symbols: list of symbol codes
             market_data: Dictionary mapping symbol to market data
 
         Returns:
@@ -156,15 +161,13 @@ class AIInferenceClient:
             pred_values = result.get("predictions", [])
             result_symbols = result.get("symbols", [])
 
-            for symbol, score in zip(result_symbols, pred_values):
+            for symbol, score in zip(result_symbols, pred_values, strict=False):
                 predictions[symbol] = score
 
         return predictions
 
-
 # Singleton instance
 _client_instance = None
-
 
 def get_inference_client(base_url: str = "http://localhost:8001") -> AIInferenceClient:
     """Get or create singleton inference client instance."""

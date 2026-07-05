@@ -7,7 +7,9 @@ from backend.services.engine.qlib_app.schemas.backtest import (
     QlibOptimizationRequest,
     TopkDropoutParams,
 )
-from backend.services.engine.qlib_app.services.optimization_service import OptimizationService
+from backend.services.engine.qlib_app.services.optimization_service import (
+    OptimizationService,
+)
 
 
 class _FakeBacktestService:
@@ -26,7 +28,9 @@ class _FakeBacktestService:
             backtest_id=f"{request.strategy_params.topk}-{request.strategy_params.n_drop}",
             status="completed",
             annual_return=float(request.strategy_params.topk) / 100,
-            sharpe_ratio=float(request.strategy_params.topk + request.strategy_params.n_drop),
+            sharpe_ratio=float(
+                request.strategy_params.topk + request.strategy_params.n_drop
+            ),
             max_drawdown=-0.1,
         )
 

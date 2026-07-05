@@ -1,10 +1,9 @@
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from backend.services.engine.qlib_app.schemas.backtest import RebalanceInstruction
 
 logger = logging.getLogger(__name__)
-
 
 class OrderGenerationService:
     """
@@ -32,7 +31,9 @@ class OrderGenerationService:
         # 2. 标准化当前持仓
         currents = {}
         if current_holdings:
-            currents = {item["symbol"]: item.get("weight", 0.0) for item in current_holdings}
+            currents = {
+                item["symbol"]: item.get("weight", 0.0) for item in current_holdings
+            }
 
         # 3. 合并所有涉及的股票
         all_symbols = set(targets.keys()) | set(currents.keys())

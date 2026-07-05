@@ -1,5 +1,5 @@
 import logging
-from typing import List, Optional
+from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -15,13 +15,13 @@ from backend.services.trade.simulation.services.trade_service import SimTradeSer
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-
 def _require_int_user_id(raw_user_id: str) -> int:
     try:
         return int(raw_user_id)
     except (TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="Invalid user_id in token")
-
+        raise HTTPException(
+            status_code=400, detail="Invalid user_id in token"
+        ) from None
 
 @router.get("/trades", response_model=list[SimTradeResponse])
 async def list_trades(
@@ -43,7 +43,6 @@ async def list_trades(
         offset=offset,
     )
 
-
 @router.get("/trades/{trade_id}", response_model=SimTradeResponse)
 async def get_trade(
     trade_id: UUID,
@@ -56,7 +55,6 @@ async def get_trade(
     if not trade:
         raise HTTPException(status_code=404, detail="Simulation trade not found")
     return trade
-
 
 @router.get("/trades/stats/summary", response_model=SimTradeStatsResponse)
 async def get_trade_stats(

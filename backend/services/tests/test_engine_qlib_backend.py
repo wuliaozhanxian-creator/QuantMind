@@ -61,7 +61,9 @@ def test_check_health_includes_qlib_backend(monkeypatch):
         service._initialized = True
 
     monkeypatch.setattr(service, "initialize", fake_initialize)
-    monkeypatch.setattr(service_mod, "D", SimpleNamespace(features=lambda *args, **kwargs: []))
+    monkeypatch.setattr(
+        service_mod, "D", SimpleNamespace(features=lambda *args, **kwargs: [])
+    )
     health = service.check_health()
     assert "qlib_backend" in health
     assert health["qlib_backend"] in {"real", "mock"}

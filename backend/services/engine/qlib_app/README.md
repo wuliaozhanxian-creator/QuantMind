@@ -149,7 +149,7 @@ python backend/scripts/seed_qlib_strategy.py
 
 ## 修复记录（2026-02-20）
 
-- 修复 `api/user_strategies.py` 中 `_get_user_id` 缺失 `import os` 导致的运行时 `500`（网关注入 `X-Internal-Call` 鉴权头时触发）。
+- 修复 `api/user_strategies.py` 中 `_get_user_id` 缺失 `import os` 导致的运行时 `500`（网关注入 `X-Service-Token` 鉴权头时触发）。
 
 ## 修复记录（2026-02-21）
 

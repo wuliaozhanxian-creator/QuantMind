@@ -11,7 +11,7 @@ import os
 import threading
 from datetime import datetime
 from urllib.parse import urlparse
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -36,7 +36,9 @@ from backend.services.engine.qlib_app.services.strategy_templates import (
     get_all_templates,
     invalidate_templates_cache,
 )
-from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
+from backend.services.engine.qlib_app.utils.structured_logger import (
+    StructuredTaskLogger,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +59,6 @@ _trade_pool: ConnectionPool | None = None
 _trade_client: Redis | None = None
 _trade_lock = threading.Lock()
 
-
 def close_trade_redis() -> None:
     """关闭 trade-redis 连接池，优雅释放资源"""
     global _trade_pool, _trade_client
@@ -77,7 +78,6 @@ def close_trade_redis() -> None:
                 logger.info("trade redis pool closed")
             except Exception as e:  # noqa: BLE001
                 logger.error("close trade redis pool failed: %s", e)
-
 
 def _get_trade_redis():
     """
@@ -122,7 +122,6 @@ def _get_trade_redis():
                 return None
         return _trade_client
 
-
 def _is_valid_bearer_jwt(auth_header: str) -> bool:
     token = str(auth_header or "").strip()
     if not token.lower().startswith("bearer "):
@@ -131,20 +130,29 @@ def _is_valid_bearer_jwt(auth_header: str) -> bool:
     parts = raw_token.split(".")
     return len(parts) == 3 and all(part.strip() for part in parts)
 
-
-async def _trigger_inference_after_activate(*, strategy_id: str, tenant_id: str, user_id: str) -> None:
+async def _trigger_inference_after_activate(
+    *, strategy_id: str, tenant_id: str, user_id: str
+) -> None:
     """
     策略激活后异步触发一次推理发布（按 tenant_id + user_id 定向产信号）。
     """
     try:
-        from backend.services.engine.inference.router_service import InferenceRouterService
+        from backend.services.engine.inference.router_service import (
+            InferenceRouterService,
+        )
     except Exception as e:
-        StructuredTaskLogger(logger, "user-strategies").warning("inference_import_failed", "导入 InferenceRouterService 失败", error=e)
+        StructuredTaskLogger(logger, "user-strategies").warning(
+            "inference_import_failed", "导入 InferenceRouterService 失败", error=e
+        )
         return
 
     now_local = datetime.now(ZoneInfo("Asia/Shanghai"))
     cal = xcals.get_calendar("XSHG")
-    data_trade_date_obj = cal.previous_session(now_local.date()).date() if now_local.time() < datetime.strptime("09:30", "%H:%M").time() else now_local.date()
+    data_trade_date_obj = (
+        cal.previous_session(now_local.date()).date()
+        if now_local.time() < datetime.strptime("09:30", "%H:%M").time()
+        else now_local.date()
+    )
     data_trade_date = data_trade_date_obj.isoformat()
     prediction_trade_date = cal.next_session(data_trade_date_obj).date().isoformat()
     redis = None
@@ -156,11 +164,21 @@ async def _trigger_inference_after_activate(*, strategy_id: str, tenant_id: str,
             StructuredTaskLogger(
                 logger,
                 "user-strategies",
-                {"strategy_id": strategy_id, "tenant_id": tenant_id, "user_id": user_id},
-            ).info("inference_skipped", "已有同用户同日推理在执行/完成，跳过", date=prediction_trade_date)
+                {
+                    "strategy_id": strategy_id,
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                },
+            ).info(
+                "inference_skipped",
+                "已有同用户同日推理在执行/完成，跳过",
+                date=prediction_trade_date,
+            )
             return
     except Exception as e:
-        StructuredTaskLogger(logger, "user-strategies").warning("inference_lock_failed", "Redis 锁获取失败，降级继续执行", error=e)
+        StructuredTaskLogger(logger, "user-strategies").warning(
+            "inference_lock_failed", "Redis 锁获取失败，降级继续执行", error=e
+        )
 
     try:
         router_service = InferenceRouterService()
@@ -200,7 +218,6 @@ async def _trigger_inference_after_activate(*, strategy_id: str, tenant_id: str,
             error=e,
         )
 
-
 def _normalize_base_status(raw: Any) -> str:
     text = str(raw or "").strip().lower()
     if text in {"draft", "d"}:
@@ -211,18 +228,15 @@ def _normalize_base_status(raw: Any) -> str:
         return "live_trading"
     return "draft"
 
-
 def _base_to_effective_status(base_status: str) -> str:
     # 生命周期状态不代表当前运行态，兜底统一显示 stopped
     return "stopped"
-
 
 def _normalize_runtime_state(raw: Any) -> str | None:
     text = str(raw or "").strip().lower()
     if text in _RUNTIME_STATES:
         return text
     return None
-
 
 def _resolve_trade_service_url() -> str:
     direct = str(os.getenv("TRADE_SERVICE_URL", "")).strip()
@@ -241,18 +255,15 @@ def _resolve_trade_service_url() -> str:
         return f"{direct.rstrip('/')}/api/v1/real-trading/status"
     return "http://quantmind-trade:8002/api/v1/real-trading/status"
 
-
 def _get_user_id(request: Request) -> str | None:
     user = getattr(request.state, "user", None)
     if user:
         return str(user.get("user_id") or user.get("sub"))
     return None
 
-
 def _get_tenant_id(request: Request) -> str:
     user = getattr(request.state, "user", None) or {}
     return str(user.get("tenant_id") or "default")
-
 
 def _to_iso_string(value: Any) -> str | None:
     if value is None:
@@ -262,8 +273,9 @@ def _to_iso_string(value: Any) -> str | None:
     text_value = str(value).strip()
     return text_value or None
 
-
-async def _fetch_latest_backtest_summaries(user_id: str, tenant_id: str) -> dict[str, dict[str, Any]]:
+async def _fetch_latest_backtest_summaries(
+    user_id: str, tenant_id: str
+) -> dict[str, dict[str, Any]]:
     """
     按策略 ID 提取最近一次回测摘要。
 
@@ -310,7 +322,11 @@ async def _fetch_latest_backtest_summaries(user_id: str, tenant_id: str) -> dict
             "risk_level": payload.get("risk_level"),
             "error_code": payload.get("error_code"),
             "error_message": payload.get("error_message"),
-            "last_update": _to_iso_string(payload.get("last_update") or row.get("completed_at") or row.get("created_at")),
+            "last_update": _to_iso_string(
+                payload.get("last_update")
+                or row.get("completed_at")
+                or row.get("created_at")
+            ),
             "execution_latency_ms": (
                 int(float(payload.get("execution_time")) * 1000)
                 if payload.get("execution_time") is not None
@@ -318,7 +334,6 @@ async def _fetch_latest_backtest_summaries(user_id: str, tenant_id: str) -> dict
             ),
         }
     return summaries
-
 
 async def _perform_sync(user_id: str):
     """
@@ -335,20 +350,29 @@ async def _perform_sync(user_id: str):
         with get_db() as session:
             # 1. 按名称清理
             session.execute(
-                text("DELETE FROM strategies WHERE user_id = :uid AND name = '抗下行 Alpha 策略'"), {"uid": user_id}
+                text(
+                    "DELETE FROM strategies WHERE user_id = :uid AND name = '抗下行 Alpha 策略'"
+                ),
+                {"uid": user_id},
             )
             # 2. 按内部参数 ID 清理
             session.execute(
-                text("DELETE FROM strategies WHERE user_id = :uid AND parameters->>'strategy_type' = 'downside_alpha'"),
+                text(
+                    "DELETE FROM strategies WHERE user_id = :uid AND parameters->>'strategy_type' = 'downside_alpha'"
+                ),
                 {"uid": user_id},
             )
             session.commit()
             StructuredTaskLogger(logger, "user-strategies", {"user_id": user_id}).info(
-                "sync_cleanup", "清理旧模板", strategy="抗下行 Alpha 策略/downside_alpha"
+                "sync_cleanup",
+                "清理旧模板",
+                strategy="抗下行 Alpha 策略/downside_alpha",
             )
     except Exception as e:
         StructuredTaskLogger(logger, "user-strategies", {"user_id": user_id}).warning(
-            "sync_cleanup_failed", "Failed to cleanup obsolete strategy in sync", error=e
+            "sync_cleanup_failed",
+            "Failed to cleanup obsolete strategy in sync",
+            error=e,
         )
 
     templates = get_all_templates()
@@ -374,11 +398,9 @@ async def _perform_sync(user_id: str):
         synced_count += 1
     return synced_count
 
-
 # ============================================================================
 # 请求/响应模型
 # ============================================================================
-
 
 class StrategyListItem(BaseModel):
     id: str
@@ -408,11 +430,9 @@ class StrategyListItem(BaseModel):
     is_system: bool = False
     parameters: dict[str, Any] = Field(default_factory=dict)
 
-
 class StrategyListResponse(BaseModel):
     total: int
     strategies: list[StrategyListItem]
-
 
 async def _fetch_real_trading_status(request: Request) -> dict[str, Any] | None:
     auth_header = request.headers.get("authorization")
@@ -421,14 +441,18 @@ async def _fetch_real_trading_status(request: Request) -> dict[str, Any] | None:
             "real_trading_skip", "skip real-trading/status due to invalid auth header"
         )
         return None
-    tenant_id = str((getattr(request.state, "user", {}) or {}).get("tenant_id") or "default")
+    tenant_id = str(
+        (getattr(request.state, "user", {}) or {}).get("tenant_id") or "default"
+    )
     headers = {"Authorization": auth_header, "X-Tenant-Id": tenant_id}
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(2.0, connect=1.0)) as client:
             resp = await client.get(_resolve_trade_service_url(), headers=headers)
         if resp.status_code != 200:
             StructuredTaskLogger(logger, "user-strategies").warning(
-                "real_trading_failed", "fetch real-trading/status failed", status=resp.status_code
+                "real_trading_failed",
+                "fetch real-trading/status failed",
+                status=resp.status_code,
             )
             return None
         payload = resp.json()
@@ -441,11 +465,9 @@ async def _fetch_real_trading_status(request: Request) -> dict[str, Any] | None:
         )
         return None
 
-
 # ============================================================================
 # 核心业务接口
 # ============================================================================
-
 
 @router.get("", response_model=StrategyListResponse)
 async def list_user_strategies(
@@ -464,22 +486,38 @@ async def list_user_strategies(
         tag_list = tags.split(",") if tags else None
         tenant_id = _get_tenant_id(request)
 
-        items = svc.list(user_id=user_id, category=category, search=search, tags=tag_list)
+        items = svc.list(
+            user_id=user_id, category=category, search=search, tags=tag_list
+        )
 
         if not items and not search and not tags:
             await _perform_sync(user_id)
             items = svc.list(user_id=user_id)
 
-        backtest_summaries = await _fetch_latest_backtest_summaries(user_id=user_id, tenant_id=tenant_id)
+        backtest_summaries = await _fetch_latest_backtest_summaries(
+            user_id=user_id, tenant_id=tenant_id
+        )
         trading_status = await _fetch_real_trading_status(request)
         runtime_state = _normalize_runtime_state((trading_status or {}).get("status"))
-        strategy_payload = (trading_status or {}).get("strategy") if isinstance(trading_status, dict) else {}
+        strategy_payload = (
+            (trading_status or {}).get("strategy")
+            if isinstance(trading_status, dict)
+            else {}
+        )
         if not isinstance(strategy_payload, dict):
             strategy_payload = {}
         active_strategy_id = str(strategy_payload.get("id") or "").strip()
         active_strategy_name = str(strategy_payload.get("name") or "").strip().lower()
-        active_template_id = active_strategy_id.replace("sys_", "", 1) if active_strategy_id.startswith("sys_") else ""
-        trade_portfolio = (trading_status or {}).get("portfolio") if isinstance(trading_status, dict) else None
+        active_template_id = (
+            active_strategy_id.replace("sys_", "", 1)
+            if active_strategy_id.startswith("sys_")
+            else ""
+        )
+        trade_portfolio = (
+            (trading_status or {}).get("portfolio")
+            if isinstance(trading_status, dict)
+            else None
+        )
 
         def _to_float(value: Any, default: float = 0.0) -> float:
             try:
@@ -495,26 +533,42 @@ async def list_user_strategies(
             base_status = _normalize_base_status(item.get("status"))
             item_id = str(item.get("id") or "")
             item_name = str(item.get("name") or "").strip().lower()
-            item_parameters = item.get("parameters") if isinstance(item.get("parameters"), dict) else {}
-            item_strategy_type = str(item_parameters.get("strategy_type") or "").strip().lower()
+            item_parameters = (
+                item.get("parameters")
+                if isinstance(item.get("parameters"), dict)
+                else {}
+            )
+            item_strategy_type = (
+                str(item_parameters.get("strategy_type") or "").strip().lower()
+            )
 
             is_active_item = False
             if active_strategy_id and item_id == active_strategy_id:
                 is_active_item = True
-            elif active_template_id and item_strategy_type == active_template_id.lower():
+            elif (
+                active_template_id and item_strategy_type == active_template_id.lower()
+            ):
                 is_active_item = True
             elif active_strategy_name and item_name == active_strategy_name:
                 is_active_item = True
 
             item_runtime_state = runtime_state if is_active_item else None
-            effective_status = item_runtime_state or _base_to_effective_status(base_status)
+            effective_status = item_runtime_state or _base_to_effective_status(
+                base_status
+            )
             summary = backtest_summaries.get(item_id, {})
             summary_total_return = summary.get("total_return")
             summary_today_return = summary.get("today_return")
             summary_risk_level = summary.get("risk_level")
             summary_execution_latency = summary.get("execution_latency_ms")
-            risk_level = summary_risk_level if isinstance(summary_risk_level, str) and summary_risk_level else (
-                item.get("parameters", {}).get("risk_level") if isinstance(item.get("parameters"), dict) else None
+            risk_level = (
+                summary_risk_level
+                if isinstance(summary_risk_level, str) and summary_risk_level
+                else (
+                    item.get("parameters", {}).get("risk_level")
+                    if isinstance(item.get("parameters"), dict)
+                    else None
+                )
             )
             if not isinstance(risk_level, str) or not risk_level.strip():
                 risk_level = "medium"
@@ -534,9 +588,13 @@ async def list_user_strategies(
                 if trade_today_return is not None:
                     today_return = _to_float(trade_today_return, today_return)
                 elif trade_daily_pnl is not None and isinstance(trade_portfolio, dict):
-                    initial_capital = _to_float(trade_portfolio.get("initial_capital"), 0.0)
+                    initial_capital = _to_float(
+                        trade_portfolio.get("initial_capital"), 0.0
+                    )
                     if initial_capital > 0:
-                        today_return = _to_float(trade_daily_pnl, 0.0) / initial_capital * 100.0
+                        today_return = (
+                            _to_float(trade_daily_pnl, 0.0) / initial_capital * 100.0
+                        )
                 if trade_daily_pnl is not None:
                     today_pnl = _to_float(trade_daily_pnl, 0.0)
             execution_latency_ms = None
@@ -566,7 +624,9 @@ async def list_user_strategies(
                     last_update=summary.get("last_update"),
                     error_code=summary.get("error_code"),
                     error_message=summary.get("error_message"),
-                    last_failed_at=summary.get("completed_at") if summary.get("status") == "failed" else None,
+                    last_failed_at=summary.get("completed_at")
+                    if summary.get("status") == "failed"
+                    else None,
                     last_signal_at=summary.get("created_at"),
                     execution_latency_ms=execution_latency_ms,
                     parameters=item.get("parameters") or {},
@@ -577,12 +637,12 @@ async def list_user_strategies(
     except HTTPException:
         raise
     except Exception as e:
-        StructuredTaskLogger(logger, "user-strategies").exception("list_failed", "获取策略列表失败", error=e)
-        raise HTTPException(status_code=500, detail=str(e))
-
+        StructuredTaskLogger(logger, "user-strategies").exception(
+            "list_failed", "获取策略列表失败", error=e
+        )
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 # --- 重要：静态路径必须放在动态路径 {strategy_id} 之前 ---
-
 
 @router.get("/templates")
 async def list_strategy_templates(response: Response):
@@ -591,7 +651,6 @@ async def list_strategy_templates(response: Response):
     response.headers["Cache-Control"] = "max-age=60, public"
     templates = get_all_templates()
     return {"templates": [t.model_dump() for t in templates]}
-
 
 @router.post("/sync")
 async def sync_templates(request: Request):
@@ -605,16 +664,20 @@ async def sync_templates(request: Request):
         invalidate_templates_cache()
 
         count = await _perform_sync(user_id)
-        return {"success": True, "synced_count": count, "message": f"成功同步 {count} 个模板"}
+        return {
+            "success": True,
+            "synced_count": count,
+            "message": f"成功同步 {count} 个模板",
+        }
     except HTTPException:
         raise
     except Exception as e:
-        StructuredTaskLogger(logger, "user-strategies").exception("sync_failed", "同步模板失败", error=e)
-        raise HTTPException(status_code=500, detail=str(e))
-
+        StructuredTaskLogger(logger, "user-strategies").exception(
+            "sync_failed", "同步模板失败", error=e
+        )
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 # --- 动态路径参数 ---
-
 
 @router.get("/{strategy_id}")
 async def get_strategy_detail(strategy_id: str, request: Request):
@@ -637,9 +700,10 @@ async def get_strategy_detail(strategy_id: str, request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        StructuredTaskLogger(logger, "user-strategies").exception("detail_failed", "获取策略详情失败", error=e)
-        raise HTTPException(status_code=500, detail=str(e))
-
+        StructuredTaskLogger(logger, "user-strategies").exception(
+            "detail_failed", "获取策略详情失败", error=e
+        )
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @router.post("/{strategy_id}/activate")
 async def activate_strategy(strategy_id: str, request: Request):
@@ -686,8 +750,12 @@ async def activate_strategy(strategy_id: str, request: Request):
             try:
                 trade_redis.hset(ACTIVE_STRATEGIES_KEY, strategy_id, config_json)
             except Exception as e:
-                StructuredTaskLogger(logger, "user-strategies", {"strategy_id": strategy_id}).warning(
-                    "trade_redis_sync_failed", "同步写入 trade-redis 失败（不影响主流程）", error=e
+                StructuredTaskLogger(
+                    logger, "user-strategies", {"strategy_id": strategy_id}
+                ).warning(
+                    "trade_redis_sync_failed",
+                    "同步写入 trade-redis 失败（不影响主流程）",
+                    error=e,
                 )
 
         asyncio.create_task(
@@ -701,17 +769,20 @@ async def activate_strategy(strategy_id: str, request: Request):
         StructuredTaskLogger(
             logger,
             "user-strategies",
-            {"strategy_id": strategy_id, "user_id": normalized_user_id, "tenant_id": tenant_id},
+            {
+                "strategy_id": strategy_id,
+                "user_id": normalized_user_id,
+                "tenant_id": tenant_id,
+            },
         ).info("activate", "策略已激活")
         return {"success": True, "message": "策略已成功激活", "data": config_to_cache}
     except HTTPException:
         raise
     except Exception as e:
-        StructuredTaskLogger(logger, "user-strategies", {"strategy_id": strategy_id}).exception(
-            "activate_failed", "激活策略失败", error=e
-        )
-        raise HTTPException(status_code=500, detail=str(e))
-
+        StructuredTaskLogger(
+            logger, "user-strategies", {"strategy_id": strategy_id}
+        ).exception("activate_failed", "激活策略失败", error=e)
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @router.delete("/{strategy_id}/activate")
 async def deactivate_strategy(strategy_id: str, request: Request):
@@ -730,19 +801,22 @@ async def deactivate_strategy(strategy_id: str, request: Request):
             try:
                 trade_redis.hdel(ACTIVE_STRATEGIES_KEY, strategy_id)
             except Exception as e:
-                StructuredTaskLogger(logger, "user-strategies", {"strategy_id": strategy_id}).warning(
-                    "trade_redis_remove_failed", "从 trade-redis 移除失败（不影响主流程）", error=e
+                StructuredTaskLogger(
+                    logger, "user-strategies", {"strategy_id": strategy_id}
+                ).warning(
+                    "trade_redis_remove_failed",
+                    "从 trade-redis 移除失败（不影响主流程）",
+                    error=e,
                 )
 
         return {"success": True, "message": "策略已停用"}
     except HTTPException:
         raise
     except Exception as e:
-        StructuredTaskLogger(logger, "user-strategies", {"strategy_id": strategy_id}).exception(
-            "deactivate_failed", "停用策略失败", error=e
-        )
-        raise HTTPException(status_code=500, detail=str(e))
-
+        StructuredTaskLogger(
+            logger, "user-strategies", {"strategy_id": strategy_id}
+        ).exception("deactivate_failed", "停用策略失败", error=e)
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @router.delete("/{strategy_id}")
 async def delete_user_strategy(strategy_id: str, request: Request):
@@ -767,9 +841,9 @@ async def delete_user_strategy(strategy_id: str, request: Request):
     except HTTPException:
         raise
     except ValueError as ve:
-        raise HTTPException(status_code=400, detail=str(ve))
+        raise HTTPException(status_code=400, detail=str(ve)) from ve
     except Exception as e:
-        StructuredTaskLogger(logger, "user-strategies", {"strategy_id": strategy_id}).exception(
-            "delete_failed", "删除策略失败", error=e
-        )
-        raise HTTPException(status_code=500, detail=str(e))
+        StructuredTaskLogger(
+            logger, "user-strategies", {"strategy_id": strategy_id}
+        ).exception("delete_failed", "删除策略失败", error=e)
+        raise HTTPException(status_code=500, detail=str(e)) from e

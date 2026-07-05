@@ -2,7 +2,7 @@
 
 import csv
 import io
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -16,14 +16,15 @@ from backend.services.engine.qlib_app.api.identity import _identity_from_request
 
 router = APIRouter(tags=["qlib"])
 
-
 @router.get("/export/{backtest_id}/csv")
 @router.get("/export/{backtest_id}/pdf")
 @router.get("/export/{backtest_id}/excel")
 async def export_backtest(
     request: Request,
     backtest_id: str,
-    tenant_id: str | None = Query(None, description="租户ID（已废弃，自动使用认证身份）"),
+    tenant_id: str | None = Query(
+        None, description="租户ID（已废弃，自动使用认证身份）"
+    ),
     style: str = Query(
         "quick",
         pattern="^(quick|legacy)$",
@@ -33,7 +34,9 @@ async def export_backtest(
 ) -> StreamingResponse:
     """导出回测结果（CSV格式，兼容 pdf/excel 路径）"""
 
-    auth_user_id, auth_tenant_id = _identity_from_request(request, provided_tenant_id=tenant_id)
+    auth_user_id, auth_tenant_id = _identity_from_request(
+        request, provided_tenant_id=tenant_id
+    )
     result = await service.get_result(
         backtest_id,
         tenant_id=auth_tenant_id,
@@ -42,7 +45,13 @@ async def export_backtest(
     if not result:
         raise HTTPException(status_code=404, detail="回测结果不存在")
 
-    r = result if isinstance(result, dict) else result.dict() if hasattr(result, "dict") else vars(result)
+    r = (
+        result
+        if isinstance(result, dict)
+        else result.dict()
+        if hasattr(result, "dict")
+        else vars(result)
+    )
 
     output = io.StringIO()
     writer = csv.writer(output)
@@ -92,7 +101,18 @@ async def export_backtest(
                     writer.writerow(list(t.values()))
         filename = f"backtest_{backtest_id[:8]}.csv"
     else:
-        writer.writerow(["日期", "代码", "方向", "成交价", "成交量", "成交金额", "手续费", "权益余额"])
+        writer.writerow(
+            [
+                "日期",
+                "代码",
+                "方向",
+                "成交价",
+                "成交量",
+                "成交金额",
+                "手续费",
+                "权益余额",
+            ]
+        )
         trades = r.get("trades") or r.get("trade_list") or []
         equity_curve = r.get("equity_curve") or []
         initial_capital = _to_finite_float(r.get("initial_capital"))
@@ -114,7 +134,9 @@ async def export_backtest(
                     str(int(row["qty_int"])),
                     f"{float(row['amount']):.2f}",
                     f"{float(row['commission']):.2f}",
-                    f"{float(row['equity_balance']):.2f}" if row["equity_balance"] is not None else "",
+                    f"{float(row['equity_balance']):.2f}"
+                    if row["equity_balance"] is not None
+                    else "",
                 ]
             )
         filename = f"backtest_{backtest_id[:8]}_trades.csv"

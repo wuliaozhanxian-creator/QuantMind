@@ -57,7 +57,6 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 REAL_ACCOUNT_SNAPSHOT_VIEW_NAME = "real_account_snapshot_overview_v"
 
-
 def _select_latest_usable_snapshot_row(
     rows: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
@@ -82,7 +81,6 @@ def _select_latest_usable_snapshot_row(
             continue
         return row
     return None
-
 
 def _build_real_account_contract(
     *,
@@ -178,32 +176,26 @@ def _build_real_account_contract(
         else len(positions or []),
     }
 
-
 class TradingPrecheckItem(BaseModel):
     key: str
     label: str
     passed: bool
     detail: str
 
-
 class TradingPrecheckResponse(BaseModel):
     passed: bool
     checked_at: str
     items: list[TradingPrecheckItem]
 
-
 # 策略文件存储基准路径
 SHARED_STORAGE_PATH = os.path.abspath("userdata/strategies")
-
 
 def get_strategy_path(user_id: str):
     return os.path.join(SHARED_STORAGE_PATH, user_id)
 
-
 def _active_strategy_key(tenant_id: str, user_id: str) -> str:
     tenant = (tenant_id or "").strip() or "default"
     return f"trade:active_strategy:{tenant}:{str(user_id).zfill(8)}"
-
 
 def _normalize_identity(
     auth: AuthContext,
@@ -228,7 +220,6 @@ def _normalize_identity(
         )
 
     return str(token_user_id).zfill(8), token_tenant_id
-
 
 async def _fetch_active_portfolio_snapshot(
     db: AsyncSession,
@@ -331,7 +322,6 @@ async def _fetch_active_portfolio_snapshot(
         else None,
     }
 
-
 async def _fetch_real_account_baseline(
     db: AsyncSession,
     *,
@@ -365,7 +355,6 @@ async def _fetch_real_account_baseline(
         "first_snapshot_at": row.get("first_snapshot_at"),
         "source": row.get("source") or "qmt_bridge_first_report",
     }
-
 
 async def _upsert_real_account_baseline(
     db: AsyncSession,
@@ -418,7 +407,6 @@ async def _upsert_real_account_baseline(
         },
     )
     await db.commit()
-
 
 async def _fetch_latest_real_account_snapshot(
     db: AsyncSession,
@@ -639,7 +627,6 @@ async def _fetch_latest_real_account_snapshot(
         payload_json=snapshot.payload_json or {},
     )
 
-
 async def _writeback_strategy_lifecycle_status(
     *,
     strategy_id: str | None,
@@ -679,7 +666,6 @@ async def _writeback_strategy_lifecycle_status(
             if attempt < retries:
                 await asyncio.sleep(0.25 * (attempt + 1))
 
-
 def _schedule_status_writeback(
     *,
     strategy_id: str | None,
@@ -701,7 +687,6 @@ def _schedule_status_writeback(
             else None
         )
     )
-
 
 def _schedule_user_notification(
     *,
@@ -768,13 +753,13 @@ def _schedule_user_notification(
         )
     )
 
-
 def _parse_int_user_id(raw_user_id: str) -> int:
     try:
         return int(raw_user_id)
     except (TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="Invalid user_id in token")
-
+        raise HTTPException(
+            status_code=400, detail="Invalid user_id in token"
+        ) from None
 
 def _normalize_execution_config(user_exec_cfg: dict, base_exec_cfg: dict) -> dict:
     """
@@ -790,7 +775,7 @@ def _normalize_execution_config(user_exec_cfg: dict, base_exec_cfg: dict) -> dic
         except (TypeError, ValueError):
             raise HTTPException(
                 status_code=400, detail="execution_config.max_buy_drop 非法"
-            )
+            ) from None
         if not (-0.10 <= max_buy_drop <= -0.01):
             raise HTTPException(
                 status_code=400,
@@ -805,7 +790,7 @@ def _normalize_execution_config(user_exec_cfg: dict, base_exec_cfg: dict) -> dic
         except (TypeError, ValueError):
             raise HTTPException(
                 status_code=400, detail="execution_config.stop_loss 非法"
-            )
+            ) from None
         if not (-0.20 <= stop_loss <= -0.03):
             raise HTTPException(
                 status_code=400,
@@ -815,10 +800,8 @@ def _normalize_execution_config(user_exec_cfg: dict, base_exec_cfg: dict) -> dic
 
     return merged
 
-
 def _default_execution_config() -> dict:
     return {"max_buy_drop": -0.03, "stop_loss": -0.08}
-
 
 def _default_live_trade_config() -> dict:
     return {
@@ -834,7 +817,6 @@ def _default_live_trade_config() -> dict:
         "max_orders_per_cycle": 20,
     }
 
-
 def _normalize_live_trade_config(user_live_cfg: dict, base_live_cfg: dict) -> dict:
     merged = dict(_default_live_trade_config())
     merged.update(base_live_cfg or {})
@@ -843,7 +825,9 @@ def _normalize_live_trade_config(user_live_cfg: dict, base_live_cfg: dict) -> di
     try:
         LiveTradeConfigSchema.model_validate(merged)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"live_trade_config 非法: {exc}")
+        raise HTTPException(
+            status_code=400, detail=f"live_trade_config 非法: {exc}"
+        ) from exc
 
     normalized = dict(merged)
     normalized["schedule_type"] = str(
@@ -888,7 +872,6 @@ def _normalize_live_trade_config(user_live_cfg: dict, base_live_cfg: dict) -> di
 
     return normalized
 
-
 def _parse_bridge_report_ts(report: dict) -> float | None:
     """
     从柜台桥接上报中提取时间戳（秒）:
@@ -920,7 +903,7 @@ def _parse_bridge_report_ts(report: dict) -> float | None:
                 ts = float(text_raw)
                 return ts / 1000.0 if ts > 1e12 else ts
             except Exception:
-                pass
+                logger.debug("ignored exception", exc_info=True)
             try:
                 iso = text_raw.replace("Z", "+00:00")
                 return datetime.fromisoformat(iso).timestamp()
@@ -928,13 +911,11 @@ def _parse_bridge_report_ts(report: dict) -> float | None:
                 continue
     return None
 
-
 def _resolve_preflight_symbols() -> list[str]:
     # 优先使用项目标准的 Prefix 格式 (AGENTS.md)
     raw = str(os.getenv("PREFLIGHT_STREAM_SYMBOLS", "SZ000001,SH600000")).strip()
     symbols = [item.strip() for item in raw.split(",") if item.strip()]
     return symbols or ["SZ000001", "SH600000"]
-
 
 @lru_cache(maxsize=1)
 def _load_root_env_map() -> dict[str, str]:
@@ -959,13 +940,11 @@ def _load_root_env_map() -> dict[str, str]:
         return {}
     return env_map
 
-
 def _get_env_with_root_fallback(key: str, default: str = "") -> str:
     value = os.getenv(key)
     if value is not None and str(value).strip() != "":
         return str(value).strip()
     return _load_root_env_map().get(key, default)
-
 
 def _resolve_runner_image_for_mode() -> tuple[str, str]:
     configured = str(os.getenv("STRATEGY_RUNNER_IMAGE", "")).strip()
@@ -978,15 +957,19 @@ def _resolve_runner_image_for_mode() -> tuple[str, str]:
     )
     return default_image, "default"
 
-
 def _get_stream_series_redis_client():
     """
     Stream 行情时序 Redis（quote->series）客户端。
     优先使用 REMOTE_QUOTE_REDIS_*，与 stream 写入端保持一致。
     """
-    host = _get_env_with_root_fallback("REMOTE_QUOTE_REDIS_HOST", os.getenv("REDIS_HOST", "redis"))
+    host = _get_env_with_root_fallback(
+        "REMOTE_QUOTE_REDIS_HOST", os.getenv("REDIS_HOST", "redis")
+    )
     port = int(
-        _get_env_with_root_fallback("REMOTE_QUOTE_REDIS_PORT", os.getenv("REDIS_PORT", "6379")) or "6379"
+        _get_env_with_root_fallback(
+            "REMOTE_QUOTE_REDIS_PORT", os.getenv("REDIS_PORT", "6379")
+        )
+        or "6379"
     )
     password = _get_env_with_root_fallback("REMOTE_QUOTE_REDIS_PASSWORD", "") or None
     client = redis_lib.Redis(
@@ -999,7 +982,6 @@ def _get_stream_series_redis_client():
     )
     return client, host, port
 
-
 def _local_today_for_preflight():
     tz_name = os.getenv("PREFLIGHT_SNAPSHOT_TZ", "Asia/Shanghai")
     try:
@@ -1008,7 +990,6 @@ def _local_today_for_preflight():
         return datetime.now(ZoneInfo(tz_name)).date()
     except Exception:
         return datetime.now().date()
-
 
 async def _upsert_preflight_snapshot(
     db: AsyncSession,

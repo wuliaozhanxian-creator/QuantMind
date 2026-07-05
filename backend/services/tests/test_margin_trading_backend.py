@@ -4,8 +4,16 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from backend.services.engine.services.pipeline_service import PipelineRunRequest, PipelineService
-from backend.services.trade.models.enums import OrderSide, OrderType, PositionSide, TradeAction
+from backend.services.engine.services.pipeline_service import (
+    PipelineRunRequest,
+    PipelineService,
+)
+from backend.services.trade.models.enums import (
+    OrderSide,
+    OrderType,
+    PositionSide,
+    TradeAction,
+)
 from backend.services.trade.schemas.order import OrderCreate
 from backend.services.trade.services.order_service import OrderService
 from backend.services.trade.services.simulation_manager import SimulationAccountManager
@@ -36,7 +44,12 @@ class _FakeRedis:
 
 def test_margin_stock_pool_service_loads_and_normalizes_symbols(tmp_path: Path):
     path = tmp_path / "margin.xlsx"
-    df = pd.DataFrame({"股票代码": ["600000", "000001", "300750"], "股票简称": ["浦发银行", "平安银行", "宁德时代"]})
+    df = pd.DataFrame(
+        {
+            "股票代码": ["600000", "000001", "300750"],
+            "股票简称": ["浦发银行", "平安银行", "宁德时代"],
+        }
+    )
     df.to_excel(path, index=False)
 
     svc = MarginStockPoolService(path)

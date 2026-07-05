@@ -10,14 +10,13 @@ Version: 1.0.0
 
 import logging
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any
 
 from .data_aggregator import DataAggregator
 from .llm_parser import LLMQueryParser, get_llm_parser
 from .tushare_adapter import TushareAdapter, get_tushare_adapter
 
 logger = logging.getLogger(__name__)
-
 
 class SmartStockScreener:
     """智能选股服务
@@ -32,7 +31,9 @@ class SmartStockScreener:
     5. 返回结果
     """
 
-    def __init__(self, llm_parser: LLMQueryParser = None, tushare_adapter: TushareAdapter = None):
+    def __init__(
+        self, llm_parser: LLMQueryParser = None, tushare_adapter: TushareAdapter = None
+    ):
         """初始化智能选股服务
 
         Args:
@@ -48,7 +49,9 @@ class SmartStockScreener:
         """检查服务是否就绪（仅要求 LLM 解析器可用，行情数据走 stream 降级链路）"""
         return self.llm_parser is not None and self.llm_parser.is_available()
 
-    def screen(self, user_query: str, limit: int = 50, explain: bool = True) -> dict[str, Any]:
+    def screen(
+        self, user_query: str, limit: int = 50, explain: bool = True
+    ) -> dict[str, Any]:
         """执行智能选股
 
         Args:
@@ -63,12 +66,12 @@ class SmartStockScreener:
                 "message": str,
                 "query_understood": {
                     "original": str,
-                    "parsed_conditions": List[Dict],
+                    "parsed_conditions": list[dict],
                     "explanation": str
                 },
-                "data": List[Dict],
+                "data": list[dict],
                 "total": int,
-                "conditions": List[str],
+                "conditions": list[str],
                 "execution_time": float,
                 "timestamp": str
             }
@@ -132,7 +135,9 @@ class SmartStockScreener:
                     "explanation": result.get("explanation", parsed_query.explanation),
                 }
 
-            logger.info(f"筛选完成: 找到{result['total']}只股票, 耗时{execution_time:.2f}秒")
+            logger.info(
+                f"筛选完成: 找到{result['total']}只股票, 耗时{execution_time:.2f}秒"
+            )
 
             return response
 
@@ -147,7 +152,9 @@ class SmartStockScreener:
                 "timestamp": datetime.now().isoformat(),
             }
 
-    def refine(self, session_id: str, additional_query: str, previous_result: dict[str, Any]) -> dict[str, Any]:
+    def refine(
+        self, session_id: str, additional_query: str, previous_result: dict[str, Any]
+    ) -> dict[str, Any]:
         """细化查询(对话式)
 
         Args:
@@ -168,12 +175,12 @@ class SmartStockScreener:
         # 执行新查询
         return self.screen(combined_query)
 
-
 # 单例实例
 _smart_screener = None
 
-
-def get_smart_screener(openai_api_key: str = None, tushare_token: str = None) -> SmartStockScreener:
+def get_smart_screener(
+    openai_api_key: str = None, tushare_token: str = None
+) -> SmartStockScreener:
     """获取智能选股服务单例
 
     Args:
@@ -187,5 +194,7 @@ def get_smart_screener(openai_api_key: str = None, tushare_token: str = None) ->
     if _smart_screener is None:
         llm_parser = get_llm_parser(api_key=openai_api_key)
         tushare_adapter = get_tushare_adapter(token=tushare_token)
-        _smart_screener = SmartStockScreener(llm_parser=llm_parser, tushare_adapter=tushare_adapter)
+        _smart_screener = SmartStockScreener(
+            llm_parser=llm_parser, tushare_adapter=tushare_adapter
+        )
     return _smart_screener

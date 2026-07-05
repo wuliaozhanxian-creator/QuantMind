@@ -27,14 +27,22 @@ class _FakeRedisClient:
         account = json.loads(self.store[key])
         account["cash"] = float(account.get("cash") or 0.0) + delta_cash
         positions = dict(account.get("positions") or {})
-        pos = dict(positions.get(symbol) or {"volume": 0, "cost": 0, "market_value": 0, "price": 0})
+        pos = dict(
+            positions.get(symbol)
+            or {"volume": 0, "cost": 0, "market_value": 0, "price": 0}
+        )
         pos["volume"] = float(pos.get("volume") or 0.0) + delta_volume
         pos["price"] = price
         pos["market_value"] = float(pos["volume"] or 0.0) * price
         positions[symbol] = pos
         account["positions"] = positions
-        account["market_value"] = sum(float(p.get("volume") or 0.0) * float(p.get("price") or 0.0) for p in positions.values())
-        account["total_asset"] = float(account.get("cash") or 0.0) + float(account.get("market_value") or 0.0)
+        account["market_value"] = sum(
+            float(p.get("volume") or 0.0) * float(p.get("price") or 0.0)
+            for p in positions.values()
+        )
+        account["total_asset"] = float(account.get("cash") or 0.0) + float(
+            account.get("market_value") or 0.0
+        )
         self.store[key] = json.dumps(account, ensure_ascii=False)
         return {"success": True}
 
@@ -60,11 +68,21 @@ async def test_simulation_manager_writes_settings_and_account_json():
         default_initial_cash=500_000,
     )
     assert settings["initial_cash"] == 1_000_000
-    assert json.loads(redis.client.get("simulation:settings:default:00000001"))["initial_cash"] == 1_000_000
+    assert (
+        json.loads(redis.client.get("simulation:settings:default:00000001"))[
+            "initial_cash"
+        ]
+        == 1_000_000
+    )
 
-    account = await manager.init_account(user_id=1, tenant_id="default", initial_cash=2_000_000)
+    account = await manager.init_account(
+        user_id=1, tenant_id="default", initial_cash=2_000_000
+    )
     assert account["cash"] == 2_000_000
-    assert json.loads(redis.client.get("simulation:account:default:00000001"))["cash"] == 2_000_000
+    assert (
+        json.loads(redis.client.get("simulation:account:default:00000001"))["cash"]
+        == 2_000_000
+    )
 
 
 @pytest.mark.asyncio

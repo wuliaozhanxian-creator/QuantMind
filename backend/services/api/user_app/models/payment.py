@@ -8,7 +8,6 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.services.api.models.base import Base
 
-
 class PaymentTransaction(Base):
     """Payment transaction record for subscription purchases."""
 
@@ -22,16 +21,12 @@ class PaymentTransaction(Base):
     status: Mapped[str] = mapped_column(
         String(32), nullable=False, default="pending"
     )  # pending, succeeded, failed, refunded
-    provider: Mapped[str] = mapped_column(
-        String(32), nullable=False, default="alipay"
-    )
+    provider: Mapped[str] = mapped_column(String(32), nullable=False, default="alipay")
     transaction_id: Mapped[str] = mapped_column(
         String(128), nullable=False, unique=True, index=True
     )
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    metadata_info: Mapped[dict[str, Any] | None] = mapped_column(
-        JSON, nullable=True
-    )
+    metadata_info: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=datetime.now
     )

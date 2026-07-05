@@ -46,7 +46,6 @@ from ..schemas import (
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-
 def _trace_id(request: Request | None) -> str | None:
     if not request:
         return None
@@ -55,7 +54,6 @@ def _trace_id(request: Request | None) -> str | None:
         or request.headers.get("X-Trace-Id")
         or request.headers.get("X-Request-Id")
     )
-
 
 def _to_qlib_instrument(symbol: str) -> str:
     s = (symbol or "").strip()
@@ -76,7 +74,6 @@ def _to_qlib_instrument(symbol: str) -> str:
             return f"{s_upper[:2]}{tail.zfill(6)[:6]}"
     return s_upper
 
-
 def _qlib_to_db_code(symbol: str) -> str:
     s = (symbol or "").strip().upper()
     if not s:
@@ -91,7 +88,6 @@ def _qlib_to_db_code(symbol: str) -> str:
             return f"{base.zfill(6)}.{suffix}"
     return s
 
-
 def _user_id_variants(user_id: str) -> list:
     uid = (user_id or "").strip()
     variants = {uid}
@@ -100,11 +96,9 @@ def _user_id_variants(user_id: str) -> list:
         variants.add(str(int(uid)))
     return list(variants)
 
-
 def _canonical_user_id(user_id: str) -> str:
     uid = (user_id or "").strip()
     return uid.zfill(8) if uid.isdigit() else uid
-
 
 def _safe_number(value: Any, default: float = 0.0) -> float:
     """将数据库数值安全转换为 JSON 兼容浮点数（过滤 NaN/Inf）。"""
@@ -116,20 +110,27 @@ def _safe_number(value: Any, default: float = 0.0) -> float:
         return default
     return n
 
-
 @router.post("/save-to-cloud", response_model=SaveToCloudResponse)
 async def save_strategy_to_cloud(body: SaveToCloudRequest, request: Request):
     """保存策略到云端（PG + COS 统一存储）"""
     try:
         trace_id = _trace_id(request)
-        authenticated_user_id = str(getattr(request.state, "user", {}).get("user_id") or "").strip()
+        authenticated_user_id = str(
+            getattr(request.state, "user", {}).get("user_id") or ""
+        ).strip()
         if body.user_id and str(body.user_id) != str(authenticated_user_id):
-            raise HTTPException(status_code=403, detail="未授权：user_id 与认证身份不匹配")
+            raise HTTPException(
+                status_code=403, detail="未授权：user_id 与认证身份不匹配"
+            )
 
         try:
-            from backend.shared.strategy_storage import get_strategy_storage_service as _get_shared_svc
+            from backend.shared.strategy_storage import (
+                get_strategy_storage_service as _get_shared_svc,
+            )
         except ImportError:
-            from shared.strategy_storage import get_strategy_storage_service as _get_shared_svc  # type: ignore
+            from shared.strategy_storage import (
+                get_strategy_storage_service as _get_shared_svc,
+            )  # type: ignore
 
         metadata = body.metadata or {}
         metadata.setdefault("description", f"AI 向导生成策略: {body.strategy_name}")
@@ -165,7 +166,6 @@ async def save_strategy_to_cloud(body: SaveToCloudRequest, request: Request):
         logger.error("Save to cloud failed: %s", e, exc_info=True)
         return SaveToCloudResponse(success=False, error=f"保存失败: {str(e)}")
 
-
 @router.post("/list-pool-files", response_model=ListPoolFilesResponse)
 async def list_pool_files(body: ListPoolFilesRequest):
     """列出用户历史保存的股票池文件"""
@@ -175,13 +175,14 @@ async def list_pool_files(body: ListPoolFilesRequest):
             q = db.query(StockPoolFile).filter(StockPoolFile.user_id.in_(uid_variants))
             if body.tenant_id:
                 q = q.filter(StockPoolFile.tenant_id == body.tenant_id)
-            rows = q.order_by(StockPoolFile.created_at.desc()).limit(int(body.limit)).all()
+            rows = (
+                q.order_by(StockPoolFile.created_at.desc()).limit(int(body.limit)).all()
+            )
             pools = [PoolFileSummary(**r.to_dict()) for r in rows]
             return ListPoolFilesResponse(success=True, pools=pools)
     except Exception as e:
         logger.error("List pool files failed: %s", e, exc_info=True)
         return ListPoolFilesResponse(success=False, pools=[], error=f"获取失败: {e}")
-
 
 @router.post("/preview-pool-file", response_model=PreviewPoolFileResponse)
 async def preview_pool_file(body: PreviewPoolFileRequest):
@@ -197,11 +198,15 @@ async def preview_pool_file(body: PreviewPoolFileRequest):
                 q = q.filter(StockPoolFile.tenant_id == body.tenant_id)
             rec = q.order_by(StockPoolFile.created_at.desc()).first()
             if not rec:
-                return PreviewPoolFileResponse(success=False, error="股票池不存在或无权限访问")
+                return PreviewPoolFileResponse(
+                    success=False, error="股票池不存在或无权限访问"
+                )
 
             uploader = get_cos_uploader()
             # 兼容 local/cos 双模式：local 优先使用 file_url，cos 使用 file_key
-            content = await uploader.read_object(url=rec.file_url, object_key=rec.file_key)
+            content = await uploader.read_object(
+                url=rec.file_url, object_key=rec.file_key
+            )
 
             instruments: list[str] = []
             seen = set()
@@ -260,7 +265,13 @@ async def preview_pool_file(body: PreviewPoolFileRequest):
             for c in instruments:
                 r = metrics_map.get(c)
                 if r:
-                    items.append(PoolItem(symbol=r["symbol"], name=r.get("name"), metrics=r.get("metrics") or {}))
+                    items.append(
+                        PoolItem(
+                            symbol=r["symbol"],
+                            name=r.get("name"),
+                            metrics=r.get("metrics") or {},
+                        )
+                    )
                 else:
                     items.append(PoolItem(symbol=c, name=c, metrics={}))
 
@@ -280,7 +291,9 @@ async def preview_pool_file(body: PreviewPoolFileRequest):
                 )
 
             universe_total = _get_universe_total(body.user_id)
-            summary, charts = _build_pool_summary(items, as_of_date=None, universe_total=universe_total)
+            summary, charts = _build_pool_summary(
+                items, as_of_date=None, universe_total=universe_total
+            )
             return PreviewPoolFileResponse(
                 success=True,
                 items=items,
@@ -291,7 +304,6 @@ async def preview_pool_file(body: PreviewPoolFileRequest):
     except Exception as e:
         logger.error("Preview pool file failed: %s", e, exc_info=True)
         return PreviewPoolFileResponse(success=False, error=f"预览失败: {e}")
-
 
 @router.post("/save-pool-file", response_model=SavePoolFileResponse)
 async def save_pool_file(body: SavePoolFileRequest, request: Request):
@@ -325,7 +337,11 @@ async def save_pool_file(body: SavePoolFileRequest, request: Request):
             import json as _json
 
             content = _json.dumps(
-                {"generated_at": datetime.now().isoformat(), "count": len(body.pool), "symbols": body.pool},
+                {
+                    "generated_at": datetime.now().isoformat(),
+                    "count": len(body.pool),
+                    "symbols": body.pool,
+                },
                 ensure_ascii=False,
                 indent=2,
             )
@@ -340,8 +356,12 @@ async def save_pool_file(body: SavePoolFileRequest, request: Request):
                     StockPoolFile.code_hash == content_hash,
                 )
                 if body.tenant_id:
-                    existing_query = existing_query.filter(StockPoolFile.tenant_id == body.tenant_id)
-                existing_record = existing_query.order_by(StockPoolFile.created_at.desc()).first()
+                    existing_query = existing_query.filter(
+                        StockPoolFile.tenant_id == body.tenant_id
+                    )
+                existing_record = existing_query.order_by(
+                    StockPoolFile.created_at.desc()
+                ).first()
 
                 if existing_record:
                     deactivate_query = db.query(StockPoolFile).filter(
@@ -349,8 +369,12 @@ async def save_pool_file(body: SavePoolFileRequest, request: Request):
                         StockPoolFile.is_active,
                     )
                     if body.tenant_id:
-                        deactivate_query = deactivate_query.filter(StockPoolFile.tenant_id == body.tenant_id)
-                    deactivate_query.update({"is_active": False}, synchronize_session=False)
+                        deactivate_query = deactivate_query.filter(
+                            StockPoolFile.tenant_id == body.tenant_id
+                        )
+                    deactivate_query.update(
+                        {"is_active": False}, synchronize_session=False
+                    )
 
                     existing_record.pool_name = body.pool_name
                     existing_record.format = body.format
@@ -378,7 +402,11 @@ async def save_pool_file(body: SavePoolFileRequest, request: Request):
                         code_hash=existing_record.code_hash,
                     )
         except Exception as db_lookup_error:
-            logger.warning("Pool dedupe lookup failed, fallback to new save: %s", db_lookup_error, exc_info=True)
+            logger.warning(
+                "Pool dedupe lookup failed, fallback to new save: %s",
+                db_lookup_error,
+                exc_info=True,
+            )
 
         pool_id = str(uuid4())
         result = await uploader.upload_pool_file(
@@ -427,8 +455,13 @@ async def save_pool_file(body: SavePoolFileRequest, request: Request):
             try:
                 await uploader.delete_object(result["url"], result["object_key"])
             except Exception:
-                logger.warning("Rollback pool object delete failed: key=%s", result.get("object_key"))
-            return SavePoolFileResponse(success=False, error=f"保存股票池失败: 数据库写入失败 ({db_error})")
+                logger.warning(
+                    "Rollback pool object delete failed: key=%s",
+                    result.get("object_key"),
+                )
+            return SavePoolFileResponse(
+                success=False, error=f"保存股票池失败: 数据库写入失败 ({db_error})"
+            )
 
         return SavePoolFileResponse(
             success=True,
@@ -443,12 +476,13 @@ async def save_pool_file(body: SavePoolFileRequest, request: Request):
         logger.error("Save pool file failed: %s", e, exc_info=True)
         return SavePoolFileResponse(success=False, error=f"保存股票池失败: {e}")
 
-
 @router.post("/get-active-pool-file", response_model=GetActivePoolFileResponse)
 async def get_active_pool_file(body: GetActivePoolFileRequest, request: Request):
     """获取用户当前活跃的股票池文件"""
     try:
-        logger.info("get_active_pool_file started", extra={"trace_id": _trace_id(request)})
+        logger.info(
+            "get_active_pool_file started", extra={"trace_id": _trace_id(request)}
+        )
         uid_variants = _user_id_variants(body.user_id)
         with get_db() as db:
             query = db.query(StockPoolFile).filter(
@@ -458,12 +492,13 @@ async def get_active_pool_file(body: GetActivePoolFileRequest, request: Request)
                 query = query.filter(StockPoolFile.tenant_id == body.tenant_id)
             pool_file = query.order_by(StockPoolFile.created_at.desc()).first()
             if pool_file:
-                return GetActivePoolFileResponse(success=True, pool_file=pool_file.to_dict())
+                return GetActivePoolFileResponse(
+                    success=True, pool_file=pool_file.to_dict()
+                )
             return GetActivePoolFileResponse(success=True, pool_file=None)
     except Exception as e:
         logger.error("Get active pool file failed: %s", e, exc_info=True)
         return GetActivePoolFileResponse(success=False, error=f"获取失败: {e}")
-
 
 @router.post("/delete-pool-file", response_model=DeletePoolFileResponse)
 async def delete_pool_file(body: DeletePoolFileRequest):

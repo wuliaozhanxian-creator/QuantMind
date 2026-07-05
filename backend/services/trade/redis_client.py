@@ -11,7 +11,6 @@ from backend.services.trade.trade_config import settings
 
 logger = logging.getLogger(__name__)
 
-
 class RedisClient:
     """Redis client wrapper"""
 
@@ -24,15 +23,22 @@ class RedisClient:
             if settings.REDIS_SENTINEL_ENABLED:
                 from redis.sentinel import Sentinel
 
-                sentinel_hosts = [tuple(host.split(":")) for host in settings.REDIS_SENTINEL_HOSTS.split(",")]
-                sentinel = Sentinel(sentinel_hosts, socket_timeout=5.0, password=settings.REDIS_PASSWORD)
+                sentinel_hosts = [
+                    tuple(host.split(":"))
+                    for host in settings.REDIS_SENTINEL_HOSTS.split(",")
+                ]
+                sentinel = Sentinel(
+                    sentinel_hosts, socket_timeout=5.0, password=settings.REDIS_PASSWORD
+                )
                 self.client = sentinel.master_for(
                     settings.REDIS_MASTER_NAME,
                     socket_timeout=5.0,
                     db=settings.REDIS_DB,
                     decode_responses=True,
                 )
-                logger.info(f"Connected to Redis Sentinel: {settings.REDIS_MASTER_NAME}")
+                logger.info(
+                    f"Connected to Redis Sentinel: {settings.REDIS_MASTER_NAME}"
+                )
             else:
                 self.client = redis.Redis(
                     host=settings.REDIS_HOST,
@@ -43,7 +49,9 @@ class RedisClient:
                     socket_timeout=5.0,
                     socket_connect_timeout=5.0,
                 )
-                logger.info(f"Connected to Redis: {settings.REDIS_HOST}:{settings.REDIS_PORT}")
+                logger.info(
+                    f"Connected to Redis: {settings.REDIS_HOST}:{settings.REDIS_PORT}"
+                )
 
             # Test connection
             self.client.ping()
@@ -121,10 +129,8 @@ class RedisClient:
         except Exception as e:
             logger.error(f"Redis XADD error: {e}")
 
-
 # Global Redis client instance
 redis_client = RedisClient()
-
 
 def get_redis() -> RedisClient:
     """Get Redis client, ensuring it is connected"""

@@ -1,32 +1,20 @@
 /**
- * WebSocket Service
- * Placeholder for WebSocket functionality
+ * QuantBot WebSocket 服务（T2.2 统一后）
+ *
+ * 原占位实现已废弃，统一转发到 `services/websocketService.ts` 的 `websocketService` 单例。
+ * 历史调用方通过本文件导入的 `websocketService` 现在拿到的是同一个带鉴权的全局单例。
  */
 
-class WebSocketService {
-  connect() {
-    console.warn('WebSocketService.connect() is a placeholder');
-  }
-
-  disconnect() {
-    console.warn('WebSocketService.disconnect() is a placeholder');
-  }
-
-  sendMessage() {
-    console.warn('WebSocketService.sendMessage() is a placeholder');
-  }
-
-  subscribe() {
-    console.warn('WebSocketService.subscribe() is a placeholder');
-  }
-
-  unsubscribe() {
-    console.warn('WebSocketService.unsubscribe() is a placeholder');
-  }
-}
-
-export default new WebSocketService();
-
 export {
-  WebSocketService
-};
+  websocketService,
+  WebSocketService,
+  WebSocketStatus,
+  MessageType,
+  type WebSocketMessage,
+  type SubscriptionConfig,
+  type WebSocketErrorCallback
+} from '../../../services/websocketService';
+
+// 兼容默认导出（历史代码使用 `import websocketService from './websocketService'`）
+import { websocketService as defaultService } from '../../../services/websocketService';
+export default defaultService;

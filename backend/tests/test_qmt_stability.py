@@ -382,9 +382,7 @@ def _setup_poll(monkeypatch, broker, orders):
         "backend.services.trade.services.order_timeout_scanner.get_session",
         lambda: _PollSessionContext(session),
     )
-    monkeypatch.setattr(
-        order_timeout_scanner, "_get_reconcile_broker", lambda: broker
-    )
+    monkeypatch.setattr(order_timeout_scanner, "_get_reconcile_broker", lambda: broker)
 
     async def _fake_notification(**kwargs):
         notifications.append(kwargs)
@@ -572,7 +570,8 @@ class TestReportParsingTolerance:
         consumer = ExecutionStreamConsumer()
         anomalies = []
         monkeypatch.setattr(
-            consumer, "_log_report_anomaly",
+            consumer,
+            "_log_report_anomaly",
             lambda fields, reason: anomalies.append((fields, reason)),
         )
 
@@ -597,7 +596,8 @@ class TestReportParsingTolerance:
         consumer = ExecutionStreamConsumer()
         anomalies = []
         monkeypatch.setattr(
-            consumer, "_log_report_anomaly",
+            consumer,
+            "_log_report_anomaly",
             lambda fields, reason: anomalies.append((fields, reason)),
         )
 

@@ -17,11 +17,9 @@ from ..user_center_client import record_activity
 
 router = APIRouter()
 
-
 def _get_user_id(auth_user: str | None, x_user_id: str | None) -> str:
     # Prefer JWT user; fallback to header for backward compatibility
     return auth_user or x_user_id or ""
-
 
 async def _toggle_interaction(
     session: AsyncSession,
@@ -37,12 +35,16 @@ async def _toggle_interaction(
 
     target_obj = None
     if post_id:
-        post_stmt = select(PostRecord).where(PostRecord.id == post_id, PostRecord.tenant_id == tenant_id)
+        post_stmt = select(PostRecord).where(
+            PostRecord.id == post_id, PostRecord.tenant_id == tenant_id
+        )
         target_obj = (await session.execute(post_stmt)).scalar_one_or_none()
         if not target_obj:
             raise HTTPException(status_code=404, detail="Post not found")
     elif comment_id:
-        comment_stmt = select(CommentRecord).where(CommentRecord.id == comment_id, CommentRecord.tenant_id == tenant_id)
+        comment_stmt = select(CommentRecord).where(
+            CommentRecord.id == comment_id, CommentRecord.tenant_id == tenant_id
+        )
         target_obj = (await session.execute(comment_stmt)).scalar_one_or_none()
         if not target_obj:
             raise HTTPException(status_code=404, detail="Comment not found")
@@ -72,7 +74,11 @@ async def _toggle_interaction(
             await session.delete(existing)
             if action == "like" and target_obj.likes > 0:
                 target_obj.likes -= 1
-            if action == "collect" and hasattr(target_obj, "collections") and target_obj.collections > 0:
+            if (
+                action == "collect"
+                and hasattr(target_obj, "collections")
+                and target_obj.collections > 0
+            ):
                 target_obj.collections -= 1
             await session.flush()
             return False, get_count(), True
@@ -97,7 +103,6 @@ async def _toggle_interaction(
         target_obj.collections += 1
     await session.flush()
     return True, get_count(), True
-
 
 @router.post("/posts/{post_id}/like")
 async def like_post(
@@ -134,10 +139,13 @@ async def like_post(
         )
     if changed and liked:
         await record_activity(
-            user_id, "like_post", {"post_id": post_id, "action": "like"}, tenant_id=tenant_id, session=session
+            user_id,
+            "like_post",
+            {"post_id": post_id, "action": "like"},
+            tenant_id=tenant_id,
+            session=session,
         )
     return {"isLiked": liked, "likes": likes}
-
 
 @router.delete("/posts/{post_id}/like")
 async def unlike_post(
@@ -174,10 +182,13 @@ async def unlike_post(
         )
     if changed and not liked:
         await record_activity(
-            user_id, "unlike_post", {"post_id": post_id, "action": "unlike"}, tenant_id=tenant_id, session=session
+            user_id,
+            "unlike_post",
+            {"post_id": post_id, "action": "unlike"},
+            tenant_id=tenant_id,
+            session=session,
         )
     return {"isLiked": False, "likes": likes}
-
 
 @router.post("/posts/{post_id}/collect")
 async def collect_post(
@@ -214,10 +225,13 @@ async def collect_post(
         )
     if changed and collected:
         await record_activity(
-            user_id, "collect_post", {"post_id": post_id, "action": "collect"}, tenant_id=tenant_id, session=session
+            user_id,
+            "collect_post",
+            {"post_id": post_id, "action": "collect"},
+            tenant_id=tenant_id,
+            session=session,
         )
     return {"isCollected": collected, "collections": collections}
-
 
 @router.delete("/posts/{post_id}/collect")
 async def uncollect_post(
@@ -254,10 +268,13 @@ async def uncollect_post(
         )
     if changed and not collected:
         await record_activity(
-            user_id, "uncollect_post", {"post_id": post_id, "action": "uncollect"}, tenant_id=tenant_id, session=session
+            user_id,
+            "uncollect_post",
+            {"post_id": post_id, "action": "uncollect"},
+            tenant_id=tenant_id,
+            session=session,
         )
     return {"isCollected": False, "collections": collections}
-
 
 @router.post("/comments/{comment_id}/like")
 async def like_comment(
@@ -281,14 +298,17 @@ async def like_comment(
         await write_audit_log(
             session,
             principal,
-            action=("interaction.comment_like_on" if liked else "interaction.comment_like_off"),
+            action=(
+                "interaction.comment_like_on"
+                if liked
+                else "interaction.comment_like_off"
+            ),
             entity_type="comment",
             entity_id=str(comment_id),
             metadata={"comment_id": comment_id, "isLiked": liked, "likes": likes},
             request=request,
         )
     return {"isLiked": liked, "likes": likes}
-
 
 @router.delete("/comments/{comment_id}/like")
 async def unlike_comment(

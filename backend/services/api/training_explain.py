@@ -4,7 +4,6 @@ from typing import Any
 
 from fastapi import HTTPException
 
-
 DEFAULT_EXPLAIN_CFG: dict[str, Any] = {
     "enable_shap": True,
     "shap_split": "valid",
@@ -14,23 +13,35 @@ ALLOWED_SHAP_SPLIT = {"valid", "test", "train"}
 MIN_SHAP_SAMPLE_ROWS = 1000
 MAX_SHAP_SAMPLE_ROWS = 100000
 
-
 def normalize_explain(raw: Any) -> dict[str, Any]:
     explain = raw if isinstance(raw, dict) else {}
 
     enable_shap = explain.get("enable_shap", DEFAULT_EXPLAIN_CFG["enable_shap"])
     if not isinstance(enable_shap, bool):
-        raise HTTPException(status_code=422, detail="explain.enable_shap must be a boolean")
+        raise HTTPException(
+            status_code=422, detail="explain.enable_shap must be a boolean"
+        )
 
-    shap_split = str(explain.get("shap_split", DEFAULT_EXPLAIN_CFG["shap_split"])).strip().lower()
+    shap_split = (
+        str(explain.get("shap_split", DEFAULT_EXPLAIN_CFG["shap_split"]))
+        .strip()
+        .lower()
+    )
     if shap_split not in ALLOWED_SHAP_SPLIT:
-        raise HTTPException(status_code=422, detail="explain.shap_split must be one of: valid, test, train")
+        raise HTTPException(
+            status_code=422,
+            detail="explain.shap_split must be one of: valid, test, train",
+        )
 
-    shap_sample_rows_raw = explain.get("shap_sample_rows", DEFAULT_EXPLAIN_CFG["shap_sample_rows"])
+    shap_sample_rows_raw = explain.get(
+        "shap_sample_rows", DEFAULT_EXPLAIN_CFG["shap_sample_rows"]
+    )
     try:
         shap_sample_rows = int(shap_sample_rows_raw)
     except Exception as exc:
-        raise HTTPException(status_code=422, detail="explain.shap_sample_rows must be an integer") from exc
+        raise HTTPException(
+            status_code=422, detail="explain.shap_sample_rows must be an integer"
+        ) from exc
     if not (MIN_SHAP_SAMPLE_ROWS <= shap_sample_rows <= MAX_SHAP_SAMPLE_ROWS):
         raise HTTPException(
             status_code=422,

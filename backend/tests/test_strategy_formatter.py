@@ -1,6 +1,8 @@
 import pytest
 
-from backend.services.engine.qlib_app.services.strategy_formatter import StrategyFormatterService
+from backend.services.engine.qlib_app.services.strategy_formatter import (
+    StrategyFormatterService,
+)
 
 
 def test_formatter_injects_base_strategy_import():
@@ -14,7 +16,9 @@ def test_formatter_injects_base_strategy_import():
 
 def test_formatter_patches_legacy_imports():
     formatter = StrategyFormatterService()
-    raw_code = "from qlib.contrib.strategy import BaseStrategy\n\nclass MyStrategy:\n    pass"
+    raw_code = (
+        "from qlib.contrib.strategy import BaseStrategy\n\nclass MyStrategy:\n    pass"
+    )
     formatted = formatter.format_and_repair(raw_code)
 
     assert "from qlib.contrib.strategy import BaseStrategy" not in formatted
@@ -68,7 +72,9 @@ from qlib.contrib.strategy.signal_strategy import SignalStrategy
     assert "from qlib.contrib.strategy.base import BaseStrategy" not in formatted
     assert "import qlib.strategy.base as qcs" in formatted
     assert "from qlib.strategy.base import BaseStrategy" in formatted
-    assert "from qlib.contrib.strategy.signal_strategy import SignalStrategy" in formatted
+    assert (
+        "from qlib.contrib.strategy.signal_strategy import SignalStrategy" in formatted
+    )
 
 
 def test_formatter_keeps_weight_strategy_base_import():
@@ -81,7 +87,10 @@ class MyWeightStrategy(WeightStrategyBase):
 """
     formatted = formatter.format_and_repair(raw_code)
 
-    assert "from qlib.contrib.strategy.signal_strategy import WeightStrategyBase" in formatted
+    assert (
+        "from qlib.contrib.strategy.signal_strategy import WeightStrategyBase"
+        in formatted
+    )
     assert "from qlib.strategy.base import WeightStrategyBase" not in formatted
 
 
@@ -101,7 +110,10 @@ class MyStrategy(BaseStrategy):
     formatted = formatter.format_and_repair(raw_code)
 
     assert "TradeDecision Compatibility Wrapper" in formatted
-    assert "MyStrategy._original_generate_trade_decision = MyStrategy.generate_trade_decision" in formatted
+    assert (
+        "MyStrategy._original_generate_trade_decision = MyStrategy.generate_trade_decision"
+        in formatted
+    )
     assert "MyStrategy.generate_trade_decision = _ensure_trade_decision" in formatted
 
 

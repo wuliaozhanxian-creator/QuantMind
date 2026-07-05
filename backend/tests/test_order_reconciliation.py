@@ -75,8 +75,7 @@ class _ReconcileSession:
             result = [
                 o
                 for o in result
-                if "[RECONCILE_QUEUED]"
-                not in (getattr(o, "remarks", "") or "")
+                if "[RECONCILE_QUEUED]" not in (getattr(o, "remarks", "") or "")
             ]
         return _ScalarResult(result)
 
@@ -149,9 +148,7 @@ def _setup_reconcile(monkeypatch, broker, orders):
         "backend.services.trade.services.order_timeout_scanner.get_session",
         lambda: _FakeSessionContext(session),
     )
-    monkeypatch.setattr(
-        order_timeout_scanner, "_get_reconcile_broker", lambda: broker
-    )
+    monkeypatch.setattr(order_timeout_scanner, "_get_reconcile_broker", lambda: broker)
 
     async def _fake_notification(**kwargs):
         notifications.append(kwargs)
@@ -200,9 +197,7 @@ async def test_scenario_a_reconcile_filled(monkeypatch):
     assert broker.query_calls[0] == "recon-fill-001"
 
     # 成交通知已发送
-    filled_notifies = [
-        n for n in notifications if n["title"] == "对账确认成交"
-    ]
+    filled_notifies = [n for n in notifications if n["title"] == "对账确认成交"]
     assert len(filled_notifies) == 1
     assert "SH600036" in filled_notifies[0]["content"]
 
@@ -234,9 +229,7 @@ async def test_scenario_b_reconcile_cancelled(monkeypatch):
     assert broker.query_calls[0] == "recon-cancel-001"
 
     # 撤单通知已发送
-    cancel_notifies = [
-        n for n in notifications if n["title"] == "对账确认撤单"
-    ]
+    cancel_notifies = [n for n in notifications if n["title"] == "对账确认撤单"]
     assert len(cancel_notifies) == 1
 
 
@@ -274,9 +267,7 @@ async def test_scenario_c_reconcile_still_pending(monkeypatch):
     assert len(broker.query_calls) == 1
 
     # 单次查询未达阈值，不应发送人工介入通知
-    assert not any(
-        n["title"] == "对账失败待人工介入" for n in notifications
-    )
+    assert not any(n["title"] == "对账失败待人工介入" for n in notifications)
 
 
 # ==================== 场景D：连续失败5次 → RECONCILE_FAILED_MANUAL_REVIEW ====================
@@ -290,9 +281,7 @@ async def test_scenario_d_reconcile_max_failures(monkeypatch):
         query_exception=ConnectionError("broker connection lost")
     )
     session, notifications = _setup_reconcile(monkeypatch, broker, [order])
-    monkeypatch.setattr(
-        order_timeout_scanner, "_RECONCILE_MAX_QUERY_ATTEMPTS", 5
-    )
+    monkeypatch.setattr(order_timeout_scanner, "_RECONCILE_MAX_QUERY_ATTEMPTS", 5)
 
     # 连续调用5次，每次查询都失败
     for i in range(5):
@@ -312,9 +301,7 @@ async def test_scenario_d_reconcile_max_failures(monkeypatch):
     assert all(c == "recon-fail-001" for c in broker.query_calls)
 
     # 人工介入通知已发送（仅第5次触发，不重复）
-    failed_notifies = [
-        n for n in notifications if n["title"] == "对账失败待人工介入"
-    ]
+    failed_notifies = [n for n in notifications if n["title"] == "对账失败待人工介入"]
     assert len(failed_notifies) == 1
     assert "SH600036" in failed_notifies[0]["content"]
     assert "5" in failed_notifies[0]["content"]

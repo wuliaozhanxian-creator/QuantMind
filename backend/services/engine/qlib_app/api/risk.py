@@ -1,31 +1,36 @@
 """Qlib 风险路由"""
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Body
 
 from backend.services.engine.qlib_app import get_qlib_service
 from backend.services.engine.qlib_app.api.identity import _identity_from_request
-from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
+from backend.services.engine.qlib_app.utils.structured_logger import (
+    StructuredTaskLogger,
+)
 
 router = APIRouter(tags=["qlib"])
 
 logger = logging.getLogger(__name__)
 
-
 @router.get("/risk/{backtest_id}/metrics")
 async def get_risk_metrics(
     request: Request,
     backtest_id: str,
-    tenant_id: str | None = Query(None, description="租户ID（已废弃，自动使用认证身份）"),
+    tenant_id: str | None = Query(
+        None, description="租户ID（已废弃，自动使用认证身份）"
+    ),
     service: Any = Depends(get_qlib_service),
 ) -> dict[str, Any]:
     """获取风险指标"""
     try:
         from backend.services.engine.qlib_app.services.risk_monitor import RiskMonitor
 
-        auth_user_id, auth_tenant_id = _identity_from_request(request, provided_tenant_id=tenant_id)
+        auth_user_id, auth_tenant_id = _identity_from_request(
+            request, provided_tenant_id=tenant_id
+        )
         result = await service.get_result(
             backtest_id,
             tenant_id=auth_tenant_id,
@@ -47,23 +52,32 @@ async def get_risk_metrics(
         StructuredTaskLogger(
             logger,
             "risk-api",
-            {"endpoint": "metrics", "backtest_id": backtest_id, "tenant_id": auth_tenant_id},
+            {
+                "endpoint": "metrics",
+                "backtest_id": backtest_id,
+                "tenant_id": auth_tenant_id,
+            },
         ).exception("failed", "获取风险指标失败", error=e)
-        raise HTTPException(status_code=500, detail=f"获取风险指标失败: {str(e)}")
-
+        raise HTTPException(
+            status_code=500, detail=f"获取风险指标失败: {str(e)}"
+        ) from e
 
 @router.get("/risk/{backtest_id}/alerts")
 async def get_risk_alerts(
     request: Request,
     backtest_id: str,
-    tenant_id: str | None = Query(None, description="租户ID（已废弃，自动使用认证身份）"),
+    tenant_id: str | None = Query(
+        None, description="租户ID（已废弃，自动使用认证身份）"
+    ),
     service: Any = Depends(get_qlib_service),
 ) -> dict[str, Any]:
     """获取风险预警"""
     try:
         from backend.services.engine.qlib_app.services.risk_monitor import RiskMonitor
 
-        auth_user_id, auth_tenant_id = _identity_from_request(request, provided_tenant_id=tenant_id)
+        auth_user_id, auth_tenant_id = _identity_from_request(
+            request, provided_tenant_id=tenant_id
+        )
         result = await service.get_result(
             backtest_id,
             tenant_id=auth_tenant_id,
@@ -93,21 +107,30 @@ async def get_risk_alerts(
         StructuredTaskLogger(
             logger,
             "risk-api",
-            {"endpoint": "alerts", "backtest_id": backtest_id, "tenant_id": auth_tenant_id},
+            {
+                "endpoint": "alerts",
+                "backtest_id": backtest_id,
+                "tenant_id": auth_tenant_id,
+            },
         ).exception("failed", "获取风险预警失败", error=e)
-        raise HTTPException(status_code=500, detail=f"获取风险预警失败: {str(e)}")
-
+        raise HTTPException(
+            status_code=500, detail=f"获取风险预警失败: {str(e)}"
+        ) from e
 
 @router.post("/risk/{backtest_id}/config")
 async def update_risk_config(
     request: Request,
     backtest_id: str,
     config: dict[str, Any] = Body(...),
-    tenant_id: str | None = Query(None, description="租户ID（已废弃，自动使用认证身份）"),
+    tenant_id: str | None = Query(
+        None, description="租户ID（已废弃，自动使用认证身份）"
+    ),
     service: Any = Depends(get_qlib_service),
 ) -> dict[str, str]:
     """更新风险配置（暂存在内存中，未持久化）"""
-    auth_user_id, auth_tenant_id = _identity_from_request(request, provided_tenant_id=tenant_id)
+    auth_user_id, auth_tenant_id = _identity_from_request(
+        request, provided_tenant_id=tenant_id
+    )
     status_obj = await service.get_status(
         backtest_id,
         tenant_id=auth_tenant_id,

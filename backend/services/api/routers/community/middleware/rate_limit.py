@@ -20,9 +20,7 @@ try:
 except Exception:  # pragma: no cover
     Redis = None  # type: ignore
 
-
 _redis: Redis | None = None
-
 
 def _redis_url() -> str:
     url = os.getenv("REDIS_URL", "").strip()
@@ -35,7 +33,6 @@ def _redis_url() -> str:
     auth = f":{password}@" if password else ""
     return f"redis://{auth}{host}:{port}/{db}"
 
-
 async def _get_redis() -> Redis | None:
     global _redis
     if Redis is None:
@@ -43,7 +40,6 @@ async def _get_redis() -> Redis | None:
     if _redis is None:
         _redis = Redis.from_url(_redis_url(), encoding="utf-8", decode_responses=True)
     return _redis
-
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, *, enabled: bool, window_seconds: int, max_requests: int):
@@ -68,7 +64,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         user_id = None
 
         # Prefer JWT principal if present (more accurate than header).
-        auth = request.headers.get("authorization") or request.headers.get("Authorization")
+        auth = request.headers.get("authorization") or request.headers.get(
+            "Authorization"
+        )
         if auth and auth.lower().startswith("bearer "):
             token = auth.split(" ", 1)[1].strip()
             payload = decode_token(token)

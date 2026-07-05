@@ -277,7 +277,7 @@ python -m celery -A backend.services.engine.qlib_app.celery_config:celery_app fl
 - **Batch 回调超时兜底（2026-04-03）**：若 `waiting_callback` 超过 `BATCH_WAITING_CALLBACK_TIMEOUT_SECONDS`（默认 600 秒）仍未收到回调，任务自动置为 `failed`，并在日志/result 写入 `CALLBACK_TIMEOUT` 失败原因，避免任务长期卡住。
 - **LLM 核心大脑**：已集成 **Qwen-Max** 主模型与 **Text-Embedding-V4** 向量模型，支持复杂的自然语言策略解析与向量语义路由。
 - **云端同步增强**：已配置腾讯云 COS 存储，并启用自定义域名 **`https://cos.quantmind.cloud`**，实现策略文件的全球加速访问与品牌一致性。
-- **内部身份校验加固**：`internal_auth_middleware` 统一校验 `X-Internal-Call` 与 `INTERNAL_CALL_SECRET`；所有 `/api/v1/*` 业务路由在缺失或密钥不合法时返回 `401`（`OPTIONS` 预检请求除外）。
+- **内部身份校验加固**：`internal_auth_middleware` 统一校验 `X-Service-Token`（service JWT，由 `SECRET_KEY` 签发）；所有 `/api/v1/*` 业务路由在缺失或令牌不合法时返回 `401`（`OPTIONS` 预检请求除外）。T6.5-P3 后已移除 `X-Internal-Call` 回退分支。
 - **身份来源统一**：`pipeline` 与 `qlib` 读写接口统一从 `request.state.user` 读取 `user_id/tenant_id`；Query/Body 中同名字段仅用于防伪校验，不再作为真实身份来源。
 - **启动稳定性修复**：补齐 `Request` 导入，修复 `main.py` 在模块导入阶段的 `NameError` 风险。
 - **AI 向导数据库池修复**：启动时显式注册 `shared.database_pool` 的 `postgres` 连接（兼容 `asyncpg -> psycopg2` URL 转换），修复 `query-pool` 报错“数据库 postgres 未注册”导致的 `500`。

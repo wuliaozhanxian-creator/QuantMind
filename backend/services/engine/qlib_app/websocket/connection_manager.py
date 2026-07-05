@@ -10,10 +10,11 @@
 import asyncio
 import logging
 from datetime import datetime
-from typing import Dict, Set
 
 from fastapi import WebSocket, WebSocketDisconnect
-from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
+from backend.services.engine.qlib_app.utils.structured_logger import (
+    StructuredTaskLogger,
+)
 
 logger = logging.getLogger(__name__)
 task_logger = StructuredTaskLogger(logger, "WebSocketManager")
@@ -49,7 +50,9 @@ class ConnectionManager:
                 if not self.active_connections[backtest_id]:
                     # 房间为空，删除
                     del self.active_connections[backtest_id]
-                task_logger.info("ws_disconnected", "WebSocket连接已断开", backtest_id=backtest_id)
+                task_logger.info(
+                    "ws_disconnected", "WebSocket连接已断开", backtest_id=backtest_id
+                )
 
     async def send_personal_message(self, message: dict, websocket: WebSocket):
         """发送私有消息"""
@@ -64,7 +67,9 @@ class ConnectionManager:
             connections = self.active_connections.get(backtest_id, set()).copy()
 
         if not connections:
-            task_logger.debug("ws_room_empty", "房间无活跃连接", backtest_id=backtest_id)
+            task_logger.debug(
+                "ws_room_empty", "房间无活跃连接", backtest_id=backtest_id
+            )
             return
 
             # 记录失效连接
@@ -87,7 +92,12 @@ class ConnectionManager:
                         self.active_connections[backtest_id].discard(ws)
                     if not self.active_connections[backtest_id]:
                         del self.active_connections[backtest_id]
-            task_logger.info("ws_dead_connections_cleaned", "清理了失效连接", backtest_id=backtest_id, count=len(dead_connections))
+            task_logger.info(
+                "ws_dead_connections_cleaned",
+                "清理了失效连接",
+                backtest_id=backtest_id,
+                count=len(dead_connections),
+            )
 
     async def broadcast_log(self, room_id: str, message: str):
         """广播日志消息"""
@@ -109,7 +119,9 @@ class ConnectionManager:
             for conn in to_remove:
                 await self.disconnect(conn, room_id)
 
-    async def send_progress(self, backtest_id: str, progress: float, status: str, message: str = ""):
+    async def send_progress(
+        self, backtest_id: str, progress: float, status: str, message: str = ""
+    ):
         """发送进度更新"""
         data = {
             "type": "progress",
@@ -158,7 +170,8 @@ class ConnectionManager:
     def get_active_rooms(self) -> list:
         """获取活跃房间列表"""
         return [
-            {"backtest_id": room_id, "connections": len(conns)} for room_id, conns in self.active_connections.items()
+            {"backtest_id": room_id, "connections": len(conns)}
+            for room_id, conns in self.active_connections.items()
         ]
 
         # 全局实例

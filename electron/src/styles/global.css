@@ -953,12 +953,159 @@ html.platform-win32.os-win10 .module-grid-container {
   background-color: var(--neutral);
 }
 
-/* ǿ��С�ֺ��ı�ʹ�ô�Ҫ����ջ������������ */
-.text-xs, 
+/* 强制小字号文本使用次要字体栈 */
+.text-xs,
 .text-\[11px\], 
 .text-\[10px\],
 .ant-select-selector,
 .ant-select-selection-search-input,
 .ant-select-item-option-content {
   font-family: var(--font-secondary) !important;
+}
+
+/* ===================================================================
+ * T2.5 移动端断点适配（<768px）
+ * - 行情/持仓/回测表格横向滚动
+ * - 多列网格降级为单列
+ * - 收紧 padding / 字号，隐藏次要装饰元素
+ * =================================================================== */
+
+/* 表格横向滚动工具类：行情/持仓/回测表格在移动端可横向滑动 */
+.qm-table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  width: 100%;
+}
+
+.qm-table-scroll table {
+  min-width: 640px;
+}
+
+.qm-table-scroll .ant-table-content {
+  overflow-x: auto !important;
+}
+
+@media (max-width: 768px) {
+  /* 全局收紧 padding */
+  .app-root {
+    padding: 0 !important;
+  }
+
+  /* 标题栏紧凑化 */
+  .title-bar,
+  .console-header-grid {
+    padding: 0 8px !important;
+    height: auto !important;
+    min-height: 48px;
+  }
+
+  .console-brand-title-wrap {
+    grid-template-columns: 1fr !important;
+    gap: 4px !important;
+  }
+
+  .console-brand-line {
+    display: none !important;
+  }
+
+  /* 多列网格降级为单列（行情/持仓/回测卡片区域） */
+  .grid-cols-2,
+  .grid-cols-3,
+  .grid-cols-4,
+  .grid-cols-6,
+  .lg\:grid-cols-2,
+  .lg\:grid-cols-3,
+  .lg\:grid-cols-4,
+  .md\:grid-cols-2,
+  .md\:grid-cols-3,
+  .md\:grid-cols-4 {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* antd Row/Col 在移动端堆叠 */
+  .ant-row {
+    flex-direction: column !important;
+  }
+
+  .ant-row > .ant-col {
+    flex: 0 0 100% !important;
+    max-width: 100% !important;
+    width: 100% !important;
+  }
+
+  /* 卡片间距收紧 */
+  .ant-card {
+    margin-bottom: 8px !important;
+  }
+
+  .ant-card-body {
+    padding: 12px !important;
+  }
+
+  /* 表格统一横向滚动 */
+  .ant-table-wrapper,
+  .ant-table {
+    width: 100% !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .ant-table-content > table {
+    min-width: 640px;
+  }
+
+  /* 模块卡片内容区横向滚动（行情/持仓/回测） */
+  .qm-table-scroll,
+  .overflow-x-auto,
+  .overflow-auto {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* 字号收紧 */
+  .text-2xl {
+    font-size: 1.25rem !important;
+  }
+
+  .text-xl {
+    font-size: 1.125rem !important;
+  }
+
+  /* 浮动导航栏宽度适配 */
+  .fixed.bottom-4 {
+    width: calc(100% - 16px) !important;
+    left: 8px !important;
+    transform: none !important;
+  }
+
+  /* 隐藏桌面端独占的装饰性元素 */
+  .md\:hidden {
+    display: block !important;
+  }
+
+  .lg\:hidden {
+    display: block !important;
+  }
+
+  .hidden.md\:block,
+  .hidden.lg\:block {
+    display: none !important;
+  }
+
+  /* 侧边抽屉/面板在移动端全屏化 */
+  .ant-drawer-content-wrapper {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  /* Modal 在移动端宽度适配 */
+  .ant-modal {
+    max-width: calc(100vw - 16px) !important;
+    margin: 8px auto !important;
+  }
+
+  .ant-modal-body {
+    max-height: 70vh;
+    overflow-y: auto;
+  }
 }

@@ -12,10 +12,13 @@ import random
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
+from typing import TYPE_CHECKING, Any, Optional
+from collections.abc import Callable
 
 if TYPE_CHECKING:
-    from backend.services.trade.services.simulation_manager import SimulationAccountManager
+    from backend.services.trade.services.simulation_manager import (
+        SimulationAccountManager,
+    )
 
 from sqlalchemy import select, text
 
@@ -23,7 +26,6 @@ from backend.shared.auth import create_service_token
 from backend.shared.database_manager_v2 import get_session
 
 logger = logging.getLogger(__name__)
-
 
 class BrokerResult:
     """Broker 执行结果"""
@@ -44,7 +46,6 @@ class BrokerResult:
         self.exchange_order_id = exchange_order_id
         self.message = message
 
-
 @dataclass
 class OrderStatusResult:
     """Broker 订单状态查询结果（对账闭环用）。
@@ -63,7 +64,6 @@ class OrderStatusResult:
     exchange_order_id: str = ""
     message: str = ""
 
-
 @dataclass
 class MarketQuoteSnapshot:
     price: float
@@ -71,9 +71,7 @@ class MarketQuoteSnapshot:
     limit_down: bool = False
     suspended: bool = False
 
-
 # ==================== 连接状态机 & 自动重连 (T4.3) ====================
-
 
 class BrokerConnectionState(str, Enum):
     """Broker 连接状态机。
@@ -86,7 +84,6 @@ class BrokerConnectionState(str, Enum):
     DISCONNECTED = "disconnected"
     RECONNECTING = "reconnecting"
     FAILED = "failed"
-
 
 def compute_reconnect_backoff(
     attempt: int,
@@ -103,7 +100,6 @@ def compute_reconnect_backoff(
         return base
     interval = base * (2 ** (attempt - 1))
     return min(interval, max_interval)
-
 
 class BrokerConnectionManager:
     """Broker 连接状态机管理器（T4.3）。
@@ -127,8 +123,8 @@ class BrokerConnectionManager:
     def __init__(
         self,
         broker_name: str,
-        health_check_func: Optional[Callable[[], Any]] = None,
-        on_failure_callback: Optional[Callable[[str, str], Any]] = None,
+        health_check_func: Callable[[], Any] | None = None,
+        on_failure_callback: Callable[[str, str], Any] | None = None,
         heartbeat_interval: float = DEFAULT_HEARTBEAT_INTERVAL,
     ):
         self.broker_name = broker_name
@@ -137,8 +133,8 @@ class BrokerConnectionManager:
         self._heartbeat_interval = float(heartbeat_interval)
         self._state: BrokerConnectionState = BrokerConnectionState.DISCONNECTED
         self._reconnect_attempts = 0
-        self._heartbeat_task: Optional[asyncio.Task] = None
-        self._reconnect_task: Optional[asyncio.Task] = None
+        self._heartbeat_task: asyncio.Task | None = None
+        self._reconnect_task: asyncio.Task | None = None
         self._running = False
         self._lock = asyncio.Lock()
         # 可注入的 sleep/now，便于测试
@@ -216,7 +212,7 @@ class BrokerConnectionManager:
                 try:
                     await asyncio.wait_for(task, timeout=2.0)
                 except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
-                    pass
+                    pass  # noqa: BLE001 - asyncio 任务取消信号，预期静默处理
         self._heartbeat_task = None
         self._reconnect_task = None
         await self._set_state(BrokerConnectionState.DISCONNECTED)
@@ -355,12 +351,11 @@ class BrokerConnectionManager:
             logger.debug("[%s] force_reconnect check failed: %s", self.broker_name, exc)
         return False
 
-
 class BaseBroker(abc.ABC):
     """Broker 抽象基类"""
 
     def __init__(self):
-        self._connection_manager: Optional[BrokerConnectionManager] = None
+        self._connection_manager: BrokerConnectionManager | None = None
 
     @abc.abstractmethod
     async def place_order(
@@ -377,7 +372,9 @@ class BaseBroker(abc.ABC):
         ...
 
     @abc.abstractmethod
-    async def query_account(self, user_id: str, tenant_id: str = "default") -> dict[str, Any]:
+    async def query_account(
+        self, user_id: str, tenant_id: str = "default"
+    ) -> dict[str, Any]:
         """查询账户信息"""
         ...
 
@@ -404,7 +401,7 @@ class BaseBroker(abc.ABC):
 
     # ====== 连接管理（T4.3）======
 
-    def get_connection_manager(self) -> Optional[BrokerConnectionManager]:
+    def get_connection_manager(self) -> BrokerConnectionManager | None:
         """获取连接管理器（若已配置）。"""
         return getattr(self, "_connection_manager", None)
 
@@ -432,7 +429,6 @@ class BaseBroker(abc.ABC):
         """停止心跳检测（若已配置连接管理器）。"""
         if self._connection_manager is not None:
             await self._connection_manager.stop()
-
 
 class PaperTradingBroker(BaseBroker):
     """
@@ -490,7 +486,9 @@ class PaperTradingBroker(BaseBroker):
         return text in {"1", "true", "yes", "y", "on"}
 
     @staticmethod
-    def _is_price_near(price: float, limit_price: float | None, tolerance: float = 0.0015) -> bool:
+    def _is_price_near(
+        price: float, limit_price: float | None, tolerance: float = 0.0015
+    ) -> bool:
         if limit_price is None or limit_price <= 0 or price <= 0:
             return False
         return abs(price - limit_price) / max(limit_price, 1e-6) <= tolerance
@@ -506,7 +504,9 @@ class PaperTradingBroker(BaseBroker):
                 if px and px > 0:
                     limit_up = self._as_bool(data.get("is_limit_up"))
                     limit_down = self._as_bool(data.get("is_limit_down"))
-                    suspended = self._as_bool(data.get("suspended") or data.get("is_suspended"))
+                    suspended = self._as_bool(
+                        data.get("suspended") or data.get("is_suspended")
+                    )
                     limit_up_price = self._as_float(data.get("limit_up_today"))
                     limit_down_price = self._as_float(data.get("limit_down_today"))
                     if not limit_up and self._is_price_near(px, limit_up_price):
@@ -514,14 +514,26 @@ class PaperTradingBroker(BaseBroker):
                     if not limit_down and self._is_price_near(px, limit_down_price):
                         limit_down = True
 
-                    pre_close = self._as_float(data.get("pre_close") or data.get("close_price"))
+                    pre_close = self._as_float(
+                        data.get("pre_close") or data.get("close_price")
+                    )
                     ask1_volume = self._as_int(data.get("ask1_volume"))
                     bid1_volume = self._as_int(data.get("bid1_volume"))
                     if pre_close and pre_close > 0:
                         change_ratio = (px - pre_close) / pre_close
-                        if not limit_up and ask1_volume is not None and ask1_volume <= 0 and change_ratio >= 0.095:
+                        if (
+                            not limit_up
+                            and ask1_volume is not None
+                            and ask1_volume <= 0
+                            and change_ratio >= 0.095
+                        ):
                             limit_up = True
-                        if not limit_down and bid1_volume is not None and bid1_volume <= 0 and change_ratio <= -0.095:
+                        if (
+                            not limit_down
+                            and bid1_volume is not None
+                            and bid1_volume <= 0
+                            and change_ratio <= -0.095
+                        ):
                             limit_down = True
 
                     return MarketQuoteSnapshot(
@@ -538,29 +550,37 @@ class PaperTradingBroker(BaseBroker):
             async with get_session(read_only=True) as session:
                 query_with_limits = text("""
                     SELECT close, adj_factor, limit_up_today, limit_down_today, volume
-                    FROM stock_daily_latest 
-                    WHERE symbol = :symbol 
+                    FROM stock_daily_latest
+                    WHERE symbol = :symbol
                     ORDER BY trade_date DESC LIMIT 1
                 """)
                 try:
-                    result = await session.execute(query_with_limits, {"symbol": symbol})
+                    result = await session.execute(
+                        query_with_limits, {"symbol": symbol}
+                    )
                     row = result.fetchone()
                     if row:
                         hfq_close = float(row[0])
                         adj_factor = float(row[1] or 1.0)
                         price = hfq_close / adj_factor if adj_factor > 0 else hfq_close
-                        logger.info("[PaperTrading] Fallback to DB nominal price for %s: %s", symbol, price)
+                        logger.info(
+                            "[PaperTrading] Fallback to DB nominal price for %s: %s",
+                            symbol,
+                            price,
+                        )
                         return MarketQuoteSnapshot(
                             price=price,
                             limit_up=self._is_price_near(price, self._as_float(row[2])),
-                            limit_down=self._is_price_near(price, self._as_float(row[3])),
+                            limit_down=self._is_price_near(
+                                price, self._as_float(row[3])
+                            ),
                             suspended=(self._as_float(row[4]) or 0.0) <= 0.0,
                         )
                 except Exception:
                     query_legacy = text("""
                         SELECT close, adj_factor
-                        FROM stock_daily_latest 
-                        WHERE symbol = :symbol 
+                        FROM stock_daily_latest
+                        WHERE symbol = :symbol
                         ORDER BY trade_date DESC LIMIT 1
                     """)
                     result = await session.execute(query_legacy, {"symbol": symbol})
@@ -569,7 +589,11 @@ class PaperTradingBroker(BaseBroker):
                         hfq_close = float(row[0])
                         adj_factor = float(row[1] or 1.0)
                         price = hfq_close / adj_factor if adj_factor > 0 else hfq_close
-                        logger.info("[PaperTrading] Fallback to DB legacy nominal price for %s: %s", symbol, price)
+                        logger.info(
+                            "[PaperTrading] Fallback to DB legacy nominal price for %s: %s",
+                            symbol,
+                            price,
+                        )
                         return MarketQuoteSnapshot(price=price)
         except Exception as e:
             logger.error(f"[PaperTrading] Database fallback failed for {symbol}: {e}")
@@ -642,9 +666,13 @@ class PaperTradingBroker(BaseBroker):
         except ValueError as exc:
             return BrokerResult(success=False, message=str(exc))
 
-    async def query_account(self, user_id: str, tenant_id: str = "default") -> dict[str, Any]:
+    async def query_account(
+        self, user_id: str, tenant_id: str = "default"
+    ) -> dict[str, Any]:
         """Query account state from Redis"""
-        account = await self.simulation_manager.get_account(int(user_id), tenant_id=tenant_id)
+        account = await self.simulation_manager.get_account(
+            int(user_id), tenant_id=tenant_id
+        )
         if not account:
             return {}
         return account
@@ -721,7 +749,6 @@ class PaperTradingBroker(BaseBroker):
             return OrderStatusResult(
                 status="STILL_PENDING", message=f"query error: {exc}"
             )
-
 
 class QMTBroker(BaseBroker):
     """
@@ -803,7 +830,9 @@ class QMTBroker(BaseBroker):
             logger.error(f"[QMTBroker] place_order failed: {e}")
             return BrokerResult(success=False, message=str(e))
 
-    async def query_account(self, user_id: str, tenant_id: str = "default") -> dict[str, Any]:
+    async def query_account(
+        self, user_id: str, tenant_id: str = "default"
+    ) -> dict[str, Any]:
         try:
             client = await self._get_session()
             resp = await client.get(f"{self.base_url}/api/account")
@@ -844,7 +873,9 @@ class QMTBroker(BaseBroker):
         若接口不可用（404/超时/异常），回退查询本地 orders 表。
         """
         if not client_order_id:
-            return OrderStatusResult(status="STILL_PENDING", message="empty client_order_id")
+            return OrderStatusResult(
+                status="STILL_PENDING", message="empty client_order_id"
+            )
 
         # 层级1：尝试 QMT Bridge HTTP 查询接口
         try:
@@ -856,12 +887,20 @@ class QMTBroker(BaseBroker):
             )
             if resp.status_code == 200:
                 data = resp.json() or {}
-                mapped = self._map_qmt_status(data.get("status") or data.get("order_status"))
+                mapped = self._map_qmt_status(
+                    data.get("status") or data.get("order_status")
+                )
                 return OrderStatusResult(
                     status=mapped,
-                    filled_quantity=float(data.get("filled_quantity") or data.get("filled_qty") or 0),
-                    avg_price=float(data.get("avg_price") or data.get("average_price") or 0),
-                    exchange_order_id=str(data.get("exchange_order_id") or data.get("order_id") or ""),
+                    filled_quantity=float(
+                        data.get("filled_quantity") or data.get("filled_qty") or 0
+                    ),
+                    avg_price=float(
+                        data.get("avg_price") or data.get("average_price") or 0
+                    ),
+                    exchange_order_id=str(
+                        data.get("exchange_order_id") or data.get("order_id") or ""
+                    ),
                     message=str(data.get("message") or "qmt bridge query"),
                 )
         except Exception as exc:
@@ -934,8 +973,14 @@ class QMTBroker(BaseBroker):
                     message=f"qmt broker db fallback: {getattr(raw_status, 'value', raw_status)}",
                 )
         except Exception as exc:
-            logger.error("[QMTBroker] _query_order_from_db failed for %s: %s", client_order_id, exc)
-            return OrderStatusResult(status="STILL_PENDING", message=f"query error: {exc}")
+            logger.error(
+                "[QMTBroker] _query_order_from_db failed for %s: %s",
+                client_order_id,
+                exc,
+            )
+            return OrderStatusResult(
+                status="STILL_PENDING", message=f"query error: {exc}"
+            )
 
     @staticmethod
     def _normalize_account_payload(data: Any) -> dict[str, Any]:
@@ -998,7 +1043,6 @@ class QMTBroker(BaseBroker):
             "positions": cleaned_positions,
         }
 
-
 class QMTBridgeBroker(BaseBroker):
     """
     QMT Agent Bridge Broker
@@ -1060,11 +1104,15 @@ class QMTBridgeBroker(BaseBroker):
     ) -> BrokerResult:
         client_oid = str(client_order_id or "").strip()
         if not client_oid:
-            return BrokerResult(success=False, message="client_order_id is required in bridge mode")
+            return BrokerResult(
+                success=False, message="client_order_id is required in bridge mode"
+            )
         if not self.stream_base_url:
             return BrokerResult(success=False, message="stream_base_url is empty")
         if not self.is_available():
-            logger.warning("[QMTBridgeBroker] place_order called but broker connection is not available")
+            logger.warning(
+                "[QMTBridgeBroker] place_order called but broker connection is not available"
+            )
 
         payload = {
             "tenant_id": str(tenant_id or "").strip() or "default",
@@ -1078,28 +1126,34 @@ class QMTBridgeBroker(BaseBroker):
                 "price": float(price or 0.0),
                 "trade_action": str(trade_action or "").strip().lower() or None,
                 "position_side": str(position_side or "").strip().lower() or None,
-                "is_margin_trade": bool(is_margin_trade) if is_margin_trade is not None else None,
+                "is_margin_trade": bool(is_margin_trade)
+                if is_margin_trade is not None
+                else None,
                 "dispatch_mode": "async",  # 使用异步下单，避免 QMT SDK 同步调用挂起 WS 接收线程
             },
         }
         if payload["payload"]["quantity"] <= 0:
             return BrokerResult(success=False, message="quantity must be > 0")
         client_oid_lower = client_oid.lower()
-        is_manual_market_order = client_oid_lower.startswith("manual-") and str(order_type or "").strip().lower() == "market"
-        if (
-            not is_manual_market_order
-            and (
-                str(order_type or "").strip().lower() == "market"
-                or not price
-                or float(price or 0) <= 0
-            )
+        is_manual_market_order = (
+            client_oid_lower.startswith("manual-")
+            and str(order_type or "").strip().lower() == "market"
+        )
+        if not is_manual_market_order and (
+            str(order_type or "").strip().lower() == "market"
+            or not price
+            or float(price or 0) <= 0
         ):
             payload["payload"]["agent_price_mode"] = "protect_limit"
             try:
-                protect_ratio = float(os.getenv("QMT_BRIDGE_PROTECT_PRICE_RATIO", "0.002"))
+                protect_ratio = float(
+                    os.getenv("QMT_BRIDGE_PROTECT_PRICE_RATIO", "0.002")
+                )
             except ValueError:
                 protect_ratio = 0.002
-            payload["payload"]["protect_price_ratio"] = max(0.0, min(0.05, protect_ratio))
+            payload["payload"]["protect_price_ratio"] = max(
+                0.0, min(0.05, protect_ratio)
+            )
 
         try:
             client = await self._get_session()
@@ -1136,13 +1190,16 @@ class QMTBridgeBroker(BaseBroker):
             logger.error("[QMTBridgeBroker] place_order failed: %s", e)
             return BrokerResult(success=False, message=str(e))
 
-    async def query_account(self, user_id: str, tenant_id: str = "default") -> dict[str, Any]:
+    async def query_account(
+        self, user_id: str, tenant_id: str = "default"
+    ) -> dict[str, Any]:
         try:
             async with get_session(read_only=True) as session:
                 row = (
-                    await session.execute(
-                        text(
-                            """
+                    (
+                        await session.execute(
+                            text(
+                                """
                             SELECT *
                             FROM real_account_snapshot_overview_v
                             WHERE tenant_id = :tenant_id
@@ -1150,10 +1207,13 @@ class QMTBridgeBroker(BaseBroker):
                             ORDER BY snapshot_at DESC, id DESC
                             LIMIT 1
                             """
-                        ),
-                        {"tenant_id": tenant_id, "user_id": str(user_id).strip()},
+                            ),
+                            {"tenant_id": tenant_id, "user_id": str(user_id).strip()},
+                        )
                     )
-                ).mappings().first()
+                    .mappings()
+                    .first()
+                )
             if row:
                 data = dict(row)
                 payload = data.get("payload_json") or {}
@@ -1194,7 +1254,9 @@ class QMTBridgeBroker(BaseBroker):
         side = str(kwargs.get("side") or "").strip()
 
         if not user_id:
-            logger.warning("[QMTBridgeBroker] cancel_order missing user_id, skipping bridge dispatch")
+            logger.warning(
+                "[QMTBridgeBroker] cancel_order missing user_id, skipping bridge dispatch"
+            )
             return False
         if not self.stream_base_url:
             return False
@@ -1225,7 +1287,11 @@ class QMTBridgeBroker(BaseBroker):
                 },
             )
             if resp.status_code != 200:
-                logger.warning("[QMTBridgeBroker] cancel_order HTTP %s: %s", resp.status_code, resp.text)
+                logger.warning(
+                    "[QMTBridgeBroker] cancel_order HTTP %s: %s",
+                    resp.status_code,
+                    resp.text,
+                )
                 return False
             data = resp.json()
             if not data.get("ok"):
@@ -1288,7 +1354,9 @@ class QMTBridgeBroker(BaseBroker):
         本地 orders 表（回报消费已落库）正常工作。
         """
         if not client_order_id:
-            return OrderStatusResult(status="STILL_PENDING", message="empty client_order_id")
+            return OrderStatusResult(
+                status="STILL_PENDING", message="empty client_order_id"
+            )
 
         # 层级1：尝试 stream bridge query 端点（前向兼容，可能尚未实现）
         if self.stream_base_url:
@@ -1382,8 +1450,9 @@ class QMTBridgeBroker(BaseBroker):
                 client_order_id,
                 exc,
             )
-            return OrderStatusResult(status="STILL_PENDING", message=f"query error: {exc}")
-
+            return OrderStatusResult(
+                status="STILL_PENDING", message=f"query error: {exc}"
+            )
 
 class RedisBroker(BaseBroker):
     """
@@ -1475,7 +1544,9 @@ class RedisBroker(BaseBroker):
         if self._hmac_secret:
             typed_cmd["hmac"] = self._sign_cmd(typed_cmd)
         else:
-            logger.warning("[RedisBroker] QMT_CMD_HMAC_SECRET 未配置，指令将以明文发送（不安全）")
+            logger.warning(
+                "[RedisBroker] QMT_CMD_HMAC_SECRET 未配置，指令将以明文发送（不安全）"
+            )
 
         # Stream 字段必须全部为字符串
         stream_fields = {k: str(v) for k, v in typed_cmd.items()}
@@ -1505,13 +1576,16 @@ class RedisBroker(BaseBroker):
             logger.error("[RedisBroker] XADD failed: %s", e)
             return BrokerResult(success=False, message=str(e))
 
-    async def query_account(self, user_id: str, tenant_id: str = "default") -> dict[str, Any]:
+    async def query_account(
+        self, user_id: str, tenant_id: str = "default"
+    ) -> dict[str, Any]:
         try:
             async with get_session(read_only=True) as session:
                 row = (
-                    await session.execute(
-                        text(
-                            """
+                    (
+                        await session.execute(
+                            text(
+                                """
                             SELECT *
                             FROM real_account_snapshot_overview_v
                             WHERE tenant_id = :tenant_id
@@ -1519,10 +1593,13 @@ class RedisBroker(BaseBroker):
                             ORDER BY snapshot_at DESC, id DESC
                             LIMIT 1
                             """
-                        ),
-                        {"tenant_id": tenant_id, "user_id": str(user_id).strip()},
+                            ),
+                            {"tenant_id": tenant_id, "user_id": str(user_id).strip()},
+                        )
                     )
-                ).mappings().first()
+                    .mappings()
+                    .first()
+                )
             if row:
                 data = dict(row)
                 payload = data.get("payload_json") or {}
@@ -1556,13 +1633,14 @@ class RedisBroker(BaseBroker):
 
     async def cancel_order(self, exchange_order_id: str) -> bool:
         # 撤单指令可扩展为向 quantmind:trade:cancel:{user_id} publish
-        logger.warning("[RedisBroker] cancel_order not implemented yet: %s", exchange_order_id)
+        logger.warning(
+            "[RedisBroker] cancel_order not implemented yet: %s", exchange_order_id
+        )
         return False
 
     async def query_quote(self, symbol: str) -> dict[str, Any]:
         # 行情由 Stream 服务提供，不走终端代理
         return {}
-
 
 class MockBroker(BaseBroker):
     """可配置的 Mock Broker，用于测试和开发环境。
@@ -1582,9 +1660,7 @@ class MockBroker(BaseBroker):
         self.place_order_calls: list[dict] = []
         self.query_order_calls: list[str] = []
 
-    def set_order_result(
-        self, client_order_id: str, result: OrderStatusResult
-    ) -> None:
+    def set_order_result(self, client_order_id: str, result: OrderStatusResult) -> None:
         """预设某 client_order_id 的对账查询结果。"""
         self._order_results[client_order_id] = result
 
@@ -1615,8 +1691,7 @@ class MockBroker(BaseBroker):
             success=True,
             filled_quantity=float(quantity),
             filled_price=float(price or 0),
-            exchange_order_id=client_order_id
-            or f"mock-{len(self.place_order_calls)}",
+            exchange_order_id=client_order_id or f"mock-{len(self.place_order_calls)}",
             message="MockBroker fill",
         )
 
@@ -1649,7 +1724,6 @@ class MockBroker(BaseBroker):
             "timestamp": datetime.now().isoformat(),
         }
 
-
 def create_broker(enable_real: bool, **kwargs) -> BaseBroker:
     """
     工厂方法：根据配置创建 Broker 实例。
@@ -1667,18 +1741,25 @@ def create_broker(enable_real: bool, **kwargs) -> BaseBroker:
             redis_password = kwargs.get("redis_trade_password") or os.getenv(
                 "REDIS_TRADE_PASSWORD", os.getenv("REDIS_PASSWORD", "")
             )
-            hmac_secret = kwargs.get("hmac_secret") or os.getenv("QMT_CMD_HMAC_SECRET", "")
+            hmac_secret = kwargs.get("hmac_secret") or os.getenv(
+                "QMT_CMD_HMAC_SECRET", ""
+            )
             if not hmac_secret:
-                logger.warning("[create_broker] QMT_CMD_HMAC_SECRET 未设置，RedisBroker 将以不签名模式运行")
+                logger.warning(
+                    "[create_broker] QMT_CMD_HMAC_SECRET 未设置，RedisBroker 将以不签名模式运行"
+                )
             return RedisBroker(
                 redis_host=kwargs.get("redis_trade_host")
                 or os.getenv("REDIS_TRADE_HOST", os.getenv("REDIS_HOST", "localhost")),
                 redis_port=int(
-                    kwargs.get("redis_trade_port") or os.getenv("REDIS_TRADE_PORT", os.getenv("REDIS_PORT", "6379"))
+                    kwargs.get("redis_trade_port")
+                    or os.getenv("REDIS_TRADE_PORT", os.getenv("REDIS_PORT", "6379"))
                 ),
                 redis_password=redis_password,
                 hmac_secret=hmac_secret,
-                cmd_stream_prefix=os.getenv("TRADE_CMD_STREAM_PREFIX", "quantmind:trade:cmds"),
+                cmd_stream_prefix=os.getenv(
+                    "TRADE_CMD_STREAM_PREFIX", "quantmind:trade:cmds"
+                ),
                 cmd_stream_maxlen=int(os.getenv("TRADE_CMD_STREAM_MAXLEN", "10000")),
             )
         if broker_type == "qmt":

@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Optional
 
 # 计算项目根目录
 try:
@@ -24,15 +24,16 @@ except Exception:
 
 _default_rel_path = os.path.join("db", "qlib_data")
 # 如果环境变量未设置，尝试基于项目根目录解析默认路径
-if "QLIB_PROVIDER_URI" not in os.environ and (PROJECT_ROOT / _default_rel_path).exists():
+if (
+    "QLIB_PROVIDER_URI" not in os.environ
+    and (PROJECT_ROOT / _default_rel_path).exists()
+):
     DEFAULT_PROVIDER_URI = str(PROJECT_ROOT / _default_rel_path)
 else:
     DEFAULT_PROVIDER_URI = os.getenv("QLIB_PROVIDER_URI", str(_default_rel_path))
 
-
 class QlibNotAvailable(Exception):
     """Qlib 未安装或未初始化时抛出的异常"""
-
 
 class QlibBacktestAdapter:
     """封装 Qlib 初始化与回测调用"""
@@ -58,7 +59,9 @@ class QlibBacktestAdapter:
         if not qlib.is_initialized():
             if not self.auto_init:
                 raise QlibNotAvailable("Qlib 未初始化，且 auto_init=False")
-            self.logger.info("初始化 Qlib provider_uri=%s region=%s", self.provider_uri, self.region)
+            self.logger.info(
+                "初始化 Qlib provider_uri=%s region=%s", self.provider_uri, self.region
+            )
             qlib.init(provider_uri={"day": self.provider_uri}, region=self.region)
 
     def run_backtest(
@@ -118,11 +121,14 @@ class QlibBacktestAdapter:
                 return df_or_tuple.to_dict()
             return df_or_tuple
 
-        portfolio_serializable = {freq: (_df_to_dict(df), metadata) for freq, (df, metadata) in portfolio_dict.items()}
+        portfolio_serializable = {
+            freq: (_df_to_dict(df), metadata)
+            for freq, (df, metadata) in portfolio_dict.items()
+        }
         indicator_serializable = {
-            freq: (_df_to_dict(df), indicator) for freq, (df, indicator) in indicator_dict.items()
+            freq: (_df_to_dict(df), indicator)
+            for freq, (df, indicator) in indicator_dict.items()
         }
         return portfolio_serializable, indicator_serializable
-
 
 __all__ = ["QlibBacktestAdapter", "QlibNotAvailable", "DEFAULT_PROVIDER_URI"]

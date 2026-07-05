@@ -5,7 +5,7 @@
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from ..ai_providers import AIProviderFactory, StrategyRequest, StrategyResponse
 from ..backtest_engine import BacktestConfig, BacktestEngine, BacktestResult
@@ -13,7 +13,6 @@ from ..dsl import DSLCompiler, DSLExecutor, DSLParser, DSLValidator, ExecutionCo
 from ..observability.logging import get_logger
 
 logger = get_logger(__name__)
-
 
 class LoopStage(Enum):
     """闭环阶段"""
@@ -24,7 +23,6 @@ class LoopStage(Enum):
     PERFORMANCE_ANALYSIS = "performance_analysis"
     STRATEGY_OPTIMIZATION = "strategy_optimization"
     FEEDBACK_LEARNING = "feedback_learning"
-
 
 @dataclass
 class LoopConfig:
@@ -45,7 +43,6 @@ class LoopConfig:
     data_frequency: str = "1d"
     risk_tolerance: str = "medium"
 
-
 @dataclass
 class LoopIteration:
     """单次迭代结果"""
@@ -62,7 +59,6 @@ class LoopIteration:
     execution_time: float = 0.0
     errors: list[str] = field(default_factory=list)
 
-
 @dataclass
 class LoopResult:
     """闭环结果"""
@@ -74,7 +70,6 @@ class LoopResult:
     final_strategy: StrategyResponse | None = None
     learning_insights: dict[str, Any] = field(default_factory=dict)
     total_time: float = 0.0
-
 
 class StrategyBacktestLoop:
     """策略-回测闭环管理器"""
@@ -96,7 +91,9 @@ class StrategyBacktestLoop:
         self.best_score = float("-in")
         self.best_iteration = None
 
-    async def run_loop(self, initial_request: StrategyRequest, market_data: dict[str, Any]) -> LoopResult:
+    async def run_loop(
+        self, initial_request: StrategyRequest, market_data: dict[str, Any]
+    ) -> LoopResult:
         """运行策略-回测闭环"""
         start_time = time.time()
 
@@ -118,7 +115,9 @@ class StrategyBacktestLoop:
             for iteration in range(1, self.config.max_iterations + 1):
                 self.current_iteration = iteration
 
-                loop_iteration = await self._run_single_iteration(iteration, current_request, market_data)
+                loop_iteration = await self._run_single_iteration(
+                    iteration, current_request, market_data
+                )
 
                 iterations.append(loop_iteration)
 
@@ -134,7 +133,9 @@ class StrategyBacktestLoop:
                     current_request = self._generate_next_request(loop_iteration)
                 else:
                     # 如果没有改进，调整策略
-                    current_request = self._adjust_request(current_request, loop_iteration)
+                    current_request = self._adjust_request(
+                        current_request, loop_iteration
+                    )
 
                 # 检查是否应该提前终止
                 if iteration > 3 and self._should_terminate_early(iterations):
@@ -209,7 +210,11 @@ class StrategyBacktestLoop:
             validation_result = self.dsl_validator.validate(strategy_dsl)
             if not validation_result.is_valid:
                 loop_iteration.errors.extend(
-                    [issue.message for issue in validation_result.issues if issue.type == "error"]
+                    [
+                        issue.message
+                        for issue in validation_result.issues
+                        if issue.type == "error"
+                    ]
                 )
                 return loop_iteration
 
@@ -222,13 +227,19 @@ class StrategyBacktestLoop:
             self.logger.debug(f"Iteration {iteration}: Running backtest")
 
             # 创建执行上下文
-            execution_context = ExecutionContext(data=market_data["data"], variables=strategy_dsl.variables)
+            execution_context = ExecutionContext(
+                data=market_data["data"], variables=strategy_dsl.variables
+            )
 
             # 执行策略
-            execution_result = self.dsl_executor.execute(compiled_strategy, execution_context)
+            execution_result = self.dsl_executor.execute(
+                compiled_strategy, execution_context
+            )
 
             if not execution_result.success:
-                loop_iteration.errors.append(f"Strategy execution failed: {execution_result.error}")
+                loop_iteration.errors.append(
+                    f"Strategy execution failed: {execution_result.error}"
+                )
                 return loop_iteration
 
             # 阶段4: 性能分析
@@ -255,11 +266,15 @@ class StrategyBacktestLoop:
 
             # 计算改进
             if self.best_score > 0:
-                loop_iteration.improvement = (performance_score - self.best_score) / self.best_score
+                loop_iteration.improvement = (
+                    performance_score - self.best_score
+                ) / self.best_score
 
             # 阶段5: 生成反馈
             loop_iteration.stage = LoopStage.FEEDBACK_LEARNING
-            loop_iteration.feedback = self._generate_feedback(loop_iteration, market_data)
+            loop_iteration.feedback = self._generate_feedback(
+                loop_iteration, market_data
+            )
 
             loop_iteration.execution_time = time.time() - start_time
 
@@ -336,7 +351,10 @@ class StrategyBacktestLoop:
 
     def _check_targets_met(self, iteration: LoopIteration) -> bool:
         """检查是否达到目标指标"""
-        if not iteration.backtest_result or not iteration.backtest_result.performance_metrics:
+        if (
+            not iteration.backtest_result
+            or not iteration.backtest_result.performance_metrics
+        ):
             return False
 
         metrics = iteration.backtest_result.performance_metrics
@@ -383,14 +401,18 @@ class StrategyBacktestLoop:
             context_data={
                 **(base_request.context_data or {}),
                 "previous_performance": (
-                    iteration.backtest_result.performance_metrics if iteration.backtest_result else {}
+                    iteration.backtest_result.performance_metrics
+                    if iteration.backtest_result
+                    else {}
                 ),
                 "iteration": iteration.iteration,
                 "feedback": feedback,
             },
         )
 
-    def _adjust_request(self, request: StrategyRequest, iteration: LoopIteration) -> StrategyRequest:
+    def _adjust_request(
+        self, request: StrategyRequest, iteration: LoopIteration
+    ) -> StrategyRequest:
         """调整请求以改进策略"""
         # 如果性能不佳，调整复杂度或风险偏好
         new_request = StrategyRequest(
@@ -407,12 +429,21 @@ class StrategyBacktestLoop:
         )
 
         # 如果胜率低，降低风险
-        if iteration.backtest_result and iteration.backtest_result.performance_metrics.get("win_rate", 0) < 0.4:
+        if (
+            iteration.backtest_result
+            and iteration.backtest_result.performance_metrics.get("win_rate", 0) < 0.4
+        ):
             new_request.risk_tolerance = "low"
-            new_request.custom_requirements.append("Focus on higher probability trades with stricter entry conditions")
+            new_request.custom_requirements.append(
+                "Focus on higher probability trades with stricter entry conditions"
+            )
 
         # 如果收益率低，增加激进程度
-        elif iteration.backtest_result and iteration.backtest_result.performance_metrics.get("annual_return", 0) < 0.1:
+        elif (
+            iteration.backtest_result
+            and iteration.backtest_result.performance_metrics.get("annual_return", 0)
+            < 0.1
+        ):
             new_request.risk_tolerance = "high"
             new_request.custom_requirements.append(
                 "Increase position sizing and consider more aggressive entry signals"
@@ -427,12 +458,17 @@ class StrategyBacktestLoop:
 
         # 检查最近几次迭代是否有改进
         recent_scores = [iter.performance_score for iter in iterations[-3:]]
-        improvements = [recent_scores[i] - recent_scores[i - 1] for i in range(1, len(recent_scores))]
+        improvements = [
+            recent_scores[i] - recent_scores[i - 1]
+            for i in range(1, len(recent_scores))
+        ]
 
         # 如果连续3次改进都小于阈值，终止
         return all(imp < self.config.optimization_threshold for imp in improvements)
 
-    def _generate_feedback(self, iteration: LoopIteration, market_data: dict[str, Any]) -> dict[str, Any]:
+    def _generate_feedback(
+        self, iteration: LoopIteration, market_data: dict[str, Any]
+    ) -> dict[str, Any]:
         """生成反馈"""
         feedback = {
             "suggestions": [],
@@ -449,15 +485,21 @@ class StrategyBacktestLoop:
         # 分析性能问题
         if metrics.get("sharpe_ratio", 0) < 1.0:
             feedback["performance_issues"].append("Low risk-adjusted returns")
-            feedback["suggestions"].append("Improve risk management and position sizing")
+            feedback["suggestions"].append(
+                "Improve risk management and position sizing"
+            )
 
         if abs(metrics.get("max_drawdown", 0)) > 0.2:
             feedback["performance_issues"].append("High maximum drawdown")
-            feedback["suggestions"].append("Add stop-loss mechanisms and reduce position sizes")
+            feedback["suggestions"].append(
+                "Add stop-loss mechanisms and reduce position sizes"
+            )
 
         if metrics.get("win_rate", 0) < 0.5:
             feedback["performance_issues"].append("Low win rate")
-            feedback["suggestions"].append("Refine entry conditions and add confirmation signals")
+            feedback["suggestions"].append(
+                "Refine entry conditions and add confirmation signals"
+            )
 
         # 分析优势
         if metrics.get("sharpe_ratio", 0) > 1.5:
@@ -468,11 +510,15 @@ class StrategyBacktestLoop:
 
         return feedback
 
-    def _generate_learning_insights(self, iterations: list[LoopIteration]) -> dict[str, Any]:
+    def _generate_learning_insights(
+        self, iterations: list[LoopIteration]
+    ) -> dict[str, Any]:
         """生成学习洞察"""
         insights = {
             "total_iterations": len(iterations),
-            "best_performance": (max(iter.performance_score for iter in iterations) if iterations else 0),
+            "best_performance": (
+                max(iter.performance_score for iter in iterations) if iterations else 0
+            ),
             "improvement_trend": [],
             "common_issues": [],
             "successful_patterns": [],
@@ -494,6 +540,8 @@ class StrategyBacktestLoop:
         for error in all_errors:
             error_counts[error] = error_counts.get(error, 0) + 1
 
-        insights["common_issues"] = sorted(error_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+        insights["common_issues"] = sorted(
+            error_counts.items(), key=lambda x: x[1], reverse=True
+        )[:5]
 
         return insights

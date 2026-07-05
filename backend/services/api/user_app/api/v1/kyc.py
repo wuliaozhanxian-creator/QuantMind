@@ -3,8 +3,6 @@ KYC API Routes
 实名认证API
 """
 
-from typing import Optional
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -18,7 +16,9 @@ router = APIRouter(prefix="/kyc", tags=["实名认证"])
 class KYCSubmitRequest(BaseModel):
     real_name: str = Field(..., min_length=2, max_length=50, description="真实姓名")
     id_number: str = Field(..., min_length=5, max_length=30, description="证件号码")
-    document_type: str = Field("id_card", pattern="^(id_card|passport)$", description="证件类型")
+    document_type: str = Field(
+        "id_card", pattern="^(id_card|passport)$", description="证件类型"
+    )
     front_image_url: str | None = Field(None, description="证件正面URL")
     back_image_url: str | None = Field(None, description="证件背面URL")
     handheld_image_url: str | None = Field(None, description="手持证件URL")
@@ -67,10 +67,12 @@ async def submit_kyc(
                 submitted_at=verification.submitted_at.isoformat(),
             )
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        ) from e
 
 
-@router.get("/status", response_model=Optional[KYCResponse])
+@router.get("/status", response_model=KYCResponse | None)
 async def get_kyc_status(
     current_user: dict = Depends(get_current_user),
 ):

@@ -25,7 +25,6 @@ DEFAULT_SYMBOLS = [
     "SH601318",
 ]
 
-
 def _load_env() -> None:
     project_root = Path(__file__).resolve().parents[3]
     env_path = project_root / ".env"
@@ -34,13 +33,11 @@ def _load_env() -> None:
     else:
         load_dotenv()
 
-
 def _parse_symbols(raw: str | None) -> List[str]:
     if not raw:
         return DEFAULT_SYMBOLS
     symbols = [item.strip() for item in raw.split(",")]
     return [item for item in symbols if item]
-
 
 def _fetch_symbols_from_db(
     table: str,
@@ -101,13 +98,11 @@ def _fetch_symbols_from_db(
         lines = [line.strip() for line in result.stdout.splitlines()]
         return [line for line in lines if line]
 
-
 def _write_pool_file(symbols: List[str], output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", encoding="utf-8") as f:
         for symbol in symbols:
             f.write(f"{symbol}\n")
-
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="生成股票池列表文件并上传到 COS")
@@ -160,7 +155,6 @@ def main() -> int:
     print(f"key: {result['key']}")
     print(f"url: {result['url']}")
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

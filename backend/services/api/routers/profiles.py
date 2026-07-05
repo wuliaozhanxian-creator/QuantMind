@@ -20,7 +20,9 @@ def get_profile_service() -> ProfileService:
     return ProfileService()
 
 
-def _filter_sensitive_profile_data(data: dict, current_user: dict, target_user_id: str) -> dict:
+def _filter_sensitive_profile_data(
+    data: dict, current_user: dict, target_user_id: str
+) -> dict:
     """根据权限过滤敏感字段"""
     # 允许的情况：
     # 1. 内部服务调用 (username 为 internal)
@@ -48,11 +50,15 @@ async def get_my_profile(
     获取当前用户档案
     """
     user_id = current_user["user_id"]
-    profile = await profile_service.get_profile(user_id, current_user["tenant_id"], use_cache=False)
+    profile = await profile_service.get_profile(
+        user_id, current_user["tenant_id"], use_cache=False
+    )
 
     if not profile:
         # 如果档案不存在，创建一个
-        profile = await profile_service.create_profile(user_id, current_user["tenant_id"])
+        profile = await profile_service.create_profile(
+            user_id, current_user["tenant_id"]
+        )
 
     # profile 已经是 dict，直接使用
     return {
@@ -72,7 +78,9 @@ async def update_my_profile(
     更新当前用户档案
     """
     user_id = current_user["user_id"]
-    profile = await profile_service.update_profile(user_id, current_user["tenant_id"], profile_data)
+    profile = await profile_service.update_profile(
+        user_id, current_user["tenant_id"], profile_data
+    )
 
     # profile 已经是 dict，直接使用
     return {
@@ -102,7 +110,9 @@ async def get_profile(
     profile = await profile_service.get_profile(user_id, current_user["tenant_id"])
 
     if not profile:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户档案不存在")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="用户档案不存在"
+        )
 
     # profile 已经是 dict，直接使用
     return {
@@ -127,12 +137,18 @@ async def update_profile(
     """
     # 检查权限
     if user_id != current_user["user_id"]:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="没有权限修改该用户档案")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="没有权限修改该用户档案"
+        )
 
-    profile = await profile_service.update_profile(user_id, current_user["tenant_id"], profile_data)
+    profile = await profile_service.update_profile(
+        user_id, current_user["tenant_id"], profile_data
+    )
 
     if not profile:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户档案不存在")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="用户档案不存在"
+        )
 
     # profile 已经是 dict，直接使用
     return {

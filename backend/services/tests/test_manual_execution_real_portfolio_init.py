@@ -5,7 +5,9 @@ from types import SimpleNamespace
 import pytest
 
 from backend.services.trade.portfolio.models import Portfolio
-from backend.services.trade.services.manual_execution_service import ManualExecutionService
+from backend.services.trade.services.manual_execution_service import (
+    ManualExecutionService,
+)
 
 
 class _ScalarResult:
@@ -71,7 +73,11 @@ async def test_ensure_real_portfolio_auto_initializes_from_latest_snapshot(monke
     db = _FakeDb()
 
     async def _snapshot(**kwargs):
-        assert kwargs == {"tenant_id": "tenant-a", "user_id": "42", "trading_mode": "REAL"}
+        assert kwargs == {
+            "tenant_id": "tenant-a",
+            "user_id": "42",
+            "trading_mode": "REAL",
+        }
         return {
             "total_asset": 1_000_000,
             "available_cash": 800_000,

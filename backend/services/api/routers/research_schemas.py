@@ -4,16 +4,13 @@ from typing import Any
 
 from pydantic import BaseModel
 
-
 class SymbolsFeaturesRequest(BaseModel):
     symbols: list[str]
-
 
 class WatchlistAddRequest(BaseModel):
     run_id: str | None = None
     stock_name: str | None = None
     features_snapshot: dict[str, Any] | None = None
-
 
 class PoolAddRequest(BaseModel):
     run_id: str | None = None

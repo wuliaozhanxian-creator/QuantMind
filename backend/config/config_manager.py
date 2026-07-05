@@ -8,10 +8,9 @@ import logging
 import os
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Optional
 
 logger = logging.getLogger(__name__)
-
 
 class DataSourceType(Enum):
     """数据源类型"""
@@ -19,7 +18,6 @@ class DataSourceType(Enum):
     TENCENT = "tencent"
     BAOSTOCK = "baostock"
     TUSHARE = "tushare"
-
 
 @dataclass
 class DataSourceConfig:
@@ -43,7 +41,6 @@ class DataSourceConfig:
         if self.timeout < 1:
             raise ValueError(f"Timeout must be >= 1, got {self.timeout}")
 
-
 @dataclass
 class CacheConfig:
     """缓存配置"""
@@ -59,7 +56,6 @@ class CacheConfig:
 
         if self.max_size < 1:
             raise ValueError(f"Max size must be >= 1, got {self.max_size}")
-
 
 class ConfigManager:
     """配置管理器
@@ -189,5 +185,7 @@ class ConfigManager:
         try:
             return int(value)
         except ValueError:
-            logger.warning(f"Invalid int value for {key}: {value}, using default {default}")
+            logger.warning(
+                f"Invalid int value for {key}: {value}, using default {default}"
+            )
             return default

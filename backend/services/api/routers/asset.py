@@ -14,7 +14,6 @@ from backend.shared.database_manager_v2 import get_session
 
 router = APIRouter()
 
-
 @router.get("/summary")
 async def get_asset_summary(
     current_user: dict = Depends(get_current_user),
@@ -30,7 +29,7 @@ async def get_asset_summary(
 
         result = await session.execute(
             text("""
-            SELECT 
+            SELECT
                 account_id,
                 snapshot_date,
                 total_asset,
@@ -85,7 +84,6 @@ async def get_asset_summary(
             },
         }
 
-
 @router.get("/history")
 async def get_asset_history(
     days: int = Query(30, ge=1, le=365, description="查询天数"),
@@ -102,7 +100,7 @@ async def get_asset_history(
 
         result = await session.execute(
             text("""
-            SELECT 
+            SELECT
                 snapshot_date,
                 total_asset,
                 cash,
@@ -146,7 +144,6 @@ async def get_asset_history(
             "data": history,
         }
 
-
 @router.get("/positions")
 async def get_positions(
     current_user: dict = Depends(get_current_user),
@@ -162,7 +159,7 @@ async def get_positions(
 
         result = await session.execute(
             text("""
-            SELECT 
+            SELECT
                 p.symbol,
                 p.symbol_name,
                 p.side,
@@ -175,8 +172,8 @@ async def get_positions(
                 p.unrealized_pnl_rate
             FROM positions p
             JOIN portfolios pf ON p.portfolio_id = pf.id
-            WHERE pf.user_id = :user_id 
-              AND pf.tenant_id = :tenant_id 
+            WHERE pf.user_id = :user_id
+              AND pf.tenant_id = :tenant_id
               AND pf.is_deleted = false
               AND p.quantity > 0
             ORDER BY p.market_value DESC
@@ -202,7 +199,9 @@ async def get_positions(
                     if row.current_price
                     else 0,
                     "market_value": float(row.market_value) if row.market_value else 0,
-                    "floating_pnl": float(row.unrealized_pnl) if row.unrealized_pnl else 0,
+                    "floating_pnl": float(row.unrealized_pnl)
+                    if row.unrealized_pnl
+                    else 0,
                     "floating_pnl_pct": float(row.unrealized_pnl_rate)
                     if row.unrealized_pnl_rate
                     else 0,

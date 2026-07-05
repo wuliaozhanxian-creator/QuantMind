@@ -7,7 +7,7 @@ import sys
 import uuid
 import re
 import time
-from typing import Dict, Any, Optional, List
+from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -16,11 +16,9 @@ from pydantic import BaseModel
 logger = logging.getLogger("AI-IDE-Executor")
 router = APIRouter()
 
-
 class SyntaxCheckRequest(BaseModel):
     code: str | None = None
     content: str | None = None
-
 
 @router.post("/check-syntax")
 async def check_syntax(request: Request, item: SyntaxCheckRequest):
@@ -44,7 +42,6 @@ async def check_syntax(request: Request, item: SyntaxCheckRequest):
         }
     except Exception as e:
         return {"valid": False, "error": f"Internal error during syntax check: {e}"}
-
 
 from backend.shared.strategy_storage import get_strategy_storage_service
 
@@ -74,7 +71,6 @@ _SMOKE_CACHE: dict[str, dict[str, Any]] = {}
 TMP_ROOT = os.getenv("AI_IDE_TEMP_DIR", "/app/db/ai_ide_tmp")
 HOST_PROJECT_PATH = os.getenv("HOST_PROJECT_PATH", "/home/quantmind")
 
-
 def _ensure_path_within(path: str, base_dir: str) -> str:
     """路径穿越防护：校验 path 解析后位于 base_dir 之内。
 
@@ -90,19 +86,15 @@ def _ensure_path_within(path: str, base_dir: str) -> str:
         )
     return path_real
 
-
 def _sanitize_user_id_for_path(user_id: str) -> str:
     """校验 user_id 不含路径穿越字符（/../ / 等），防止逃逸用户临时目录。"""
     if not user_id or "/" in user_id or "\\" in user_id or ".." in user_id:
-        raise HTTPException(
-            status_code=400, detail="非法用户标识（含路径穿越字符）"
-        )
+        raise HTTPException(status_code=400, detail="非法用户标识（含路径穿越字符）")
     # 仅允许字母数字下划线连字符
     safe = "".join(c for c in user_id if c.isalnum() or c in "-_")
     if not safe:
         raise HTTPException(status_code=400, detail="非法用户标识")
     return safe
-
 
 def _build_runner_environment(
     user_id: str, request_meta: dict[str, Any] | None = None
@@ -162,7 +154,6 @@ def _build_runner_environment(
             env[key] = value
     return env
 
-
 class StartRequest(BaseModel):
     file_id: str | None = None
     path: str | None = None  # 兼容前端字段，通常即 ID
@@ -174,7 +165,6 @@ class StartRequest(BaseModel):
     model_id: str | None = None
     run_id: str | None = None
 
-
 class SmokeImageRequest(BaseModel):
     image: str | None = None
     strict: bool = False
@@ -182,14 +172,12 @@ class SmokeImageRequest(BaseModel):
     optional_imports: list[str] | None = None
     cache_bypass: bool = False
 
-
 def _is_docstring_expr(node: ast.AST) -> bool:
     return (
         isinstance(node, ast.Expr)
         and isinstance(getattr(node, "value", None), ast.Constant)
         and isinstance(node.value.value, str)
     )
-
 
 def _is_main_guard(node: ast.AST) -> bool:
     if not isinstance(node, ast.If):
@@ -210,7 +198,6 @@ def _is_main_guard(node: ast.AST) -> bool:
         and isinstance(comparator, ast.Constant)
         and comparator.value == "__main__"
     )
-
 
 def _analyze_execution_entrypoint(code: str) -> dict[str, Any]:
     tree = ast.parse(code)
@@ -274,7 +261,6 @@ def _analyze_execution_entrypoint(code: str) -> dict[str, Any]:
     )
     return info
 
-
 def _build_runnable_error(info: dict[str, Any]) -> str:
     details: list[str] = []
     if info.get("has_strategy_config"):
@@ -307,11 +293,9 @@ def _build_runnable_error(info: dict[str, Any]) -> str:
         f"{suffix}"
     )
 
-
 def _normalize_image_ref(image: str | None) -> str:
     normalized = str(image or "").strip()
     return normalized or _DEFAULT_IMAGE
-
 
 def _build_smoke_script(
     mandatory_imports: list[str], optional_imports: list[str], strict: bool
@@ -356,7 +340,6 @@ if STRICT and failed_optional:
 print("[SMOKE] smoke test completed")
 """
 
-
 def _smoke_cache_key(
     image_id: str,
     mandatory_imports: list[str],
@@ -373,7 +356,6 @@ def _smoke_cache_key(
     )
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()
 
-
 async def _cleanup_job_artifacts(job_info: dict[str, Any]) -> None:
     for key in ("file", "runner", "smoke"):
         path = job_info.get(key)
@@ -381,8 +363,7 @@ async def _cleanup_job_artifacts(job_info: dict[str, Any]) -> None:
             try:
                 os.remove(path)
             except Exception:
-                pass
-
+                logger.debug("ignored exception", exc_info=True)
 
 async def _resolve_docker_image(client, image_ref: str):
     from docker.errors import ImageNotFound
@@ -397,7 +378,6 @@ async def _resolve_docker_image(client, image_ref: str):
             "Image %s not found locally, pulling for smoke validation", normalized
         )
         return await asyncio.to_thread(client.images.pull, normalized)
-
 
 async def _run_image_smoke_check(
     client,
@@ -536,13 +516,12 @@ async def _run_image_smoke_check(
             try:
                 await asyncio.to_thread(container.remove, force=True)
             except Exception:
-                pass
+                logger.debug("ignored exception", exc_info=True)
         try:
             if os.path.exists(smoke_script_path):
                 os.remove(smoke_script_path)
         except Exception:
-            pass
-
+            logger.debug("ignored exception", exc_info=True)
 
 def _build_runner_script() -> str:
     return r'''import ast
@@ -557,12 +536,10 @@ import traceback
 STRATEGY_PATH = "/app/strategy.py"
 QLIB_DATA_PATH = "/app/db/qlib_data"
 
-
 def _is_docstring_expr(node):
     return isinstance(node, ast.Expr) and isinstance(getattr(node, "value", None), ast.Constant) and isinstance(
         node.value.value, str
     )
-
 
 def _is_main_guard(node):
     if not isinstance(node, ast.If):
@@ -579,7 +556,6 @@ def _is_main_guard(node):
         and isinstance(comparator, ast.Constant)
         and comparator.value == "__main__"
     )
-
 
 def _analyze(code):
     tree = ast.parse(code)
@@ -625,7 +601,6 @@ def _analyze(code):
     )
     return info
 
-
 def _load_module(path):
     spec = importlib.util.spec_from_file_location("ai_ide_strategy", path)
     if spec is None or spec.loader is None:
@@ -634,7 +609,6 @@ def _load_module(path):
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
-
 
 def _call_callable(module, name):
     fn = getattr(module, name, None)
@@ -647,7 +621,6 @@ def _call_callable(module, name):
 
         asyncio.run(result)
     return True
-
 
 def _init_qlib():
     """初始化 Qlib"""
@@ -663,7 +636,6 @@ def _init_qlib():
     qlib.init(provider_uri={"day": provider_uri}, region="cn")
     print("[SYSTEM] Qlib 初始化成功")
     return True
-
 
 def _run_module_backtest(module):
     """执行模块型策略（回测中心兼容模式）"""
@@ -798,7 +770,6 @@ def _run_module_backtest(module):
     print("\n[RESULT] 回测成功")
     return 0
 
-
 def main():
     source = pathlib.Path(STRATEGY_PATH).read_text(encoding="utf-8")
     info = _analyze(source)
@@ -827,18 +798,15 @@ def main():
     print("  3. get_strategy_config() 或 STRATEGY_CONFIG (模块型策略)")
     return 2
 
-
 if __name__ == "__main__":
     raise SystemExit(main())
 '''
-
 
 def _get_user_id(request: Request) -> str:
     user = getattr(request.state, "user", None)
     if not user:
         raise HTTPException(status_code=401, detail="Authentication required")
     return str(user.get("user_id") or user.get("sub"))
-
 
 @router.post("/start")
 @router.post("/run-tmp")
@@ -880,12 +848,12 @@ async def start_execution(request: Request, item: StartRequest):
             raise HTTPException(
                 status_code=422,
                 detail=f"策略代码语法错误，无法执行: {e.msg} (line {e.lineno})",
-            )
+            ) from e
         except Exception as e:
             logger.exception("Execution entrypoint analysis failed")
             raise HTTPException(
                 status_code=500, detail=f"Execution analysis failed: {e}"
-            )
+            ) from e
 
         if not entrypoint_info.get("runnable"):
             raise HTTPException(
@@ -966,7 +934,7 @@ async def start_execution(request: Request, item: StartRequest):
                     try:
                         smoke_client.close()
                     except Exception:
-                        pass
+                        logger.debug("ignored exception", exc_info=True)
 
         # 启动异步任务执行进程
         asyncio.create_task(run_process(job_id, file_path))
@@ -976,8 +944,7 @@ async def start_execution(request: Request, item: StartRequest):
         raise
     except Exception as e:
         logger.exception("Execution start failed")
-        raise HTTPException(status_code=500, detail=str(e))
-
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @router.post("/smoke-image")
 async def smoke_image(request: Request, item: SmokeImageRequest):
@@ -1014,13 +981,12 @@ async def smoke_image(request: Request, item: SmokeImageRequest):
             try:
                 client.close()
             except Exception:
-                pass
+                logger.debug("ignored exception", exc_info=True)
     except HTTPException:
         raise
     except Exception as e:
         logger.exception("Image smoke failed")
-        raise HTTPException(status_code=500, detail=str(e))
-
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @router.post("/stop/{job_id}")
 async def stop_execution(request: Request, job_id: str):
@@ -1046,7 +1012,6 @@ async def stop_execution(request: Request, job_id: str):
             return {"status": "error", "message": str(e)}
 
     return {"status": "already_stopped"}
-
 
 @router.get("/logs/{job_id}")
 async def get_logs_stream(request: Request, job_id: str):
@@ -1078,7 +1043,6 @@ async def get_logs_stream(request: Request, job_id: str):
             del jobs[job_id]
 
     return StreamingResponse(log_generator(), media_type="text/event-stream")
-
 
 async def run_process(job_id: str, file_path: str):
     if job_id not in jobs:

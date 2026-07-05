@@ -29,7 +29,9 @@ def test_is_trading_day_route(client):
         AsyncMock(return_value=True),
     ):
         try:
-            response = client.get("/api/v1/market-calendar/is-trading-day?market=SSE&date=2026-04-07")
+            response = client.get(
+                "/api/v1/market-calendar/is-trading-day?market=SSE&date=2026-04-07"
+            )
             assert response.status_code == 200
             payload = response.json()
             assert payload["is_trading_day"] is True
@@ -52,11 +54,15 @@ def test_next_and_prev_trading_day_routes(client):
             AsyncMock(return_value=date(2026, 4, 3)),
         ):
             try:
-                next_resp = client.get("/api/v1/market-calendar/next-trading-day?market=SSE&date=2026-04-07")
+                next_resp = client.get(
+                    "/api/v1/market-calendar/next-trading-day?market=SSE&date=2026-04-07"
+                )
                 assert next_resp.status_code == 200
                 assert next_resp.json()["next_trading_day"] == "2026-04-08"
 
-                prev_resp = client.get("/api/v1/market-calendar/prev-trading-day?market=SSE&date=2026-04-07")
+                prev_resp = client.get(
+                    "/api/v1/market-calendar/prev-trading-day?market=SSE&date=2026-04-07"
+                )
                 assert prev_resp.status_code == 200
                 assert prev_resp.json()["prev_trading_day"] == "2026-04-03"
             finally:

@@ -7,7 +7,6 @@
 import re
 import sys
 from pathlib import Path
-from typing import Dict, List
 
 
 class ImportRefactor:
@@ -108,7 +107,9 @@ class ImportRefactor:
                 continue
 
             # 移除路径设置注释
-            if line.strip().startswith("#") and ("路径" in line or "path" in line.lower()):
+            if line.strip().startswith("#") and (
+                "路径" in line or "path" in line.lower()
+            ):
                 continue
 
             # 重构import语句
@@ -130,7 +131,9 @@ class ImportRefactor:
     def _is_import_line(self, line: str) -> bool:
         """检查是否是import行"""
         stripped = line.strip()
-        return stripped.startswith("from backend.") or stripped.startswith("import backend.")
+        return stripped.startswith("from backend.") or stripped.startswith(
+            "import backend."
+        )
 
     def _refactor_import_line(self, line: str, line_num: int) -> str:
         """重构import行"""
@@ -150,12 +153,16 @@ class ImportRefactor:
         """重构from import语句"""
         # 保持原有的from import，但添加导入保护
         indent = self._get_indent(line)
-        return f"{indent}# Using unified path manager (auto-initialized on import)\n{line}"
+        return (
+            f"{indent}# Using unified path manager (auto-initialized on import)\n{line}"
+        )
 
     def _refactor_direct_import(self, line: str) -> str:
         """重构direct import语句"""
         indent = self._get_indent(line)
-        return f"{indent}# Using unified path manager (auto-initialized on import)\n{line}"
+        return (
+            f"{indent}# Using unified path manager (auto-initialized on import)\n{line}"
+        )
 
     def _get_indent(self, line: str) -> str:
         """获取行缩进"""
@@ -236,7 +243,9 @@ def main():
         default="/Users/qusong/git/quantmind/backend",
         help="后端根目录路径",
     )
-    parser.add_argument("--dry-run", action="store_true", help="只显示需要重构的文件，不执行实际重构")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="只显示需要重构的文件，不执行实际重构"
+    )
 
     args = parser.parse_args()
 

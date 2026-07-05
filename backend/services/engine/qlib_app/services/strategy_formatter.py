@@ -2,11 +2,12 @@ import ast
 import logging
 from typing import Optional
 
-from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
+from backend.services.engine.qlib_app.utils.structured_logger import (
+    StructuredTaskLogger,
+)
 
 logger = logging.getLogger(__name__)
 task_logger = StructuredTaskLogger(logger, "StrategyFormatterService")
-
 
 class StrategyFormatterService:
     """Strategy formatting middleware for filtering and patching unsupported Qlib strategies."""
@@ -46,7 +47,11 @@ class StrategyFormatterService:
         # Scan the AST for classes and configuration protocols
         for node in tree.body:
             if isinstance(node, ast.ImportFrom):
-                if node.module in ["qlib.strategy.base", "qlib.contrib.strategy", "qlib.contrib.strategy.base"]:
+                if node.module in [
+                    "qlib.strategy.base",
+                    "qlib.contrib.strategy",
+                    "qlib.contrib.strategy.base",
+                ]:
                     for n in node.names:
                         if n.name == "BaseStrategy":
                             has_base_strategy_import = True
@@ -88,7 +93,9 @@ class StrategyFormatterService:
                 defaults_count = len(sub_node.args.defaults)
 
                 # Mandatory args are the ones at the beginning that don't have a matching default
-                mandatory_args = all_args[:-defaults_count] if defaults_count > 0 else all_args
+                mandatory_args = (
+                    all_args[:-defaults_count] if defaults_count > 0 else all_args
+                )
 
                 # Assign safe defaults for common Qlib params often seen in legacy strategies
                 safe_defaults = {
@@ -143,7 +150,7 @@ def get_strategy_config():
 # === TradeDecision Compatibility Wrapper ===
 try:
     from qlib.backtest.decision import TradeDecisionWO, Order
-    
+
     def _ensure_trade_decision(self, *args, **kwargs):
         # Call the original method
         res = self._original_generate_trade_decision(*args, **kwargs)
@@ -153,10 +160,10 @@ try:
                 for stock, amount in res.items():
                     if isinstance(amount, (int, float)):
                         order_list.append(Order(
-                            stock_id=stock, 
-                            amount=abs(float(amount)), 
-                            start_time=None, 
-                            end_time=None, 
+                            stock_id=stock,
+                            amount=abs(float(amount)),
+                            start_time=None,
+                            end_time=None,
                             direction=Order.BUY if amount > 0 else Order.SELL
                         ))
             else:

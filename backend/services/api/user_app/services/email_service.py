@@ -11,7 +11,7 @@ import smtplib
 from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,7 +24,6 @@ from backend.services.api.user_app.models.rbac import (
 from backend.services.api.user_app.models.user import User
 
 logger = logging.getLogger(__name__)
-
 
 class EmailService:
     """
@@ -176,7 +175,6 @@ class EmailService:
             subject, email, html, f"欢迎加入 QuantMind, {username}!"
         )
 
-
 class VerificationService:
     """邮箱验证服务 (保持逻辑不变，适配新的 EmailService)"""
 
@@ -279,7 +277,7 @@ class VerificationService:
                 EmailVerification.user_id == user_id,
                 EmailVerification.tenant_id == tenant_id,
                 EmailVerification.code_type == code_type,
-                EmailVerification.is_used == False,
+                not EmailVerification.is_used,
             )
         )
         result = await self.db.execute(stmt)
@@ -289,7 +287,6 @@ class VerificationService:
             verification.is_expired = True
 
         await self.db.commit()
-
 
 class PasswordResetService:
     """密码重置服务 (适配新的 EmailService)"""

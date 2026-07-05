@@ -3,7 +3,7 @@
 import json
 import logging
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Optional
 
 from redis.asyncio import Redis
 from sqlalchemy import desc, select
@@ -22,12 +22,10 @@ from .remote_redis_source import RemoteRedisDataSource
 
 logger = logging.getLogger(__name__)
 
-
 def _as_utc_aware(dt: datetime) -> datetime:
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)
-
 
 class QuoteService:
     """实时行情服务"""
@@ -119,17 +117,26 @@ class QuoteService:
 
     async def get_latest_quote(self, symbol: str) -> QuoteResponse | None:
         """获取最新行情"""
-        query = select(Quote).filter(Quote.symbol == symbol).order_by(desc(Quote.timestamp)).limit(1)
+        query = (
+            select(Quote)
+            .filter(Quote.symbol == symbol)
+            .order_by(desc(Quote.timestamp))
+            .limit(1)
+        )
         result = await self.db.execute(query)
         quote = result.scalar_one_or_none()
 
         return QuoteResponse.model_validate(quote) if quote else None
 
-    async def _get_recent_quote(self, symbol: str, max_age_seconds: int = 5) -> QuoteResponse | None:
+    async def _get_recent_quote(
+        self, symbol: str, max_age_seconds: int = 5
+    ) -> QuoteResponse | None:
         latest = await self.get_latest_quote(symbol)
         if not latest:
             return None
-        age = (datetime.now(timezone.utc) - _as_utc_aware(latest.timestamp)).total_seconds()
+        age = (
+            datetime.now(timezone.utc) - _as_utc_aware(latest.timestamp)
+        ).total_seconds()
         return latest if age <= max_age_seconds else None
 
     def _get_data_source(self, source: str | None = None) -> DataSourceAdapter:

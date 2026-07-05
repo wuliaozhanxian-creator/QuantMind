@@ -12,11 +12,18 @@ from backend.services.engine.qlib_app.api.ai_fix import router as ai_fix_router
 from backend.services.engine.qlib_app.api.export import router as export_router
 from backend.services.engine.qlib_app.api.history import router as history_router
 from backend.services.engine.qlib_app.api.ops import router as ops_router
-from backend.services.engine.qlib_app.api.optimization import router as optimization_router
+from backend.services.engine.qlib_app.api.optimization import (
+    router as optimization_router,
+)
 from backend.services.engine.qlib_app.api.risk import router as risk_router
-from backend.services.engine.qlib_app.schemas.backtest import QlibBacktestRequest, QlibBacktestResult
+from backend.services.engine.qlib_app.schemas.backtest import (
+    QlibBacktestRequest,
+    QlibBacktestResult,
+)
 from backend.shared.utils import normalize_user_id
-from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
+from backend.services.engine.qlib_app.utils.structured_logger import (
+    StructuredTaskLogger,
+)
 
 # 前端 backtestService 的 baseUrl 是 /api/v1/qlib
 # 因此这里必须显式包含 prefix="/qlib"，以便匹配 /api/v1/qlib/backtest
@@ -33,23 +40,21 @@ router.include_router(risk_router)
 router.include_router(optimization_router)
 router.include_router(ai_fix_router)
 
-
 def get_qlib_service() -> Any:
     """依赖注入：获取 Qlib 服务实例"""
     return get_qlib_service_cached()
 
-
 _qlib_service_cache = None
-
 
 def get_qlib_service_cached():
     global _qlib_service_cache
     if _qlib_service_cache is None:
-        from backend.services.engine.qlib_app.services.backtest_service import QlibBacktestService
+        from backend.services.engine.qlib_app.services.backtest_service import (
+            QlibBacktestService,
+        )
 
         _qlib_service_cache = QlibBacktestService()
     return _qlib_service_cache
-
 
 @router.post("/backtest", response_model=QlibBacktestResult)
 async def run_backtest(
@@ -80,7 +85,9 @@ async def run_backtest(
             request_dict["backtest_id"] = backtest_id
 
             try:
-                from backend.services.engine.qlib_app.services.backtest_persistence import BacktestPersistence
+                from backend.services.engine.qlib_app.services.backtest_persistence import (
+                    BacktestPersistence,
+                )
                 from backend.services.engine.qlib_app.tasks import run_backtest_async
 
                 task = run_backtest_async.apply_async(args=[request_dict])
@@ -117,11 +124,11 @@ async def run_backtest(
                 raise HTTPException(
                     status_code=503,
                     detail="异步回测服务不可用，请检查 Celery Worker",
-                )
+                ) from celery_err
 
         return await service.run_backtest(request)
     except HTTPException:
         raise
     except Exception as e:
         task_logger.exception("backtest_failed", "回测执行失败", error=str(e))
-        raise HTTPException(status_code=500, detail=f"回测执行失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"回测执行失败: {str(e)}") from e

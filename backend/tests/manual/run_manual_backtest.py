@@ -27,7 +27,9 @@ backtest_config = {
     },
 }
 
-portfolio_dict, indicator_dict = backtest(strategy=strategy, executor=executor, **backtest_config)
+portfolio_dict, indicator_dict = backtest(
+    strategy=strategy, executor=executor, **backtest_config
+)
 
 report = portfolio_dict.get("1day")[0]
 print(f"Report head:\n{report.head()}")

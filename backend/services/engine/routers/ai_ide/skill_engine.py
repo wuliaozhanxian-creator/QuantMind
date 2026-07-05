@@ -13,21 +13,55 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-
 class SkillEngine:
     """策略生成模板路由引擎"""
 
     # 意图检测关键词
     TRADITIONAL_KEYWORDS = [
-        "MACD", "KDJ", "RSI", "BOLL", "布林", "均线", "MA", "EMA", "SMA",
-        "指标", "技术指标", "传统", "backtest", "回测", "信号", "买入", "卖出",
-        "cross", "金叉", "死叉", "突破", "支撑", "压力", "趋势",
+        "MACD",
+        "KDJ",
+        "RSI",
+        "BOLL",
+        "布林",
+        "均线",
+        "MA",
+        "EMA",
+        "SMA",
+        "指标",
+        "技术指标",
+        "传统",
+        "backtest",
+        "回测",
+        "信号",
+        "买入",
+        "卖出",
+        "cross",
+        "金叉",
+        "死叉",
+        "突破",
+        "支撑",
+        "压力",
+        "趋势",
     ]
 
     MODEL_KEYWORDS = [
-        "模型", "预测", "机器学习", "ML", "AI", "深度学习", "神经网络",
-        "RedisTopkStrategy", "TopK", "选股", "因子", "alpha", "分数", "score",
-        "STRATEGY_CONFIG", "get_strategy_config", "策略配置",
+        "模型",
+        "预测",
+        "机器学习",
+        "ML",
+        "AI",
+        "深度学习",
+        "神经网络",
+        "RedisTopkStrategy",
+        "TopK",
+        "选股",
+        "因子",
+        "alpha",
+        "分数",
+        "score",
+        "STRATEGY_CONFIG",
+        "get_strategy_config",
+        "策略配置",
     ]
 
     def __init__(self, templates_dir: str | None = None):
@@ -49,7 +83,9 @@ class SkillEngine:
         user_lower = user_input.lower()
         error_msg = context.get("error_msg", "")
 
-        traditional_score = sum(1 for kw in self.TRADITIONAL_KEYWORDS if kw.lower() in user_lower)
+        traditional_score = sum(
+            1 for kw in self.TRADITIONAL_KEYWORDS if kw.lower() in user_lower
+        )
         model_score = sum(1 for kw in self.MODEL_KEYWORDS if kw.lower() in user_lower)
 
         templates = []
@@ -75,7 +111,12 @@ class SkillEngine:
             return self._cache[template_name]
 
         # 路径穿越防护：校验模板名不含路径分隔符或 ..
-        if not template_name or "/" in template_name or "\\" in template_name or ".." in template_name:
+        if (
+            not template_name
+            or "/" in template_name
+            or "\\" in template_name
+            or ".." in template_name
+        ):
             logger.warning(f"Rejected suspicious template name: {template_name!r}")
             return ""
 
@@ -83,8 +124,9 @@ class SkillEngine:
         # 路径穿越防护：校验最终路径仍在 templates_dir 内
         templates_dir_real = os.path.realpath(self.templates_dir)
         template_path_real = os.path.realpath(template_path)
-        if template_path_real != templates_dir_real and not template_path_real.startswith(
-            templates_dir_real + os.sep
+        if (
+            template_path_real != templates_dir_real
+            and not template_path_real.startswith(templates_dir_real + os.sep)
         ):
             logger.warning(f"Path traversal blocked for template: {template_name!r}")
             return ""

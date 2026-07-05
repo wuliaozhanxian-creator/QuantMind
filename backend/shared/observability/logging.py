@@ -22,7 +22,7 @@ import sys
 import time
 import traceback
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 try:
     from opentelemetry import trace
@@ -30,7 +30,6 @@ try:
     _OTEL_AVAILABLE = True
 except ImportError:
     _OTEL_AVAILABLE = False
-
 
 class StructuredFormatter(logging.Formatter):
     """结构化日志格式化器"""
@@ -117,7 +116,6 @@ class StructuredFormatter(logging.Formatter):
             log_data["metadata"] = record.metadata
 
         return json.dumps(log_data, ensure_ascii=False, default=str)
-
 
 class QuantMindLogger:
     """QuantMind统一日志管理器"""
@@ -249,14 +247,15 @@ class QuantMindLogger:
         log_level = getattr(logging, level.upper())
         logger.log(log_level, message, extra=extra)
 
-
 class LoggerMixin:
     """日志器混入类，为其他类提供日志功能"""
 
     @property
     def logger(self) -> logging.Logger:
         """获取当前类的日志器"""
-        return QuantMindLogger.get_logger(f"{self.__class__.__module__}.{self.__class__.__name__}")
+        return QuantMindLogger.get_logger(
+            f"{self.__class__.__module__}.{self.__class__.__name__}"
+        )
 
     def log_info(
         self,
@@ -342,7 +341,6 @@ class LoggerMixin:
             **kwargs,
         )
 
-
 def init_service_logging(
     service_name: str,
     service_version: str = "1.0.0",
@@ -381,7 +379,6 @@ def init_service_logging(
     )
 
     return QuantMindLogger.get_logger(service_name)
-
 
 # 性能监控装饰器
 def log_performance(logger: logging.Logger | None = None):
@@ -454,7 +451,6 @@ def log_performance(logger: logging.Logger | None = None):
         return wrapper
 
     return decorator
-
 
 __all__ = [
     "QuantMindLogger",

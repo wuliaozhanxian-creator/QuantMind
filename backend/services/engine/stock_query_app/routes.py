@@ -4,7 +4,7 @@
 """
 
 import logging
-from typing import List, Optional
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
@@ -20,14 +20,12 @@ router = APIRouter(prefix="/api/v1", tags=["stock-query"])
 _query_service = None
 _search_service = None
 
-
 def get_query_service() -> StockQueryService:
     """获取股票查询服务实例"""
     global _query_service
     if _query_service is None:
         _query_service = StockQueryService()
     return _query_service
-
 
 def get_search_service() -> StockSearchService:
     """获取股票搜索服务实例"""
@@ -38,21 +36,17 @@ def get_search_service() -> StockSearchService:
 
     # 请求模型
 
-
 class StockQueryRequest(BaseModel):
     symbol: str
     fields: list[str] | None = None
-
 
 class StockSearchRequest(BaseModel):
     query: str
     limit: int | None = 10
 
-
 class MarketIndexRequest(BaseModel):
     symbols: list[str] | None = None
     indicators: list[str] | None = None
-
 
 @router.get("/stocks/search")
 async def search_stocks(
@@ -79,8 +73,7 @@ async def search_stocks(
         }
     except Exception as e:
         logger.error("Stock search failed", extra={"query": q, "error": str(e)})
-        raise HTTPException(status_code=500, detail=f"搜索失败: {str(e)}")
-
+        raise HTTPException(status_code=500, detail=f"搜索失败: {str(e)}") from e
 
 @router.get("/stocks/{symbol}")
 async def get_stock_info(symbol: str):
@@ -91,7 +84,10 @@ async def get_stock_info(symbol: str):
         query_service = get_query_service()
         stock_info_resp = await query_service.get_stock_info(symbol)
         if not stock_info_resp or not bool(getattr(stock_info_resp, "success", False)):
-            raise HTTPException(status_code=500, detail=f"获取股票信息失败: {getattr(stock_info_resp, 'message', 'unknown error')}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"获取股票信息失败: {getattr(stock_info_resp, 'message', 'unknown error')}",
+            )
 
         stock_info = getattr(stock_info_resp, "data", None)
         if not isinstance(stock_info, dict):
@@ -112,8 +108,9 @@ async def get_stock_info(symbol: str):
         raise
     except Exception as e:
         logger.error("Get stock info failed", extra={"symbol": symbol, "error": str(e)})
-        raise HTTPException(status_code=500, detail=f"获取股票信息失败: {str(e)}")
-
+        raise HTTPException(
+            status_code=500, detail=f"获取股票信息失败: {str(e)}"
+        ) from e
 
 @router.get("/stocks/{symbol}/quote")
 async def get_stock_quote(symbol: str):
@@ -141,9 +138,12 @@ async def get_stock_quote(symbol: str):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Get stock quote failed", extra={"symbol": symbol, "error": str(e)})
-        raise HTTPException(status_code=500, detail=f"获取股票报价失败: {str(e)}")
-
+        logger.error(
+            "Get stock quote failed", extra={"symbol": symbol, "error": str(e)}
+        )
+        raise HTTPException(
+            status_code=500, detail=f"获取股票报价失败: {str(e)}"
+        ) from e
 
 @router.get("/market/indices")
 async def get_market_indices(
@@ -151,7 +151,9 @@ async def get_market_indices(
     indicators: list[str] | None = Query(None, description="技术指标列表"),
 ):
     """获取大盘指数信息"""
-    logger.info("Fetching market indices", extra={"symbols": symbols, "indicators": indicators})
+    logger.info(
+        "Fetching market indices", extra={"symbols": symbols, "indicators": indicators}
+    )
 
     try:
         query_service = get_query_service()
@@ -169,8 +171,9 @@ async def get_market_indices(
         }
     except Exception as e:
         logger.error("Get market indices failed", extra={"error": str(e)})
-        raise HTTPException(status_code=500, detail=f"获取大盘指数失败: {str(e)}")
-
+        raise HTTPException(
+            status_code=500, detail=f"获取大盘指数失败: {str(e)}"
+        ) from e
 
 @router.get("/market/overview")
 async def get_market_overview():
@@ -186,8 +189,9 @@ async def get_market_overview():
         return overview
     except Exception as e:
         logger.error("Get market overview failed", extra={"error": str(e)})
-        raise HTTPException(status_code=500, detail=f"获取市场概览失败: {str(e)}")
-
+        raise HTTPException(
+            status_code=500, detail=f"获取市场概览失败: {str(e)}"
+        ) from e
 
 """
 注意：企业级金融业务禁止内置任何演示数据接口。

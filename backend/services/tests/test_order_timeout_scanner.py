@@ -70,7 +70,9 @@ async def test_bridge_ack_timeout_marks_pending_review_without_rejecting(monkeyp
         notifications.append(kwargs)
         return None
 
-    monkeypatch.setattr(order_timeout_scanner, "publish_notification_async", _fake_notification)
+    monkeypatch.setattr(
+        order_timeout_scanner, "publish_notification_async", _fake_notification
+    )
     monkeypatch.setattr(order_timeout_scanner, "_BRIDGE_ACK_TIMEOUT_SECONDS", 120)
 
     count = await order_timeout_scanner._scan_bridge_ack_timeout_once()
@@ -84,7 +86,7 @@ async def test_bridge_ack_timeout_marks_pending_review_without_rejecting(monkeyp
 
 @pytest.mark.asyncio
 async def test_bridge_ack_timeout_skips_already_flagged_order(monkeypatch):
-    order = SimpleNamespace(
+    SimpleNamespace(
         order_id=uuid4(),
         tenant_id="default",
         user_id=1001,
@@ -108,7 +110,9 @@ async def test_bridge_ack_timeout_skips_already_flagged_order(monkeypatch):
         notifications.append(kwargs)
         return None
 
-    monkeypatch.setattr(order_timeout_scanner, "publish_notification_async", _fake_notification)
+    monkeypatch.setattr(
+        order_timeout_scanner, "publish_notification_async", _fake_notification
+    )
     monkeypatch.setattr(order_timeout_scanner, "_BRIDGE_ACK_TIMEOUT_SECONDS", 120)
 
     count = await order_timeout_scanner._scan_bridge_ack_timeout_once()

@@ -3,7 +3,6 @@
 import numpy as np
 from typing import Any
 
-
 def _to_finite_float(value: Any) -> float | None:
     try:
         val = float(value)
@@ -13,7 +12,6 @@ def _to_finite_float(value: Any) -> float | None:
         return None
     return val
 
-
 def _normalize_display_quantity(symbol: str, quantity: float) -> int:
     qty_int = int(round(float(quantity)))
     symbol_upper = str(symbol or "").upper()
@@ -22,7 +20,6 @@ def _normalize_display_quantity(symbol: str, quantity: float) -> int:
         if abs(qty_int - lot_rounded) <= 2:
             return lot_rounded
     return qty_int
-
 
 def _build_quick_trade_rows(
     *,
@@ -77,22 +74,33 @@ def _build_quick_trade_rows(
 
         # 兼容性处理（旧数据 adj_price/adj_quantity 可能是复权口径）：
         quantity_is_integer_like = (
-            explicit_quantity is not None and np.isfinite(explicit_quantity)
+            explicit_quantity is not None
+            and np.isfinite(explicit_quantity)
             and abs(explicit_quantity - round(explicit_quantity)) <= 1e-6
         )
         price_looks_adjusted = (
-            explicit_price is not None and adj_price is not None and factor is not None and factor > 0
+            explicit_price is not None
+            and adj_price is not None
+            and factor is not None
+            and factor > 0
             and explicit_price < adj_price * 0.9
         )
         should_restore = (
-            has_valid_factor and adj_price is not None and adj_quantity is not None
-            and ((explicit_quantity is None or not quantity_is_integer_like) or price_looks_adjusted)
+            has_valid_factor
+            and adj_price is not None
+            and adj_quantity is not None
+            and (
+                (explicit_quantity is None or not quantity_is_integer_like)
+                or price_looks_adjusted
+            )
         )
         if should_restore:
             display_price = adj_price / factor
             display_quantity = adj_quantity * factor
 
-        qty_int = _normalize_display_quantity(str(trade.get("symbol", "")), display_quantity)
+        qty_int = _normalize_display_quantity(
+            str(trade.get("symbol", "")), display_quantity
+        )
 
         # 优先使用 totalAmount（recording_strategy 写的真实成交额）
         amount = _to_finite_float(trade.get("totalAmount", trade.get("total_amount")))
@@ -151,6 +159,7 @@ def _build_quick_trade_rows(
 
     # 按日分组
     from collections import defaultdict
+
     day_trade_indices: dict[str, list[int]] = defaultdict(list)
     for idx, item in enumerate(normalized_trades):
         day_trade_indices[item["trade_day"]].append(idx)
@@ -244,13 +253,19 @@ def _build_quick_trade_rows(
                     for s, qty in position_qty_by_symbol.items()
                     if s in last_price_by_symbol
                 )
-                reconstructed = running_cash + pos_value if running_cash is not None else None
+                reconstructed = (
+                    running_cash + pos_value if running_cash is not None else None
+                )
                 reconstructed_values.append(reconstructed)
                 equity_balance_by_index[idx] = reconstructed
 
             # 用 equity_curve 锚点修正整体偏差
             anchor = equity_by_date.get(trade_day)
-            if anchor is not None and reconstructed_values and reconstructed_values[-1] is not None:
+            if (
+                anchor is not None
+                and reconstructed_values
+                and reconstructed_values[-1] is not None
+            ):
                 offset = anchor - reconstructed_values[-1]
                 for idx in indices:
                     val = equity_balance_by_index.get(idx)

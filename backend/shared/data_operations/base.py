@@ -11,10 +11,12 @@ import uuid
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Optional, Union
 
 # 添加路径以便导入共享模块(使用相对路径,不硬编码 /app)
-_proj_root = str(Path(__file__).resolve().parents[3])  # backend/shared/data_operations -> 项目根
+_proj_root = str(
+    Path(__file__).resolve().parents[3]
+)  # backend/shared/data_operations -> 项目根
 sys.path.insert(0, _proj_root)
 sys.path.insert(0, str(Path(_proj_root) / "backend" / "shared"))
 sys.path.insert(0, str(Path(_proj_root) / "backend"))
@@ -41,7 +43,6 @@ except ImportError as e:
 
     # 创建fallback装饰器
 
-
 def fallback_performance_decorator(logger, operation_name):
     """Fallback performance decorator when observability modules are not available"""
 
@@ -55,10 +56,8 @@ def fallback_performance_decorator(logger, operation_name):
 
     # 使用fallback装饰器如果log_performance不可用
 
-
 if log_performance is None:
     log_performance = fallback_performance_decorator
-
 
 class BaseDataOperation(ABC):
     """
@@ -71,7 +70,9 @@ class BaseDataOperation(ABC):
     - 配置管理
     """
 
-    def __init__(self, operation_name: str, config: dict[str, Any] | None = None, **kwargs):
+    def __init__(
+        self, operation_name: str, config: dict[str, Any] | None = None, **kwargs
+    ):
         """
         初始化数据操作
 
@@ -257,7 +258,6 @@ class BaseDataOperation(ABC):
         """
         return self.config.get(key, default)
 
-
 class DatabaseDataOperation(BaseDataOperation):
     """
     数据库数据操作基类
@@ -298,8 +298,9 @@ class DatabaseDataOperation(BaseDataOperation):
             # 关闭连接的逻辑
             self.db_connection = None
 
-            self.logger.info("Database connection closed", extra={"operation_id": self.operation_id})
-
+            self.logger.info(
+                "Database connection closed", extra={"operation_id": self.operation_id}
+            )
 
 class FileDataOperation(BaseDataOperation):
     """

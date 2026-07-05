@@ -1,13 +1,28 @@
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from sqlalchemy import select, update
 from .internal_strategy_utils import *
-from .internal_strategy_utils import _bridge_ws_url, _agent_template_root, _qmt_agent_release_manifest_key, _qmt_agent_release_asset_ttl, _qmt_agent_release_local_manifest_path, _load_qmt_agent_release_manifest, _build_qmt_agent_release_asset, _iso_or_none, _to_float, _compute_account_metrics, _get_bridge_session_context
+from .internal_strategy_utils import (
+    _bridge_ws_url,
+    _agent_template_root,
+    _qmt_agent_release_manifest_key,
+    _qmt_agent_release_asset_ttl,
+    _qmt_agent_release_local_manifest_path,
+    _load_qmt_agent_release_manifest,
+    _build_qmt_agent_release_asset,
+    _iso_or_none,
+    _to_float,
+    _compute_account_metrics,
+    _get_bridge_session_context,
+)
 from .real_trading_utils import _fetch_latest_real_account_snapshot
 from backend.shared.trade_account_cache import (
     write_trade_account_cache,
     write_trade_agent_heartbeat_cache,
 )
-from backend.shared.trade_redis_keys import build_trade_account_key, build_trade_agent_heartbeat_key
+from backend.shared.trade_redis_keys import (
+    build_trade_account_key,
+    build_trade_agent_heartbeat_key,
+)
 from backend.services.trade.models.qmt_agent_session import QMTAgentSession
 
 router = APIRouter(tags=["Internal Strategy Gateway"])
@@ -46,7 +61,10 @@ def _build_portfolio_sync_payload_from_snapshot(
     )
     market_value = _to_float(latest_snapshot.get("market_value"), 0.0)
     raw_frozen = _to_float(
-        payload_json.get("frozen_cash", latest_snapshot.get("frozen_cash", latest_snapshot.get("frozen"))),
+        payload_json.get(
+            "frozen_cash",
+            latest_snapshot.get("frozen_cash", latest_snapshot.get("frozen")),
+        ),
         0.0,
     )
     derived_frozen = max(0.0, total_asset - market_value - available_cash)
@@ -58,7 +76,9 @@ def _build_portfolio_sync_payload_from_snapshot(
         if liabilities <= 0.0:
             liabilities = _to_float(getattr(fallback_payload, "liabilities", 0.0), 0.0)
         if short_market_value <= 0.0:
-            short_market_value = _to_float(getattr(fallback_payload, "short_market_value", 0.0), 0.0)
+            short_market_value = _to_float(
+                getattr(fallback_payload, "short_market_value", 0.0), 0.0
+            )
 
     return {
         "total_asset": total_asset,
@@ -71,6 +91,7 @@ def _build_portfolio_sync_payload_from_snapshot(
         "source": "latest_valid_snapshot",
         "snapshot_at": latest_snapshot.get("snapshot_at"),
     }
+
 
 @router.post("/dispatch/item-status", dependencies=[Depends(verify_internal_call)])
 async def update_dispatch_item_status(
@@ -107,7 +128,7 @@ async def update_dispatch_item_status(
     try:
         user_id_int = int(user_id)
     except ValueError:
-        raise HTTPException(status_code=400, detail="invalid x_user_id")
+        raise HTTPException(status_code=400, detail="invalid x_user_id") from None
 
     order_status_map = {
         "pending": "PENDING",
@@ -198,14 +219,19 @@ async def create_qmt_bridge_session(
 
     key = await resolve_api_key(db, payload.access_key)
     validation_error = validate_api_key_secret(key, payload.secret_key)
-    if validation_error == "secret_key_invalid" or validation_error == "access_key_not_found":
+    if (
+        validation_error == "secret_key_invalid"
+        or validation_error == "access_key_not_found"
+    ):
         raise HTTPException(status_code=401, detail="Invalid access_key or secret_key")
     if validation_error in {"access_key_inactive", "access_key_expired"}:
         raise HTTPException(status_code=403, detail=validation_error)
 
     active_binding = await get_active_binding(db, key.tenant_id, payload.account_id)
     if active_binding and active_binding.api_key_id != key.id:
-        raise HTTPException(status_code=409, detail="account_id already bound to another active agent")
+        raise HTTPException(
+            status_code=409, detail="account_id already bound to another active agent"
+        )
 
     try:
         binding, _ = await get_or_create_binding(
@@ -220,7 +246,10 @@ async def create_qmt_bridge_session(
         )
     except ValueError as exc:
         if str(exc) == "binding_conflict":
-            raise HTTPException(status_code=409, detail="binding conflict, please unbind previous device first")
+            raise HTTPException(
+                status_code=409,
+                detail="binding conflict, please unbind previous device first",
+            ) from exc
         raise
 
     session_model, raw_token = await create_bridge_session(db, binding)
@@ -285,7 +314,10 @@ async def reset_qmt_binding(
 
     reset = await reset_binding(db, key)
     await db.commit()
-    return {"reset": reset, "message": "Binding reset. You can now reconnect from any device."}
+    return {
+        "reset": reset,
+        "message": "Binding reset. You can now reconnect from any device.",
+    }
 
 
 @router.delete("/bridge/binding/me", status_code=200)
@@ -373,12 +405,16 @@ async def download_agent_package(
         .limit(1)
     )
     latest_binding = binding_result.scalar_one_or_none()
-    latest_account_id = latest_binding.account_id if latest_binding else str(auth.user_id or "").strip()
+    latest_account_id = (
+        latest_binding.account_id if latest_binding else str(auth.user_id or "").strip()
+    )
 
     config = {
         "agent_type": "qmt",
         "server_url": _bridge_ws_url(),
-        "api_base_url": os.getenv("API_GATEWAY_BASE_URL", "https://api.quantmind.cloud/api/v1"),
+        "api_base_url": os.getenv(
+            "API_GATEWAY_BASE_URL", "https://api.quantmind.cloud/api/v1"
+        ),
         "tenant_id": str(auth.tenant_id or "default").strip(),
         "user_id": str(auth.user_id or "").strip(),
         "access_key": str(key.access_key or "").strip(),
@@ -427,7 +463,9 @@ async def download_agent_package(
 
     reference_template = Path(_agent_template_root()) / "qmt_bridge.py"
     if reference_template.exists():
-        shutil.copyfile(reference_template, os.path.join(bundle_dir, "qmt_agent_reference.py"))
+        shutil.copyfile(
+            reference_template, os.path.join(bundle_dir, "qmt_agent_reference.py")
+        )
 
     archive_path = os.path.join(bundle_dir, "qmt_agent_client.zip")
     with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -447,7 +485,9 @@ async def download_agent_package(
     )
 
 
-@router.get("/bridge/download/agent/release", response_model=QMTAgentReleaseDownloadResponse)
+@router.get(
+    "/bridge/download/agent/release", response_model=QMTAgentReleaseDownloadResponse
+)
 async def get_qmt_agent_release_download(
     asset: str = "installer",
     auth: AuthContext = Depends(get_auth_context),
@@ -459,17 +499,26 @@ async def get_qmt_agent_release_download(
     """
     requested_asset = str(asset or "installer").strip().lower()
     if requested_asset not in {"installer", "portable"}:
-        raise HTTPException(status_code=400, detail="asset must be installer or portable")
+        raise HTTPException(
+            status_code=400, detail="asset must be installer or portable"
+        )
 
     manifest, _ = _load_qmt_agent_release_manifest()
-    product = str(manifest.get("product") or "QuantMindQMTAgent").strip() or "QuantMindQMTAgent"
+    product = (
+        str(manifest.get("product") or "QuantMindQMTAgent").strip()
+        or "QuantMindQMTAgent"
+    )
     channel = str(manifest.get("channel") or "release").strip() or "release"
     version = str(manifest.get("version") or "").strip()
     if not version:
-        raise HTTPException(status_code=503, detail="QMT Agent release manifest missing version")
+        raise HTTPException(
+            status_code=503, detail="QMT Agent release manifest missing version"
+        )
 
     build_time = str(manifest.get("build_time") or "").strip() or None
-    manifest_key = str(manifest.get("manifest_key") or _qmt_agent_release_manifest_key()).strip()
+    manifest_key = str(
+        manifest.get("manifest_key") or _qmt_agent_release_manifest_key()
+    ).strip()
 
     installer_info = None
     portable_info = None
@@ -482,12 +531,16 @@ async def get_qmt_agent_release_download(
 
     selected = installer_info if requested_asset == "installer" else portable_info
     if selected is None:
-        raise HTTPException(status_code=404, detail=f"QMT Agent {requested_asset} package not found")
+        raise HTTPException(
+            status_code=404, detail=f"QMT Agent {requested_asset} package not found"
+        )
 
     manifest_url = None
     cos = get_cos_service()
     if cos.client and cos.bucket_name:
-        manifest_url = cos.get_presigned_url(manifest_key, expired=_qmt_agent_release_asset_ttl())
+        manifest_url = cos.get_presigned_url(
+            manifest_key, expired=_qmt_agent_release_asset_ttl()
+        )
         if manifest_url:
             manifest_url = str(manifest_url).strip()
 
@@ -519,7 +572,9 @@ async def get_qmt_binding_status(
 
     result = await db.execute(
         select(ApiKey)
-        .where(ApiKey.user_id == resolved_user_id, ApiKey.tenant_id == resolved_tenant_id)
+        .where(
+            ApiKey.user_id == resolved_user_id, ApiKey.tenant_id == resolved_tenant_id
+        )
         .order_by(ApiKey.created_at.desc())
         .limit(1)
     )
@@ -540,7 +595,9 @@ async def get_qmt_binding_status(
         binding = binding_result.scalar_one_or_none()
 
     try:
-        heartbeat_key = build_trade_agent_heartbeat_key(resolved_tenant_id, resolved_user_id)
+        heartbeat_key = build_trade_agent_heartbeat_key(
+            resolved_tenant_id, resolved_user_id
+        )
         account_key = build_trade_account_key(resolved_tenant_id, resolved_user_id)
 
         # 使用 redis_client 包装好的 get 方法，自带错误处理和 JSON 解析
@@ -559,7 +616,7 @@ async def get_qmt_binding_status(
                 try:
                     return float(raw_str)
                 except ValueError:
-                    pass
+                    pass  # noqa: BLE001 - 已知数值解析失败，预期静默
                 try:
                     parsed = datetime.fromisoformat(raw_str.replace("Z", "+00:00"))
                     if parsed.tzinfo is None:
@@ -606,13 +663,16 @@ async def get_qmt_binding_status(
             stale_reason=stale_reason,
         )
     except Exception as e:
-        logger.error(f"Error fetching binding status for user {resolved_user_id}: {e}", exc_info=True)
+        logger.error(
+            f"Error fetching binding status for user {resolved_user_id}: {e}",
+            exc_info=True,
+        )
         # 即使报错也返回一个基本结构而不是 500
         return QMTBindingStatusResponse(
             online=False,
             user_id=resolved_user_id,
             tenant_id=resolved_tenant_id,
-            stale_reason=f"error: {str(e)}"
+            stale_reason=f"error: {str(e)}",
         )
 
 
@@ -633,19 +693,25 @@ async def _sync_qmt_account_to_db(
 
     # 1. 查找该用户的 REAL 模式活跃 portfolio
     portfolio_result = await db.execute(
-        select(Portfolio).where(
+        select(Portfolio)
+        .where(
             and_(
                 Portfolio.tenant_id == tenant_id,
                 Portfolio.user_id == user_id,
                 Portfolio.trading_mode == "REAL",
                 Portfolio.status == "active",
-                Portfolio.is_deleted == False,
+                not Portfolio.is_deleted,
             )
-        ).order_by(Portfolio.updated_at.desc()).limit(1)
+        )
+        .order_by(Portfolio.updated_at.desc())
+        .limit(1)
     )
     portfolio = portfolio_result.scalar_one_or_none()
     if portfolio is None:
-        logger.debug("[BridgeAccount] no active REAL portfolio for user=%s, skip DB sync", user_id)
+        logger.debug(
+            "[BridgeAccount] no active REAL portfolio for user=%s, skip DB sync",
+            user_id,
+        )
         return
 
     # 2. 更新 portfolio 资金数据
@@ -726,7 +792,10 @@ async def _sync_qmt_account_to_db(
 
     logger.info(
         "[BridgeAccount] synced portfolio=%s user=%s: total_asset=%.2f, positions=%d",
-        portfolio.id, user_id, total_asset, len(reported_symbols),
+        portfolio.id,
+        user_id,
+        total_asset,
+        len(reported_symbols),
     )
 
 
@@ -821,15 +890,33 @@ async def upsert_qmt_account_snapshot(
             account_info.update(
                 {
                     "cash": latest_snapshot.get("cash", account_info["cash"]),
-                    "available_cash": latest_snapshot.get("available_cash", account_info["available_cash"]),
-                    "total_asset": latest_snapshot.get("total_asset", account_info["total_asset"]),
-                    "market_value": latest_snapshot.get("market_value", account_info["market_value"]),
-                    "today_pnl": latest_snapshot.get("today_pnl", account_info["today_pnl"]),
-                    "total_pnl": latest_snapshot.get("total_pnl", account_info["total_pnl"]),
-                    "floating_pnl": latest_snapshot.get("floating_pnl", account_info["floating_pnl"]),
-                    "monthly_pnl": latest_snapshot.get("monthly_pnl", account_info["monthly_pnl"]),
-                    "total_return": latest_snapshot.get("total_return", account_info["total_return"]),
-                    "positions": latest_snapshot.get("positions", payload_json.get("positions", position_rows)),
+                    "available_cash": latest_snapshot.get(
+                        "available_cash", account_info["available_cash"]
+                    ),
+                    "total_asset": latest_snapshot.get(
+                        "total_asset", account_info["total_asset"]
+                    ),
+                    "market_value": latest_snapshot.get(
+                        "market_value", account_info["market_value"]
+                    ),
+                    "today_pnl": latest_snapshot.get(
+                        "today_pnl", account_info["today_pnl"]
+                    ),
+                    "total_pnl": latest_snapshot.get(
+                        "total_pnl", account_info["total_pnl"]
+                    ),
+                    "floating_pnl": latest_snapshot.get(
+                        "floating_pnl", account_info["floating_pnl"]
+                    ),
+                    "monthly_pnl": latest_snapshot.get(
+                        "monthly_pnl", account_info["monthly_pnl"]
+                    ),
+                    "total_return": latest_snapshot.get(
+                        "total_return", account_info["total_return"]
+                    ),
+                    "positions": latest_snapshot.get(
+                        "positions", payload_json.get("positions", position_rows)
+                    ),
                     "position_count": latest_snapshot.get("position_count"),
                     "baseline": latest_snapshot.get("baseline"),
                     "is_online": False,
@@ -877,7 +964,10 @@ async def upsert_qmt_account_snapshot(
         )
 
     # 同步 QMT 账户快照到 PostgreSQL（portfolio + positions 表）
-    if metrics_meta.get("snapshot_persisted") is False and portfolio_sync_payload.get("source") == "bridge_payload":
+    if (
+        metrics_meta.get("snapshot_persisted") is False
+        and portfolio_sync_payload.get("source") == "bridge_payload"
+    ):
         logger.warning(
             "[BridgeAccount] skip portfolio sync after snapshot guard tenant=%s user=%s account=%s because no valid fallback snapshot payload is available",
             ctx.tenant_id,
@@ -894,7 +984,9 @@ async def upsert_qmt_account_snapshot(
             frozen_cash=_to_float(portfolio_sync_payload.get("frozen_cash"), 0.0),
             market_value=_to_float(portfolio_sync_payload.get("market_value"), 0.0),
             liabilities=_to_float(portfolio_sync_payload.get("liabilities"), 0.0),
-            short_market_value=_to_float(portfolio_sync_payload.get("short_market_value"), 0.0),
+            short_market_value=_to_float(
+                portfolio_sync_payload.get("short_market_value"), 0.0
+            ),
             position_rows=list(portfolio_sync_payload.get("position_rows") or []),
         )
 
@@ -977,7 +1069,7 @@ async def report_qmt_execution(
     try:
         ctx_user_id = int(ctx.user_id)
     except Exception:
-        raise HTTPException(status_code=400, detail="invalid bridge user_id")
+        raise HTTPException(status_code=400, detail="invalid bridge user_id") from None
 
     client_oid = str(payload.client_order_id or "").strip()
     logger.info(
@@ -1054,7 +1146,9 @@ async def report_qmt_execution(
             except Exception:
                 order_side = None
         if symbol and order_side is not None:
-            recent_cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=15)
+            recent_cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+                minutes=15
+            )
             candidates_result = await db.execute(
                 select(Order)
                 .where(
@@ -1122,23 +1216,27 @@ async def report_qmt_execution(
     }
     # QMT 原始数字状态码兜底映射（防止 Agent 未转换直接上报）
     qmt_code_map = {
-        "48": OrderStatus.PENDING,         # 未报
-        "49": OrderStatus.SUBMITTED,       # 待报
-        "50": OrderStatus.SUBMITTED,       # 已报（交易所确认，未成交）
-        "51": OrderStatus.CANCELLED,       # 报撤中
-        "52": OrderStatus.PARTIALLY_FILLED,# 部成待撤
-        "53": OrderStatus.CANCELLED,       # 已撤
-        "54": OrderStatus.CANCELLED,       # 部撤
-        "55": OrderStatus.REJECTED,        # 废单
-        "56": OrderStatus.FILLED,          # 已成（实盘回放观测）
-        "57": OrderStatus.REJECTED,        # 柜台拒单/无效委托（实盘回放观测）
-        "58": OrderStatus.FILLED,          # 已成
+        "48": OrderStatus.PENDING,  # 未报
+        "49": OrderStatus.SUBMITTED,  # 待报
+        "50": OrderStatus.SUBMITTED,  # 已报（交易所确认，未成交）
+        "51": OrderStatus.CANCELLED,  # 报撤中
+        "52": OrderStatus.PARTIALLY_FILLED,  # 部成待撤
+        "53": OrderStatus.CANCELLED,  # 已撤
+        "54": OrderStatus.CANCELLED,  # 部撤
+        "55": OrderStatus.REJECTED,  # 废单
+        "56": OrderStatus.FILLED,  # 已成（实盘回放观测）
+        "57": OrderStatus.REJECTED,  # 柜台拒单/无效委托（实盘回放观测）
+        "58": OrderStatus.FILLED,  # 已成
     }
     raw_status = str(payload.status).strip()
-    normalized_status = status_map.get(raw_status.upper()) or qmt_code_map.get(raw_status, OrderStatus.SUBMITTED)
+    normalized_status = status_map.get(raw_status.upper()) or qmt_code_map.get(
+        raw_status, OrderStatus.SUBMITTED
+    )
 
     # 防御：FILLED 但 filled_quantity<=0 → 降级为 SUBMITTED（避免 QMT 状态误报产生虚假成交记录）
-    filled_qty = float(payload.filled_quantity) if payload.filled_quantity is not None else 0.0
+    filled_qty = (
+        float(payload.filled_quantity) if payload.filled_quantity is not None else 0.0
+    )
     if normalized_status == OrderStatus.FILLED and filled_qty <= 0:
         normalized_status = OrderStatus.SUBMITTED
 
@@ -1167,7 +1265,12 @@ async def report_qmt_execution(
         pass
     elif normalized_status in {OrderStatus.PARTIALLY_FILLED, OrderStatus.FILLED}:
         if filled_qty > 0:
-            price = payload.filled_price or getattr(order, "average_price", None) or order.price or 0.0
+            price = (
+                payload.filled_price
+                or getattr(order, "average_price", None)
+                or order.price
+                or 0.0
+            )
             trade_value = filled_qty * price
             dedup_result = await db.execute(
                 select(Trade).where(
@@ -1195,16 +1298,26 @@ async def report_qmt_execution(
                     commission=0.0,
                     exchange_trade_id=payload.exchange_trade_id,
                     executed_at=datetime.now(),
-                    remarks=((f"[{payload.error_code}] " if payload.error_code else "") + str(payload.message or "")).strip()
+                    remarks=(
+                        (f"[{payload.error_code}] " if payload.error_code else "")
+                        + str(payload.message or "")
+                    ).strip()
                     or None,
                 )
                 db.add(trade)
-                order.filled_quantity = float(getattr(order, "filled_quantity", 0.0) or 0.0) + filled_qty
-                order.filled_value = float(getattr(order, "filled_value", 0.0) or 0.0) + trade_value
+                order.filled_quantity = (
+                    float(getattr(order, "filled_quantity", 0.0) or 0.0) + filled_qty
+                )
+                order.filled_value = (
+                    float(getattr(order, "filled_value", 0.0) or 0.0) + trade_value
+                )
                 if order.filled_quantity > 0:
                     order.average_price = order.filled_value / order.filled_quantity
         total_quantity = float(order.quantity or 0.0)
-        if total_quantity > 0 and float(getattr(order, "filled_quantity", 0.0) or 0.0) >= total_quantity:
+        if (
+            total_quantity > 0
+            and float(getattr(order, "filled_quantity", 0.0) or 0.0) >= total_quantity
+        ):
             order.status = OrderStatus.FILLED
         elif float(getattr(order, "filled_quantity", 0.0) or 0.0) > 0:
             order.status = OrderStatus.PARTIALLY_FILLED
@@ -1215,7 +1328,9 @@ async def report_qmt_execution(
         # 如果是 FILLED 状态则发送 TRADE_CREATED，否则发送 ORDER_UPDATED
         # 前端 useTradeWebSocket 会监听到此消息并调用 fetchData() 刷新页面数据
         event_data = {
-            "event_type": "TRADE_CREATED" if normalized_status == OrderStatus.FILLED else "ORDER_UPDATED",
+            "event_type": "TRADE_CREATED"
+            if normalized_status == OrderStatus.FILLED
+            else "ORDER_UPDATED",
             "order_id": str(order.order_id),
             "user_id": str(ctx.user_id),
             "tenant_id": ctx.tenant_id,

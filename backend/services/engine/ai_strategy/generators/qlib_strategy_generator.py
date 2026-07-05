@@ -6,10 +6,9 @@ Qlib策略代码生成器
 import json
 import re
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel
-
 
 class QlibStrategyConfig(BaseModel):
     """Qlib策略配置"""
@@ -33,7 +32,6 @@ class QlibStrategyConfig(BaseModel):
     llm_model: str
     user_input: str
 
-
 class QlibStrategyCodeGenerator:
     """Qlib策略代码生成器"""
 
@@ -47,7 +45,9 @@ class QlibStrategyCodeGenerator:
         self.llm_client = llm_client
         self.templates = QlibStrategyTemplates()
 
-    async def generate_strategy(self, user_input: str, strategy_type: str = "auto") -> dict[str, Any]:
+    async def generate_strategy(
+        self, user_input: str, strategy_type: str = "auto"
+    ) -> dict[str, Any]:
         """
         生成Qlib策略代码
 
@@ -158,7 +158,9 @@ class QlibStrategyCodeGenerator:
 
         return result
 
-    async def _parse_requirement(self, user_input: str, strategy_type: str) -> dict[str, Any]:
+    async def _parse_requirement(
+        self, user_input: str, strategy_type: str
+    ) -> dict[str, Any]:
         """解析用户需求"""
 
         prompt = f"""
@@ -333,13 +335,17 @@ class QlibStrategyCodeGenerator:
 
         return design
 
-    def _generate_code(self, design: dict[str, Any], requirement: dict[str, Any]) -> str:
+    def _generate_code(
+        self, design: dict[str, Any], requirement: dict[str, Any]
+    ) -> str:
         """生成策略代码 (包含动态仓位逻辑)"""
 
         strategy_type = requirement["strategy_type"]
 
         # 检查是否启用了动态仓位
-        is_dynamic = requirement.get("risk_management", {}).get("enable_dynamic_position", False)
+        is_dynamic = requirement.get("risk_management", {}).get(
+            "enable_dynamic_position", False
+        )
 
         # 如果启用，在 Prompt 中增加指令，或者在代码拼接时注入
         if is_dynamic:
@@ -348,13 +354,21 @@ class QlibStrategyCodeGenerator:
             )
 
         if strategy_type == "topk_dropout":
-            return self.templates.generate_topk_strategy(design, requirement, is_dynamic=is_dynamic)
+            return self.templates.generate_topk_strategy(
+                design, requirement, is_dynamic=is_dynamic
+            )
         elif strategy_type == "weight_based":
-            return self.templates.generate_weight_strategy(design, requirement, is_dynamic=is_dynamic)
+            return self.templates.generate_weight_strategy(
+                design, requirement, is_dynamic=is_dynamic
+            )
         else:  # custom
-            return self.templates.generate_custom_strategy(design, requirement, is_dynamic=is_dynamic)
+            return self.templates.generate_custom_strategy(
+                design, requirement, is_dynamic=is_dynamic
+            )
 
-    def _generate_config(self, design: dict[str, Any], requirement: dict[str, Any]) -> dict[str, Any]:
+    def _generate_config(
+        self, design: dict[str, Any], requirement: dict[str, Any]
+    ) -> dict[str, Any]:
         """生成Qlib配置"""
 
         strategy_name = requirement.get("strategy_name", "CustomStrategy")
@@ -379,7 +393,9 @@ class QlibStrategyCodeGenerator:
 
         return config
 
-    def _generate_documentation(self, design: dict[str, Any], requirement: dict[str, Any]) -> str:
+    def _generate_documentation(
+        self, design: dict[str, Any], requirement: dict[str, Any]
+    ) -> str:
         """生成策略文档"""
 
         doc = f"""# {requirement.get("strategy_name")} 策略文档
@@ -477,11 +493,17 @@ portfolio_dict, indicator_dict = backtest(
         has_config = "STRATEGY_CONFIG" in code
         has_get_config = "get_strategy_config" in code
         if not has_config and not has_get_config:
-            validation["errors"].append("缺少 V2 策略入口: STRATEGY_CONFIG 或 get_strategy_config()")
+            validation["errors"].append(
+                "缺少 V2 策略入口: STRATEGY_CONFIG 或 get_strategy_config()"
+            )
             validation["valid"] = False
 
         # 3. 策略基类检查（应使用 Redis* 系列而非原生 qlib 类）
-        forbidden_bases = ["TopkDropoutStrategy", "WeightStrategyBase", "BaseSignalStrategy"]
+        forbidden_bases = [
+            "TopkDropoutStrategy",
+            "WeightStrategyBase",
+            "BaseSignalStrategy",
+        ]
         for fb in forbidden_bases:
             # 检查是否从 qlib 原生模块继承（而非从 backend 内部模块继承）
             if f"from qlib.contrib.strategy.signal_strategy import {fb}" in code:
@@ -490,7 +512,14 @@ portfolio_dict, indicator_dict = backtest(
                 )
 
         # 4. 安全性检查
-        dangerous_keywords = ["eval", "exec", "compile", "__import__", "os.system", "os.path"]
+        dangerous_keywords = [
+            "eval",
+            "exec",
+            "compile",
+            "__import__",
+            "os.system",
+            "os.path",
+        ]
         for keyword in dangerous_keywords:
             if keyword in code:
                 validation["errors"].append(f"发现危险操作: {keyword}")
@@ -515,7 +544,11 @@ portfolio_dict, indicator_dict = backtest(
                 )
 
         # 8. 无效方法检查（不会被父类调用的方法）
-        invalid_methods = ["_rule_based_policy", "calculate_signals", "generate_signals"]
+        invalid_methods = [
+            "_rule_based_policy",
+            "calculate_signals",
+            "generate_signals",
+        ]
         for method in invalid_methods:
             if f"def {method}" in code:
                 validation["warnings"].append(
@@ -524,14 +557,16 @@ portfolio_dict, indicator_dict = backtest(
 
         # 9. 检查是否正确覆写了核心方法
         if "class " in code and "RedisTopkStrategy" in code:
-            if "def generate_target_weight_position" not in code and "def generate_trade_decision" not in code:
+            if (
+                "def generate_target_weight_position" not in code
+                and "def generate_trade_decision" not in code
+            ):
                 # 如果只是简单继承没有覆写任何方法，建议直接使用配置
                 validation["suggestions"].append(
                     "如果不需要自定义选股逻辑，可以直接在 STRATEGY_CONFIG 中使用 RedisTopkStrategy，无需定义子类"
                 )
 
         return validation
-
 
 class QlibStrategyTemplates:
     """Qlib策略代码模板"""
@@ -549,25 +584,28 @@ class QlibStrategyTemplates:
         parameters = requirement.get("parameters", {})
 
         # 提取参数
-        topk = parameters.get("topk", {}).get("value", 50) if isinstance(parameters.get("topk"), dict) else 50
-        n_drop = parameters.get("n_drop", {}).get("value", 5) if isinstance(parameters.get("n_drop"), dict) else 5
-        rebalance_days = parameters.get("rebalance_days", {}).get("value", 3) if isinstance(parameters.get("rebalance_days"), dict) else 3
+        topk = (
+            parameters.get("topk", {}).get("value", 50)
+            if isinstance(parameters.get("topk"), dict)
+            else 50
+        )
+        n_drop = (
+            parameters.get("n_drop", {}).get("value", 5)
+            if isinstance(parameters.get("n_drop"), dict)
+            else 5
+        )
+        rebalance_days = (
+            parameters.get("rebalance_days", {}).get("value", 3)
+            if isinstance(parameters.get("rebalance_days"), dict)
+            else 3
+        )
         risk_mgmt = requirement.get("risk_management", {})
         account_stop_loss = risk_mgmt.get("account_stop_loss", 0.1)
         max_leverage = risk_mgmt.get("max_leverage", 1.0)
 
         # 自定义参数注入（用于需要自定义逻辑时）
-        custom_init = ""
-        custom_method = ""
         if is_dynamic:
-            custom_init = "        self.dynamic_sizing = True"
-            custom_method = """
-    def generate_trade_decision(self, execute_result=None):
-        \"\"\"基于全市场热度动态调整仓位的核心决策逻辑\"\"\"
-        decision = super().generate_trade_decision(execute_result)
-        # 动态仓位逻辑由平台 market_state_kwargs 注入，此处仅做示例
-        return decision
-"""
+            pass
 
         code = f'''"""
 自动生成的Qlib策略: {strategy_name}
@@ -578,7 +616,6 @@ class QlibStrategyTemplates:
 """
 
 from backend.services.engine.qlib_app.utils.extended_strategies import RedisTopkStrategy
-
 
 def get_strategy_config():
     return {{
@@ -595,12 +632,13 @@ def get_strategy_config():
         }}
     }}
 
-
 STRATEGY_CONFIG = get_strategy_config()
 '''
         return code
 
-    def generate_weight_strategy(self, design: dict[str, Any], requirement: dict[str, Any]) -> str:
+    def generate_weight_strategy(
+        self, design: dict[str, Any], requirement: dict[str, Any]
+    ) -> str:
         """生成权重策略（V2 合规：STRATEGY_CONFIG 入口 + RedisWeightStrategy 基类）"""
 
         strategy_name = requirement.get("strategy_name", "CustomWeightStrategy")
@@ -608,10 +646,26 @@ STRATEGY_CONFIG = get_strategy_config()
         parameters = requirement.get("parameters", {})
         risk_mgmt = requirement.get("risk_management", {})
 
-        topk = parameters.get("topk", {}).get("value", 50) if isinstance(parameters.get("topk"), dict) else 50
-        min_score = parameters.get("min_score", {}).get("value", 0.01) if isinstance(parameters.get("min_score"), dict) else 0.01
-        max_weight = parameters.get("max_weight", {}).get("value", 0.1) if isinstance(parameters.get("max_weight"), dict) else 0.1
-        rebalance_days = parameters.get("rebalance_days", {}).get("value", 3) if isinstance(parameters.get("rebalance_days"), dict) else 3
+        topk = (
+            parameters.get("topk", {}).get("value", 50)
+            if isinstance(parameters.get("topk"), dict)
+            else 50
+        )
+        min_score = (
+            parameters.get("min_score", {}).get("value", 0.01)
+            if isinstance(parameters.get("min_score"), dict)
+            else 0.01
+        )
+        max_weight = (
+            parameters.get("max_weight", {}).get("value", 0.1)
+            if isinstance(parameters.get("max_weight"), dict)
+            else 0.1
+        )
+        rebalance_days = (
+            parameters.get("rebalance_days", {}).get("value", 3)
+            if isinstance(parameters.get("rebalance_days"), dict)
+            else 3
+        )
         account_stop_loss = risk_mgmt.get("account_stop_loss", 0.1)
         max_leverage = risk_mgmt.get("max_leverage", 1.0)
 
@@ -621,7 +675,6 @@ STRATEGY_CONFIG = get_strategy_config()
 策略描述: {strategy_desc}
 生成时间: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 """
-
 
 def get_strategy_config():
     return {{
@@ -639,13 +692,14 @@ def get_strategy_config():
         }}
     }}
 
-
 STRATEGY_CONFIG = get_strategy_config()
 '''
 
         return code
 
-    def generate_custom_strategy(self, design: dict[str, Any], requirement: dict[str, Any]) -> str:
+    def generate_custom_strategy(
+        self, design: dict[str, Any], requirement: dict[str, Any]
+    ) -> str:
         """生成自定义策略（V2 合规：STRATEGY_CONFIG 入口 + RedisRecordingStrategy 基类）"""
 
         strategy_name = requirement.get("strategy_name", "CustomStrategy")
@@ -653,9 +707,21 @@ STRATEGY_CONFIG = get_strategy_config()
         parameters = requirement.get("parameters", {})
         risk_mgmt = requirement.get("risk_management", {})
 
-        topk = parameters.get("topk", {}).get("value", 50) if isinstance(parameters.get("topk"), dict) else 50
-        n_drop = parameters.get("n_drop", {}).get("value", 5) if isinstance(parameters.get("n_drop"), dict) else 5
-        rebalance_days = parameters.get("rebalance_days", {}).get("value", 3) if isinstance(parameters.get("rebalance_days"), dict) else 3
+        topk = (
+            parameters.get("topk", {}).get("value", 50)
+            if isinstance(parameters.get("topk"), dict)
+            else 50
+        )
+        n_drop = (
+            parameters.get("n_drop", {}).get("value", 5)
+            if isinstance(parameters.get("n_drop"), dict)
+            else 5
+        )
+        rebalance_days = (
+            parameters.get("rebalance_days", {}).get("value", 3)
+            if isinstance(parameters.get("rebalance_days"), dict)
+            else 3
+        )
         account_stop_loss = risk_mgmt.get("account_stop_loss", 0.1)
         max_leverage = risk_mgmt.get("max_leverage", 1.0)
 
@@ -666,12 +732,18 @@ STRATEGY_CONFIG = get_strategy_config()
             if isinstance(param_info, dict):
                 default_val = param_info.get("value")
                 if isinstance(default_val, str):
-                    custom_param_pops.append(f'        self.{param_name} = kwargs.pop("{param_name}", "{default_val}")')
+                    custom_param_pops.append(
+                        f'        self.{param_name} = kwargs.pop("{param_name}", "{default_val}")'
+                    )
                 else:
-                    custom_param_pops.append(f'        self.{param_name} = kwargs.pop("{param_name}", {default_val})')
+                    custom_param_pops.append(
+                        f'        self.{param_name} = kwargs.pop("{param_name}", {default_val})'
+                    )
 
-        pop_lines = "\n".join(custom_param_pops) if custom_param_pops else "        pass"
-        assign_lines = "\n".join(custom_param_assignments) if custom_param_assignments else ""
+        pop_lines = (
+            "\n".join(custom_param_pops) if custom_param_pops else "        pass"
+        )
+        "\n".join(custom_param_assignments) if custom_param_assignments else ""
 
         code = f'''"""
 自动生成的Qlib策略: {strategy_name}
@@ -684,7 +756,6 @@ from backend.services.engine.qlib_app.utils.recording_strategy import RedisRecor
 from qlib.backtest.decision import TradeDecisionWO, Order, OrderDir
 import pandas as pd
 import numpy as np
-
 
 class {strategy_name}(RedisRecordingStrategy):
     """
@@ -707,7 +778,6 @@ class {strategy_name}(RedisRecordingStrategy):
         # 调用父类默认逻辑 (TopK 选股 + 换仓)
         return super().generate_trade_decision(execute_result)
 
-
 def get_strategy_config():
     return {{
         "class": "{strategy_name}",
@@ -722,7 +792,6 @@ def get_strategy_config():
             "only_tradable": True,
         }}
     }}
-
 
 STRATEGY_CONFIG = get_strategy_config()
 '''

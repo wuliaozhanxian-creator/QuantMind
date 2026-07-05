@@ -88,7 +88,9 @@ celery_app.conf.update(
         },
         "warmup-stock-latest-cache-daily": {
             "task": "engine.tasks.warmup_stock_latest_cache",
-            "schedule": crontab(hour=22, minute=30, day_of_week="1-5"),  # 交易日 22:30 预热最新行情缓存
+            "schedule": crontab(
+                hour=22, minute=30, day_of_week="1-5"
+            ),  # 交易日 22:30 预热最新行情缓存
         },
     },
 )

@@ -1,9 +1,8 @@
 """WebSocket schemas"""
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
-
 
 class WSMessage(BaseModel):
     """WebSocket消息"""
@@ -12,7 +11,6 @@ class WSMessage(BaseModel):
     data: dict[str, Any] | None = Field(None, description="消息数据")
     timestamp: float = Field(..., description="时间戳")
 
-
 class WSSubscribe(BaseModel):
     """WebSocket订阅"""
 
@@ -20,7 +18,6 @@ class WSSubscribe(BaseModel):
     symbols: list[str] = Field(..., description="股票代码列表")
     data_type: str = Field("quote", description="数据类型 (quote/kline)")
     interval: str | None = Field(None, description="K线周期 (仅data_type=kline时)")
-
 
 class WSUnsubscribe(BaseModel):
     """WebSocket取消订阅"""

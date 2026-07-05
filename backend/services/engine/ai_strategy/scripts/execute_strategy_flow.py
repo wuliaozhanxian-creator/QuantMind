@@ -40,7 +40,6 @@ from backend.services.engine.ai_strategy.steps.step2_pool_confirmation import qu
 from backend.services.engine.ai_strategy.steps.step5_generation import generate_strategy as step5_generate
 from backend.shared.database_pool import get_db
 
-
 class StrategyGenerationFlow:
     """智能策略生成与落库流程"""
 
@@ -385,7 +384,6 @@ class StrategyGenerationFlow:
                 "session_id": self.session_id,
             }
 
-
 async def main():
     """主函数"""
 
@@ -436,7 +434,6 @@ async def main():
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
     return 0 if result["success"] else 1
-
 
 if __name__ == "__main__":
     sys.exit(asyncio.run(main()))

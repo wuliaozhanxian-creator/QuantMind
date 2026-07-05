@@ -9,7 +9,7 @@ Version: 1.0.0
 """
 
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
@@ -19,9 +19,7 @@ from .smart_screener import get_smart_screener
 # 创建路由器
 router = APIRouter(prefix="/api/smart-screener", tags=["智能选股"])
 
-
 # ============= 请求/响应模型 =============
-
 
 class SmartScreenRequest(BaseModel):
     """智能选股请求"""
@@ -41,7 +39,6 @@ class SmartScreenRequest(BaseModel):
     limit: int = Field(50, description="返回数量限制", ge=1, le=1000)
     explain: bool = Field(True, description="是否返回解析过程")
 
-
 class RefineRequest(BaseModel):
     """细化查询请求"""
 
@@ -49,14 +46,12 @@ class RefineRequest(BaseModel):
     query: str = Field(..., description="追加的查询条件")
     previous_result: dict[str, Any] = Field(..., description="之前的查询结果")
 
-
 class QueryUnderstanding(BaseModel):
     """查询理解"""
 
     original: str = Field(..., description="原始查询")
     parsed_conditions: list[dict] = Field(..., description="解析的条件")
     explanation: str = Field(..., description="解析说明")
-
 
 class SmartScreenResponse(BaseModel):
     """智能选股响应"""
@@ -93,7 +88,6 @@ class SmartScreenResponse(BaseModel):
     execution_time: float
     timestamp: str
 
-
 class SuggestionsResponse(BaseModel):
     """查询建议响应"""
 
@@ -101,9 +95,7 @@ class SuggestionsResponse(BaseModel):
     popular_queries: list[str]
     examples: list[dict[str, str]]
 
-
 # ============= API端点 =============
-
 
 @router.post("/query", response_model=SmartScreenResponse, summary="智能选股查询")
 async def smart_screen_query(request: SmartScreenRequest):
@@ -153,7 +145,9 @@ async def smart_screen_query(request: SmartScreenRequest):
             )
 
         # 执行查询
-        result = screener.screen(user_query=request.query, limit=request.limit, explain=request.explain)
+        result = screener.screen(
+            user_query=request.query, limit=request.limit, explain=request.explain
+        )
 
         if not result["success"]:
             raise HTTPException(status_code=400, detail=result["message"])
@@ -163,8 +157,7 @@ async def smart_screen_query(request: SmartScreenRequest):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
-
+        raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}") from e
 
 @router.post("/refine", response_model=SmartScreenResponse, summary="细化查询")
 async def refine_query(request: RefineRequest):
@@ -199,8 +192,7 @@ async def refine_query(request: RefineRequest):
         return result
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"细化查询失败: {str(e)}")
-
+        raise HTTPException(status_code=500, detail=f"细化查询失败: {str(e)}") from e
 
 @router.get("/suggestions", response_model=SuggestionsResponse, summary="获取查询建议")
 async def get_suggestions():
@@ -233,7 +225,6 @@ async def get_suggestions():
         ],
     }
 
-
 @router.get("/status", summary="检查服务状态")
 async def check_status():
     """
@@ -259,7 +250,6 @@ async def check_status():
 
     except Exception as e:
         return {"status": "error", "message": str(e)}
-
 
 @router.get("/", summary="API信息")
 async def api_info():

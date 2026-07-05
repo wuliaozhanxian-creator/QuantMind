@@ -16,6 +16,8 @@ def test_build_quick_trade_rows_prefers_explicit_quantity_over_factor_reconstruc
             "commission": 13.738500643331143,
         }
     ]
-    rows = _build_quick_trade_rows(trades=trades, equity_curve=[], initial_capital=1_000_000.0)
+    rows = _build_quick_trade_rows(
+        trades=trades, equity_curve=[], initial_capital=1_000_000.0
+    )
     assert len(rows) == 1
     assert rows[0]["qty_int"] == 2700

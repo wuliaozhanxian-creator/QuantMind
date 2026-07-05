@@ -46,9 +46,12 @@ from .model_management_utils import (
 router = APIRouter()
 
 DAILY_SYNC_SHELL_SCRIPT = (
-    Path(os.getcwd()) / "scripts" / "data" / "maintenance" / "run_daily_pg_parquet_and_qlib_sync.sh"
+    Path(os.getcwd())
+    / "scripts"
+    / "data"
+    / "maintenance"
+    / "run_daily_pg_parquet_and_qlib_sync.sh"
 )
-
 
 class OfficialDataUpdateRequest(BaseModel):
     api_base_url: str | None = Field(default=None)
@@ -56,7 +59,6 @@ class OfficialDataUpdateRequest(BaseModel):
     secret_key: str | None = Field(default=None)
     version: str | None = Field(default=None)
     dry_run: bool = Field(default=False)
-
 
 @router.get("/scan", summary="扫描本地模型目录")
 async def scan_model_directories(
@@ -79,7 +81,6 @@ async def scan_model_directories(
             results.append({"model_id": Path(d).name, "dir_path": d, "error": str(e)})
 
     return {"total": len(results), "models": results}
-
 
 @router.get("/feature-catalog", summary="获取模型训练特征字典（动态）")
 async def get_model_feature_catalog(
@@ -107,7 +108,6 @@ async def get_model_feature_catalog(
         status_code=404, detail="未找到可用的特征字典（DB/文件均不可用）"
     )
 
-
 @router.get("/data-status", summary="查看当前数据状态（Qlib + 特征快照）")
 async def get_data_status(
     refresh: bool = Query(False, description="是否强制刷新（后台异步）"),
@@ -124,7 +124,7 @@ async def get_data_status(
     try:
         redis = get_redis_sentinel_client()
     except Exception:
-        pass
+        pass  # noqa: BLE001 - None
 
     # 1. 如果不是强制刷新，尝试读取缓存
     if not refresh and redis:
@@ -156,7 +156,7 @@ async def get_data_status(
                 market="SSE",
                 trade_date=now_local.date(),
                 tenant_id=tenant_id,
-                user_id=user_id
+                user_id=user_id,
             )
         else:
             # 已过开盘时间，取今天（若是交易日）或更早的最后一个交易日
@@ -164,7 +164,7 @@ async def get_data_status(
                 market="SSE",
                 trade_date=now_local.date(),
                 tenant_id=tenant_id,
-                user_id=user_id
+                user_id=user_id,
             )
             if is_td:
                 trade_date_obj = now_local.date()
@@ -173,7 +173,7 @@ async def get_data_status(
                     market="SSE",
                     trade_date=now_local.date(),
                     tenant_id=tenant_id,
-                    user_id=user_id
+                    user_id=user_id,
                 )
         trade_date = trade_date_obj.isoformat()
 
@@ -214,11 +214,13 @@ async def get_data_status(
                     qlib_info["calendar_last_date"] = calendar[-1]
                     qlib_info["latest_date_coverage"]["target_date"] = calendar[-1]
             except Exception:
-                pass
+                pass  # noqa: BLE001 - None
 
         if instruments_all_path.exists():
             try:
-                for line in instruments_all_path.read_text(encoding="utf-8").splitlines():
+                for line in instruments_all_path.read_text(
+                    encoding="utf-8"
+                ).splitlines():
                     if not line.strip():
                         continue
                     code = line.split()[0].strip().upper()
@@ -232,7 +234,7 @@ async def get_data_status(
                     else:
                         qlib_info["instruments"]["other"] += 1
             except Exception:
-                pass
+                pass  # noqa: BLE001 - None
 
         if features_root.exists() and features_root.is_dir():
             feature_dirs = [p for p in features_root.iterdir() if p.is_dir()]
@@ -257,6 +259,7 @@ async def get_data_status(
         }
     except Exception as e:
         import traceback
+
         error_msg = f"Data status scanning failed: {str(e)}"
         print(error_msg)
         print(traceback.format_exc())
@@ -265,9 +268,8 @@ async def get_data_status(
             "checked_at": datetime.now(ZoneInfo("Asia/Shanghai")).isoformat(),
             "qlib_data": {"exists": False},
             "feature_snapshots": {"exists": False},
-            "message": f"状态扫描异常: {str(e)}"
+            "message": f"状态扫描异常: {str(e)}",
         }
-
 
 @router.post(
     "/sync-stock-daily-latest",
@@ -293,7 +295,6 @@ async def sync_stock_daily_latest(
         status_code=410, detail="该接口已废弃，数据由官方服务器统一推送，无需手动同步"
     )
 
-
 @router.post(
     "/sync-official-data-update",
     summary="一键拉取并应用官方数据增量包",
@@ -312,7 +313,10 @@ async def sync_official_data_update(
     # 简化后的同步步骤：只拉取远端特征快照和底层数据，并转换给 qlib_data
     steps = [
         ("Step 1/2: 从远程PG拉取最新 Parquet 数据", "sync_parquets_from_remote_pg.py"),
-        ("Step 2/2: 同步 qlib_data 二进制引擎", "sync_qlib_from_fundamental_parquet.py"),
+        (
+            "Step 2/2: 同步 qlib_data 二进制引擎",
+            "sync_qlib_from_fundamental_parquet.py",
+        ),
     ]
 
     results = []
@@ -324,11 +328,13 @@ async def sync_official_data_update(
             script_path = scripts_dir / script_name
 
         if not script_path.exists():
-            results.append({
-                "step": step_name,
-                "success": False,
-                "error": f"脚本不存在: {script_path}",
-            })
+            results.append(
+                {
+                    "step": step_name,
+                    "success": False,
+                    "error": f"脚本不存在: {script_path}",
+                }
+            )
             continue
 
         # 收益计算脚本需要 --recent-days 参数，连板回填脚本需要 --apply 参数
@@ -347,32 +353,37 @@ async def sync_official_data_update(
                 timeout=1800,
                 check=False,
             )
-            results.append({
-                "step": step_name,
-                "success": proc.returncode == 0,
-                "exit_code": proc.returncode,
-                "stdout": proc.stdout[-2000:] if proc.stdout else "",
-                "stderr": proc.stderr[-2000:] if proc.stderr else "",
-            })
+            results.append(
+                {
+                    "step": step_name,
+                    "success": proc.returncode == 0,
+                    "exit_code": proc.returncode,
+                    "stdout": proc.stdout[-2000:] if proc.stdout else "",
+                    "stderr": proc.stderr[-2000:] if proc.stderr else "",
+                }
+            )
         except subprocess.TimeoutExpired as exc:
-            results.append({
-                "step": step_name,
-                "success": False,
-                "error": f"执行超时: {exc}",
-            })
+            results.append(
+                {
+                    "step": step_name,
+                    "success": False,
+                    "error": f"执行超时: {exc}",
+                }
+            )
         except Exception as exc:
-            results.append({
-                "step": step_name,
-                "success": False,
-                "error": str(exc),
-            })
+            results.append(
+                {
+                    "step": step_name,
+                    "success": False,
+                    "error": str(exc),
+                }
+            )
 
     all_success = all(r.get("success", False) for r in results)
     return {
         "success": all_success,
         "steps": results,
     }
-
 
 @router.get("/precheck-inference", summary="生成明日信号前置检查")
 async def precheck_inference(

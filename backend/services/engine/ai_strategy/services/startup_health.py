@@ -11,7 +11,6 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-
 @dataclass
 class StartupHealthReport:
     """启动阶段健康检查结果。"""
@@ -23,20 +22,16 @@ class StartupHealthReport:
     elapsed_seconds: float = 0.0
     error: str | None = None
 
-
 _STARTUP_HEALTH_REPORT = StartupHealthReport()
-
 
 def get_startup_health_report() -> dict[str, Any]:
     """返回最近一次启动健康检查快照。"""
 
     return asdict(_STARTUP_HEALTH_REPORT)
 
-
 def _store_startup_health_report(report: StartupHealthReport) -> None:
     global _STARTUP_HEALTH_REPORT
     _STARTUP_HEALTH_REPORT = report
-
 
 async def _warmup_strategy_dependencies() -> None:
     from ..provider_registry import get_provider
@@ -47,12 +42,12 @@ async def _warmup_strategy_dependencies() -> None:
     await get_strategy_vector_parser()
     await get_schema_retriever()
 
-
 def _warmup_strategy_dependencies_sync() -> None:
     asyncio.run(_warmup_strategy_dependencies())
 
-
-async def run_startup_health_checks(timeout_seconds: float | None = None) -> StartupHealthReport:
+async def run_startup_health_checks(
+    timeout_seconds: float | None = None,
+) -> StartupHealthReport:
     """强制预热 AI Strategy 依赖，失败则阻断启动。"""
 
     report = StartupHealthReport()
@@ -66,12 +61,18 @@ async def run_startup_health_checks(timeout_seconds: float | None = None) -> Sta
             timeout_seconds = 60.0
 
     try:
-        await asyncio.wait_for(asyncio.to_thread(_warmup_strategy_dependencies_sync), timeout=timeout_seconds)
+        await asyncio.wait_for(
+            asyncio.to_thread(_warmup_strategy_dependencies_sync),
+            timeout=timeout_seconds,
+        )
         report.ready = True
         report.qwen_provider_ready = True
         report.vector_parser_ready = True
         report.schema_retriever_ready = True
-        logger.info("AI Strategy startup health check completed in %.2fs", time.monotonic() - started_at)
+        logger.info(
+            "AI Strategy startup health check completed in %.2fs",
+            time.monotonic() - started_at,
+        )
         return report
     except Exception as exc:
         report.error = str(exc)

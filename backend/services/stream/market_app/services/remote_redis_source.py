@@ -11,7 +11,7 @@ import json
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import redis.asyncio as aioredis
 
@@ -20,7 +20,6 @@ from .data_source import DataSourceAdapter
 from backend.shared.stock_utils import StockCodeUtil
 
 logger = logging.getLogger(__name__)
-
 
 class RemoteRedisDataSource(DataSourceAdapter):
     """
@@ -84,21 +83,21 @@ class RemoteRedisDataSource(DataSourceAdapter):
 
         client = self._get_client()
         normalized_map = {self._normalize_symbol(s): s for s in symbols}
-        
+
         # 批量构建查询 Key 列表 (全路径组合，增加容错性)
         # 每个 normalized symbol 会产生 3 个 candidate snapshot keys:
         # 1. market:snapshot:sh600000 (规范小写前缀)
         # 2. market:snapshot:SH600000 (规范大写前缀)
         # 3. stock:600000.SH (Legacy 后缀格式)
-        
+
         pipeline_keys = []
         symbol_key_count = 3
         for n in normalized_map.keys():
             # n 已经是 SH600000 格式
-            prefix = n[:2].lower() # sh
-            code = n[2:] # 600000
-            legacy = f"{code}.{n[:2].upper()}" # 600000.SH
-            
+            prefix = n[:2].lower()  # sh
+            code = n[2:]  # 600000
+            legacy = f"{code}.{n[:2].upper()}"  # 600000.SH
+
             pipeline_keys.append(f"market:snapshot:{prefix}{code}")
             pipeline_keys.append(f"market:snapshot:{n}")
             pipeline_keys.append(f"stock:{legacy}")
@@ -124,7 +123,7 @@ class RemoteRedisDataSource(DataSourceAdapter):
                 if candidate:
                     data = candidate
                     break
-            
+
             if not data:
                 continue
 
@@ -227,7 +226,9 @@ class RemoteRedisDataSource(DataSourceAdapter):
             raw_data = await client.zrange(prefix_key, start_ts, now_ts, byscore=True)
             # 如果没有数据，尝试后缀格式
             if not raw_data:
-                raw_data = await client.zrange(suffix_key, start_ts, now_ts, byscore=True)
+                raw_data = await client.zrange(
+                    suffix_key, start_ts, now_ts, byscore=True
+                )
 
             results = []
             for item in raw_data:

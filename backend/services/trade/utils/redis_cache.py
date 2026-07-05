@@ -14,6 +14,7 @@ def redis_cache(ttl: int = 60, prefix: str = "cache"):
     Redis 缓存装饰器，专为 FastAPI 路由函数设计。
     自动识别身份标识 (user_id, tenant_id) 并进行数据隔离。
     """
+
     def decorator(func: Callable):
         @functools.wraps(func)
         async def wrapper(*args, **kwargs):
@@ -24,9 +25,9 @@ def redis_cache(ttl: int = 60, prefix: str = "cache"):
             auth = kwargs.get("auth")
 
             # 如果存在 auth 对象，优先使用 auth 中的 identity
-            if auth and hasattr(auth, 'user_id'):
+            if auth and hasattr(auth, "user_id"):
                 user_id = auth.user_id
-                tenant_id = getattr(auth, 'tenant_id', 'default')
+                tenant_id = getattr(auth, "tenant_id", "default")
 
             # 构造缓存键基础部分
             # 键格式: {prefix}:{func_name}:{tenant_id}:{user_id}:{params_hash}
@@ -35,7 +36,8 @@ def redis_cache(ttl: int = 60, prefix: str = "cache"):
 
             # 生成参数哈希 (排除 db, redis, auth 等不可序列化对象)
             filtered_kwargs = {
-                k: v for k, v in kwargs.items()
+                k: v
+                for k, v in kwargs.items()
                 if k not in {"db", "redis", "auth", "session"}
             }
             params_str = json.dumps(filtered_kwargs, sort_keys=True, default=str)
@@ -64,5 +66,7 @@ def redis_cache(ttl: int = 60, prefix: str = "cache"):
                 logger.error(f"Redis cache write error: {e}")
 
             return result
+
         return wrapper
+
     return decorator

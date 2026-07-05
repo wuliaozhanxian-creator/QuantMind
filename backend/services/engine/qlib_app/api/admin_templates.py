@@ -8,7 +8,7 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, field_validator
@@ -20,7 +20,9 @@ from backend.services.engine.qlib_app.services.strategy_templates import (
     invalidate_templates_cache,
 )
 from backend.shared.auth import verify_service_token
-from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
+from backend.services.engine.qlib_app.utils.structured_logger import (
+    StructuredTaskLogger,
+)
 
 logger = logging.getLogger(__name__)
 task_logger = StructuredTaskLogger(logger, "AdminTemplatesAPI")
@@ -30,11 +32,9 @@ router = APIRouter()
 _MAX_CODE_BYTES = 200 * 1024  # 200 KB
 _ID_PATTERN = re.compile(r"^[a-z0-9_]{1,64}$")
 
-
 # ---------------------------------------------------------------------------
 # 鉴权依赖
 # ---------------------------------------------------------------------------
-
 
 def _verify_internal(
     x_service_token: str | None = Header(default=None, alias="X-Service-Token"),
@@ -48,14 +48,12 @@ def _verify_internal(
             verify_service_token(x_service_token, ["api", "engine", "trade", "stream"])
             return
         except Exception:
-            pass
+            logger.debug("ignored exception", exc_info=True)
     raise HTTPException(status_code=403, detail="内部调用凭证无效")
-
 
 # ---------------------------------------------------------------------------
 # 请求 / 响应模型
 # ---------------------------------------------------------------------------
-
 
 class TemplateParam(BaseModel):
     name: str
@@ -63,7 +61,6 @@ class TemplateParam(BaseModel):
     default: Any
     min: float | None = None
     max: float | None = None
-
 
 class TemplateCreateRequest(BaseModel):
     id: str | None = None  # POST 可选，PUT 路径中提供
@@ -93,13 +90,11 @@ class TemplateCreateRequest(BaseModel):
             raise ValueError(f"difficulty 必须是 {allowed} 之一")
         return v
 
-
 def _slug(name: str) -> str:
     """将中英文名称转为合法 id（snake_case）。"""
     slug = re.sub(r"[^a-z0-9]", "_", name.lower())
     slug = re.sub(r"_+", "_", slug).strip("_")
     return slug[:64] or "template"
-
 
 def _validate_id(template_id: str) -> None:
     if not _ID_PATTERN.match(template_id):
@@ -108,14 +103,12 @@ def _validate_id(template_id: str) -> None:
             detail=f"模板 ID 只允许小写字母、数字和下划线，长度 1-64，收到: {template_id!r}",
         )
 
-
 def _get_file_pair(template_id: str) -> tuple[Path, Path]:
     templates_dir = _resolve_templates_dir()
     return (
         templates_dir / f"{template_id}.json",
         templates_dir / f"{template_id}.py",
     )
-
 
 def _write_template(template_id: str, data: TemplateCreateRequest) -> None:
     """将模板写入 .json + .py 文件对。"""
@@ -153,11 +146,9 @@ def _write_template(template_id: str, data: TemplateCreateRequest) -> None:
     invalidate_templates_cache()
     task_logger.info("template_written", "策略模板写入完成", template_id=template_id)
 
-
 # ---------------------------------------------------------------------------
 # 端点
 # ---------------------------------------------------------------------------
-
 
 @router.get("")
 async def list_admin_templates(
@@ -171,7 +162,6 @@ async def list_admin_templates(
         "total": len(templates),
         "templates": [t.model_dump() for t in templates],
     }
-
 
 @router.post("", status_code=201)
 async def create_template(
@@ -193,8 +183,11 @@ async def create_template(
         )
 
     _write_template(template_id, data)
-    return {"success": True, "id": template_id, "message": f"模板 '{data.name}' 创建成功"}
-
+    return {
+        "success": True,
+        "id": template_id,
+        "message": f"模板 '{data.name}' 创建成功",
+    }
 
 @router.put("/{template_id}")
 async def update_template(
@@ -211,8 +204,11 @@ async def update_template(
         raise HTTPException(status_code=404, detail=f"模板 '{template_id}' 不存在")
 
     _write_template(template_id, data)
-    return {"success": True, "id": template_id, "message": f"模板 '{data.name}' 更新成功"}
-
+    return {
+        "success": True,
+        "id": template_id,
+        "message": f"模板 '{data.name}' 更新成功",
+    }
 
 @router.delete("/{template_id}")
 async def delete_template(
@@ -238,7 +234,16 @@ async def delete_template(
     invalidate_templates_cache()
 
     if errors:
-        task_logger.warning("template_delete_partial_error", "删除模板时出现部分错误", template_id=template_id, errors=errors)
+        task_logger.warning(
+            "template_delete_partial_error",
+            "删除模板时出现部分错误",
+            template_id=template_id,
+            errors=errors,
+        )
 
     task_logger.info("template_deleted", "策略模板已删除", template_id=template_id)
-    return {"success": True, "id": template_id, "message": f"模板 '{template_id}' 已删除"}
+    return {
+        "success": True,
+        "id": template_id,
+        "message": f"模板 '{template_id}' 已删除",
+    }

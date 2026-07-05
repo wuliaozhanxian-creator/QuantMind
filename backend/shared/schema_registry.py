@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from importlib import import_module
-from typing import Dict, List
 from collections.abc import Iterable, Sequence
 
 from sqlalchemy import MetaData
@@ -176,5 +175,9 @@ async def create_registered_tables(
 ) -> None:
     for schema in load_registered_schemas(schema_keys):
         async with engine.begin() as conn:
-            # noqa: B023 — run_sync 在当前迭代内同步执行 lambda，schema 不会被后续迭代覆盖
-            await conn.run_sync(lambda sync_conn: schema.metadata.create_all(sync_conn, checkfirst=checkfirst))  # noqa: B023
+            # run_sync 在当前迭代内同步执行 lambda；用默认参数绑定 schema 避免闭包延迟绑定问题
+            await conn.run_sync(
+                lambda sync_conn, schema=schema: schema.metadata.create_all(
+                    sync_conn, checkfirst=checkfirst
+                )
+            )

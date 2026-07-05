@@ -11,7 +11,6 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 # ============ 请求模型 ============
 
-
 class UserRegister(BaseModel):
     """用户注册"""
 
@@ -28,14 +27,12 @@ class UserRegister(BaseModel):
             raise ValueError("用户名只能包含字母和数字")
         return v
 
-
 class UserLogin(BaseModel):
     """用户登录"""
 
     tenant_id: str = Field(..., min_length=1, max_length=64, description="租户ID")
     username: str = Field(..., description="用户名或邮箱")
     password: str = Field(..., description="密码")
-
 
 class AdminLogin(BaseModel):
     """管理员专用登录"""
@@ -44,7 +41,6 @@ class AdminLogin(BaseModel):
     password: str = Field(..., description="密码")
     admin_key: str = Field(..., description="管理员安全密钥")
     tenant_id: str = Field("default", description="租户ID")
-
 
 class VerificationRequest(BaseModel):
     """验证码/回执请求"""
@@ -57,13 +53,11 @@ class VerificationRequest(BaseModel):
     )
     user_id: str | None = Field(None, description="相关用户ID（可选）")
 
-
 class ForgotPasswordRequest(BaseModel):
     """忘记密码请求"""
 
     tenant_id: str = Field(..., min_length=1, max_length=64, description="租户ID")
     email: EmailStr = Field(..., description="注册邮箱")
-
 
 class PasswordResetRequest(BaseModel):
     """密码重置请求"""
@@ -72,13 +66,11 @@ class PasswordResetRequest(BaseModel):
     tenant_id: str = Field(..., min_length=1, max_length=64, description="租户ID")
     new_password: str = Field(..., min_length=8, description="新密码")
 
-
 class PasswordChangeRequest(BaseModel):
     """修改密码请求"""
 
     old_password: str = Field(..., description="旧密码")
     new_password: str = Field(..., min_length=8, description="新密码")
-
 
 class UserProfileUpdate(BaseModel):
     """更新用户档案"""
@@ -98,9 +90,7 @@ class UserProfileUpdate(BaseModel):
         None, max_length=2048, description="API Key（全系统通用）"
     )
 
-
 # ============ 响应模型 ============
-
 
 class UserResponse(BaseModel):
     """用户信息响应"""
@@ -116,7 +106,6 @@ class UserResponse(BaseModel):
     is_admin: bool = False
     created_at: datetime
     last_login_at: datetime | None
-
 
 class UserProfileResponse(BaseModel):
     """用户档案响应"""
@@ -149,13 +138,11 @@ class UserProfileResponse(BaseModel):
             return "/uploads/default_avatar.png"
         return v
 
-
 class UserDetailResponse(BaseModel):
     """用户详细信息（包含档案）"""
 
     user: UserResponse
     profile: UserProfileResponse
-
 
 class TokenResponse(BaseModel):
     """Token响应"""
@@ -166,9 +153,7 @@ class TokenResponse(BaseModel):
     expires_in: int
     user: UserResponse | None = None
 
-
 # ============ 统一响应格式 ============
-
 
 class ResponseModel(BaseModel):
     """统一响应格式"""
@@ -178,7 +163,6 @@ class ResponseModel(BaseModel):
     data: dict | None = None
     meta: dict | None = None
 
-
 class PaginatedResponse(BaseModel):
     """分页响应"""
 
@@ -187,12 +171,10 @@ class PaginatedResponse(BaseModel):
     data: dict = Field(..., description="包含items和pagination")
     meta: dict | None = None
 
-
 class SmsSendRequest(BaseModel):
     phone: str
     tenant_id: str
     type: Literal["register", "login", "reset_password"]
-
 
 class PhoneSendCodeRequest(BaseModel):
     """
@@ -207,17 +189,14 @@ class PhoneSendCodeRequest(BaseModel):
         description="目标手机号（bind/change_new 必填；change_old 可不传，默认使用当前绑定手机号）",
     )
 
-
 class PhoneBindRequest(BaseModel):
     phone: str
     code: str
-
 
 class PhoneChangeRequest(BaseModel):
     old_code: str
     new_phone: str
     new_code: str
-
 
 class PhoneRegisterRequest(BaseModel):
     phone: str
@@ -226,19 +205,16 @@ class PhoneRegisterRequest(BaseModel):
     tenant_id: str
     username: str | None = None
 
-
 class PhoneLoginRequest(BaseModel):
     phone: str
     code: str
     tenant_id: str
-
 
 class PhoneResetPasswordRequest(BaseModel):
     phone: str
     code: str
     new_password: str
     tenant_id: str
-
 
 class CheckAvailabilityRequest(BaseModel):
     """检查用户名/手机号是否可用"""

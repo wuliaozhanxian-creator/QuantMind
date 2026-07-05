@@ -14,11 +14,10 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
-
 
 @dataclass
 class WarmupTask:
@@ -31,7 +30,6 @@ class WarmupTask:
     ttl: int = 3600
     priority: int = 1  # 1-5, 5最高
     enabled: bool = True
-
 
 class CacheWarmupManager:
     """缓存预热管理器"""
@@ -73,7 +71,9 @@ class CacheWarmupManager:
         self.stats["total_tasks"] = len(self.tasks)
         self.stats["total_keys"] = sum(len(task.keys) for task in self.tasks)
 
-        logger.info(f"🔥 开始缓存预热: {self.stats['total_tasks']}个任务, {self.stats['total_keys']}个键")
+        logger.info(
+            f"🔥 开始缓存预热: {self.stats['total_tasks']}个任务, {self.stats['total_keys']}个键"
+        )
 
         # 按优先级排序
         sorted_tasks = sorted(self.tasks, key=lambda t: t.priority, reverse=True)
@@ -99,7 +99,9 @@ class CacheWarmupManager:
                     self.stats["failed_tasks"] += 1
 
         self.stats["end_time"] = datetime.now()
-        self.stats["duration_seconds"] = (self.stats["end_time"] - self.stats["start_time"]).total_seconds()
+        self.stats["duration_seconds"] = (
+            self.stats["end_time"] - self.stats["start_time"]
+        ).total_seconds()
 
         logger.info(
             f"✅ 缓存预热完成: 成功 {self.stats['completed_tasks']}/{self.stats['total_tasks']} 任务, "
@@ -145,7 +147,9 @@ class CacheWarmupManager:
         self.stats["warmed_keys"] += success_count
         self.stats["failed_keys"] += failed_count
 
-        logger.info(f"✅ 任务 {task.name} 完成: 成功 {success_count}, 失败 {failed_count}")
+        logger.info(
+            f"✅ 任务 {task.name} 完成: 成功 {success_count}, 失败 {failed_count}"
+        )
 
     async def _fetch_data(self, fetch_func: Callable, key: str) -> Any | None:
         """获取数据（支持同步和异步函数）"""
@@ -153,7 +157,6 @@ class CacheWarmupManager:
             return await fetch_func(key)
         else:
             return fetch_func(key)
-
 
 class QuantMindWarmup:
     """QuantMind项目缓存预热配置"""
@@ -347,7 +350,6 @@ class QuantMindWarmup:
     async def run_warmup(self, parallel: bool = True) -> dict[str, Any]:
         """执行预热"""
         return await self.warmup_manager.warmup_all(parallel=parallel)
-
 
 # 快速启动函数
 async def warmup_cache(cache_manager, parallel: bool = True) -> dict[str, Any]:

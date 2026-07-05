@@ -5,14 +5,13 @@
 
 import os
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from dotenv import load_dotenv
 from loguru import logger
 
 # 加载环境变量
 load_dotenv()
-
 
 class COSConfigManager:
     """腾讯云COS配置管理器"""
@@ -33,29 +32,42 @@ class COSConfigManager:
             "scheme": os.getenv("TENCENT_SCHEME", "https"),
             "base_url": os.getenv("TENCENT_COS_URL"),
             # 安全配置
-            "token_expire_time": int(os.getenv("TENCENT_TOKEN_EXPIRE_TIME", "3600")),  # 1小时
-            "max_file_size": int(os.getenv("TENCENT_MAX_FILE_SIZE", "104857600")),  # 100MB
+            "token_expire_time": int(
+                os.getenv("TENCENT_TOKEN_EXPIRE_TIME", "3600")
+            ),  # 1小时
+            "max_file_size": int(
+                os.getenv("TENCENT_MAX_FILE_SIZE", "104857600")
+            ),  # 100MB
             "allowed_file_types": os.getenv(
                 "TENCENT_ALLOWED_FILE_TYPES",
                 "jpg,jpeg,png,gif,webp,pdf,doc,docx,txt,md,csv,xlsx,xls",
             ).split(","),
             # 上传路径配置
-            "upload_path_pattern": os.getenv("TENCENT_UPLOAD_PATH_PATTERN", "{category}/{user_id}/{year}/{month}"),
+            "upload_path_pattern": os.getenv(
+                "TENCENT_UPLOAD_PATH_PATTERN", "{category}/{user_id}/{year}/{month}"
+            ),
             # CDN配置
             "cdn_domain": os.getenv("TENCENT_CDN_DOMAIN"),
             "use_https": os.getenv("TENCENT_USE_HTTPS", "true").lower() == "true",
             # 访问控制
-            "private_read": os.getenv("TENCENT_PRIVATE_READ", "false").lower() == "true",
-            "cache_control": os.getenv("TENCENT_CACHE_CONTROL", "max-age=31536000"),  # 1年
+            "private_read": os.getenv("TENCENT_PRIVATE_READ", "false").lower()
+            == "true",
+            "cache_control": os.getenv(
+                "TENCENT_CACHE_CONTROL", "max-age=31536000"
+            ),  # 1年
         }
 
     def _validate_config(self):
         """验证配置的完整性和有效性"""
         required_fields = ["secret_id", "secret_key", "region", "bucket"]
-        missing_fields = [field for field in required_fields if not self.config.get(field)]
+        missing_fields = [
+            field for field in required_fields if not self.config.get(field)
+        ]
 
         if missing_fields:
-            raise ValueError(f"COS配置不完整，缺少必要字段: {', '.join(missing_fields)}")
+            raise ValueError(
+                f"COS配置不完整，缺少必要字段: {', '.join(missing_fields)}"
+            )
 
         # 验证region格式
         if not self.config["region"].startswith("ap-"):
@@ -63,9 +75,13 @@ class COSConfigManager:
 
         # 验证bucket格式
         if "-" not in self.config["bucket"]:
-            logger.warning(f"COS bucket格式可能不正确，应包含APPID: {self.config['bucket']}")
+            logger.warning(
+                f"COS bucket格式可能不正确，应包含APPID: {self.config['bucket']}"
+            )
 
-        logger.info(f"COS配置验证通过 - Bucket: {self.config['bucket']}, Region: {self.config['region']}")
+        logger.info(
+            f"COS配置验证通过 - Bucket: {self.config['bucket']}, Region: {self.config['region']}"
+        )
 
     def get_config(self) -> dict[str, Any]:
         """获取完整配置"""
@@ -88,7 +104,9 @@ class COSConfigManager:
             return f"https://{self.config['cdn_domain']}/{file_key}"
         return f"{self.get_base_url()}/{file_key}"
 
-    def is_file_type_allowed(self, file_extension: str, category: str = "general") -> bool:
+    def is_file_type_allowed(
+        self, file_extension: str, category: str = "general"
+    ) -> bool:
         """检查文件类型是否被允许"""
         file_extension = file_extension.lower().lstrip(".")
         allowed_types = self.config["allowed_file_types"]
@@ -149,7 +167,9 @@ class COSConfigManager:
 
         return upload_path
 
-    def generate_presigned_url(self, file_key: str, expire_seconds: int = None) -> dict[str, Any]:
+    def generate_presigned_url(
+        self, file_key: str, expire_seconds: int = None
+    ) -> dict[str, Any]:
         """生成预签名URL"""
         if expire_seconds is None:
             expire_seconds = self.config["token_expire_time"]
@@ -188,7 +208,9 @@ class COSConfigManager:
 
         return headers
 
-    def validate_file_security(self, filename: str, file_size: int, content_type: str) -> dict[str, Any]:
+    def validate_file_security(
+        self, filename: str, file_size: int, content_type: str
+    ) -> dict[str, Any]:
         """验证文件安全性"""
         validation_result = {"valid": True, "errors": [], "warnings": []}
 
@@ -203,7 +225,9 @@ class COSConfigManager:
         max_size = self.config["max_file_size"]
         if file_size > max_size:
             validation_result["valid"] = False
-            validation_result["errors"].append(f"文件大小超过限制: {file_size} > {max_size}")
+            validation_result["errors"].append(
+                f"文件大小超过限制: {file_size} > {max_size}"
+            )
 
         # 检查文件扩展名
         file_ext = os.path.splitext(filename)[1].lower().lstrip(".")
@@ -234,7 +258,9 @@ class COSConfigManager:
 
         return f"{name}{ext}"
 
-    def get_content_type(self, filename: str, default_type: str = "application/octet-stream") -> str:
+    def get_content_type(
+        self, filename: str, default_type: str = "application/octet-stream"
+    ) -> str:
         """根据文件名获取Content-Type"""
         ext = os.path.splitext(filename)[1].lower()
 
@@ -260,20 +286,16 @@ class COSConfigManager:
 
         return content_types.get(ext, default_type)
 
-
 # 创建全局配置管理器实例
 cos_config_manager = COSConfigManager()
-
 
 def get_cos_config() -> COSConfigManager:
     """获取COS配置管理器实例"""
     return cos_config_manager
 
-
 def get_cos_config_dict() -> dict[str, Any]:
     """获取COS配置字典"""
     return cos_config_manager.get_config()
-
 
 # 预定义的文件类别配置
 FILE_CATEGORIES = {
@@ -327,11 +349,9 @@ FILE_CATEGORIES = {
     },
 }
 
-
 def get_file_category_config(category: str) -> dict[str, Any] | None:
     """获取文件类别配置"""
     return FILE_CATEGORIES.get(category.lower())
-
 
 def list_supported_categories() -> list[dict[str, Any]]:
     """列出所有支持的文件类别"""

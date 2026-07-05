@@ -21,7 +21,6 @@ logger = logging.getLogger(__name__)
 # 默认头像路径
 DEFAULT_AVATAR_URL = "/uploads/default_avatar.png"
 
-
 class ProfileService:
     """用户档案服务"""
 
@@ -89,7 +88,11 @@ class ProfileService:
         try:
             parsed = urlparse(value)
             # 例如 quantmind-xxx.cos.ap-guangzhou.myqcloud.com
-            if parsed.netloc and ".cos." in parsed.netloc and parsed.netloc.endswith(".myqcloud.com"):
+            if (
+                parsed.netloc
+                and ".cos." in parsed.netloc
+                and parsed.netloc.endswith(".myqcloud.com")
+            ):
                 parsed_base = urlparse(cos_base)
                 if parsed_base.scheme and parsed_base.netloc:
                     normalized_path = parsed.path or ""
@@ -98,7 +101,9 @@ class ProfileService:
                         normalized_path = f"/{file_key}" if file_key else ""
                     normalized_query = f"?{parsed.query}" if parsed.query else ""
                     if not normalized_path:
-                        logger.warning("avatar_url missing object key, skip rewrite: %s", value)
+                        logger.warning(
+                            "avatar_url missing object key, skip rewrite: %s", value
+                        )
                         return value
                     return f"{parsed_base.scheme}://{parsed_base.netloc}{normalized_path}{normalized_query}"
         except Exception:
@@ -112,14 +117,24 @@ class ProfileService:
         """
         try:
             # 仅在显式开启时尝试自动建表，避免生产环境误创建。
-            if (settings.DEBUG or settings.AUTO_CREATE_PROFILE_TABLE) and not ProfileService._profile_table_checked:
+            if (
+                settings.DEBUG or settings.AUTO_CREATE_PROFILE_TABLE
+            ) and not ProfileService._profile_table_checked:
                 conn = await session.connection()
-                await conn.run_sync(lambda sync_conn: UserProfile.__table__.create(bind=sync_conn, checkfirst=True))
+                await conn.run_sync(
+                    lambda sync_conn: UserProfile.__table__.create(
+                        bind=sync_conn, checkfirst=True
+                    )
+                )
                 ProfileService._profile_table_checked = True
 
             if not ProfileService._profile_columns_checked:
                 # 幂等补列：兼容历史库没有 api_key 字段的场景
-                await session.execute(text("ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS api_key TEXT"))
+                await session.execute(
+                    text(
+                        "ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS api_key TEXT"
+                    )
+                )
                 ProfileService._profile_columns_checked = True
         except Exception:
             logger.exception("Failed to ensure user_profiles table")
@@ -127,7 +142,9 @@ class ProfileService:
             # or if it's a connectivity issue that will be caught later
             pass
 
-    async def get_profile(self, user_id: str, tenant_id: str, use_cache: bool = True) -> dict | None:
+    async def get_profile(
+        self, user_id: str, tenant_id: str, use_cache: bool = True
+    ) -> dict | None:
         """获取用户档案（返回 dict 避免 detached instance 问题）"""
         # 从数据库查询（主库，必要时可创建表）
         async with get_session(read_only=False) as session:
@@ -180,7 +197,9 @@ class ProfileService:
                 if not profile_dict["avatar_url"]:
                     profile_dict["avatar_url"] = DEFAULT_AVATAR_URL
                 else:
-                    profile_dict["avatar_url"] = self._normalize_avatar_url(profile_dict["avatar_url"])
+                    profile_dict["avatar_url"] = self._normalize_avatar_url(
+                        profile_dict["avatar_url"]
+                    )
                 if use_cache:
                     # 缓存档案
                     cache_key = f"profile:{tenant_id}:{user_id}"
@@ -201,7 +220,10 @@ class ProfileService:
             await self._ensure_profile_table(session)
             # 显式设置默认值，确保 Pydantic 校验通过
             profile = UserProfile(
-                user_id=user_id, tenant_id=tenant_id, trading_experience="intermediate", risk_tolerance="medium"
+                user_id=user_id,
+                tenant_id=tenant_id,
+                trading_experience="intermediate",
+                risk_tolerance="medium",
             )
             session.add(profile)
             await session.commit()
@@ -255,7 +277,9 @@ class ProfileService:
             # 更新字段
             update_data = profile_data.dict(exclude_unset=True)
             if "avatar_url" in update_data:
-                update_data["avatar_url"] = self._normalize_avatar_url(update_data.get("avatar_url"))
+                update_data["avatar_url"] = self._normalize_avatar_url(
+                    update_data.get("avatar_url")
+                )
             for key, value in update_data.items():
                 if hasattr(profile, key):
                     setattr(profile, key, value)
@@ -297,7 +321,9 @@ class ProfileService:
                 "username_at_runtime": None,
             }
 
-    async def update_avatar(self, user_id: str, tenant_id: str, avatar_url: str) -> UserProfile | None:
+    async def update_avatar(
+        self, user_id: str, tenant_id: str, avatar_url: str
+    ) -> UserProfile | None:
         """更新头像"""
         normalized_avatar_url = self._normalize_avatar_url(avatar_url)
         async with get_session(read_only=False) as session:

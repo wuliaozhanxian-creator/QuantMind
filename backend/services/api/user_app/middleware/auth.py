@@ -9,7 +9,7 @@ Authentication Middleware
 """
 
 import logging
-from typing import List, Optional
+from typing import Optional
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -23,7 +23,6 @@ logger = logging.getLogger(__name__)
 
 security = HTTPBearer(auto_error=False)
 
-
 async def get_current_user(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
@@ -35,7 +34,9 @@ async def get_current_user(
     服务间调用请使用 service JWT（T6.5 实现）。
     """
     if not credentials:
-        print(f"DEBUG: get_current_user Missing authentication token for {request.url.path}")
+        print(
+            f"DEBUG: get_current_user Missing authentication token for {request.url.path}"
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing authentication token",
@@ -75,7 +76,6 @@ async def get_current_user(
         "jti": payload.get("jti"),
     }
 
-
 async def get_current_active_user(
     current_user: dict = Depends(get_current_user),
 ) -> dict:
@@ -89,8 +89,9 @@ async def get_current_active_user(
 
     return current_user
 
-
-async def require_admin(current_user: dict = Depends(get_current_user), db=Depends(get_db)) -> dict:
+async def require_admin(
+    current_user: dict = Depends(get_current_user), db=Depends(get_db)
+) -> dict:
     """
     要求管理员权限
     """
@@ -103,10 +104,11 @@ async def require_admin(current_user: dict = Depends(get_current_user), db=Depen
     has_admin = await rbac_service.has_role(current_user["user_id"], "admin")
 
     if not has_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要管理员权限")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="需要管理员权限"
+        )
 
     return current_user
-
 
 def require_permission(permission_code: str):
     """
@@ -119,11 +121,15 @@ def require_permission(permission_code: str):
         ...
     """
 
-    async def permission_checker(current_user: dict = Depends(get_current_user), db=Depends(get_db)) -> dict:
+    async def permission_checker(
+        current_user: dict = Depends(get_current_user), db=Depends(get_db)
+    ) -> dict:
         rbac_service = RBACService(db)
 
         # 检查权限
-        has_perm = await rbac_service.has_permission(current_user["user_id"], permission_code)
+        has_perm = await rbac_service.has_permission(
+            current_user["user_id"], permission_code
+        )
 
         if not has_perm:
             raise HTTPException(
@@ -134,7 +140,6 @@ def require_permission(permission_code: str):
         return current_user
 
     return permission_checker
-
 
 def require_any_permission(permission_codes: list[str]):
     """
@@ -147,10 +152,14 @@ def require_any_permission(permission_codes: list[str]):
         ...
     """
 
-    async def permission_checker(current_user: dict = Depends(get_current_user), db=Depends(get_db)) -> dict:
+    async def permission_checker(
+        current_user: dict = Depends(get_current_user), db=Depends(get_db)
+    ) -> dict:
         rbac_service = RBACService(db)
 
-        has_perm = await rbac_service.has_any_permission(current_user["user_id"], permission_codes)
+        has_perm = await rbac_service.has_any_permission(
+            current_user["user_id"], permission_codes
+        )
 
         if not has_perm:
             raise HTTPException(
@@ -161,7 +170,6 @@ def require_any_permission(permission_codes: list[str]):
         return current_user
 
     return permission_checker
-
 
 def require_role(role_code: str):
     """
@@ -174,22 +182,27 @@ def require_role(role_code: str):
         ...
     """
 
-    async def role_checker(current_user: dict = Depends(get_current_user), db=Depends(get_db)) -> dict:
+    async def role_checker(
+        current_user: dict = Depends(get_current_user), db=Depends(get_db)
+    ) -> dict:
         rbac_service = RBACService(db)
 
         has_role = await rbac_service.has_role(current_user["user_id"], role_code)
 
         if not has_role:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"需要角色: {role_code}")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail=f"需要角色: {role_code}"
+            )
 
         return current_user
 
     return role_checker
 
-
 async def get_optional_user(
     request: Request,
-    credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
+    credentials: HTTPAuthorizationCredentials | None = Depends(
+        HTTPBearer(auto_error=False)
+    ),
 ) -> dict | None:
     """
     获取可选的当前用户
@@ -220,7 +233,6 @@ async def get_optional_user(
         "jti": payload.get("jti"),
     }
 
-
 def check_user_permission(user_id: str, resource_user_id: str) -> bool:
     """
     检查用户权限
@@ -230,14 +242,17 @@ def check_user_permission(user_id: str, resource_user_id: str) -> bool:
     # 简化版本：用户只能访问自己的资源
     return user_id == resource_user_id
 
-
-async def verify_user_access(resource_user_id: str, current_user: dict = Depends(get_current_user)) -> dict:
+async def verify_user_access(
+    resource_user_id: str, current_user: dict = Depends(get_current_user)
+) -> dict:
     """
     验证用户访问权限
 
     确保用户只能访问自己的资源
     """
     if not check_user_permission(current_user["user_id"], resource_user_id):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="没有权限访问该资源")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="没有权限访问该资源"
+        )
 
     return current_user

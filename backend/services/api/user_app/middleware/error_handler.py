@@ -28,7 +28,9 @@ def add_error_handlers(app: FastAPI):
         )
 
     @app.exception_handler(RequestValidationError)
-    async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    async def validation_exception_handler(
+        request: Request, exc: RequestValidationError
+    ):
         """参数验证异常处理"""
         errors = []
         for error in exc.errors():

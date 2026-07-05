@@ -78,8 +78,8 @@ def _generate_synthetic_prices(
     for t in range(1, n_days):
         ret = daily_drift + daily_vol * rng.standard_normal(n_instruments)
         # 动量结构：昨日收益的 0.05 延续
-        prev_ret = (prices[t - 1] / prices[t - 2] - 1) if t >= 2 else np.zeros(
-            n_instruments
+        prev_ret = (
+            (prices[t - 1] / prices[t - 2] - 1) if t >= 2 else np.zeros(n_instruments)
         )
         ret = ret + 0.05 * prev_ret
         # 偶发涨跌停：~1.5% 概率冲击到 ±9.6%~10%
@@ -143,14 +143,9 @@ class QlibStepBacktestEmulator:
 
         sig_wide = signals["score"].unstack(level="instrument")
         price_wide = (
-            prices["$close"]
-            .unstack(level="instrument")
-            .reindex_like(sig_wide)
-            .ffill()
+            prices["$close"].unstack(level="instrument").reindex_like(sig_wide).ffill()
         )
-        valid_dates = sig_wide.index.intersection(
-            price_wide.dropna(how="all").index
-        )
+        valid_dates = sig_wide.index.intersection(price_wide.dropna(how="all").index)
         sig_wide = sig_wide.loc[valid_dates]
         price_wide = price_wide.loc[valid_dates]
 
@@ -439,8 +434,10 @@ def _multifactor_param_grid():
         (0.0, 0.5, 0.5),
     ]
     for lb in [10, 20, 30]:
-        for (wm, wr, wv) in weights:
-            grid.append({"lookback": lb, "topk": 5, "w_mom": wm, "w_rev": wr, "w_vol": wv})
+        for wm, wr, wv in weights:
+            grid.append(
+                {"lookback": lb, "topk": 5, "w_mom": wm, "w_rev": wr, "w_vol": wv}
+            )
     return grid
 
 
@@ -507,9 +504,7 @@ def test_phase2_alignment_multi_factor(synthetic_data):
 
 
 def _assert_scenario_pass(r: ScenarioResult):
-    assert r.pass_spearman, (
-        f"[{r.name}] Spearman {r.spearman:.4f} < {THRESH_SPEARMAN}"
-    )
+    assert r.pass_spearman, f"[{r.name}] Spearman {r.spearman:.4f} < {THRESH_SPEARMAN}"
     assert r.pass_deviation, (
         f"[{r.name}] 年化偏差 {r.mean_annual_deviation:.2%} > {THRESH_ANNUAL_DEVIATION:.0%}"
     )

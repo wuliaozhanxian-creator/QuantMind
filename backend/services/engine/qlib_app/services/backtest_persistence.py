@@ -6,14 +6,16 @@ import logging
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from sqlalchemy import text
 
 from backend.services.engine.qlib_app.schemas.backtest import QlibBacktestResult
 from backend.shared.database_manager_v2 import get_session
 from backend.shared.utils import normalize_user_id
-from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
+from backend.services.engine.qlib_app.utils.structured_logger import (
+    StructuredTaskLogger,
+)
 
 logger = logging.getLogger(__name__)
 task_logger = StructuredTaskLogger(logger, "BacktestPersistence")
@@ -22,7 +24,6 @@ try:
     from backend.shared.cos_service import get_cos_service
 except Exception:
     get_cos_service = None
-
 
 class BacktestPersistence:
     """PostgreSQL 持久化"""
@@ -42,24 +43,40 @@ class BacktestPersistence:
     def __init__(self) -> None:
         self._local_result_root = self._resolve_local_result_root()
         self._local_result_root.mkdir(parents=True, exist_ok=True)
-        self._enable_cos_backup = os.getenv("QLIB_BACKTEST_COS_BACKUP_ENABLED", "false").strip().lower() in (
+        self._enable_cos_backup = os.getenv(
+            "QLIB_BACKTEST_COS_BACKUP_ENABLED", "false"
+        ).strip().lower() in (
             "1",
             "true",
             "yes",
             "on",
         )
-        self._cos_backup_prefix = os.getenv("QLIB_BACKTEST_COS_PREFIX", "backtests/results").strip().strip("/")
+        self._cos_backup_prefix = (
+            os.getenv("QLIB_BACKTEST_COS_PREFIX", "backtests/results")
+            .strip()
+            .strip("/")
+        )
         self._cos_service = None
         if self._enable_cos_backup and get_cos_service:
             try:
                 self._cos_service = get_cos_service()
                 if not self._cos_service.client:
-                    task_logger.warning("cos_backup_unavailable", "QLIB_BACKTEST_COS_BACKUP_ENABLED=true，但 COS 不可用，已回退仅本地存储")
+                    task_logger.warning(
+                        "cos_backup_unavailable",
+                        "QLIB_BACKTEST_COS_BACKUP_ENABLED=true，但 COS 不可用，已回退仅本地存储",
+                    )
             except Exception as exc:
-                task_logger.warning("cos_service_init_failed", "初始化 COS 服务失败，已回退仅本地存储", error=str(exc))
+                task_logger.warning(
+                    "cos_service_init_failed",
+                    "初始化 COS 服务失败，已回退仅本地存储",
+                    error=str(exc),
+                )
                 self._cos_service = None
         elif self._enable_cos_backup and not get_cos_service:
-            task_logger.warning("cos_dependency_missing", "QLIB_BACKTEST_COS_BACKUP_ENABLED=true，但 COS 依赖不可用，已回退仅本地存储")
+            task_logger.warning(
+                "cos_dependency_missing",
+                "QLIB_BACKTEST_COS_BACKUP_ENABLED=true，但 COS 依赖不可用，已回退仅本地存储",
+            )
 
     async def ensure_tables(self) -> None:
         statements = [
@@ -170,7 +187,11 @@ class BacktestPersistence:
         if has_local_payload:
             backup_status = "pending" if self._can_backup_to_cos() else "local_only"
         config_json = json.dumps(config or {}, ensure_ascii=False)
-        summary_json = json.dumps(summary_payload, ensure_ascii=False) if summary_payload is not None else None
+        summary_json = (
+            json.dumps(summary_payload, ensure_ascii=False)
+            if summary_payload is not None
+            else None
+        )
         async with get_session() as session:
             await session.execute(
                 text("""
@@ -252,7 +273,10 @@ class BacktestPersistence:
             needs_local = any(f in self.LARGE_RESULT_FIELDS for f in include_fields)
         elif exclude_fields:
             # 如果排除的大量字段包含所有大文件字段，则不需要加载本地
-            needs_local = any(f in self.LARGE_RESULT_FIELDS and f not in exclude_fields for f in self.LARGE_RESULT_FIELDS)
+            needs_local = any(
+                f in self.LARGE_RESULT_FIELDS and f not in exclude_fields
+                for f in self.LARGE_RESULT_FIELDS
+            )
 
         merged_payload = self._merge_summary_with_local(
             summary_payload=data["result_json"],
@@ -272,13 +296,19 @@ class BacktestPersistence:
                 merged_payload.pop(field, None)
 
         # 【核心性能优化 2】仅在明确包含 trades 且确实有数据时才进行极其耗时的归一化
-        should_normalize_trades = (include_fields is None or "trades" in include_fields) and (exclude_fields is None or "trades" not in exclude_fields)
+        should_normalize_trades = (
+            include_fields is None or "trades" in include_fields
+        ) and (exclude_fields is None or "trades" not in exclude_fields)
         trades = merged_payload.get("trades")
         if should_normalize_trades and isinstance(trades, list) and trades:
             try:
-                from backend.services.engine.qlib_app.services.risk_analyzer import RiskAnalyzer
+                from backend.services.engine.qlib_app.services.risk_analyzer import (
+                    RiskAnalyzer,
+                )
 
-                merged_payload["trades"] = RiskAnalyzer.normalize_trades_for_display(trades)
+                merged_payload["trades"] = RiskAnalyzer.normalize_trades_for_display(
+                    trades
+                )
             except Exception as exc:
                 task_logger.warning(
                     "normalize_trade_display_failed",
@@ -292,7 +322,8 @@ class BacktestPersistence:
             filtered = {
                 k: v
                 for k, v in merged_payload.items()
-                if k in include_fields or k in ["backtest_id", "status", "created_at", "user_id"]
+                if k in include_fields
+                or k in ["backtest_id", "status", "created_at", "user_id"]
             }
             return QlibBacktestResult.model_validate(filtered)
 
@@ -398,7 +429,10 @@ class BacktestPersistence:
                         AND m.tenant_id = b.tenant_id
                         AND m.user_id = b.user_id
                     WHERE b.user_id = :user_id
-                    """ + (" AND b.tenant_id = :tenant_id" if tenant_id else "") + " ORDER BY b.created_at DESC" + sql_limit
+                    """
+                    + (" AND b.tenant_id = :tenant_id" if tenant_id else "")
+                    + " ORDER BY b.created_at DESC"
+                    + sql_limit
                 ),
                 params,
             )
@@ -426,13 +460,18 @@ class BacktestPersistence:
                 benchmark_symbol=row["benchmark_symbol"],
                 benchmark_return=row["benchmark_return"],
                 error_message=row["error_message"],
-                config=row["config_json"] if isinstance(row["config_json"], dict) else None,
+                config=row["config_json"]
+                if isinstance(row["config_json"], dict)
+                else None,
                 model_name=row.get("model_name"),
                 analysis_ready=(
                     str(row["status"] or "").lower() == "completed"
                     and (
                         bool(row.get("has_summary_equity"))
-                        or (bool(row.get("result_file_path")) and Path(str(row.get("result_file_path"))).exists())
+                        or (
+                            bool(row.get("result_file_path"))
+                            and Path(str(row.get("result_file_path"))).exists()
+                        )
                     )
                 ),
             )
@@ -548,18 +587,24 @@ class BacktestPersistence:
             trades = payload.get("trades")
             if should_normalize_trades and isinstance(trades, list) and trades:
                 try:
-                    from backend.services.engine.qlib_app.services.risk_analyzer import RiskAnalyzer
+                    from backend.services.engine.qlib_app.services.risk_analyzer import (
+                        RiskAnalyzer,
+                    )
 
-                    payload["trades"] = RiskAnalyzer.normalize_trades_for_display(trades)
+                    payload["trades"] = RiskAnalyzer.normalize_trades_for_display(
+                        trades
+                    )
                 except Exception:
-                    pass
+                    logger.debug("ignored exception", exc_info=True)
 
             # 裁剪字段
             if include_fields:
                 payload = {
                     k: v
                     for k, v in payload.items()
-                    if k in include_fields or k in ["backtest_id", "status", "created_at", "user_id", "model_name"]
+                    if k in include_fields
+                    or k
+                    in ["backtest_id", "status", "created_at", "user_id", "model_name"]
                 }
 
             obj = QlibBacktestResult.parse_obj(payload)
@@ -572,7 +617,9 @@ class BacktestPersistence:
             row = await session.execute(text("SELECT 1"))
             return row.scalar_one_or_none() == 1
 
-    def _result_to_payload(self, result: QlibBacktestResult | None) -> dict[str, Any] | None:
+    def _result_to_payload(
+        self, result: QlibBacktestResult | None
+    ) -> dict[str, Any] | None:
         if result is None:
             return None
         return self._normalize(result.dict())
@@ -620,7 +667,9 @@ class BacktestPersistence:
         safe = segment.replace("/", "_").replace("\\", "_").strip()
         return safe or "unknown"
 
-    def _build_local_result_path(self, backtest_id: str, user_id: str, tenant_id: str) -> Path:
+    def _build_local_result_path(
+        self, backtest_id: str, user_id: str, tenant_id: str
+    ) -> Path:
         tenant = self._sanitize_segment(tenant_id)
         user = self._sanitize_segment(user_id)
         file_name = f"{self._sanitize_segment(backtest_id)}.json"
@@ -635,7 +684,9 @@ class BacktestPersistence:
     ) -> str | None:
         if payload is None:
             return None
-        target = self._build_local_result_path(backtest_id=backtest_id, user_id=user_id, tenant_id=tenant_id)
+        target = self._build_local_result_path(
+            backtest_id=backtest_id, user_id=user_id, tenant_id=tenant_id
+        )
         target.parent.mkdir(parents=True, exist_ok=True)
         temp_path = target.with_suffix(".json.tmp")
         temp_path.write_text(
@@ -698,7 +749,10 @@ class BacktestPersistence:
 
     def _can_backup_to_cos(self) -> bool:
         return bool(
-            self._enable_cos_backup and self._cos_service and self._cos_service.client and self._cos_service.bucket_name
+            self._enable_cos_backup
+            and self._cos_service
+            and self._cos_service.client
+            and self._cos_service.bucket_name
         )
 
     def _build_cos_key(self, backtest_id: str, user_id: str, tenant_id: str) -> str:
@@ -719,7 +773,11 @@ class BacktestPersistence:
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
-            task_logger.warning("cos_backup_no_event_loop", "无可用事件循环，跳过 COS 冷备", backtest_id=backtest_id)
+            task_logger.warning(
+                "cos_backup_no_event_loop",
+                "无可用事件循环，跳过 COS 冷备",
+                backtest_id=backtest_id,
+            )
             return
         loop.create_task(
             self._backup_local_result_to_cos(
@@ -758,7 +816,13 @@ class BacktestPersistence:
                 True,
             )
             if not isinstance(upload_resp, dict) or not upload_resp.get("success"):
-                raise RuntimeError(str(upload_resp.get("error") if isinstance(upload_resp, dict) else upload_resp))
+                raise RuntimeError(
+                    str(
+                        upload_resp.get("error")
+                        if isinstance(upload_resp, dict)
+                        else upload_resp
+                    )
+                )
             file_url = upload_resp.get("file_url")
             await self._update_backup_status(
                 backtest_id=backtest_id,
@@ -769,7 +833,12 @@ class BacktestPersistence:
                 cos_url=file_url,
             )
         except Exception as exc:
-            task_logger.warning("cos_backup_failed", "回测结果 COS 冷备失败", backtest_id=backtest_id, error=str(exc))
+            task_logger.warning(
+                "cos_backup_failed",
+                "回测结果 COS 冷备失败",
+                backtest_id=backtest_id,
+                error=str(exc),
+            )
             await self._update_backup_status(
                 backtest_id=backtest_id,
                 user_id=user_id,
@@ -845,10 +914,15 @@ class BacktestPersistence:
                         )
                     )
                 except RuntimeError:
-                    pass
+                    pass  # noqa: BLE001 - 可选配置/依赖未启用，预期静默
             return data
         except Exception as exc:
-            task_logger.warning("cos_restore_failed", "从 COS 回源回测文件失败", key=result_cos_key, error=str(exc))
+            task_logger.warning(
+                "cos_restore_failed",
+                "从 COS 回源回测文件失败",
+                key=result_cos_key,
+                error=str(exc),
+            )
             return None
 
     async def _prune_user_history(self, session, user_id: str, tenant_id: str) -> None:

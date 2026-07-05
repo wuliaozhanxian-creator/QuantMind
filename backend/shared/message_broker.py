@@ -12,14 +12,13 @@ from abc import ABC, abstractmethod
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 from collections.abc import Callable
 from uuid import uuid4
 
 from .service_communication import ServiceMessage
 
 logger = logging.getLogger(__name__)
-
 
 class ExchangeType(str, Enum):
     """交换机类型"""
@@ -29,7 +28,6 @@ class ExchangeType(str, Enum):
     FANOUT = "fanout"
     HEADERS = "headers"
 
-
 class QueueType(str, Enum):
     """队列类型"""
 
@@ -37,7 +35,6 @@ class QueueType(str, Enum):
     REDIS = "redis"
     RABBITMQ = "rabbitmq"
     KAFKA = "kafka"
-
 
 @dataclass
 class QueueConfig:
@@ -53,7 +50,6 @@ class QueueConfig:
     durable: bool = False
     auto_delete: bool = True
 
-
 @dataclass
 class Subscription:
     """订阅信息"""
@@ -64,7 +60,6 @@ class Subscription:
     callback: Callable
     auto_ack: bool = True
     exclusive: bool = False
-
 
 class MessageQueue(ABC):
     """消息队列抽象基类"""
@@ -89,7 +84,6 @@ class MessageQueue(ABC):
     async def get_queue_size(self, queue_name: str) -> int:
         """获取队列大小"""
 
-
 class MemoryMessageQueue(MessageQueue):
     """内存消息队列"""
 
@@ -104,10 +98,14 @@ class MemoryMessageQueue(MessageQueue):
         """发布消息"""
         try:
             # 根据路由键找到目标队列
-            target_queues = self._find_target_queues(message.target_service, routing_key)
+            target_queues = self._find_target_queues(
+                message.target_service, routing_key
+            )
 
             if not target_queues:
-                logger.warning(f"没有找到目标队列: {message.target_service}, {routing_key}")
+                logger.warning(
+                    f"没有找到目标队列: {message.target_service}, {routing_key}"
+                )
                 return False
 
             # 发布到所有目标队列
@@ -123,7 +121,11 @@ class MemoryMessageQueue(MessageQueue):
                         continue
 
                     # 检查TTL
-                    if config and message.expires_at and time.time() > message.expires_at:
+                    if (
+                        config
+                        and message.expires_at
+                        and time.time() > message.expires_at
+                    ):
                         logger.debug(f"消息已过期，丢弃: {message.message_id}")
                         continue
 
@@ -236,7 +238,6 @@ class MemoryMessageQueue(MessageQueue):
 
         return stats
 
-
 class RedisMessageQueue(MessageQueue):
     """Redis消息队列"""
 
@@ -269,7 +270,6 @@ class RedisMessageQueue(MessageQueue):
         # 这里实现Redis队列大小查询逻辑
         return 0
 
-
 class MessageBroker:
     """消息代理"""
 
@@ -285,7 +285,9 @@ class MessageBroker:
         if queue_type == QueueType.MEMORY:
             return MemoryMessageQueue()
         elif queue_type == QueueType.REDIS:
-            redis_url = kwargs.get("redis_url", os.getenv("REDIS_URL", "redis://localhost:6379/0"))
+            redis_url = kwargs.get(
+                "redis_url", os.getenv("REDIS_URL", "redis://localhost:6379/0")
+            )
             return RedisMessageQueue(redis_url)
         else:
             raise ValueError(f"Unsupported queue type: {queue_type}")
@@ -303,7 +305,9 @@ class MessageBroker:
         self._running = False
         logger.info("消息代理已停止")
 
-    async def publish(self, message: ServiceMessage, routing_key: str = "", exchange: str = "default") -> bool:
+    async def publish(
+        self, message: ServiceMessage, routing_key: str = "", exchange: str = "default"
+    ) -> bool:
         """发布消息"""
         if not self._running:
             logger.warning("消息代理未运行")
@@ -327,7 +331,9 @@ class MessageBroker:
 
         except Exception as e:
             logger.error(f"发布消息失败: {e}")
-            await self._trigger_event_handlers("message.publish_error", {"message": message, "error": str(e)})
+            await self._trigger_event_handlers(
+                "message.publish_error", {"message": message, "error": str(e)}
+            )
             return False
 
     async def subscribe(
@@ -355,11 +361,15 @@ class MessageBroker:
         self._subscriptions[subscription_id] = subscription
 
         # 创建队列
-        queue_config = QueueConfig(name=queue_name, exchange="default", routing_key=pattern, auto_delete=True)
+        queue_config = QueueConfig(
+            name=queue_name, exchange="default", routing_key=pattern, auto_delete=True
+        )
         await self._queue.create_queue(queue_config)
 
         # 注册消费者
-        await self._queue.consume(queue_name, self._create_message_handler(subscription))
+        await self._queue.consume(
+            queue_name, self._create_message_handler(subscription)
+        )
 
         logger.info(f"订阅已创建: {subscription_id}, 模式: {pattern}")
         return subscription_id
@@ -437,7 +447,9 @@ class MessageBroker:
             "broker_type": self.queue_type,
             "running": self._running,
             "subscriptions": len(self._subscriptions),
-            "event_handlers": {event: len(handlers) for event, handlers in self._event_handlers.items()},
+            "event_handlers": {
+                event: len(handlers) for event, handlers in self._event_handlers.items()
+            },
             "queue_stats": queue_stats,
         }
 
@@ -450,18 +462,17 @@ class MessageBroker:
             "timestamp": time.time(),
         }
 
-
 # 全局消息代理实例
 _message_broker: MessageBroker | None = None
 
-
-def get_message_broker(queue_type: QueueType = QueueType.MEMORY, **kwargs) -> MessageBroker:
+def get_message_broker(
+    queue_type: QueueType = QueueType.MEMORY, **kwargs
+) -> MessageBroker:
     """获取全局消息代理实例"""
     global _message_broker
     if _message_broker is None:
         _message_broker = MessageBroker(queue_type, **kwargs)
     return _message_broker
-
 
 async def start_message_broker(queue_type: QueueType = QueueType.MEMORY, **kwargs):
     """启动消息代理"""
@@ -469,14 +480,12 @@ async def start_message_broker(queue_type: QueueType = QueueType.MEMORY, **kwarg
     await broker.start()
     return broker
 
-
 async def stop_message_broker():
     """停止消息代理"""
     global _message_broker
     if _message_broker:
         await _message_broker.stop()
         _message_broker = None
-
 
 # 标准交换机和队列定义
 class StandardExchanges:
@@ -487,7 +496,6 @@ class StandardExchanges:
     ERRORS = "errors"
     METRICS = "metrics"
     HEALTH_CHECKS = "health_checks"
-
 
 class StandardQueues:
     """标准队列"""
@@ -512,7 +520,6 @@ class StandardQueues:
     # 监控队列
     METRICS_QUEUE = "metrics.default"
     HEALTH_CHECK_QUEUE = "health_checks.default"
-
 
 def create_standard_queues(broker: MessageBroker):
     """创建标准队列"""

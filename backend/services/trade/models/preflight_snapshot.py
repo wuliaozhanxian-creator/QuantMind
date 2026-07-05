@@ -25,4 +25,6 @@ class PreflightSnapshot(Base):
     source = Column(String(32), nullable=False, default="preflight_api")
     last_checked_at = Column(DateTime, nullable=False, default=datetime.now)
     created_at = Column(DateTime, nullable=False, default=datetime.now)
-    updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
+    updated_at = Column(
+        DateTime, nullable=False, default=datetime.now, onupdate=datetime.now
+    )

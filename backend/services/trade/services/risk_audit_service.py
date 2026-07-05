@@ -23,7 +23,6 @@ from backend.services.trade.services.risk_control import RiskRuleConfig
 
 logger = logging.getLogger(__name__)
 
-
 class RiskAuditService:
     """
     风控审计日志服务。
@@ -103,7 +102,7 @@ class RiskAuditService:
             try:
                 await self._db.rollback()
             except Exception:
-                pass
+                logger.debug("ignored exception", exc_info=True)
 
     async def log_rule_reload(
         self,
@@ -141,7 +140,7 @@ class RiskAuditService:
             try:
                 await self._db.rollback()
             except Exception:
-                pass
+                logger.debug("ignored exception", exc_info=True)
 
     async def query_recent(
         self,
@@ -163,7 +162,6 @@ class RiskAuditService:
         stmt = stmt.order_by(RiskAuditLog.created_at.desc()).limit(limit)
         result = await self._db.execute(stmt)
         return list(result.scalars().all())
-
 
 # 模块级单例 (DB session 由调用方在请求作用域内 bind)
 risk_audit_service = RiskAuditService()

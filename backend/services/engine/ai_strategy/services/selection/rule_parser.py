@@ -1,7 +1,7 @@
 import json
 import logging
 import os
-from typing import Any, Dict, List
+from typing import Any
 
 from openai import AsyncOpenAI
 
@@ -9,15 +9,18 @@ from .prompts import TRADE_RULE_PARSER_PROMPT
 
 logger = logging.getLogger(__name__)
 
-
 class TradeRuleParser:
     def __init__(self):
         api_key = os.getenv("DASHSCOPE_API_KEY")
-        base_url = os.getenv("DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+        base_url = os.getenv(
+            "DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        )
         self.model = os.getenv("DASHSCOPE_MODEL", "qwen-max")
 
         if not api_key:
-            logger.warning("DASHSCOPE_API_KEY not found, TradeRuleParser may not work properly.")
+            logger.warning(
+                "DASHSCOPE_API_KEY not found, TradeRuleParser may not work properly."
+            )
 
         self.client = AsyncOpenAI(api_key=api_key, base_url=base_url)
 
@@ -30,10 +33,10 @@ class TradeRuleParser:
             rule_type: 'buy' or 'sell'
 
         Returns:
-            List of rule dictionaries.
+            list of rule dictionaries.
         """
         try:
-            prompt = f"Rule Type: {rule_type}\nUser Input: {text}"
+            prompt = f"Rule type: {rule_type}\nUser Input: {text}"
 
             response = await self.client.chat.completions.create(
                 model=self.model,
@@ -59,10 +62,8 @@ class TradeRuleParser:
             logger.error(f"TradeRuleParser failed: {e}")
             return []
 
-
 # Singleton pattern
 _rule_parser = None
-
 
 def get_trade_rule_parser() -> TradeRuleParser:
     global _rule_parser

@@ -3,7 +3,7 @@
 import json
 import logging
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Optional
 
 from redis.asyncio import Redis
 from sqlalchemy import and_, desc, select, text
@@ -16,7 +16,6 @@ from backend.shared.market_db_manager import get_market_session
 from backend.shared.stock_utils import StockCodeUtil
 
 logger = logging.getLogger(__name__)
-
 
 class KLineService:
     """K线数据服务"""
@@ -37,7 +36,9 @@ class KLineService:
         """获取K线数据 - 优先从远程 stock_daily_latest 读取"""
 
         if use_cache and self.redis:
-            cached = await self._get_cached_klines(symbol, interval, limit, start_time, end_time)
+            cached = await self._get_cached_klines(
+                symbol, interval, limit, start_time, end_time
+            )
             if cached:
                 logger.debug(f"KLine cache hit for {symbol} {interval}")
                 return cached
@@ -46,7 +47,9 @@ class KLineService:
             klines = await self._fetch_from_stock_daily_latest(symbol, limit)
             if klines:
                 if self.redis:
-                    await self._cache_klines(symbol, interval, klines, start_time, end_time)
+                    await self._cache_klines(
+                        symbol, interval, klines, start_time, end_time
+                    )
                 return klines
 
         klines = await self.list_klines(symbol, interval, start_time, end_time, limit)
@@ -82,7 +85,9 @@ class KLineService:
                     LIMIT :limit
                     """
                 )
-                result = await session.execute(stmt, {"symbol": normalized, "limit": limit})
+                result = await session.execute(
+                    stmt, {"symbol": normalized, "limit": limit}
+                )
                 rows = result.mappings().all()
 
                 if not rows:
@@ -141,7 +146,9 @@ class KLineService:
         offset: int = 0,
     ) -> list[KLineResponse]:
         """查询K线历史"""
-        query = select(KLine).filter(and_(KLine.symbol == symbol, KLine.interval == interval))
+        query = select(KLine).filter(
+            and_(KLine.symbol == symbol, KLine.interval == interval)
+        )
 
         if start_time:
             query = query.filter(KLine.timestamp >= start_time)
@@ -155,7 +162,9 @@ class KLineService:
 
         return [KLineResponse.model_validate(k) for k in klines]
 
-    async def get_latest_kline(self, symbol: str, interval: str) -> KLineResponse | None:
+    async def get_latest_kline(
+        self, symbol: str, interval: str
+    ) -> KLineResponse | None:
         """获取最新K线"""
         query = (
             select(KLine)
@@ -170,7 +179,12 @@ class KLineService:
         return KLineResponse.model_validate(kline) if kline else None
 
     async def _get_cached_klines(
-        self, symbol: str, interval: str, limit: int, start_time: datetime | None = None, end_time: datetime | None = None
+        self,
+        symbol: str,
+        interval: str,
+        limit: int,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
     ) -> list[KLineResponse] | None:
         """从缓存获取K线"""
         if not self.redis:
@@ -190,7 +204,12 @@ class KLineService:
         return None
 
     async def _cache_klines(
-        self, symbol: str, interval: str, klines: list[KLineResponse], start_time: datetime | None = None, end_time: datetime | None = None
+        self,
+        symbol: str,
+        interval: str,
+        klines: list[KLineResponse],
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
     ) -> None:
         """缓存K线数据"""
         if not self.redis:

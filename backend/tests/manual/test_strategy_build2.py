@@ -6,7 +6,9 @@ if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
 from backend.services.engine.qlib_app.schemas.backtest import QlibBacktestRequest
-from backend.services.engine.qlib_app.services.strategy_builder import CustomStrategyBuilder
+from backend.services.engine.qlib_app.services.strategy_builder import (
+    CustomStrategyBuilder,
+)
 
 # Use a clean strategy
 content = """
@@ -28,7 +30,9 @@ builder = CustomStrategyBuilder()
 try:
     from types import SimpleNamespace
 
-    request = SimpleNamespace(strategy_content=content, strategy_params=SimpleNamespace())
+    request = SimpleNamespace(
+        strategy_content=content, strategy_params=SimpleNamespace()
+    )
     res = builder._build_strategy_from_content(content, request=request)
     print("Type returned:", type(res))
     print("Result:", res)

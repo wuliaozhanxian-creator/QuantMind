@@ -32,7 +32,6 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-
 class StorageResolver:
     """
     负责将抽象资源 Key 解析为具体的本地文件路径。
@@ -49,7 +48,9 @@ class StorageResolver:
             try:
                 self.cos_service = get_cos_service()
             except Exception as e:
-                logger.warning(f"StorageResolver: COS service initialization failed: {e}")
+                logger.warning(
+                    f"StorageResolver: COS service initialization failed: {e}"
+                )
 
     async def resolve_to_local_path(self, key: str) -> Path:
         """
@@ -155,16 +156,22 @@ class StorageResolver:
 
                 code = config_data.get("code")
                 if not code:
-                    raise ValueError(f"Strategy {strategy_id} has no code in 'config.code' field")
+                    raise ValueError(
+                        f"Strategy {strategy_id} has no code in 'config.code' field"
+                    )
 
                 # 构造文件名
-                safe_name = "".join([c if c.isalnum() else "_" for c in str(row[1] or "unnamed")])
+                safe_name = "".join(
+                    [c if c.isalnum() else "_" for c in str(row[1] or "unnamed")]
+                )
                 filename = f"db_strategy_{strategy_id}_{safe_name}.py"
                 local_path = self.cache_dir / filename
 
                 # 写入文件
                 local_path.write_text(code, encoding="utf-8")
-                logger.info(f"Resolved strategy {strategy_id} to local file: {local_path}")
+                logger.info(
+                    f"Resolved strategy {strategy_id} to local file: {local_path}"
+                )
                 return local_path
 
         except Exception as e:
@@ -185,7 +192,11 @@ class StorageResolver:
 
         # 如果没有配置 COS，或者强制本地模式，尝试直接从本地文件系统读取
         storage_mode = os.getenv("STORAGE_MODE", "cos").lower()
-        if storage_mode == "local" or not self.cos_service or not self.cos_service.client:
+        if (
+            storage_mode == "local"
+            or not self.cos_service
+            or not self.cos_service.client
+        ):
             storage_root = os.getenv("STORAGE_ROOT", "/tmp/quantmind_strategies")
             potential = Path(storage_root) / key
             if potential.exists():
@@ -195,7 +206,9 @@ class StorageResolver:
         # 执行 COS 下载
         try:
             logger.info(f"Downloading {key} from COS...")
-            response = self.cos_service.client.get_object(Bucket=self.cos_service.bucket_name, Key=key)
+            response = self.cos_service.client.get_object(
+                Bucket=self.cos_service.bucket_name, Key=key
+            )
             content = response["Body"].get_raw_stream().read()
 
             local_path.parent.mkdir(parents=True, exist_ok=True)
@@ -207,10 +220,8 @@ class StorageResolver:
             logger.error(f"Failed to download {key} from COS: {e}")
             raise
 
-
 # Singleton instance access
 _resolver = None
-
 
 def get_storage_resolver() -> StorageResolver:
     global _resolver

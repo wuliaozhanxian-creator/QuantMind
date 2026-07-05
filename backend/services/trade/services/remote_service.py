@@ -64,7 +64,9 @@ class RemoteService:
                 # Since it's called from TradeService, we should probably await but catch errors so we don't block trading
                 response = await client.post(url, json=payload)
                 response.raise_for_status()
-                logger.info(f"Synced trade {trade.trade_id} to portfolio {trade.portfolio_id}")
+                logger.info(
+                    f"Synced trade {trade.trade_id} to portfolio {trade.portfolio_id}"
+                )
             except Exception as e:
                 logger.error(f"Failed to sync trade {trade.trade_id} to portfolio: {e}")
                 # We do NOT raise exception here to avoid rolling back the trade execution

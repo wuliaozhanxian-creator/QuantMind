@@ -13,7 +13,6 @@ from ..models import (
     StrategyGenRes,
 )
 
-
 class BaseLLMProvider(ABC):
     name: str = "base"
     supports_stream: bool = False
@@ -24,7 +23,9 @@ class BaseLLMProvider(ABC):
         ...
 
     @abstractmethod
-    async def convert(self, req: StrategyConversionRequest) -> StrategyConversionResponse:
+    async def convert(
+        self, req: StrategyConversionRequest
+    ) -> StrategyConversionResponse:
         """转换策略"""
         ...
 
@@ -40,7 +41,6 @@ class BaseLLMProvider(ABC):
     async def chat_stream(self, req) -> AsyncGenerator[str, None]:
         """流式聊天对话"""
         raise NotImplementedError("chat_stream not implemented")
-
 
 def normalize_name(desc: str) -> str:
     """规范化策略名称"""

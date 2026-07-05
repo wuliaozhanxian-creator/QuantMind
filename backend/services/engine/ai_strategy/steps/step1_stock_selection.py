@@ -3,7 +3,7 @@
 import logging
 import os
 import re
-from typing import Any, Dict, List
+from typing import Any
 
 from ..api.schemas.stock_pool import (
     Condition,
@@ -52,19 +52,29 @@ FACTOR_COLUMN_MAP = {
     "return_20d": "return_20d",
     "return_60d": "return_60d",
     # ── 均线 ──
-    "ma5": "ma5", "sma5": "ma5",
+    "ma5": "ma5",
+    "sma5": "ma5",
     "ma10": "ma10",
-    "ma20": "ma20", "sma20": "ma20",
-    "ma60": "ma60", "sma60": "ma60",
+    "ma20": "ma20",
+    "sma20": "ma20",
+    "ma60": "ma60",
+    "sma60": "ma60",
     "ma_gap_5": "ma_gap_5",
     "ma_gap_10": "ma_gap_10",
     "ma_gap_20": "ma_gap_20",
     # ── 技术指标 ──
     "rsi_6": "rsi_6",
-    "rsi_14": "rsi_14", "rsi": "rsi_14",
-    "kdj_k": "kdj_k", "kdj_d": "kdj_d", "kdj_j": "kdj_j",
-    "macd_dif": "macd_dif", "macd_dea": "macd_dea", "macd_hist": "macd_hist",
-    "dif": "macd_dif", "dea": "macd_dea", "macd": "macd_hist",
+    "rsi_14": "rsi_14",
+    "rsi": "rsi_14",
+    "kdj_k": "kdj_k",
+    "kdj_d": "kdj_d",
+    "kdj_j": "kdj_j",
+    "macd_dif": "macd_dif",
+    "macd_dea": "macd_dea",
+    "macd_hist": "macd_hist",
+    "dif": "macd_dif",
+    "dea": "macd_dea",
+    "macd": "macd_hist",
     "beta_20": "beta_20",
     # ── 波动量能 ──
     "vol_std_5": "vol_std_5",
@@ -100,9 +110,16 @@ FACTOR_COLUMN_MAP = {
     "s_volume": "s_volume",
     # ── 指数关联 ──
     "idx_all": "idx_all",
-    "idx_hs300": "idx_hs300", "hs300": "idx_hs300", "is_hs300": "idx_hs300", "is_csi300": "idx_hs300",
-    "idx_zz500": "idx_zz500", "csi500": "idx_zz500", "is_csi500": "idx_zz500",
-    "idx_zz1000": "idx_zz1000", "csi1000": "idx_zz1000", "is_csi1000": "idx_zz1000",
+    "idx_hs300": "idx_hs300",
+    "hs300": "idx_hs300",
+    "is_hs300": "idx_hs300",
+    "is_csi300": "idx_hs300",
+    "idx_zz500": "idx_zz500",
+    "csi500": "idx_zz500",
+    "is_csi500": "idx_zz500",
+    "idx_zz1000": "idx_zz1000",
+    "csi1000": "idx_zz1000",
+    "is_csi1000": "idx_zz1000",
     "idx_margin": "idx_margin",
     "idx_chinext": "idx_chinext",
     # ── 微结构 ──
@@ -120,11 +137,13 @@ FACTOR_COLUMN_MAP = {
 
 DSL_PREFIX = "SELECT symbol WHERE "
 DELTA_REGEX = re.compile(
-    r"DELTA\((?P<factor>[a-zA-Z0-9_]+),(?P<window>\d+)\)\s*" r"(?P<op>>=|<=|==|!=|>|<)\s*(?P<value>-?\d+(?:\.\d+)?)",
+    r"DELTA\((?P<factor>[a-zA-Z0-9_]+),(?P<window>\d+)\)\s*"
+    r"(?P<op>>=|<=|==|!=|>|<)\s*(?P<value>-?\d+(?:\.\d+)?)",
     re.IGNORECASE,
 )
 SIMPLE_REGEX = re.compile(
-    r"(?P<factor>[a-zA-Z0-9_]+)\s*" r"(?P<op>>=|<=|==|!=|>|<|=)\s*(?P<value>-?\d+(?:\.\d+)?)",
+    r"(?P<factor>[a-zA-Z0-9_]+)\s*"
+    r"(?P<op>>=|<=|==|!=|>|<|=)\s*(?P<value>-?\d+(?:\.\d+)?)",
     re.IGNORECASE,
 )
 COMBINER_REGEX = re.compile(r"\s+(AND|OR)\s+", re.IGNORECASE)
@@ -133,8 +152,9 @@ LATEST_TABLE = "stock_daily_latest"
 
 # total_mv 列口径可配置：默认“亿元”（1亿=1）。
 # 若仍使用旧库“万元”口径，可通过环境变量 AI_STRATEGY_TOTAL_MV_PER_YI=10000 覆盖。
-MARKET_CAP_YI_TO_DB_UNIT = float(os.getenv("AI_STRATEGY_TOTAL_MV_PER_YI", "100000000.0"))
-
+MARKET_CAP_YI_TO_DB_UNIT = float(
+    os.getenv("AI_STRATEGY_TOTAL_MV_PER_YI", "100000000.0")
+)
 
 def _condition_to_dsl(cond: Condition) -> str:
     t = cond.get("type")
@@ -149,11 +169,12 @@ def _condition_to_dsl(cond: Condition) -> str:
         return f"SELECT symbol WHERE DELTA({cond['factor']},{cond['window']}) {sign}"
     if t == "composite":
         children = cond.get("children", [])
-        parts = [_condition_to_dsl(c).replace("SELECT symbol WHERE ", "") for c in children]
+        parts = [
+            _condition_to_dsl(c).replace("SELECT symbol WHERE ", "") for c in children
+        ]
         op = cond.get("op", "AND").upper()
         return "SELECT symbol WHERE " + (f" {op} ".join(parts) if parts else "true")
     raise ValueError(f"未知条件类型: {t}")
-
 
 def _extract_factors(cond: Condition) -> list[str]:
     t = cond.get("type")
@@ -165,7 +186,6 @@ def _extract_factors(cond: Condition) -> list[str]:
             facs.extend(_extract_factors(c))
         return facs
     return []
-
 
 def _parse_dsl(dsl: str) -> tuple[list[dict[str, Any]], list[str]]:
     expr = dsl[len(DSL_PREFIX) :].strip()
@@ -213,13 +233,11 @@ def _parse_dsl(dsl: str) -> tuple[list[dict[str, Any]], list[str]]:
 
     return conditions, combiners
 
-
 def _map_factor(factor: str) -> str:
     key = factor.strip()
     if key not in FACTOR_COLUMN_MAP:
         raise ValueError(f"暂不支持的因子: {factor}")
     return FACTOR_COLUMN_MAP[key]
-
 
 def parse_conditions(conditions: Condition) -> ParseResponse:
     """解析前端条件树为 DSL 语句"""

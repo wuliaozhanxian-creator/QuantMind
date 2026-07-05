@@ -1,3 +1,18 @@
+/**
+ * 业务层 WebSocket 单例 (T2.2 统一后)
+ *
+ * 此单例在 `WebSocketClient`（services/websocket/WebSocketClient.ts）之上封装：
+ * - JWT/tenant/user_id 鉴权 URL 拼装
+ * - 与后端 stream service 的消息协议（subscribe / unsubscribe / heartbeat / ping-pong）
+ * - 业务消息类型分发（MessageType）
+ *
+ * T2.2 已统一并补齐以下能力（与底层 WebSocketClient 对齐）：
+ * - 指数退避重连（1s/2s/4s/8s/16s/32s，最大 60s，无最大次数上限）
+ * - 心跳超时检测（30s 未收到 pong → 主动断开并重连）
+ * - 订阅去重（同一 channel/symbol 仅发送一次 subscribe）
+ * - 统一错误回调（addErrorCallback / removeErrorCallback）
+ */
+
 // WebSocket连接状态
 export enum WebSocketStatus {
   CONNECTING = 'connecting',
@@ -29,6 +44,7 @@ export interface WebSocketMessage {
   timestamp: string;
   data: unknown;
   id?: string;
+  [key: string]: unknown;
 }
 
 // 订阅配置
@@ -38,21 +54,40 @@ export interface SubscriptionConfig {
   frequency?: number;
 }
 
+// 统一错误回调类型
+export type WebSocketErrorCallback = (error: Error, context?: string) => void;
+
+// 指数退避参数（T2.2）
+const BASE_RECONNECT_DELAY = 1000; // 1s
+const MAX_RECONNECT_DELAY = 60000; // 60s
+// 心跳超时（T2.2）
+const HEARTBEAT_INTERVAL = 30000; // 30s 发送间隔
+const HEARTBEAT_TIMEOUT = 30000; // 30s 无响应判定超时
+
 class WebSocketService {
   private ws: WebSocket | null = null;
   private connectPromise: Promise<void> | null = null;
   private status: WebSocketStatus = WebSocketStatus.DISCONNECTED;
   private reconnectAttempts = 0;
-  private reconnectDelay = 3000;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private authReconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private authReconnectAttempts = 0;
   private manualDisconnect = false;
   private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
+  private heartbeatTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastHeartbeatAck = 0;
+
+  /** 已发送 subscribe 的 symbol 集合（去重） */
   private symbolSubscriptions = new Set<string>();
+  /** 已发送 subscribe 的 channel 集合（去重） */
   private channelSubscriptions = new Set<string>();
+  /** 业务期望订阅（即使连接未就绪也保留，重连后补发） */
+  private pendingSymbols = new Set<string>();
+  private pendingChannels = new Set<string>();
+
   private messageHandlers = new Map<MessageType, Set<(data: unknown) => void>>();
   private statusHandlers = new Set<(status: WebSocketStatus) => void>();
+  private errorHandlers = new Set<WebSocketErrorCallback>();
 
   private getStoredToken(): string | null {
     const raw = authService.getAccessToken();
@@ -73,6 +108,26 @@ class WebSocketService {
     return this.customUrl || SERVICE_URLS.WEBSOCKET_MARKET;
   }
 
+  /** 统一错误回调注册（T2.2） */
+  addErrorCallback(handler: WebSocketErrorCallback): void {
+    this.errorHandlers.add(handler);
+  }
+
+  removeErrorCallback(handler: WebSocketErrorCallback): void {
+    this.errorHandlers.delete(handler);
+  }
+
+  private emitError(error: Error, context?: string): void {
+    console.warn('[WebSocketService] error:', context, error.message);
+    this.errorHandlers.forEach(handler => {
+      try {
+        handler(error, context);
+      } catch (e) {
+        console.error('[WebSocketService] error handler failed:', e);
+      }
+    });
+  }
+
   // 连接WebSocket
   connect(): Promise<void> {
     if (this.connectPromise) {
@@ -86,7 +141,7 @@ class WebSocketService {
     let shouldClearConnectPromise = false;
     const connectPromise = new Promise<void>((resolve, reject) => {
       const disableWebSocket =
-        String((import.meta as any).env?.VITE_DISABLE_WEBSOCKET || '').toLowerCase() === 'true';
+        String((import.meta as ImportMeta).env?.VITE_DISABLE_WEBSOCKET || '').toLowerCase() === 'true';
       if (disableWebSocket) {
         this.setStatus(WebSocketStatus.DISCONNECTED);
         shouldClearConnectPromise = true;
@@ -149,6 +204,7 @@ class WebSocketService {
           this.reconnectAttempts = 0;
           this.authReconnectAttempts = 0;
           this.clearAuthReconnectTimer();
+          this.lastHeartbeatAck = Date.now();
           this.startHeartbeat();
           this.resubscribeAll();
           this.connectPromise = null;
@@ -171,18 +227,21 @@ class WebSocketService {
           }
         };
 
-        this.ws.onerror = (error) => {
-          console.error('WebSocket错误:', error);
+        this.ws.onerror = () => {
+          console.error('WebSocket错误');
           this.setStatus(WebSocketStatus.ERROR);
+          this.emitError(new Error('WebSocket connection error'), 'ws-onerror');
           this.connectPromise = null;
-          reject(error);
+          // 不主动 reject：交给 onclose 触发重连，避免上层未捕获异常
         };
 
       } catch (error) {
         console.error('创建WebSocket连接失败:', error);
         this.setStatus(WebSocketStatus.ERROR);
+        const err = error instanceof Error ? error : new Error(String(error));
+        this.emitError(err, 'connect-create');
         this.connectPromise = null;
-        reject(error);
+        reject(err);
       }
     });
     this.connectPromise = shouldClearConnectPromise ? null : connectPromise;
@@ -207,7 +266,7 @@ class WebSocketService {
   // 发送消息
   send(message: WebSocketMessage): boolean {
     const disableWebSocket =
-      String((import.meta as any).env?.VITE_DISABLE_WEBSOCKET || '').toLowerCase() === 'true';
+      String((import.meta as ImportMeta).env?.VITE_DISABLE_WEBSOCKET || '').toLowerCase() === 'true';
     if (disableWebSocket) return false;
     if (this.ws?.readyState === WebSocket.OPEN) {
       try {
@@ -215,71 +274,94 @@ class WebSocketService {
         return true;
       } catch (error) {
         console.error('发送WebSocket消息失败:', error);
+        const err = error instanceof Error ? error : new Error(String(error));
+        this.emitError(err, 'send');
         return false;
       }
     }
     return false;
   }
 
-  // 订阅数据
+  /**
+   * 订阅数据（T2.2 去重：仅对新增 symbol/channel 发送 subscribe）
+   */
   subscribe(config: SubscriptionConfig): void {
-    let sent = false;
-
     if (config.symbols?.length) {
-      config.symbols.forEach(symbol => this.symbolSubscriptions.add(symbol));
-      sent = this.send({
-        type: MessageType.SUBSCRIBE,
-        timestamp: new Date().toISOString(),
-        data: undefined,
-        action: 'subscribe' as any,
-        symbols: config.symbols,
-      } as WebSocketMessage & { action: string; symbols: string[] }) || sent;
+      const newSymbols = config.symbols.filter(s => {
+        this.pendingSymbols.add(s);
+        return !this.symbolSubscriptions.has(s);
+      });
+      if (newSymbols.length > 0) {
+        newSymbols.forEach(s => this.symbolSubscriptions.add(s));
+        this.send({
+          type: MessageType.SUBSCRIBE,
+          timestamp: new Date().toISOString(),
+          data: undefined,
+          action: 'subscribe',
+          symbols: newSymbols,
+        });
+      }
     }
 
     if (config.channels?.length) {
-      config.channels.forEach(channel => this.channelSubscriptions.add(channel));
-      config.channels.forEach((channel) => {
-        const channelSent = this.send({
+      const newChannels = config.channels.filter(c => {
+        this.pendingChannels.add(c);
+        return !this.channelSubscriptions.has(c);
+      });
+      newChannels.forEach((channel) => {
+        this.channelSubscriptions.add(channel);
+        this.send({
           type: MessageType.SUBSCRIBE,
           timestamp: new Date().toISOString(),
           data: undefined,
           topic: channel,
-        } as WebSocketMessage & { topic: string });
-        sent = channelSent || sent;
+        });
       });
     }
-    if (!sent) return;
   }
 
-  // 取消订阅
+  /**
+   * 取消订阅（T2.2 去重：仅对已订阅项发送 unsubscribe）
+   */
   unsubscribe(symbols: string[]): void {
     symbols.forEach((symbol) => {
       const key = String(symbol);
+      const wasSubscribed = this.symbolSubscriptions.has(key) || this.channelSubscriptions.has(key);
+      if (!wasSubscribed) {
+        // 未订阅则无需发送
+        this.pendingSymbols.delete(key);
+        this.pendingChannels.delete(key);
+        return;
+      }
+
       let sent = false;
       if (
         key.startsWith('trade.updates.') ||
         key.startsWith('notification.') ||
-        key.startsWith('stock.')
+        key.startsWith('stock.') ||
+        key.startsWith('strategy.')
       ) {
         sent = this.send({
           type: MessageType.UNSUBSCRIBE,
           timestamp: new Date().toISOString(),
           data: undefined,
           topic: key,
-        } as WebSocketMessage & { topic: string });
+        });
       }
       if (!sent) {
         sent = this.send({
           type: MessageType.UNSUBSCRIBE,
           timestamp: new Date().toISOString(),
           data: undefined,
-          action: 'unsubscribe' as any,
+          action: 'unsubscribe',
           symbols: [key],
-        } as WebSocketMessage & { action: string; symbols: string[] });
+        });
       }
-      if (sent) {
+      if (sent || wasSubscribed) {
         this.symbolSubscriptions.delete(key);
         this.channelSubscriptions.delete(key);
+        this.pendingSymbols.delete(key);
+        this.pendingChannels.delete(key);
       }
     });
   }
@@ -334,35 +416,43 @@ class WebSocketService {
   // 私有方法：处理消息
   private handleMessage(data: string): void {
     try {
-      const message: WebSocketMessage = JSON.parse(data);
+      const raw = JSON.parse(data) as { type: string; data?: unknown; [key: string]: unknown };
+      const messageType = raw.type;
 
-      // 处理心跳消息
-      if (message.type === MessageType.HEARTBEAT || (message as any).type === 'pong') {
-        this.handleHeartbeat();
+      // 处理心跳消息（heartbeat / pong 均视为 ack）
+      if (messageType === MessageType.HEARTBEAT || messageType === 'pong' || messageType === 'ping') {
+        this.lastHeartbeatAck = Date.now();
+        this.clearHeartbeatTimeout();
         return;
       }
 
       // 分发消息给对应的处理器
-      const handlers = this.messageHandlers.get(message.type);
+      const handlers = this.messageHandlers.get(messageType as MessageType);
       if (handlers) {
         handlers.forEach(handler => {
           try {
-            handler(message.data);
+            handler(raw.data);
           } catch (error) {
             console.error('消息处理器执行失败:', error);
+            const err = error instanceof Error ? error : new Error(String(error));
+            this.emitError(err, 'message-handler');
           }
         });
       }
 
     } catch (error) {
       console.error('解析WebSocket消息失败:', error);
+      const err = error instanceof Error ? error : new Error(String(error));
+      this.emitError(err, 'message-parse');
     }
   }
 
-  // 私有方法：重连
+  /**
+   * 指数退避重连（1s/2s/4s/8s/16s/32s，最大 60s）
+   */
   private attemptReconnect(): void {
     const disableWebSocket =
-      String((import.meta as any).env?.VITE_DISABLE_WEBSOCKET || '').toLowerCase() === 'true';
+      String((import.meta as ImportMeta).env?.VITE_DISABLE_WEBSOCKET || '').toLowerCase() === 'true';
     if (disableWebSocket) {
       this.setStatus(WebSocketStatus.DISCONNECTED);
       return;
@@ -373,21 +463,30 @@ class WebSocketService {
     this.reconnectAttempts++;
     this.setStatus(WebSocketStatus.RECONNECTING);
 
-    const delay = this.reconnectDelay;
+    const exp = Math.pow(2, this.reconnectAttempts - 1);
+    const delay = Math.min(BASE_RECONNECT_DELAY * exp, MAX_RECONNECT_DELAY);
     console.log(`WebSocket断链，将在 ${delay}ms 后第 ${this.reconnectAttempts} 次重试`);
 
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.connect().catch(error => {
         console.error('重连失败:', error);
+        const err = error instanceof Error ? error : new Error(String(error));
+        this.emitError(err, 'reconnect');
       });
     }, delay);
   }
 
-  // 私有方法：开始心跳
+  /**
+   * 心跳：30s 发送 ping，30s 未收到 pong 判定超时并重连
+   */
   private startHeartbeat(): void {
     this.stopHeartbeat();
+    this.lastHeartbeatAck = Date.now();
+
     this.heartbeatInterval = setInterval(() => {
+      if (this.status !== WebSocketStatus.CONNECTED) return;
+
       const heartbeatMessage: WebSocketMessage = {
         // 后端 ws_core 协议使用 ping/pong
         type: 'ping' as MessageType,
@@ -395,7 +494,29 @@ class WebSocketService {
         data: { ping: true }
       };
       this.send(heartbeatMessage);
-    }, 30000); // 30秒心跳
+
+      // 设置本次心跳超时检测
+      this.clearHeartbeatTimeout();
+      this.heartbeatTimeoutTimer = setTimeout(() => {
+        const elapsed = Date.now() - this.lastHeartbeatAck;
+        if (elapsed > HEARTBEAT_TIMEOUT) {
+          console.warn(`WebSocket心跳超时(${elapsed}ms)，主动断开重连`);
+          this.emitError(new Error(`Heartbeat timeout after ${elapsed}ms`), 'heartbeat-timeout');
+          try {
+            this.ws?.close();
+          } catch (e) {
+            // ignore
+          }
+        }
+      }, HEARTBEAT_TIMEOUT);
+    }, HEARTBEAT_INTERVAL);
+  }
+
+  private clearHeartbeatTimeout(): void {
+    if (this.heartbeatTimeoutTimer) {
+      clearTimeout(this.heartbeatTimeoutTimer);
+      this.heartbeatTimeoutTimer = null;
+    }
   }
 
   // 私有方法：停止心跳
@@ -404,12 +525,7 @@ class WebSocketService {
       clearInterval(this.heartbeatInterval);
       this.heartbeatInterval = null;
     }
-  }
-
-  // 私有方法：处理心跳响应
-  private handleHeartbeat(): void {
-    // 心跳响应处理逻辑
-    console.debug('收到心跳响应');
+    this.clearHeartbeatTimeout();
   }
 
   private clearReconnectTimer(): void {
@@ -421,7 +537,7 @@ class WebSocketService {
 
   private scheduleAuthReconnect(): void {
     const disableWebSocket =
-      String((import.meta as any).env?.VITE_DISABLE_WEBSOCKET || '').toLowerCase() === 'true';
+      String((import.meta as ImportMeta).env?.VITE_DISABLE_WEBSOCKET || '').toLowerCase() === 'true';
     if (disableWebSocket || this.manualDisconnect) {
       this.setStatus(WebSocketStatus.DISCONNECTED);
       return;
@@ -434,13 +550,15 @@ class WebSocketService {
     this.authReconnectAttempts += 1;
     this.setStatus(WebSocketStatus.RECONNECTING);
 
-    const delay = Math.min(this.reconnectDelay * Math.max(1, this.authReconnectAttempts), 15000);
+    const delay = Math.min(BASE_RECONNECT_DELAY * Math.max(1, this.authReconnectAttempts), MAX_RECONNECT_DELAY);
     console.log(`WebSocket鉴权未就绪，将在 ${delay}ms 后第 ${this.authReconnectAttempts} 次重试`);
 
     this.authReconnectTimer = setTimeout(() => {
       this.authReconnectTimer = null;
       this.connect().catch(error => {
         console.error('WebSocket鉴权补连失败:', error);
+        const err = error instanceof Error ? error : new Error(String(error));
+        this.emitError(err, 'auth-reconnect');
       });
     }, delay);
   }
@@ -452,24 +570,27 @@ class WebSocketService {
     }
   }
 
+  /**
+   * 重连后补发所有订阅（仅对 pending 集合中的 symbol/channel）
+   */
   private resubscribeAll(): void {
-    if (this.symbolSubscriptions.size > 0) {
+    if (this.pendingSymbols.size > 0) {
       this.send({
         type: MessageType.SUBSCRIBE,
         timestamp: new Date().toISOString(),
         data: undefined,
-        action: 'subscribe' as any,
-        symbols: Array.from(this.symbolSubscriptions),
-      } as WebSocketMessage & { action: string; symbols: string[] });
+        action: 'subscribe',
+        symbols: Array.from(this.pendingSymbols),
+      });
     }
 
-    this.channelSubscriptions.forEach((channel) => {
+    this.pendingChannels.forEach((channel) => {
       this.send({
         type: MessageType.SUBSCRIBE,
         timestamp: new Date().toISOString(),
         data: undefined,
         topic: channel,
-      } as WebSocketMessage & { topic: string });
+      });
     });
   }
 }

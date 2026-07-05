@@ -23,14 +23,15 @@ router = APIRouter(tags=["Trade-Proxy"])
 
 _SKIP_HEADERS = {"host", "content-length", "transfer-encoding"}
 
-
 async def _do_proxy(request: Request, user: dict | None = None) -> Response:
     path = request.url.path
 
     # 兼容旧版前端：重写路径到 /api/v1
-    if path.startswith("/internal/strategy") or \
-       path.startswith("/simulation") or \
-       path.startswith("/real-trading"):
+    if (
+        path.startswith("/internal/strategy")
+        or path.startswith("/simulation")
+        or path.startswith("/real-trading")
+    ):
         if not path.startswith("/api/v1"):
             path = f"/api/v1{path}"
 
@@ -38,7 +39,9 @@ async def _do_proxy(request: Request, user: dict | None = None) -> Response:
     if request.url.query:
         url = f"{url}?{request.url.query}"
 
-    headers = {k: v for k, v in request.headers.items() if k.lower() not in _SKIP_HEADERS}
+    headers = {
+        k: v for k, v in request.headers.items() if k.lower() not in _SKIP_HEADERS
+    }
 
     # 显式注入身份
     if user:
@@ -72,7 +75,8 @@ async def _do_proxy(request: Request, user: dict | None = None) -> Response:
             resp_headers = {
                 k: v
                 for k, v in resp.headers.items()
-                if k.lower() not in {"content-encoding", "content-length", "transfer-encoding"}
+                if k.lower()
+                not in {"content-encoding", "content-length", "transfer-encoding"}
             }
             return Response(
                 content=resp.content,
@@ -92,52 +96,89 @@ async def _do_proxy(request: Request, user: dict | None = None) -> Response:
             last_exc = exc
             break
 
-    logger.error(f"❌ TRADE PROXY FINAL FAILURE: {request.method} {url} -> {type(last_exc).__name__}: {last_exc}")
-    raise map_upstream_http_error("trade", last_exc or Exception("Unknown trade proxy error"))
+    logger.error(
+        f"❌ TRADE PROXY FINAL FAILURE: {request.method} {url} -> {type(last_exc).__name__}: {last_exc}"
+    )
+    raise map_upstream_http_error(
+        "trade", last_exc or Exception("Unknown trade proxy error")
+    )
 
-
-@router.api_route("/api/v1/simulation", methods=["GET", "POST", "OPTIONS"], include_in_schema=False)
 @router.api_route(
-    "/api/v1/simulation/{p:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"], include_in_schema=False
+    "/api/v1/simulation", methods=["GET", "POST", "OPTIONS"], include_in_schema=False
 )
-@router.api_route("/api/v1/real-trading", methods=["GET", "POST", "OPTIONS"], include_in_schema=False)
 @router.api_route(
-    "/api/v1/real-trading/{p:path}", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"], include_in_schema=False
+    "/api/v1/simulation/{p:path}",
+    methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    include_in_schema=False,
 )
-@router.api_route("/api/v1/orders", methods=["GET", "POST", "OPTIONS"], include_in_schema=False)
 @router.api_route(
-    "/api/v1/orders/{p:path}", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"], include_in_schema=False
+    "/api/v1/real-trading", methods=["GET", "POST", "OPTIONS"], include_in_schema=False
 )
-@router.api_route("/api/v1/trades", methods=["GET", "POST", "OPTIONS"], include_in_schema=False)
-@router.api_route("/api/v1/trades/{p:path}", methods=["GET", "POST", "OPTIONS"], include_in_schema=False)
-@router.api_route("/api/v1/portfolios", methods=["GET", "POST", "OPTIONS"], include_in_schema=False)
 @router.api_route(
-    "/api/v1/portfolios/{p:path}", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"], include_in_schema=False
+    "/api/v1/real-trading/{p:path}",
+    methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    include_in_schema=False,
 )
-@router.api_route("/api/v1/internal/strategy", methods=["GET", "POST", "OPTIONS"], include_in_schema=False)
+@router.api_route(
+    "/api/v1/orders", methods=["GET", "POST", "OPTIONS"], include_in_schema=False
+)
+@router.api_route(
+    "/api/v1/orders/{p:path}",
+    methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    include_in_schema=False,
+)
+@router.api_route(
+    "/api/v1/trades", methods=["GET", "POST", "OPTIONS"], include_in_schema=False
+)
+@router.api_route(
+    "/api/v1/trades/{p:path}",
+    methods=["GET", "POST", "OPTIONS"],
+    include_in_schema=False,
+)
+@router.api_route(
+    "/api/v1/portfolios", methods=["GET", "POST", "OPTIONS"], include_in_schema=False
+)
+@router.api_route(
+    "/api/v1/portfolios/{p:path}",
+    methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    include_in_schema=False,
+)
+@router.api_route(
+    "/api/v1/internal/strategy",
+    methods=["GET", "POST", "OPTIONS"],
+    include_in_schema=False,
+)
 @router.api_route(
     "/api/v1/internal/strategy/{p:path}",
     methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     include_in_schema=False,
 )
 # 兼容旧版前端路径（不带 /api/v1 前缀）
-@router.api_route("/internal/strategy", methods=["GET", "POST", "OPTIONS"], include_in_schema=False)
+@router.api_route(
+    "/internal/strategy", methods=["GET", "POST", "OPTIONS"], include_in_schema=False
+)
 @router.api_route(
     "/internal/strategy/{p:path}",
     methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     include_in_schema=False,
 )
-@router.api_route("/simulation", methods=["GET", "POST", "OPTIONS"], include_in_schema=False)
+@router.api_route(
+    "/simulation", methods=["GET", "POST", "OPTIONS"], include_in_schema=False
+)
 @router.api_route(
     "/simulation/{p:path}",
     methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     include_in_schema=False,
 )
-@router.api_route("/real-trading", methods=["GET", "POST", "OPTIONS"], include_in_schema=False)
+@router.api_route(
+    "/real-trading", methods=["GET", "POST", "OPTIONS"], include_in_schema=False
+)
 @router.api_route(
     "/real-trading/{p:path}",
     methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     include_in_schema=False,
 )
-async def trade_proxy_handler(request: Request, user: dict | None = Depends(get_optional_user)):
+async def trade_proxy_handler(
+    request: Request, user: dict | None = Depends(get_optional_user)
+):
     return await _do_proxy(request, user)

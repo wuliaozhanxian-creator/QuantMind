@@ -23,11 +23,15 @@ def build_trade_account_key(tenant_id: str | None, user_id: str | int | None) ->
     return f"trade:account:{normalize_trade_tenant_id(tenant_id)}:{normalize_trade_user_id(user_id)}"
 
 
-def build_trade_agent_heartbeat_key(tenant_id: str | None, user_id: str | int | None) -> str:
+def build_trade_agent_heartbeat_key(
+    tenant_id: str | None, user_id: str | int | None
+) -> str:
     return f"trade:agent:heartbeat:{normalize_trade_tenant_id(tenant_id)}:{normalize_trade_user_id(user_id)}"
 
 
-def trade_account_key_candidates(tenant_id: str | None, user_id: str | int | None) -> tuple[str, ...]:
+def trade_account_key_candidates(
+    tenant_id: str | None, user_id: str | int | None
+) -> tuple[str, ...]:
     normalized_tenant = normalize_trade_tenant_id(tenant_id)
     raw_user = str(user_id or "").strip()
     normalized_user = normalize_trade_user_id(user_id)
@@ -37,7 +41,9 @@ def trade_account_key_candidates(tenant_id: str | None, user_id: str | int | Non
     return tuple(dict.fromkeys(keys))
 
 
-def trade_agent_heartbeat_key_candidates(tenant_id: str | None, user_id: str | int | None) -> tuple[str, ...]:
+def trade_agent_heartbeat_key_candidates(
+    tenant_id: str | None, user_id: str | int | None
+) -> tuple[str, ...]:
     normalized_tenant = normalize_trade_tenant_id(tenant_id)
     raw_user = str(user_id or "").strip()
     normalized_user = normalize_trade_user_id(user_id)

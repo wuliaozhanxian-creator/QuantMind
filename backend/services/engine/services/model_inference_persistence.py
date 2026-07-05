@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import date, datetime, time, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 import exchange_calendars as xcals
@@ -10,12 +10,10 @@ from sqlalchemy import text
 
 from backend.shared.database_manager_v2 import get_session
 
-
 _SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
 _DEFAULT_AUTO_INFERENCE_SCHEDULE_TIME = "04:00"
 _LEGACY_AUTO_INFERENCE_SCHEDULE_TIMES = {"00:00", "09:30", "15:30"}
 _AUTO_INFERENCE_RETRY_INTERVAL_MINUTES = 15
-
 
 class ModelInferencePersistence:
     """模型推理结果与自动推理设置持久化。"""
@@ -125,7 +123,9 @@ class ModelInferencePersistence:
             return 0, 0
 
     @classmethod
-    def _compute_next_run_at(cls, schedule_time: str, reference: datetime | None = None) -> datetime:
+    def _compute_next_run_at(
+        cls, schedule_time: str, reference: datetime | None = None
+    ) -> datetime:
         now = reference or datetime.now(_SHANGHAI_TZ)
         if now.tzinfo is None:
             now = now.replace(tzinfo=_SHANGHAI_TZ)
@@ -137,7 +137,9 @@ class ModelInferencePersistence:
             if cal.is_session(now.date()) and now < scheduled_today:
                 return scheduled_today
             next_session = cal.next_session(now.date())
-            next_date = next_session.date() if hasattr(next_session, "date") else next_session
+            next_date = (
+                next_session.date() if hasattr(next_session, "date") else next_session
+            )
             return datetime.combine(next_date, time(hour, minute), tzinfo=_SHANGHAI_TZ)
         except Exception:
             if now < scheduled_today:
@@ -161,8 +163,12 @@ class ModelInferencePersistence:
         for key in ("data_trade_date", "prediction_trade_date"):
             if result.get(key) is not None:
                 result[key] = str(result[key])
-        result["request_json"] = ModelInferencePersistence._parse_json_field(result.get("request_json"))
-        result["result_json"] = ModelInferencePersistence._parse_json_field(result.get("result_json"))
+        result["request_json"] = ModelInferencePersistence._parse_json_field(
+            result.get("request_json")
+        )
+        result["result_json"] = ModelInferencePersistence._parse_json_field(
+            result.get("result_json")
+        )
         return result
 
     @staticmethod
@@ -171,9 +177,15 @@ class ModelInferencePersistence:
         for key in ("created_at", "updated_at", "next_run_at"):
             if result.get(key) is not None:
                 result[key] = result[key].isoformat()
-        result["last_run_json"] = ModelInferencePersistence._parse_json_field(result.get("last_run_json"))
-        schedule_time = str(result.get("schedule_time") or _DEFAULT_AUTO_INFERENCE_SCHEDULE_TIME)
-        result["schedule_desc"] = ModelInferencePersistence._schedule_desc(schedule_time)
+        result["last_run_json"] = ModelInferencePersistence._parse_json_field(
+            result.get("last_run_json")
+        )
+        schedule_time = str(
+            result.get("schedule_time") or _DEFAULT_AUTO_INFERENCE_SCHEDULE_TIME
+        )
+        result["schedule_desc"] = ModelInferencePersistence._schedule_desc(
+            schedule_time
+        )
         if result.get("next_run_at"):
             dt = result["next_run_at"]
             if isinstance(dt, str):
@@ -297,7 +309,9 @@ class ModelInferencePersistence:
                     "model_source": model_source,
                     "active_data_source": active_data_source,
                     "result_json": (
-                        json.dumps(result_payload, ensure_ascii=False) if result_payload is not None else None
+                        json.dumps(result_payload, ensure_ascii=False)
+                        if result_payload is not None
+                        else None
                     ),
                     "updated_at": updated_at,
                 },
@@ -312,9 +326,10 @@ class ModelInferencePersistence:
     ) -> dict[str, Any] | None:
         async with get_session(read_only=True) as session:
             row = (
-                await session.execute(
-                    text(
-                        """
+                (
+                    await session.execute(
+                        text(
+                            """
                         SELECT *
                         FROM qm_model_inference_runs
                         WHERE run_id = :run_id
@@ -322,10 +337,13 @@ class ModelInferencePersistence:
                           AND user_id = :user_id
                         LIMIT 1
                         """
-                    ),
-                    {"run_id": run_id, "tenant_id": tenant_id, "user_id": user_id},
+                        ),
+                        {"run_id": run_id, "tenant_id": tenant_id, "user_id": user_id},
+                    )
                 )
-            ).mappings().first()
+                .mappings()
+                .first()
+            )
         if not row:
             return None
         return self._row_to_run(dict(row))
@@ -405,7 +423,9 @@ class ModelInferencePersistence:
             total_row = (
                 (
                     await session.execute(
-                        text(f"SELECT COUNT(*) AS total FROM qm_model_inference_runs WHERE {where_sql}"),
+                        text(
+                            f"SELECT COUNT(*) AS total FROM qm_model_inference_runs WHERE {where_sql}"
+                        ),
                         params,
                     )
                 )
@@ -507,25 +527,39 @@ class ModelInferencePersistence:
 
         async with get_session(read_only=True) as session:
             row = (
-                await session.execute(
-                    text(
-                        """
+                (
+                    await session.execute(
+                        text(
+                            """
                         SELECT tenant_id, user_id, model_id, enabled, schedule_time, last_run_id, last_run_json,
                                next_run_at, created_at, updated_at
                         FROM qm_model_inference_settings
                         WHERE tenant_id = :tenant_id AND user_id = :user_id AND model_id = :model_id
                         LIMIT 1
                         """
-                    ),
-                    {"tenant_id": tenant_id, "user_id": user_id, "model_id": model_id},
+                        ),
+                        {
+                            "tenant_id": tenant_id,
+                            "user_id": user_id,
+                            "model_id": model_id,
+                        },
+                    )
                 )
-            ).mappings().first()
+                .mappings()
+                .first()
+            )
         if not row:
             raise RuntimeError("failed to initialize inference settings")
-        normalized_schedule_time = self._normalize_schedule_time(row.get("schedule_time"))
+        normalized_schedule_time = self._normalize_schedule_time(
+            row.get("schedule_time")
+        )
         if normalized_schedule_time != str(row.get("schedule_time") or ""):
             enabled = bool(row.get("enabled"))
-            next_run_at = self._compute_next_run_at(normalized_schedule_time, now) if enabled else None
+            next_run_at = (
+                self._compute_next_run_at(normalized_schedule_time, now)
+                if enabled
+                else None
+            )
             async with get_session() as session:
                 await session.execute(
                     text(
@@ -547,7 +581,9 @@ class ModelInferencePersistence:
                     },
                 )
                 await session.commit()
-            return await self.get_settings(tenant_id=tenant_id, user_id=user_id, model_id=model_id)
+            return await self.get_settings(
+                tenant_id=tenant_id, user_id=user_id, model_id=model_id
+            )
         result = self._row_to_settings(dict(row))
         if result.get("last_run_json") and isinstance(result["last_run_json"], dict):
             result["last_run"] = result["last_run_json"]
@@ -570,16 +606,22 @@ class ModelInferencePersistence:
         last_run: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         # 1. 确保记录存在 (通过 get_settings 进行幂等初始化)
-        current = await self.get_settings(tenant_id=tenant_id, user_id=user_id, model_id=model_id)
+        current = await self.get_settings(
+            tenant_id=tenant_id, user_id=user_id, model_id=model_id
+        )
 
         next_schedule_time = self._normalize_schedule_time(
-            schedule_time or current.get("schedule_time") or _DEFAULT_AUTO_INFERENCE_SCHEDULE_TIME
+            schedule_time
+            or current.get("schedule_time")
+            or _DEFAULT_AUTO_INFERENCE_SCHEDULE_TIME
         )
         next_run_at = self._compute_next_run_at(next_schedule_time) if enabled else None
         now = datetime.now(_SHANGHAI_TZ)
 
         last_run_id = (last_run or {}).get("run_id")
-        last_run_payload = json.dumps(last_run, ensure_ascii=False) if last_run else None
+        last_run_payload = (
+            json.dumps(last_run, ensure_ascii=False) if last_run else None
+        )
 
         async with get_session() as session:
             await session.execute(
@@ -589,9 +631,9 @@ class ModelInferencePersistence:
                     SET enabled = :enabled,
                         schedule_time = :schedule_time,
                         last_run_id = COALESCE(:last_run_id, last_run_id),
-                        last_run_json = CASE 
-                            WHEN CAST(:last_run_json_val AS TEXT) IS NULL THEN last_run_json 
-                            ELSE CAST(:last_run_json_val AS JSONB) 
+                        last_run_json = CASE
+                            WHEN CAST(:last_run_json_val AS TEXT) IS NULL THEN last_run_json
+                            ELSE CAST(:last_run_json_val AS JSONB)
                         END,
                         next_run_at = :next_run_at,
                         updated_at = :updated_at
@@ -605,14 +647,18 @@ class ModelInferencePersistence:
                     "enabled": bool(enabled),
                     "schedule_time": next_schedule_time,
                     "last_run_id": last_run_id,
-                    "last_run_json_val": last_run_payload if last_run_payload is not None else None,
+                    "last_run_json_val": last_run_payload
+                    if last_run_payload is not None
+                    else None,
                     "next_run_at": next_run_at,
                     "updated_at": now,
                 },
             )
             await session.commit()
 
-        return await self.get_settings(tenant_id=tenant_id, user_id=user_id, model_id=model_id)
+        return await self.get_settings(
+            tenant_id=tenant_id, user_id=user_id, model_id=model_id
+        )
 
     async def record_run_to_settings(
         self,
@@ -623,7 +669,9 @@ class ModelInferencePersistence:
         run_payload: dict[str, Any],
         retry_on_failure: bool = False,
     ) -> dict[str, Any]:
-        settings = await self.get_settings(tenant_id=tenant_id, user_id=user_id, model_id=model_id)
+        settings = await self.get_settings(
+            tenant_id=tenant_id, user_id=user_id, model_id=model_id
+        )
         schedule_time = self._normalize_schedule_time(
             settings.get("schedule_time") or _DEFAULT_AUTO_INFERENCE_SCHEDULE_TIME
         )
@@ -659,7 +707,8 @@ class ModelInferencePersistence:
                     "updated_at": now,
                 },
             )
-        return await self.get_settings(tenant_id=tenant_id, user_id=user_id, model_id=model_id)
-
+        return await self.get_settings(
+            tenant_id=tenant_id, user_id=user_id, model_id=model_id
+        )
 
 model_inference_persistence = ModelInferencePersistence()

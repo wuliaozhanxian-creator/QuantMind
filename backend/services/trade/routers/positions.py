@@ -4,7 +4,7 @@ Position API Routes
 
 import logging
 from decimal import Decimal
-from typing import List, Optional
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,7 +27,6 @@ from backend.services.trade.portfolio.utils.limiter import limiter
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Positions"])
 
-
 @router.post(
     "/portfolios/{portfolio_id}/positions",
     response_model=PositionResponse,
@@ -48,7 +47,9 @@ async def create_position(
     """创建持仓（开仓）"""
     try:
         # 验证用户是否拥有该投资组合
-        portfolio = await PortfolioService.get_portfolio(db, portfolio_id, user_id, tenant_id=tenant_id)
+        portfolio = await PortfolioService.get_portfolio(
+            db, portfolio_id, user_id, tenant_id=tenant_id
+        )
         if not portfolio:
             raise HTTPException(status_code=404, detail="投资组合不存在或无权访问")
 
@@ -57,11 +58,10 @@ async def create_position(
     except HTTPException:
         raise
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Failed to create position: {e}")
-        raise HTTPException(status_code=500, detail="创建失败")
-
+        raise HTTPException(status_code=500, detail="创建失败") from e
 
 @router.get(
     "/portfolios/{portfolio_id}/positions",
@@ -82,7 +82,9 @@ async def list_positions(
     """查询持仓列表"""
     try:
         # 验证用户是否拥有该投资组合
-        portfolio = await PortfolioService.get_portfolio(db, portfolio_id, user_id, tenant_id=tenant_id)
+        portfolio = await PortfolioService.get_portfolio(
+            db, portfolio_id, user_id, tenant_id=tenant_id
+        )
         if not portfolio:
             raise HTTPException(status_code=404, detail="投资组合不存在或无权访问")
 
@@ -92,8 +94,7 @@ async def list_positions(
         raise
     except Exception as e:
         logger.error(f"Failed to list positions: {e}")
-        raise HTTPException(status_code=500, detail="查询失败")
-
+        raise HTTPException(status_code=500, detail="查询失败") from e
 
 @router.post(
     "/internal/sync-trade",
@@ -110,8 +111,7 @@ async def sync_trade(
         position = await PositionService.sync_trade_update(db, data)
         return position
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 @router.get(
     "/portfolios/{portfolio_id}/positions/{position_id}",
@@ -130,7 +130,9 @@ async def get_position(
 ):
     """查询持仓详情"""
     try:
-        position = await PositionService.get_position(db, position_id, user_id=user_id, tenant_id=tenant_id)
+        position = await PositionService.get_position(
+            db, position_id, user_id=user_id, tenant_id=tenant_id
+        )
         if not position:
             raise HTTPException(status_code=404, detail="持仓不存在")
         return position
@@ -138,8 +140,7 @@ async def get_position(
         raise
     except Exception as e:
         logger.error(f"Failed to get position: {e}")
-        raise HTTPException(status_code=500, detail="查询失败")
-
+        raise HTTPException(status_code=500, detail="查询失败") from e
 
 @router.put(
     "/positions/{position_id}/price",
@@ -164,11 +165,10 @@ async def update_position_price(
         )
         return position
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Failed to update position price: {e}")
-        raise HTTPException(status_code=500, detail="更新失败")
-
+        raise HTTPException(status_code=500, detail="更新失败") from e
 
 @router.post(
     "/positions/{position_id}/adjust",
@@ -188,14 +188,15 @@ async def adjust_position(
 ):
     """调整持仓（加仓/减仓）"""
     try:
-        position = await PositionService.adjust_position(db, position_id, data, user_id=user_id, tenant_id=tenant_id)
+        position = await PositionService.adjust_position(
+            db, position_id, data, user_id=user_id, tenant_id=tenant_id
+        )
         return position
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Failed to adjust position: {e}")
-        raise HTTPException(status_code=500, detail="调整失败")
-
+        raise HTTPException(status_code=500, detail="调整失败") from e
 
 @router.post(
     "/positions/{position_id}/close",
@@ -221,11 +222,10 @@ async def close_position(
         )
         return position
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Failed to close position: {e}")
-        raise HTTPException(status_code=500, detail="平仓失败")
-
+        raise HTTPException(status_code=500, detail="平仓失败") from e
 
 @router.get(
     "/positions/{position_id}/history",
@@ -251,4 +251,4 @@ async def get_position_history(
         return history
     except Exception as e:
         logger.error(f"Failed to get position history: {e}")
-        raise HTTPException(status_code=500, detail="查询失败")
+        raise HTTPException(status_code=500, detail="查询失败") from e

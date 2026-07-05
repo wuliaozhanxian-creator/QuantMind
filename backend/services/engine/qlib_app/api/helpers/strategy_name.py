@@ -1,7 +1,6 @@
 """策略显示名称处理。"""
 
-from typing import Any, Dict, Optional
-
+from typing import Any, Optional
 
 def normalize_strategy_key(raw: Any) -> str:
     text = str(raw or "").strip().strip("'").strip('"')
@@ -10,7 +9,6 @@ def normalize_strategy_key(raw: Any) -> str:
     if text.endswith(".py") or text.endswith(".json"):
         text = text.rsplit(".", 1)[0]
     return text
-
 
 def resolve_strategy_display_name(payload: dict[str, Any]) -> str | None:
     config = payload.get("config") if isinstance(payload.get("config"), dict) else {}
@@ -30,7 +28,9 @@ def resolve_strategy_display_name(payload: dict[str, Any]) -> str | None:
     }
 
     try:
-        from backend.services.engine.qlib_app.services.strategy_templates import get_template_by_id
+        from backend.services.engine.qlib_app.services.strategy_templates import (
+            get_template_by_id,
+        )
     except Exception:
         get_template_by_id = None  # type: ignore
 
@@ -44,7 +44,7 @@ def resolve_strategy_display_name(payload: dict[str, Any]) -> str | None:
                 if tpl and getattr(tpl, "name", None):
                     return str(tpl.name)
             except Exception:
-                pass
+                pass  # noqa: BLE001 - None
         fallback = namespaced_fallback_map.get(key.lower())
         if fallback:
             return fallback

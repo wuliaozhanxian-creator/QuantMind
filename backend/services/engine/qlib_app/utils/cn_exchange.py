@@ -1,7 +1,7 @@
 import json
 import logging
 from datetime import datetime
-from typing import Optional, Tuple
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -12,10 +12,11 @@ from qlib.backtest.position import BasePosition
 from backend.shared.redis_sentinel_client import get_redis_sentinel_client
 
 logger = logging.getLogger(__name__)
-from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
+from backend.services.engine.qlib_app.utils.structured_logger import (
+    StructuredTaskLogger,
+)
 
 task_logger = StructuredTaskLogger(logger, "CnExchange")
-
 
 class CnExchange(Exchange):
     """
@@ -67,7 +68,11 @@ class CnExchange(Exchange):
                 # Set expire time for the key (e.g., 24 hours)
                 self.redis_client.expire(self.trades_key, 86400)
             except Exception as e:
-                task_logger.warning("redis_client_init_failed", "Failed to initialize Redis client in CnExchange", error=str(e))
+                task_logger.warning(
+                    "redis_client_init_failed",
+                    "Failed to initialize Redis client in CnExchange",
+                    error=str(e),
+                )
 
     def round_amount_by_trade_unit(
         self,
@@ -90,7 +95,9 @@ class CnExchange(Exchange):
             rounded = (float(deal_amount) + 1e-5) // trade_unit * trade_unit
             return max(0.0, rounded)
         else:
-            f_val = float(factor) if factor is not None and not np.isnan(factor) else 1.0
+            f_val = (
+                float(factor) if factor is not None and not np.isnan(factor) else 1.0
+            )
             raw_amount = deal_amount * f_val
             rounded_raw = (raw_amount + 1e-5) // trade_unit * trade_unit
             return max(0.0, rounded_raw) / f_val
@@ -113,14 +120,18 @@ class CnExchange(Exchange):
         field: str,
         method: str = "ts_data_last",
     ) -> float | None:
-        value = self.quote.get_data(stock_id, start_time, end_time, field=field, method=method)
+        value = self.quote.get_data(
+            stock_id, start_time, end_time, field=field, method=method
+        )
         if not self._is_invalid_quote(value):
             return float(value)
 
         for offset in range(1, self.quote_fallback_lookback_days + 1):
             prev_start = pd.Timestamp(start_time) - pd.Timedelta(days=offset)
             prev_end = pd.Timestamp(end_time) - pd.Timedelta(days=offset)
-            fallback_value = self.quote.get_data(stock_id, prev_start, prev_end, field=field, method=method)
+            fallback_value = self.quote.get_data(
+                stock_id, prev_start, prev_end, field=field, method=method
+            )
             if self._is_invalid_quote(fallback_value):
                 continue
 
@@ -147,7 +158,9 @@ class CnExchange(Exchange):
         end_time: pd.Timestamp,
         method: str = "ts_data_last",
     ) -> float | None:
-        price = self._get_recent_valid_quote(stock_id, start_time, end_time, field="$close", method=method)
+        price = self._get_recent_valid_quote(
+            stock_id, start_time, end_time, field="$close", method=method
+        )
         if price is not None and not getattr(self, "trade_w_adj_price", False):
             factor = self.get_factor(stock_id, start_time, end_time)
             if factor:
@@ -162,7 +175,9 @@ class CnExchange(Exchange):
     ) -> float | None:
         if stock_id not in self.quote.get_all_stock():
             return None
-        return self._get_recent_valid_quote(stock_id, start_time, end_time, field="$factor", method="ts_data_last")
+        return self._get_recent_valid_quote(
+            stock_id, start_time, end_time, field="$factor", method="ts_data_last"
+        )
 
     def get_deal_price(
         self,
@@ -179,7 +194,9 @@ class CnExchange(Exchange):
         else:
             raise NotImplementedError("This type of input is not supported")
 
-        deal_price = self._get_recent_valid_quote(stock_id, start_time, end_time, field=pstr, method=method or "ts_data_last")
+        deal_price = self._get_recent_valid_quote(
+            stock_id, start_time, end_time, field=pstr, method=method or "ts_data_last"
+        )
         if method is not None and self._is_invalid_quote(deal_price):
             task_logger.warning(
                 "deal_price_fallback_to_close",
@@ -227,7 +244,10 @@ class CnExchange(Exchange):
         # It does NOT expect force_deal.
 
         trade_val, trade_cost, trade_price = super().deal_order(
-            order, trade_account=trade_account, position=position, dealt_order_amount=dealt_order_amount
+            order,
+            trade_account=trade_account,
+            position=position,
+            dealt_order_amount=dealt_order_amount,
         )
 
         # 注意：交易记录统一由 recording_strategy.log_executed_trades() 负责写入 Redis，
@@ -271,7 +291,9 @@ class CnExchange(Exchange):
         if market_volume_val > 0:
             participation_rate = trade_val / market_volume_val
             # 采用平方根定律模拟冲击成本
-            impact = trade_val * self.impact_cost_coefficient * np.sqrt(participation_rate)
+            impact = (
+                trade_val * self.impact_cost_coefficient * np.sqrt(participation_rate)
+            )
             if participation_rate > 0.1:  # 参与率超过 10% 时额外警告
                 task_logger.debug(
                     "high_participation_rate",
@@ -304,7 +326,9 @@ class CnExchange(Exchange):
         # Verify and adjust (Iterative approach to account for fixed costs and market impact)
         for _ in range(3):
             val = amount * trade_price
-            cost = self.calculate_cost(stock_id, val, OrderDir.BUY, market_volume_val=market_volume_val)
+            cost = self.calculate_cost(
+                stock_id, val, OrderDir.BUY, market_volume_val=market_volume_val
+            )
             if val + cost <= cash:
                 break
             else:
@@ -318,8 +342,15 @@ class CnExchange(Exchange):
         Clip the order based on price limits.
         Use base class check_stock_limit which is standard in Qlib.
         """
-        if self.check_stock_limit(order.stock_id, order.start_time, order.end_time, direction=order.direction):
-            task_logger.info("skip_trade_by_limit", "Skip trade by price limit", stock_id=order.stock_id, start_time=str(order.start_time))
+        if self.check_stock_limit(
+            order.stock_id, order.start_time, order.end_time, direction=order.direction
+        ):
+            task_logger.info(
+                "skip_trade_by_limit",
+                "Skip trade by price limit",
+                stock_id=order.stock_id,
+                start_time=str(order.start_time),
+            )
             order.deal_amount = 0.0
             return order
 
@@ -335,15 +366,21 @@ class CnExchange(Exchange):
         Calculation of trade info
         **NOTE**: Order will be changed in this function
         """
-        trade_price = self.get_deal_price(order.stock_id, order.start_time, order.end_time, direction=order.direction)
+        trade_price = self.get_deal_price(
+            order.stock_id, order.start_time, order.end_time, direction=order.direction
+        )
         if trade_price is None or np.isnan(trade_price) or trade_price <= 0:
             return 0.0, 0.0, 0.0
 
         trade_price = float(trade_price)
 
         # 获取市场当日成交量 (用于计算冲击成本)
-        market_volume = self.get_volume(order.stock_id, order.start_time, order.end_time)
-        market_volume_val = float(market_volume) * trade_price if market_volume is not None else 0.0
+        market_volume = self.get_volume(
+            order.stock_id, order.start_time, order.end_time
+        )
+        market_volume_val = (
+            float(market_volume) * trade_price if market_volume is not None else 0.0
+        )
 
         # Basic volume clipping
         order.factor = self.get_factor(order.stock_id, order.start_time, order.end_time)
@@ -360,7 +397,9 @@ class CnExchange(Exchange):
                     )
                 else:
                     current_amount = (
-                        position.get_stock_amount(order.stock_id) if position.check_stock(order.stock_id) else 0
+                        position.get_stock_amount(order.stock_id)
+                        if position.check_stock(order.stock_id)
+                        else 0
                     )
                     if not np.isclose(order.deal_amount, current_amount):
                         order.deal_amount = self.round_amount_by_trade_unit(
@@ -383,7 +422,9 @@ class CnExchange(Exchange):
                 if self.allow_short_selling:
                     # Margin limits are enforced by strategy level weights and account constraints.
                     # We bypass strict cash limitation here to allow borrowing cash (negative cash).
-                    order.deal_amount = self.round_amount_by_trade_unit(order.deal_amount, order.factor)
+                    order.deal_amount = self.round_amount_by_trade_unit(
+                        order.deal_amount, order.factor
+                    )
                 else:
                     cash = position.get_cash()
                     trade_val = order.deal_amount * trade_price
@@ -407,9 +448,13 @@ class CnExchange(Exchange):
                             min(max_amount, order.deal_amount), order.factor
                         )
                     else:
-                        order.deal_amount = self.round_amount_by_trade_unit(order.deal_amount, order.factor)
+                        order.deal_amount = self.round_amount_by_trade_unit(
+                            order.deal_amount, order.factor
+                        )
             else:
-                order.deal_amount = self.round_amount_by_trade_unit(order.deal_amount, order.factor)
+                order.deal_amount = self.round_amount_by_trade_unit(
+                    order.deal_amount, order.factor
+                )
 
         # Final Calculation
         trade_val = order.deal_amount * trade_price

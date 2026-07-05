@@ -89,17 +89,29 @@ export class QlibBacktestError extends Error {
 }
 
 /**
- * WebSocket连接管理器（优化版 - 指数退避重连）
+ * WebSocket连接管理器（T2.2 已对齐统一策略：指数退避 + 心跳超时）
+ *
+ * 注意：本类为回测进度流专用，保持回调式 API 不变。
+ * 新场景请直接使用 services/websocket/WebSocketClient.ts 统一客户端。
  */
 class WebSocketManager {
   private ws: WebSocket | null = null;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5; // 增加到5次
+  private maxReconnectAttempts = Number.POSITIVE_INFINITY; // T2.2: 无最大次数上限
   private baseReconnectDelay = 1000; // 基础延迟1秒
-  private maxReconnectDelay = 30000; // 最大延迟30秒
+  private maxReconnectDelay = 60000; // T2.2: 最大延迟60s（与统一客户端对齐）
   private heartbeatInterval: NodeJS.Timeout | null = null;
+  private heartbeatTimeoutTimer: NodeJS.Timeout | null = null; // T2.2: 心跳超时检测
+  private lastHeartbeatAck = 0; // T2.2: 上次收到 pong 的时间
   private reconnectTimeout: NodeJS.Timeout | null = null;
   private manualClose = false; // 标记是否手动关闭
+  private currentUrl = ''; // T2.2: 记录当前 url 以便重连
+  private currentCallbacks: {
+    onOpen?: () => void;
+    onMessage?: (data: any) => void;
+    onError?: (error: Error) => void;
+    onClose?: () => void;
+  } = {}; // T2.2: 记录回调以便重连
 
   connect(
     url: string,
@@ -115,11 +127,14 @@ class WebSocketManager {
     }
 
     this.manualClose = false;
+    this.currentUrl = url; // T2.2: 记录以便重连
+    this.currentCallbacks = callbacks; // T2.2: 记录以便重连
     this.ws = new WebSocket(url);
 
     this.ws.onopen = () => {
       console.log('[WS] ✅ Connected:', url);
       this.reconnectAttempts = 0; // 重置重连计数
+      this.lastHeartbeatAck = Date.now(); // T2.2: 心跳基准时间
       callbacks.onOpen?.();
       this.startHeartbeat();
     };
@@ -127,10 +142,16 @@ class WebSocketManager {
     this.ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        // 忽略心跳响应
-        if (data.type !== 'pong') {
-          callbacks.onMessage?.(data);
+        // 心跳响应（pong）视为 ack，并清除超时检测
+        if (data.type === 'pong') {
+          this.lastHeartbeatAck = Date.now();
+          if (this.heartbeatTimeoutTimer) {
+            clearTimeout(this.heartbeatTimeoutTimer);
+            this.heartbeatTimeoutTimer = null;
+          }
+          return;
         }
+        callbacks.onMessage?.(data);
       } catch (error) {
         console.error('[WS] ❌ Parse error:', error);
         callbacks.onError?.(new Error('WebSocket消息解析失败'));
@@ -165,7 +186,8 @@ class WebSocketManager {
 
         this.reconnectTimeout = setTimeout(() => {
           console.log(`[WS] 🔄 Attempting reconnect #${this.reconnectAttempts}...`);
-          this.connect(url, callbacks);
+          // T2.2: 复用记录的 url 与 callbacks 进行重连
+          this.connect(this.currentUrl, this.currentCallbacks);
         }, delay);
       } else if (this.reconnectAttempts >= this.maxReconnectAttempts) {
         console.error('[WS] ❌ Max reconnection attempts reached. Please refresh the page.');
@@ -181,6 +203,22 @@ class WebSocketManager {
       if (this.ws?.readyState === WebSocket.OPEN) {
         try {
           this.ws.send(JSON.stringify({ type: 'ping' }));
+          // T2.2: 心跳超时检测（30s 未收到 pong → 主动断开触发重连）
+          if (this.heartbeatTimeoutTimer) {
+            clearTimeout(this.heartbeatTimeoutTimer);
+          }
+          this.heartbeatTimeoutTimer = setTimeout(() => {
+            const elapsed = Date.now() - this.lastHeartbeatAck;
+            if (elapsed > 30000) {
+              console.warn(`[WS] ⚠️ Heartbeat timeout (${elapsed}ms), forcing reconnect...`);
+              this.currentCallbacks.onError?.(new Error(`Heartbeat timeout after ${elapsed}ms`));
+              try {
+                this.ws?.close();
+              } catch (e) {
+                // ignore
+              }
+            }
+          }, 30000);
         } catch (error) {
           console.error('[WS] ❌ Heartbeat send failed:', error);
         }
@@ -192,6 +230,10 @@ class WebSocketManager {
     if (this.heartbeatInterval) {
       clearInterval(this.heartbeatInterval);
       this.heartbeatInterval = null;
+    }
+    if (this.heartbeatTimeoutTimer) {
+      clearTimeout(this.heartbeatTimeoutTimer);
+      this.heartbeatTimeoutTimer = null;
     }
   }
 

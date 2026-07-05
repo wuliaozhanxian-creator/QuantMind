@@ -132,7 +132,9 @@ class UserSession(Base):
     __tablename__ = "user_sessions"
 
     # 主键 (session_id 是实际主键)
-    id = Column(String(64), primary_key=True, default=lambda: __import__("uuid").uuid4().hex)
+    id = Column(
+        String(64), primary_key=True, default=lambda: __import__("uuid").uuid4().hex
+    )
     session_id = Column(
         String(64), unique=True, nullable=False, primary_key=True, comment="会话ID"
     )

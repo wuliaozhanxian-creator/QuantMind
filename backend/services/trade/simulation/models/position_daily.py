@@ -28,7 +28,9 @@ class SimulationPositionDaily(Base, TimestampMixin):
         String(16), nullable=False, default="long", index=True
     )
     quantity: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-    available_quantity: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    available_quantity: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0.0
+    )
     frozen_quantity: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     cost_price: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     close_price: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)

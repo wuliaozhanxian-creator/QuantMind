@@ -1,375 +1,202 @@
 /**
- * WebSocket 连接管理工具
+ * WebSocket 工具（T2.2 统一后）
  *
- * 功能：
- * - 自动重连机制
- * - 心跳检测
- * - 连接状态管理
- * - 消息队列
+ * 历史上这里维护了一套独立的 `WebSocketManager` + `useWebSocket` 实现，
+ * T2.2 已统一收敛到底层 `services/websocket/WebSocketClient.ts`。
+ *
+ * 为兼容既有调用方（如 EnhancedQuickBacktest），保留以下导出：
+ * - `WebSocketManager`：以 `WebSocketClient` 为底层的兼容封装（deprecated alias）
+ * - `useWebSocket`：基于 `WebSocketClient` 的轻量 React Hook
+ * - `ConnectionState`：从统一实现透出
+ *
+ * 新代码请直接使用 `services/websocket/WebSocketClient` 或
+ * `services/websocketService.ts` 的 `websocketService` 单例。
  */
 
-export enum WebSocketStatus {
-  CONNECTING = 'connecting',
-  CONNECTED = 'connected',
-  DISCONNECTING = 'disconnecting',
-  DISCONNECTED = 'disconnected',
-  ERROR = 'error',
-  RECONNECTING = 'reconnecting',
-}
+import { useEffect, useRef, useState, useCallback } from 'react';
+import {
+  WebSocketClient,
+  ConnectionState,
+  type WebSocketClientConfig,
+  type ErrorCallback
+} from '../services/websocket/WebSocketClient';
 
-export interface WebSocketMessage<T = any> {
+export { ConnectionState };
+
+/** 兼容历史调用方对消息 { type, data } 结构的访问 */
+export interface WebSocketMessageLike {
   type: string;
-  data: T;
-  timestamp: number;
+  data: Record<string, unknown>;
+  [key: string]: unknown;
 }
 
-export interface WebSocketManagerOptions {
+export interface WebSocketManagerConfig {
   url: string;
+  onMessage?: (message: WebSocketMessageLike) => void;
+  onStatusChange?: (status: ConnectionState) => void;
+  onError?: (error: Error, context?: string) => void;
   reconnect?: boolean;
-  reconnectInterval?: number;
-  reconnectAttempts?: number;
-  heartbeatInterval?: number;
-  heartbeatTimeout?: number;
-  onOpen?: (event: Event) => void;
-  onClose?: (event: CloseEvent) => void;
-  onError?: (event: Event) => void;
-  onMessage?: (message: WebSocketMessage) => void;
-  onStatusChange?: (status: WebSocketStatus) => void;
+  debug?: boolean;
 }
 
+/**
+ * 兼容性封装：内部委托给统一 `WebSocketClient`
+ * @deprecated 请直接使用 `WebSocketClient` 或 `websocketService` 单例
+ */
 export class WebSocketManager {
-  private ws: WebSocket | null = null;
-  private options: Required<WebSocketManagerOptions>;
-  private status: WebSocketStatus = WebSocketStatus.DISCONNECTED;
-  private reconnectTimer: NodeJS.Timeout | null = null;
-  private heartbeatTimer: NodeJS.Timeout | null = null;
-  private heartbeatTimeoutTimer: NodeJS.Timeout | null = null;
-  private reconnectCount = 0;
-  private messageQueue: WebSocketMessage[] = [];
-  private lastHeartbeatTime = 0;
+  private client: WebSocketClient;
+  private config: WebSocketManagerConfig;
 
-  constructor(options: WebSocketManagerOptions) {
-    this.options = {
-      reconnect: true,
-      reconnectInterval: 3000,
-      reconnectAttempts: 5,
+  constructor(config: WebSocketManagerConfig) {
+    this.config = config;
+    const clientConfig: WebSocketClientConfig = {
+      url: config.url,
+      reconnect: config.reconnect ?? true,
+      debug: config.debug ?? false,
+      maxReconnectDelay: 60000,
       heartbeatInterval: 30000,
-      heartbeatTimeout: 10000,
-      onOpen: () => {},
-      onClose: () => {},
-      onError: () => {},
-      onMessage: () => {},
-      onStatusChange: () => {},
-      ...options,
+      heartbeatTimeout: 30000
     };
-  }
+    this.client = new WebSocketClient(clientConfig);
 
-  /**
-   * 连接 WebSocket
-   */
-  connect(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      if (this.ws?.readyState === WebSocket.OPEN) {
-        resolve();
-        return;
-      }
-
-      this.updateStatus(WebSocketStatus.CONNECTING);
-
-      try {
-        this.ws = new WebSocket(this.options.url);
-
-        this.ws.onopen = (event) => {
-          console.log('[WebSocket] Connected:', this.options.url);
-          this.updateStatus(WebSocketStatus.CONNECTED);
-          this.reconnectCount = 0;
-          this.startHeartbeat();
-          this.flushMessageQueue();
-          this.options.onOpen(event);
-          resolve();
-        };
-
-        this.ws.onclose = (event) => {
-          console.log('[WebSocket] Closed:', event.code, event.reason);
-          this.updateStatus(WebSocketStatus.DISCONNECTED);
-          this.stopHeartbeat();
-          this.options.onClose(event);
-
-          // 自动重连
-          if (this.options.reconnect && this.reconnectCount < this.options.reconnectAttempts) {
-            this.scheduleReconnect();
-          }
-        };
-
-        this.ws.onerror = (event) => {
-          console.error('[WebSocket] Error:', event);
-          this.updateStatus(WebSocketStatus.ERROR);
-          this.options.onError(event);
-          reject(new Error('WebSocket connection error'));
-        };
-
-        this.ws.onmessage = (event) => {
-          try {
-            const message: WebSocketMessage = JSON.parse(event.data);
-
-            // 处理心跳响应
-            if (message.type === 'pong') {
-              this.lastHeartbeatTime = Date.now();
-              this.resetHeartbeatTimeout();
-              return;
-            }
-
-            this.options.onMessage(message);
-          } catch (error) {
-            console.error('[WebSocket] Failed to parse message:', error);
-          }
-        };
-      } catch (error) {
-        console.error('[WebSocket] Failed to create connection:', error);
-        this.updateStatus(WebSocketStatus.ERROR);
-        reject(error);
-      }
-    });
-  }
-
-  /**
-   * 断开连接
-   */
-  disconnect(): void {
-    this.options.reconnect = false;
-    this.clearReconnectTimer();
-    this.stopHeartbeat();
-
-    if (this.ws) {
-      this.updateStatus(WebSocketStatus.DISCONNECTING);
-      this.ws.close(1000, 'Client disconnecting');
-      this.ws = null;
-    }
-
-    this.updateStatus(WebSocketStatus.DISCONNECTED);
-  }
-
-  /**
-   * 发送消息
-   */
-  send(type: string, data: any): boolean {
-    const message: WebSocketMessage = {
-      type,
-      data,
-      timestamp: Date.now(),
-    };
-
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      try {
-        this.ws.send(JSON.stringify(message));
-        return true;
-      } catch (error) {
-        console.error('[WebSocket] Failed to send message:', error);
-        this.messageQueue.push(message);
-        return false;
-      }
-    } else {
-      // 连接未就绪，加入队列
-      this.messageQueue.push(message);
-      return false;
-    }
-  }
-
-  /**
-   * 获取当前状态
-   */
-  getStatus(): WebSocketStatus {
-    return this.status;
-  }
-
-  /**
-   * 是否已连接
-   */
-  isConnected(): boolean {
-    return this.status === WebSocketStatus.CONNECTED &&
-           this.ws?.readyState === WebSocket.OPEN;
-  }
-
-  /**
-   * 更新状态
-   */
-  private updateStatus(status: WebSocketStatus): void {
-    if (this.status !== status) {
-      this.status = status;
-      this.options.onStatusChange(status);
-    }
-  }
-
-  /**
-   * 定时重连
-   */
-  private scheduleReconnect(): void {
-    if (this.reconnectTimer) {
-      return;
-    }
-
-    this.reconnectCount++;
-    this.updateStatus(WebSocketStatus.RECONNECTING);
-
-    const delay = this.options.reconnectInterval * Math.min(this.reconnectCount, 5);
-    console.log(`[WebSocket] Reconnecting in ${delay}ms (attempt ${this.reconnectCount}/${this.options.reconnectAttempts})`);
-
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = null;
-      this.connect().catch(error => {
-        console.error('[WebSocket] Reconnect failed:', error);
+    if (config.onMessage) {
+      // 将所有 type 的消息透传给单一 onMessage 回调（兼容历史 API）
+      this.client.on('message', (payload) => {
+        config.onMessage?.(payload as WebSocketMessageLike);
       });
-    }, delay);
-  }
-
-  /**
-   * 清除重连定时器
-   */
-  private clearReconnectTimer(): void {
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
+    }
+    if (config.onStatusChange) {
+      this.client.onStateChange(config.onStatusChange);
+    }
+    if (config.onError) {
+      this.client.onError(config.onError as ErrorCallback);
     }
   }
 
-  /**
-   * 启动心跳
-   */
-  private startHeartbeat(): void {
-    this.stopHeartbeat();
-
-    this.heartbeatTimer = setInterval(() => {
-      if (this.isConnected()) {
-        this.send('ping', { timestamp: Date.now() });
-
-        // 设置心跳超时
-        this.heartbeatTimeoutTimer = setTimeout(() => {
-          console.warn('[WebSocket] Heartbeat timeout, reconnecting...');
-          this.ws?.close();
-        }, this.options.heartbeatTimeout);
-      }
-    }, this.options.heartbeatInterval);
+  async connect(): Promise<void> {
+    return this.client.connect();
   }
 
-  /**
-   * 停止心跳
-   */
-  private stopHeartbeat(): void {
-    if (this.heartbeatTimer) {
-      clearInterval(this.heartbeatTimer);
-      this.heartbeatTimer = null;
-    }
-
-    if (this.heartbeatTimeoutTimer) {
-      clearTimeout(this.heartbeatTimeoutTimer);
-      this.heartbeatTimeoutTimer = null;
-    }
+  disconnect(): void {
+    this.client.disconnect();
   }
 
-  /**
-   * 重置心跳超时
-   */
-  private resetHeartbeatTimeout(): void {
-    if (this.heartbeatTimeoutTimer) {
-      clearTimeout(this.heartbeatTimeoutTimer);
-      this.heartbeatTimeoutTimer = null;
-    }
+  send(data: unknown): boolean {
+    // 历史接口接收任意 payload，统一转换为 type=message 的消息
+    return this.client.send('message', data);
   }
 
-  /**
-   * 发送队列中的消息
-   */
-  private flushMessageQueue(): void {
-    while (this.messageQueue.length > 0 && this.isConnected()) {
-      const message = this.messageQueue.shift();
-      if (message) {
-        try {
-          this.ws!.send(JSON.stringify(message));
-        } catch (error) {
-          console.error('[WebSocket] Failed to flush message:', error);
-          this.messageQueue.unshift(message);
-          break;
-        }
-      }
-    }
+  isConnected(): boolean {
+    return this.client.getState() === ConnectionState.CONNECTED;
   }
 
-  /**
-   * 清理资源
-   */
-  destroy(): void {
-    this.disconnect();
-    this.messageQueue = [];
+  getStatus(): ConnectionState {
+    return this.client.getState();
   }
 }
 
-// ============================================================================
-// React Hook
-// ============================================================================
-
-import { useEffect, useRef, useState } from 'react';
-
-export interface UseWebSocketOptions extends Omit<WebSocketManagerOptions, 'url'> {
+export interface UseWebSocketOptions {
+  reconnect?: boolean;
+  debug?: boolean;
+  /** 是否启用连接（false 时跳过建立连接） */
   enabled?: boolean;
+  onMessage?: (message: WebSocketMessageLike) => void;
 }
 
-export const useWebSocket = (url: string, options: UseWebSocketOptions = {}) => {
-  const { enabled = true, ...managerOptions } = options;
-  const [status, setStatus] = useState<WebSocketStatus>(WebSocketStatus.DISCONNECTED);
-  const [lastMessage, setLastMessage] = useState<WebSocketMessage | null>(null);
-  const managerRef = useRef<WebSocketManager | null>(null);
+export interface UseWebSocketResult {
+  status: ConnectionState;
+  lastMessage: WebSocketMessageLike | null;
+  send: (data: unknown) => boolean;
+  disconnect: () => void;
+  reconnect: () => Promise<void>;
+  isConnected: boolean;
+}
+
+/**
+ * 轻量 WebSocket Hook（基于统一 WebSocketClient）
+ */
+export function useWebSocket(url: string, options?: UseWebSocketOptions): UseWebSocketResult {
+  const { reconnect: reconnectOpt = true, debug = false, enabled = true, onMessage } = options || {};
+  const clientRef = useRef<WebSocketClient | null>(null);
+  const [status, setStatus] = useState<ConnectionState>(ConnectionState.DISCONNECTED);
+  const [lastMessage, setLastMessage] = useState<WebSocketMessageLike | null>(null);
+
+  const stableOnMessageRef = useRef(onMessage);
+  stableOnMessageRef.current = onMessage;
 
   useEffect(() => {
-    if (!enabled || !url) {
+    if (!url || !enabled) {
       return;
     }
 
-    const manager = new WebSocketManager({
+    const client = new WebSocketClient({
       url,
-      ...managerOptions,
-      onStatusChange: (newStatus) => {
-        setStatus(newStatus);
-        managerOptions.onStatusChange?.(newStatus);
-      },
-      onMessage: (message) => {
-        setLastMessage(message);
-        managerOptions.onMessage?.(message);
-      },
+      reconnect: reconnectOpt,
+      debug,
+      maxReconnectDelay: 60000,
+      heartbeatInterval: 30000,
+      heartbeatTimeout: 30000
+    });
+    clientRef.current = client;
+
+    client.onStateChange(setStatus);
+    client.on('message', (payload) => {
+      const msg = payload as WebSocketMessageLike;
+      setLastMessage(msg);
+      stableOnMessageRef.current?.(msg);
     });
 
-    managerRef.current = manager;
-
-    manager.connect().catch(error => {
-      console.error('[useWebSocket] Connection failed:', error);
+    client.connect().catch(error => {
+      console.error('[useWebSocket] connect failed:', error);
     });
 
     return () => {
-      manager.destroy();
-      managerRef.current = null;
+      client.disconnect();
+      clientRef.current = null;
     };
-  }, [url, enabled]);
+  }, [url, reconnectOpt, debug, enabled]);
 
-  const send = (type: string, data: any) => {
-    return managerRef.current?.send(type, data) ?? false;
-  };
+  const send = useCallback((data: unknown): boolean => {
+    if (!clientRef.current) return false;
+    return clientRef.current.send('message', data);
+  }, []);
 
-  const disconnect = () => {
-    managerRef.current?.disconnect();
-  };
+  const disconnect = useCallback(() => {
+    clientRef.current?.disconnect();
+  }, []);
 
-  const reconnect = () => {
-    managerRef.current?.disconnect();
-    setTimeout(() => {
-      managerRef.current?.connect();
-    }, 100);
-  };
+  const reconnectFn = useCallback(async (): Promise<void> => {
+    if (!clientRef.current) return;
+    clientRef.current.disconnect();
+    // 重置 reconnect 配置后重连
+    await new Promise(resolve => setTimeout(resolve, 100));
+    // 直接新建 client 重连（disconnect 已清空内部状态）
+    const client = new WebSocketClient({
+      url,
+      reconnect: true,
+      debug,
+      maxReconnectDelay: 60000,
+      heartbeatInterval: 30000,
+      heartbeatTimeout: 30000
+    });
+    clientRef.current = client;
+    client.onStateChange(setStatus);
+    client.on('message', (payload) => {
+      const msg = payload as WebSocketMessageLike;
+      setLastMessage(msg);
+      stableOnMessageRef.current?.(msg);
+    });
+    await client.connect();
+  }, [url, debug]);
 
   return {
     status,
     lastMessage,
     send,
     disconnect,
-    reconnect,
-    isConnected: managerRef.current?.isConnected() ?? false,
+    reconnect: reconnectFn,
+    isConnected: status === ConnectionState.CONNECTED
   };
-};
+}
+
+export default WebSocketManager;

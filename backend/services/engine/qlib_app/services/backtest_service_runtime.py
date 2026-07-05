@@ -55,7 +55,6 @@ from .backtest_service_query import QlibBacktestServiceQueryMixin
 logger = logging.getLogger(__name__)
 task_logger = StructuredTaskLogger(logger, "BacktestRuntime")
 
-
 # 计算项目根目录
 def _find_project_root() -> Path:
     try:
@@ -67,15 +66,13 @@ def _find_project_root() -> Path:
                 break
             curr = curr.parent
     except Exception:
-        pass
+        logger.debug("ignored exception", exc_info=True)
     return Path(os.getcwd())
-
 
 PROJECT_ROOT = _find_project_root()
 task_logger.info(
     "project_root_resolved", "Project root resolved", root=str(PROJECT_ROOT)
 )
-
 
 class QlibBacktestServiceRuntimeMixin(QlibBacktestServiceQueryMixin):
     """Qlib 回测运行逻辑 mixin"""
@@ -677,17 +674,22 @@ class QlibBacktestServiceRuntimeMixin(QlibBacktestServiceQueryMixin):
         """计算前向填充后的有效股票数：取回测区间内及之前最近预测日的最大股票数。"""
         try:
             import pandas as _pd
+
             if effective_pred.empty:
                 return 0
             bt_end = _pd.Timestamp(request.end_date)
             bt_start = _pd.Timestamp(request.start_date)
-            datetime_idx = _pd.to_datetime(effective_pred.index.get_level_values("datetime"))
+            datetime_idx = _pd.to_datetime(
+                effective_pred.index.get_level_values("datetime")
+            )
             if pred_dates_sorted is None:
                 pred_dates_sorted = _pd.Index(datetime_idx.unique()).sort_values()
             # 找到回测区间内及之前的所有预测日
             eligible_dates = pred_dates_sorted[pred_dates_sorted <= bt_end]
             if len(eligible_dates) == 0:
-                return int(effective_pred.index.get_level_values("instrument").nunique())
+                return int(
+                    effective_pred.index.get_level_values("instrument").nunique()
+                )
             # 取这些日期中最大的股票数（前向填充后每个交易日可用的股票数）
             max_inst = 0
             for d in eligible_dates:
@@ -698,7 +700,13 @@ class QlibBacktestServiceRuntimeMixin(QlibBacktestServiceQueryMixin):
                     continue
             # 同时也统计区间内的总唯一股票数
             in_range_mask = (datetime_idx >= bt_start) & (datetime_idx <= bt_end)
-            in_range_inst = effective_pred.loc[in_range_mask].index.get_level_values("instrument").nunique() if in_range_mask.any() else 0
+            in_range_inst = (
+                effective_pred.loc[in_range_mask]
+                .index.get_level_values("instrument")
+                .nunique()
+                if in_range_mask.any()
+                else 0
+            )
             return int(max(max_inst, in_range_inst))
         except Exception:
             return int(effective_pred.index.get_level_values("instrument").nunique())
@@ -741,18 +749,26 @@ class QlibBacktestServiceRuntimeMixin(QlibBacktestServiceQueryMixin):
         nan_ratio = float(score.isna().mean()) if len(score) > 0 else 1.0
 
         # 前向填充日期计数：当预测信号稀疏时，使用交易日历计算可覆盖的交易日数
-        actual_date_count = int(
-            pred_in_range.index.get_level_values("datetime").nunique()
-        ) if len(pred_in_range) > 0 else 0
+        actual_date_count = (
+            int(pred_in_range.index.get_level_values("datetime").nunique())
+            if len(pred_in_range) > 0
+            else 0
+        )
         forward_filled_date_count = actual_date_count
 
         try:
             from pathlib import Path as _Path
-            cal_file = _Path(os.getenv("QLIB_PRIMARY_DATA_PATH", "db/qlib_data")) / "calendars" / "day.txt"
+
+            cal_file = (
+                _Path(os.getenv("QLIB_PRIMARY_DATA_PATH", "db/qlib_data"))
+                / "calendars"
+                / "day.txt"
+            )
             if not cal_file.exists():
                 cal_file = _Path("/app/db/qlib_data/calendars/day.txt")
             if cal_file.exists() and len(datetime_index) > 0:
                 import pandas as _pd
+
                 cal_df = _pd.read_csv(cal_file, header=None, names=["date"])
                 cal_df["date"] = _pd.to_datetime(cal_df["date"])
                 bt_start = _pd.Timestamp(request.start_date)
@@ -792,14 +808,25 @@ class QlibBacktestServiceRuntimeMixin(QlibBacktestServiceQueryMixin):
 
         # universe 交叉验证:计算 pred symbol 与 qlib universe 的实际匹配数
         instrument_count_raw = self._count_forward_filled_instruments(
-            effective_pred, pred_dates_sorted if "pred_dates_sorted" in dir() else None, request
+            effective_pred,
+            pred_dates_sorted if "pred_dates_sorted" in dir() else None,
+            request,
         )
         effective_instrument_count = instrument_count_raw
         try:
-            pred_symbols = set(
-                effective_pred.index.get_level_values("instrument").astype(str).unique()
-            ) if len(effective_pred) > 0 else set()
-            from backend.services.engine.qlib_app.utils.simple_signal import SimpleSignal
+            pred_symbols = (
+                set(
+                    effective_pred.index.get_level_values("instrument")
+                    .astype(str)
+                    .unique()
+                )
+                if len(effective_pred) > 0
+                else set()
+            )
+            from backend.services.engine.qlib_app.utils.simple_signal import (
+                SimpleSignal,
+            )
+
             temp_signal = SimpleSignal(universe=request.universe or "all")
             qlib_instruments = set(map(str, temp_signal._get_universe_instruments()))
             if qlib_instruments and pred_symbols:
@@ -808,7 +835,11 @@ class QlibBacktestServiceRuntimeMixin(QlibBacktestServiceQueryMixin):
                     ps_upper = ps.upper()
                     for qs in qlib_instruments:
                         qs_upper = qs.upper()
-                        if ps_upper == qs_upper or ps_upper in qs_upper or qs_upper in ps_upper:
+                        if (
+                            ps_upper == qs_upper
+                            or ps_upper in qs_upper
+                            or qs_upper in ps_upper
+                        ):
                             matched += 1
                             break
                 effective_instrument_count = matched
@@ -822,7 +853,9 @@ class QlibBacktestServiceRuntimeMixin(QlibBacktestServiceQueryMixin):
                         match_rate=f"{matched / len(pred_symbols):.1%}",
                     )
         except Exception as exc:
-            task_logger.warning("instrument_match_check_failed", "universe匹配检查失败", error=str(exc))
+            task_logger.warning(
+                "instrument_match_check_failed", "universe匹配检查失败", error=str(exc)
+            )
 
         return {
             "source": "pred_pkl",
@@ -887,7 +920,10 @@ class QlibBacktestServiceRuntimeMixin(QlibBacktestServiceQueryMixin):
                 f"model_resolution={model_resolution or '<empty>'}, reason={fallback_reason or '<none>'}"
             )
 
-        if model_source not in {"explicit_model_id", "explicit_system_model"} or fallback_used:
+        if (
+            model_source not in {"explicit_model_id", "explicit_system_model"}
+            or fallback_used
+        ):
             return (
                 f"strict_model_id_mismatch: requested={explicit}, effective={effective_model_id or '<empty>'}, "
                 f"model_source={model_source or '<empty>'}, fallback_used={fallback_used}, "
@@ -901,8 +937,12 @@ class QlibBacktestServiceRuntimeMixin(QlibBacktestServiceQueryMixin):
         request: QlibBacktestRequest | None = None,
     ) -> None:
         source = signal_meta.get("source")
-        fallback_reason = str(signal_meta.get("fallback_reason", "unknown") or "unknown")
-        if source == "close_fallback" and fallback_reason.startswith("strict_model_id_"):
+        fallback_reason = str(
+            signal_meta.get("fallback_reason", "unknown") or "unknown"
+        )
+        if source == "close_fallback" and fallback_reason.startswith(
+            "strict_model_id_"
+        ):
             pred_path_hint = (
                 signal_meta.get("resolved_pred_path")
                 or signal_meta.get("model_storage_path")
@@ -1201,7 +1241,9 @@ class QlibBacktestServiceRuntimeMixin(QlibBacktestServiceQueryMixin):
         feature = signal.strip()
 
         if feature == "<PRED>":
-            explicit_model_id = str(getattr(request, "model_id", "") or "").strip() or None
+            explicit_model_id = (
+                str(getattr(request, "model_id", "") or "").strip() or None
+            )
             (
                 registry_pred_path,
                 registry_meta,
@@ -1225,7 +1267,9 @@ class QlibBacktestServiceRuntimeMixin(QlibBacktestServiceQueryMixin):
                     "kwargs": {
                         "metric": "$close",
                         "universe": request.universe,
-                        "signal_lag_days": int(getattr(request, "signal_lag_days", 1) or 0),
+                        "signal_lag_days": int(
+                            getattr(request, "signal_lag_days", 1) or 0
+                        ),
                     },
                 }, {
                     **registry_meta,
@@ -1246,7 +1290,9 @@ class QlibBacktestServiceRuntimeMixin(QlibBacktestServiceQueryMixin):
                     "kwargs": {
                         "metric": "$close",
                         "universe": request.universe,
-                        "signal_lag_days": int(getattr(request, "signal_lag_days", 1) or 0),
+                        "signal_lag_days": int(
+                            getattr(request, "signal_lag_days", 1) or 0
+                        ),
                     },
                 }, {
                     **registry_meta,

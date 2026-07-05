@@ -76,7 +76,9 @@ async def _recalculate_account_market_value(account: dict) -> dict:
     用最新行情重算持仓市值，更新 account 的 market_value 和 total_asset。
     只处理多头仓位（long）；空头仓位的 market_value 来自 short_market_value 字段。
     """
-    market_url = os.getenv("MARKET_DATA_SERVICE_URL", "http://quantmind-stream:8003").rstrip("/")
+    market_url = os.getenv(
+        "MARKET_DATA_SERVICE_URL", "http://quantmind-stream:8003"
+    ).rstrip("/")
     positions = dict(account.get("positions") or {})
     if not positions:
         return account
@@ -182,7 +184,9 @@ class SimulationFundSnapshotService:
         snapshot_date: date | None = None,
     ) -> dict[str, object]:
         total_asset = _to_decimal(account.get("total_asset"))
-        available_balance = _to_decimal(account.get("cash") or account.get("available_balance"))
+        available_balance = _to_decimal(
+            account.get("cash") or account.get("available_balance")
+        )
         frozen_balance = _to_decimal(account.get("frozen_balance"))
         market_value = _to_decimal(account.get("market_value"))
         initial_capital = _to_decimal(account.get("initial_capital"))
@@ -221,7 +225,9 @@ class SimulationFundSnapshotService:
 
         keys = list(redis.client.scan_iter(match="simulation:account:*", count=500))
         rows: list[dict[str, object]] = []
-        daily_payloads: dict[tuple[str, str], tuple[str, dict[str, object], dict[str, dict[str, float]]]] = {}
+        daily_payloads: dict[
+            tuple[str, str], tuple[str, dict[str, object], dict[str, dict[str, float]]]
+        ] = {}
         deduped_accounts: dict[
             tuple[str, str],
             tuple[str, str, dict[str, object]],
@@ -247,10 +253,16 @@ class SimulationFundSnapshotService:
                 deduped_accounts[dedupe_key] = (str(key), raw_user_id, account)
             else:
                 _, _, existing_account = existing
-                if _score_account_payload(account) > _score_account_payload(existing_account):
+                if _score_account_payload(account) > _score_account_payload(
+                    existing_account
+                ):
                     deduped_accounts[dedupe_key] = (str(key), raw_user_id, account)
 
-        for (tenant_id, user_id), (source_key, raw_user_id, account) in deduped_accounts.items():
+        for (tenant_id, user_id), (
+            source_key,
+            raw_user_id,
+            account,
+        ) in deduped_accounts.items():
             canonical_key = f"simulation:account:{tenant_id}:{user_id}"
             if source_key != canonical_key:
                 redis.client.set(canonical_key, json.dumps(account, ensure_ascii=False))
@@ -265,14 +277,23 @@ class SimulationFundSnapshotService:
             try:
                 account = await _recalculate_account_market_value(account)
             except Exception as exc:
-                logger.warning("Market value recalc failed for %s/%s: %s", tenant_id, user_id, exc)
+                logger.warning(
+                    "Market value recalc failed for %s/%s: %s", tenant_id, user_id, exc
+                )
             else:
                 # 实时重算后立即回写 simulation 账户与交易账户缓存，供前端/交易链路统一消费。
                 try:
-                    redis.client.set(canonical_key, json.dumps(account, ensure_ascii=False))
+                    redis.client.set(
+                        canonical_key, json.dumps(account, ensure_ascii=False)
+                    )
                     write_trade_account_cache(redis, tenant_id, user_id, dict(account))
                 except Exception as exc:
-                    logger.warning("Simulation account cache writeback failed for %s/%s: %s", tenant_id, user_id, exc)
+                    logger.warning(
+                        "Simulation account cache writeback failed for %s/%s: %s",
+                        tenant_id,
+                        user_id,
+                        exc,
+                    )
 
             # 查询昨日快照 total_asset 用于计算 today_pnl
             prev_total_asset: Decimal | None = None
@@ -293,7 +314,12 @@ class SimulationFundSnapshotService:
                     if prev_row is not None:
                         prev_total_asset = _to_decimal(prev_row)
             except Exception as exc:
-                logger.debug("Could not fetch yesterday snapshot for %s/%s: %s", tenant_id, user_id, exc)
+                logger.debug(
+                    "Could not fetch yesterday snapshot for %s/%s: %s",
+                    tenant_id,
+                    user_id,
+                    exc,
+                )
 
             row = cls._build_row(
                 tenant_id,
@@ -323,7 +349,13 @@ class SimulationFundSnapshotService:
                     ).load_projection(
                         tenant_id=tenant_id,
                         user_id=user_id,
-                        latest_price_loader=lambda symbol: _fetch_latest_price(symbol, market_url=os.getenv("MARKET_DATA_SERVICE_URL", "http://quantmind-stream:8003").rstrip("/")),
+                        latest_price_loader=lambda symbol: _fetch_latest_price(
+                            symbol,
+                            market_url=os.getenv(
+                                "MARKET_DATA_SERVICE_URL",
+                                "http://quantmind-stream:8003",
+                            ).rstrip("/"),
+                        ),
                     )
                 projection_positions = projection.positions or {}
             except Exception as exc:
@@ -335,9 +367,13 @@ class SimulationFundSnapshotService:
                 )
                 projection_positions = {}
 
-            account_id = SimulationProjectionService.build_account_id(tenant_id, user_id)
+            account_id = SimulationProjectionService.build_account_id(
+                tenant_id, user_id
+            )
             combined_account = dict(account)
-            combined_account.setdefault("initial_capital", float(row["initial_capital"] or 0.0))
+            combined_account.setdefault(
+                "initial_capital", float(row["initial_capital"] or 0.0)
+            )
             combined_account.setdefault("total_pnl", float(row["total_pnl"] or 0.0))
             combined_account.setdefault("today_pnl", float(row["today_pnl"] or 0.0))
             daily_payloads[(tenant_id, user_id)] = (
@@ -371,7 +407,9 @@ class SimulationFundSnapshotService:
                     )
                 )
                 await session.execute(stmt)
-                payload = daily_payloads.get((str(row["tenant_id"]), str(row["user_id"])))
+                payload = daily_payloads.get(
+                    (str(row["tenant_id"]), str(row["user_id"]))
+                )
                 if payload:
                     account_id, account_payload, positions_payload = payload
                     await daily_snapshot_service.replace_daily_snapshot(
@@ -446,7 +484,7 @@ class SimulationFundSnapshotWorker:
             try:
                 await self._task
             except asyncio.CancelledError:
-                pass
+                pass  # noqa: BLE001 - asyncio 任务取消信号，预期静默处理
 
     async def _run(self) -> None:
         while not self._stopped.is_set():
@@ -459,9 +497,13 @@ class SimulationFundSnapshotWorker:
                         result.scanned_accounts,
                     )
             except Exception as exc:
-                logger.error("Simulation fund snapshot worker failed: %s", exc, exc_info=True)
+                logger.error(
+                    "Simulation fund snapshot worker failed: %s", exc, exc_info=True
+                )
 
             try:
-                await asyncio.wait_for(self._stopped.wait(), timeout=self.interval_seconds)
+                await asyncio.wait_for(
+                    self._stopped.wait(), timeout=self.interval_seconds
+                )
             except asyncio.TimeoutError:
                 continue

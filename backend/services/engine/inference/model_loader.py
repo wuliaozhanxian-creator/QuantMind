@@ -9,13 +9,12 @@ import pickle
 import threading
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
 # 默认最大缓存模型数
 DEFAULT_MAX_MODELS = 5
-
 
 class EnsembleBooster:
     """多个 LightGBM Boosters 的集成包装器"""
@@ -32,7 +31,6 @@ class EnsembleBooster:
     def feature_name(self):
         return self.boosters[0].feature_name()
 
-
 class ModelLoader:
     """多框架模型管理器"""
 
@@ -46,7 +44,13 @@ class ModelLoader:
     def _build_cache_key(model_id: str, cache_key: str | None) -> str:
         return str(cache_key or model_id)
 
-    def load_model(self, model_id: str, *, model_dir: Path | None = None, cache_key: str | None = None) -> Any:
+    def load_model(
+        self,
+        model_id: str,
+        *,
+        model_dir: Path | None = None,
+        cache_key: str | None = None,
+    ) -> Any:
         """加载模型，自动识别框架"""
         cache_id = self._build_cache_key(model_id, cache_key)
         with self._lock:
@@ -56,7 +60,9 @@ class ModelLoader:
 
         resolved_model_dir = model_dir or self._resolve_model_dir(model_id)
         if not resolved_model_dir.exists():
-            raise FileNotFoundError(f"Model directory {model_id} not found at {self.production_dir}")
+            raise FileNotFoundError(
+                f"Model directory {model_id} not found at {self.production_dir}"
+            )
 
         # 读取元数据以确定框架
         metadata = self._get_metadata(resolved_model_dir)
@@ -86,10 +92,12 @@ class ModelLoader:
         """加载 LightGBM 模型 (支持单模型和集成)"""
         import lightgbm as lgb
 
-        is_ensemble = metadata.get("is_ensemble", False) or any(model_dir.glob("seed_*.txt"))
+        is_ensemble = metadata.get("is_ensemble", False) or any(
+            model_dir.glob("seed_*.txt")
+        )
 
         if is_ensemble:
-            seed_files = sorted(list(model_dir.glob("seed_*.txt")))
+            seed_files = sorted(model_dir.glob("seed_*.txt"))
             if not seed_files:
                 # 兼容性检查：如果 metadata 说集成但没 seed 文件，看有没有 model.txt
                 main_file = model_dir / "model.txt"
@@ -110,7 +118,9 @@ class ModelLoader:
                     + list(model_dir.glob("*.pkl"))
                 )
                 if not candidates:
-                    raise FileNotFoundError(f"No LightGBM model file found in {model_dir}")
+                    raise FileNotFoundError(
+                        f"No LightGBM model file found in {model_dir}"
+                    )
                 model_file = candidates[0]
 
             if model_file.suffix == ".pkl":
@@ -142,7 +152,9 @@ class ModelLoader:
                 # 注意：TFT 通常使用 load_from_checkpoint
                 return TemporalFusionTransformer.load_from_checkpoint(str(model_file))
             except ImportError:
-                logger.warning("pytorch_forecasting not installed, loading as raw torch model")
+                logger.warning(
+                    "pytorch_forecasting not installed, loading as raw torch model"
+                )
 
         if "nativetft" in model_type.lower():
             from .native_tft_model import load_native_tft_state_dict
@@ -182,7 +194,11 @@ class ModelLoader:
         exact = self.production_dir / model_id
         if exact.exists():
             return exact
-        candidates = sorted(self.production_dir.glob(f"{model_id}_v*"), key=lambda p: p.name, reverse=True)
+        candidates = sorted(
+            self.production_dir.glob(f"{model_id}_v*"),
+            key=lambda p: p.name,
+            reverse=True,
+        )
         return candidates[0] if candidates else exact
 
     def _evict_lru(self):
@@ -198,7 +214,9 @@ class ModelLoader:
                 return self._loaded_models[cache_id]
         return None
 
-    def get_model_metadata(self, model_id: str, *, model_dir: Path | None = None) -> dict[str, Any] | None:
+    def get_model_metadata(
+        self, model_id: str, *, model_dir: Path | None = None
+    ) -> dict[str, Any] | None:
         resolved_model_dir = model_dir or self._resolve_model_dir(model_id)
         return self._get_metadata(resolved_model_dir) or None
 

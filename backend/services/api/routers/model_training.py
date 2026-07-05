@@ -5,7 +5,7 @@ import re
 import uuid
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query
@@ -28,7 +28,9 @@ from backend.services.api.training_shap_summary import read_shap_summary_rows, t
 from backend.services.engine.inference.router_service import InferenceRouterService
 from backend.services.engine.inference.script_runner import InferenceScriptRunner
 from backend.services.engine.training.training_log_stream import TrainingRunLogStream
-from backend.services.engine.services.model_inference_persistence import model_inference_persistence
+from backend.services.engine.services.model_inference_persistence import (
+    model_inference_persistence,
+)
 from backend.shared.database_manager_v2 import get_session
 from backend.shared.model_registry import model_registry_service
 from backend.shared.redis_sentinel_client import get_redis_sentinel_client
@@ -39,9 +41,10 @@ logger = logging.getLogger(__name__)
 
 # models/production 目录（相对项目根）
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
-_PRODUCTION_DIR = Path(os.getenv("MODELS_PRODUCTION_ROOT", str(_PROJECT_ROOT / "models" / "production")))
+_PRODUCTION_DIR = Path(
+    os.getenv("MODELS_PRODUCTION_ROOT", str(_PROJECT_ROOT / "models" / "production"))
+)
 _TRAINING_LOG_STREAM = TrainingRunLogStream()
-
 
 def _load_production_models() -> list[dict[str, Any]]:
     """扫描 models/production/*/metadata.json，返回系统模型列表。"""
@@ -63,10 +66,10 @@ def _load_production_models() -> list[dict[str, Any]]:
         perf = meta.get("performance_metrics", {})
 
         # 统一字段名：新训练脚本用 val_start/val_end，旧格式用 valid_start/valid_end
-        val_start  = meta.get("val_start")  or meta.get("valid_start")
-        val_end    = meta.get("val_end")    or meta.get("valid_end")
+        val_start = meta.get("val_start") or meta.get("valid_start")
+        val_end = meta.get("val_end") or meta.get("valid_end")
         test_start = meta.get("test_start")
-        test_end   = meta.get("test_end")
+        test_end = meta.get("test_end")
 
         # display_name 优先取平铺字段，回退旧格式 model_info.name
         display_name = (
@@ -77,78 +80,83 @@ def _load_production_models() -> list[dict[str, Any]]:
         )
 
         # label_formula 优先取平铺字段，回退旧格式 training_config.label
-        label_formula = (
-            meta.get("label_formula")
-            or tc.get("label")
-            or ""
-        )
+        label_formula = meta.get("label_formula") or tc.get("label") or ""
 
         # metrics：新格式在 meta.metrics，旧格式在 performance_metrics
         new_metrics = meta.get("metrics", {})
         if new_metrics:
             perf = {
-                "train": {"mean_ic": new_metrics.get("train_ic"), "icir": new_metrics.get("train_rank_icir")},
-                "valid": {"mean_ic": new_metrics.get("val_ic"),   "icir": new_metrics.get("val_rank_icir")},
-                "test":  {"mean_ic": new_metrics.get("test_ic"),  "icir": new_metrics.get("test_rank_icir")},
+                "train": {
+                    "mean_ic": new_metrics.get("train_ic"),
+                    "icir": new_metrics.get("train_rank_icir"),
+                },
+                "valid": {
+                    "mean_ic": new_metrics.get("val_ic"),
+                    "icir": new_metrics.get("val_rank_icir"),
+                },
+                "test": {
+                    "mean_ic": new_metrics.get("test_ic"),
+                    "icir": new_metrics.get("test_rank_icir"),
+                },
             }
 
-        results.append({
-            "model_id": model_id,
-            "dir_name": subdir.name,
-            "tenant_id": "system",
-            "display_name": display_name,
-            "description": meta.get("description") or info.get("description", ""),
-            "framework": meta.get("framework", ""),
-            "model_type": meta.get("model_type", ""),
-            "feature_count": meta.get("feature_count"),
-            "feature_columns": meta.get("feature_columns", []),
-            "is_neutralized": meta.get("is_neutralized", False),
-            "algorithm": info.get("algorithm", ""),
-            "version": info.get("version", meta.get("version", "")),
-            "created_at": meta.get("generated_at") or info.get("created_at", meta.get("trained_at", "")),
-            "training_config": tc,
-            # 统一字段名：val_start/val_end（和用户模型 metadata_json 保持一致）
-            "train_start": meta.get("train_start"),
-            "train_end":   meta.get("train_end"),
-            "valid_start": val_start,
-            "valid_end":   val_end,
-            "test_start":  test_start,
-            "test_end":    test_end,
-            # 额外平铺字段（前端 systemModelToUserModel 直接映射）
-            "label_formula": label_formula,
-            "target_horizon_days": meta.get("target_horizon_days"),
-            "target_mode": meta.get("target_mode"),
-            "data_source": meta.get("data_source", ""),
-            "best_iteration": meta.get("best_iteration"),
-            "performance_metrics": perf,
-            "inference_config": meta.get("inference", {}),
-            "files": meta.get("files", {}),
-            "metadata_path": str(meta_file),
-        })
+        results.append(
+            {
+                "model_id": model_id,
+                "dir_name": subdir.name,
+                "tenant_id": "system",
+                "display_name": display_name,
+                "description": meta.get("description") or info.get("description", ""),
+                "framework": meta.get("framework", ""),
+                "model_type": meta.get("model_type", ""),
+                "feature_count": meta.get("feature_count"),
+                "feature_columns": meta.get("feature_columns", []),
+                "is_neutralized": meta.get("is_neutralized", False),
+                "algorithm": info.get("algorithm", ""),
+                "version": info.get("version", meta.get("version", "")),
+                "created_at": meta.get("generated_at")
+                or info.get("created_at", meta.get("trained_at", "")),
+                "training_config": tc,
+                # 统一字段名：val_start/val_end（和用户模型 metadata_json 保持一致）
+                "train_start": meta.get("train_start"),
+                "train_end": meta.get("train_end"),
+                "valid_start": val_start,
+                "valid_end": val_end,
+                "test_start": test_start,
+                "test_end": test_end,
+                # 额外平铺字段（前端 systemModelToUserModel 直接映射）
+                "label_formula": label_formula,
+                "target_horizon_days": meta.get("target_horizon_days"),
+                "target_mode": meta.get("target_mode"),
+                "data_source": meta.get("data_source", ""),
+                "best_iteration": meta.get("best_iteration"),
+                "performance_metrics": perf,
+                "inference_config": meta.get("inference", {}),
+                "files": meta.get("files", {}),
+                "metadata_path": str(meta_file),
+            }
+        )
     return results
-
 
 class SetDefaultModelRequest(BaseModel):
     model_id: str
     model_config = {"protected_namespaces": ()}
 
-
 class SetStrategyBindingRequest(BaseModel):
     model_id: str
     model_config = {"protected_namespaces": ()}
 
-
 class InferenceRunRequest(BaseModel):
     model_id: str | None = None
-    use_default_model: bool = Field(default=False, description="是否按当前用户默认模型身份执行推理")
+    use_default_model: bool = Field(
+        default=False, description="是否按当前用户默认模型身份执行推理"
+    )
     inference_date: date = Field(..., description="推理基准日期 YYYY-MM-DD")
     model_config = {"protected_namespaces": ()}
-
 
 class InferenceSettingsRequest(BaseModel):
     enabled: bool
     schedule_time: str | None = Field(default=None, description="每日执行时间 HH:MM")
-
 
 def _render_dispatch_log(row: dict[str, Any]) -> dict[str, Any]:
     result = dict(row)
@@ -162,14 +170,12 @@ def _render_dispatch_log(row: dict[str, Any]) -> dict[str, Any]:
             result[key] = str(result[key])
     return result
 
-
 def _owner_scope(current_user: dict[str, Any]) -> tuple[str, str]:
     tenant_id = str(current_user.get("tenant_id") or "default")
     user_id = str(current_user.get("user_id") or current_user.get("sub") or "")
     if not user_id:
         raise HTTPException(status_code=401, detail="用户身份无效")
     return tenant_id, user_id
-
 
 async def _resolve_inference_trade_date_with_calendar(
     *,
@@ -193,7 +199,6 @@ async def _resolve_inference_trade_date_with_calendar(
         user_id=user_id,
     )
     return previous_td, True
-
 
 async def _resolve_requested_model(current_user: dict[str, Any], model_id: str):
     tenant_id, user_id = _owner_scope(current_user)
@@ -232,17 +237,26 @@ async def _resolve_requested_model(current_user: dict[str, Any], model_id: str):
                     tenant_id=tenant_id,
                     user_id=user_id,
                 )
-                default_model_id = str((default_model or {}).get("model_id") or "").strip()
+                default_model_id = str(
+                    (default_model or {}).get("model_id") or ""
+                ).strip()
                 if default_model_id and default_model_id == requested_model_id:
                     resolved.model_source = "user_default"
     except LookupError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
-    if requested_model_id and resolved.fallback_used and resolved.model_source in {"user_default", "system_fallback"}:
-        raise HTTPException(status_code=404, detail=f"模型不可用或未就绪: {requested_model_id}")
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if (
+        requested_model_id
+        and resolved.fallback_used
+        and resolved.model_source in {"user_default", "system_fallback"}
+    ):
+        raise HTTPException(
+            status_code=404, detail=f"模型不可用或未就绪: {requested_model_id}"
+        )
     if not resolved.storage_path:
-        raise HTTPException(status_code=404, detail=f"模型路径不可用: {requested_model_id}")
+        raise HTTPException(
+            status_code=404, detail=f"模型路径不可用: {requested_model_id}"
+        )
     return requested_model_id, resolved
-
 
 def _choose_data_dir(effective_model_id: str, model_dir: Path | None = None) -> str:
     """优先从模型目录 metadata.json 的 qlib_data_path 字段读取数据目录，
@@ -257,12 +271,11 @@ def _choose_data_dir(effective_model_id: str, model_dir: Path | None = None) -> 
                 if qlib_path and str(qlib_path).strip():
                     return str(qlib_path).strip()
             except Exception:
-                pass
+                logger.debug("ignored exception", exc_info=True)
 
     # 2. 环境变量 fallback
     primary_data_dir = os.getenv("QLIB_PRIMARY_DATA_PATH", "db/qlib_data")
     return primary_data_dir
-
 
 def _render_next_run(next_run_at: Any) -> str | None:
     if next_run_at is None:
@@ -278,8 +291,9 @@ def _render_next_run(next_run_at: Any) -> str | None:
     except Exception:
         return str(next_run_at)
 
-
-@router.get("/system-models", summary="获取系统内置模型列表（读取 models/production 目录）")
+@router.get(
+    "/system-models", summary="获取系统内置模型列表（读取 models/production 目录）"
+)
 async def list_system_models(
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
@@ -288,8 +302,7 @@ async def list_system_models(
         models = _load_production_models()
         return {"status": "success", "count": len(models), "models": models}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @router.get("/feature-catalog", summary="获取模型训练特征字典（用户态）")
 async def get_model_feature_catalog(
@@ -308,8 +321,9 @@ async def get_model_feature_catalog(
     if fallback:
         return _enrich_feature_catalog_with_data_coverage(fallback)
 
-    raise HTTPException(status_code=404, detail="未找到可用的特征字典（DB/文件均不可用）")
-
+    raise HTTPException(
+        status_code=404, detail="未找到可用的特征字典（DB/文件均不可用）"
+    )
 
 @router.get("/qlib-data-range", summary="获取 Qlib 数据日期范围")
 async def get_qlib_data_range(
@@ -349,7 +363,6 @@ async def get_qlib_data_range(
 
     return result
 
-
 @router.post("/run-training", summary="启动云端模型训练任务（用户态）")
 async def run_training(
     payload: dict[str, Any],
@@ -357,7 +370,6 @@ async def run_training(
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
     return await submit_training_job(payload, background_tasks, current_user)
-
 
 @router.get("/training-runs", summary="获取当前用户训练任务列表（用户态）")
 async def list_training_runs(
@@ -387,54 +399,78 @@ async def list_training_runs(
             ).scalar() or 0
 
             rows = (
-                await session.execute(
-                    text(
-                        "SELECT id, tenant_id, user_id, status, progress, "
-                        "instance_id, request_payload, result, "
-                        "created_at, updated_at "
-                        "FROM admin_training_jobs "
-                        "WHERE tenant_id = :tid AND user_id = :uid "
-                        "ORDER BY created_at DESC "
-                        "LIMIT :limit OFFSET :offset"
-                    ),
-                    {"tid": tenant_id, "uid": user_id, "limit": page_size, "offset": offset},
+                (
+                    await session.execute(
+                        text(
+                            "SELECT id, tenant_id, user_id, status, progress, "
+                            "instance_id, request_payload, result, "
+                            "created_at, updated_at "
+                            "FROM admin_training_jobs "
+                            "WHERE tenant_id = :tid AND user_id = :uid "
+                            "ORDER BY created_at DESC "
+                            "LIMIT :limit OFFSET :offset"
+                        ),
+                        {
+                            "tid": tenant_id,
+                            "uid": user_id,
+                            "limit": page_size,
+                            "offset": offset,
+                        },
+                    )
                 )
-            ).mappings().all()
+                .mappings()
+                .all()
+            )
 
             items = []
             for row in rows:
                 import json as _json
+
                 result_data = None
                 raw_result = row.get("result")
                 if raw_result:
                     try:
-                        result_data = _json.loads(raw_result) if isinstance(raw_result, str) else raw_result
+                        result_data = (
+                            _json.loads(raw_result)
+                            if isinstance(raw_result, str)
+                            else raw_result
+                        )
                     except Exception:
                         result_data = None
                 req_payload = None
                 raw_req = row.get("request_payload")
                 if raw_req:
                     try:
-                        req_payload = _json.loads(raw_req) if isinstance(raw_req, str) else raw_req
+                        req_payload = (
+                            _json.loads(raw_req)
+                            if isinstance(raw_req, str)
+                            else raw_req
+                        )
                     except Exception:
                         req_payload = None
                 err = None
                 if isinstance(result_data, dict):
                     err = result_data.get("error")
-                items.append({
-                    "run_id": row.get("id"),
-                    "tenant_id": row.get("tenant_id"),
-                    "user_id": str(row.get("user_id") or ""),
-                    "status": row.get("status"),
-                    "progress": row.get("progress") or 0,
-                    "instance_id": row.get("instance_id"),
-                    "model_type": (req_payload or {}).get("model_type") if isinstance(req_payload, dict) else None,
-                    "job_name": (req_payload or {}).get("job_name") if isinstance(req_payload, dict) else None,
-                    "created_at": str(row.get("created_at") or ""),
-                    "updated_at": str(row.get("updated_at") or ""),
-                    "result": result_data,
-                    "error": err,
-                })
+                items.append(
+                    {
+                        "run_id": row.get("id"),
+                        "tenant_id": row.get("tenant_id"),
+                        "user_id": str(row.get("user_id") or ""),
+                        "status": row.get("status"),
+                        "progress": row.get("progress") or 0,
+                        "instance_id": row.get("instance_id"),
+                        "model_type": (req_payload or {}).get("model_type")
+                        if isinstance(req_payload, dict)
+                        else None,
+                        "job_name": (req_payload or {}).get("job_name")
+                        if isinstance(req_payload, dict)
+                        else None,
+                        "created_at": str(row.get("created_at") or ""),
+                        "updated_at": str(row.get("updated_at") or ""),
+                        "result": result_data,
+                        "error": err,
+                    }
+                )
 
             return {
                 "items": items,
@@ -444,8 +480,7 @@ async def list_training_runs(
             }
     except Exception as e:
         logger.exception("Failed to list training runs")
-        raise HTTPException(status_code=500, detail=f"训练任务列表查询失败: {e}")
-
+        raise HTTPException(status_code=500, detail=f"训练任务列表查询失败: {e}") from e
 
 @router.get("/training-runs/{run_id}", summary="获取训练任务状态（用户态）")
 async def get_training_run(
@@ -453,7 +488,6 @@ async def get_training_run(
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
     return await get_training_run_for_owner(run_id, current_user)
-
 
 @router.get("", summary="获取当前用户模型列表（用户态）")
 async def list_user_models(
@@ -469,18 +503,18 @@ async def list_user_models(
     )
     return {"items": models, "total": len(models)}
 
-
 @router.get("/default", summary="获取当前用户默认模型（用户态）")
 async def get_default_model(
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
     tenant_id = str(current_user.get("tenant_id") or "default")
     user_id = str(current_user.get("user_id") or current_user.get("sub") or "")
-    model = await model_registry_service.get_default_model(tenant_id=tenant_id, user_id=user_id)
+    model = await model_registry_service.get_default_model(
+        tenant_id=tenant_id, user_id=user_id
+    )
     if not model:
         raise HTTPException(status_code=404, detail="Default model not found")
     return model
-
 
 @router.patch("/default", summary="设置当前用户默认模型（用户态）")
 async def set_default_model(
@@ -499,7 +533,6 @@ async def set_default_model(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return model
 
-
 @router.get("/strategy-bindings/{strategy_id}", summary="获取策略模型绑定（用户态）")
 async def get_strategy_binding(
     strategy_id: str,
@@ -515,7 +548,6 @@ async def get_strategy_binding(
     if not binding:
         raise HTTPException(status_code=404, detail="Strategy binding not found")
     return binding
-
 
 @router.put("/strategy-bindings/{strategy_id}", summary="设置策略模型绑定（用户态）")
 async def set_strategy_binding(
@@ -536,7 +568,6 @@ async def set_strategy_binding(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return binding
 
-
 @router.delete("/strategy-bindings/{strategy_id}", summary="解除策略模型绑定（用户态）")
 async def delete_strategy_binding(
     strategy_id: str,
@@ -551,7 +582,6 @@ async def delete_strategy_binding(
     )
     return {"deleted": bool(deleted), "strategy_id": strategy_id}
 
-
 @router.get("/{model_id}", summary="获取单个用户模型（用户态）")
 async def get_user_model(
     model_id: str,
@@ -559,11 +589,12 @@ async def get_user_model(
 ):
     tenant_id = str(current_user.get("tenant_id") or "default")
     user_id = str(current_user.get("user_id") or current_user.get("sub") or "")
-    model = await model_registry_service.get_model(tenant_id=tenant_id, user_id=user_id, model_id=model_id)
+    model = await model_registry_service.get_model(
+        tenant_id=tenant_id, user_id=user_id, model_id=model_id
+    )
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
     return model
-
 
 @router.get("/{model_id}/shap-summary", summary="获取模型 SHAP 因子贡献列表（用户态）")
 async def get_model_shap_summary(
@@ -572,11 +603,17 @@ async def get_model_shap_summary(
 ):
     tenant_id = str(current_user.get("tenant_id") or "default")
     user_id = str(current_user.get("user_id") or current_user.get("sub") or "")
-    model = await model_registry_service.get_model(tenant_id=tenant_id, user_id=user_id, model_id=model_id)
+    model = await model_registry_service.get_model(
+        tenant_id=tenant_id, user_id=user_id, model_id=model_id
+    )
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
 
-    metadata = model.get("metadata_json") if isinstance(model.get("metadata_json"), dict) else {}
+    metadata = (
+        model.get("metadata_json")
+        if isinstance(model.get("metadata_json"), dict)
+        else {}
+    )
     shap_meta = metadata.get("shap") if isinstance(metadata.get("shap"), dict) else {}
     storage_path = str(model.get("storage_path") or "").strip()
     if not storage_path:
@@ -601,7 +638,9 @@ async def get_model_shap_summary(
         try:
             items = read_shap_summary_rows(shap_file)
         except Exception as exc:
-            logger.warning("failed to parse shap summary: model_id=%s err=%s", model_id, exc)
+            logger.warning(
+                "failed to parse shap summary: model_id=%s err=%s", model_id, exc
+            )
             parse_error = str(exc)
             items = []
 
@@ -632,7 +671,6 @@ async def get_model_shap_summary(
         "items": items,
     }
 
-
 @router.post("/{model_id}/archive", summary="归档用户模型（用户态）")
 async def archive_user_model(
     model_id: str,
@@ -641,11 +679,12 @@ async def archive_user_model(
     tenant_id = str(current_user.get("tenant_id") or "default")
     user_id = str(current_user.get("user_id") or current_user.get("sub") or "")
     try:
-        model = await model_registry_service.archive_model(tenant_id=tenant_id, user_id=user_id, model_id=model_id)
+        model = await model_registry_service.archive_model(
+            tenant_id=tenant_id, user_id=user_id, model_id=model_id
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return model
-
 
 def _build_precheck_items(
     *,
@@ -683,7 +722,9 @@ def _build_precheck_items(
             "label": "模型文件存在",
             "passed": model_file_exists,
             "severity": "hard",
-            "detail": str(model_file_path) if model_file_path else f"{model_dir}/{model_file}",
+            "detail": str(model_file_path)
+            if model_file_path
+            else f"{model_dir}/{model_file}",
         }
     )
 
@@ -749,7 +790,9 @@ def _build_precheck_items(
         readiness = runner._query_qlib_readiness(trade_date=data_trade_date)
         readiness_label = "Qlib 二进制数据就绪"
     else:
-        readiness = runner._query_dimension_readiness(trade_date=data_trade_date, expected_dim=expected_feature_dim)
+        readiness = runner._query_dimension_readiness(
+            trade_date=data_trade_date, expected_dim=expected_feature_dim
+        )
         readiness_label = "当日数据覆盖就绪"
 
     items.append(
@@ -782,10 +825,10 @@ def _build_precheck_items(
     )
     return items
 
-
 def _precheck_passed(items: list[dict[str, Any]]) -> bool:
-    return all(bool(item.get("passed")) for item in items if item.get("severity") != "soft")
-
+    return all(
+        bool(item.get("passed")) for item in items if item.get("severity") != "soft"
+    )
 
 @router.get("/inference/precheck", summary="推理前置检查（用户态）")
 async def precheck_inference(
@@ -793,10 +836,17 @@ async def precheck_inference(
     inference_date: date | None = Query(None, description="推理基准日期 YYYY-MM-DD"),
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
-    requested_model_id, resolved = await _resolve_requested_model(current_user, model_id)
+    requested_model_id, resolved = await _resolve_requested_model(
+        current_user, model_id
+    )
     model_dir = Path(resolved.storage_path)
-    requested_inference_date = inference_date or datetime.now(ZoneInfo("Asia/Shanghai")).date()
-    resolved_data_trade_date, calendar_adjusted = await _resolve_inference_trade_date_with_calendar(
+    requested_inference_date = (
+        inference_date or datetime.now(ZoneInfo("Asia/Shanghai")).date()
+    )
+    (
+        resolved_data_trade_date,
+        calendar_adjusted,
+    ) = await _resolve_inference_trade_date_with_calendar(
         current_user=current_user,
         requested_date=requested_inference_date,
     )
@@ -844,23 +894,26 @@ async def precheck_inference(
         "items": items,
     }
 
-
 @router.post("/inference/run", summary="执行模型推理（用户态）")
 async def run_model_inference(
     payload: InferenceRunRequest,
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
     tenant_id, user_id = _owner_scope(current_user)
-    
+
     # 1. 额度检查 (Quota Check)
     async with get_session() as session:
         usage_service = UsageService(session)
-        is_allowed, reason, quota_info = await usage_service.check_usage(user_id, tenant_id, "inference")
+        is_allowed, reason, quota_info = await usage_service.check_usage(
+            user_id, tenant_id, "inference"
+        )
         if not is_allowed:
-            logger.warning(f"[QUOTA] Blocking inference run for {user_id}: {reason}. info={quota_info}")
+            logger.warning(
+                f"[QUOTA] Blocking inference run for {user_id}: {reason}. info={quota_info}"
+            )
             raise HTTPException(
-                status_code=403, 
-                detail=f"配额不足: {'额度已用尽' if reason == 'quota_exceeded' else '无有效套餐'}。当前推理次数: {quota_info.get('used', 0)}/{quota_info.get('limit', 0)}"
+                status_code=403,
+                detail=f"配额不足: {'额度已用尽' if reason == 'quota_exceeded' else '无有效套餐'}。当前推理次数: {quota_info.get('used', 0)}/{quota_info.get('limit', 0)}",
             )
 
     requested_model_id, resolved = await _resolve_requested_model(
@@ -869,7 +922,10 @@ async def run_model_inference(
     )
     model_dir = Path(resolved.storage_path)
     requested_inference_date = payload.inference_date
-    resolved_data_trade_date, calendar_adjusted = await _resolve_inference_trade_date_with_calendar(
+    (
+        resolved_data_trade_date,
+        calendar_adjusted,
+    ) = await _resolve_inference_trade_date_with_calendar(
         current_user=current_user,
         requested_date=requested_inference_date,
     )
@@ -928,7 +984,9 @@ async def run_model_inference(
             "effective_model_id": resolved.effective_model_id,
             "active_model_id": resolved.effective_model_id,
             "model_source": resolved.model_source,
-            "active_data_source": _choose_data_dir(resolved.effective_model_id, model_dir),
+            "active_data_source": _choose_data_dir(
+                resolved.effective_model_id, model_dir
+            ),
             "requested_inference_date": requested_inference_date.isoformat(),
             "calendar_adjusted": calendar_adjusted,
             "data_trade_date": data_trade_date,
@@ -951,7 +1009,11 @@ async def run_model_inference(
             data_trade_date=date.fromisoformat(data_trade_date),
             prediction_trade_date=date.fromisoformat(prediction_trade_date),
             status="failed",
-            request_payload={"model_id": requested_model_id, "inference_date": data_trade_date, "precheck": precheck},
+            request_payload={
+                "model_id": requested_model_id,
+                "inference_date": data_trade_date,
+                "precheck": precheck,
+            },
             created_at=run_created_at,
         )
         await model_inference_persistence.update_run(
@@ -1006,7 +1068,9 @@ async def run_model_inference(
             "effective_model_id": resolved.effective_model_id,
             "active_model_id": resolved.effective_model_id,
             "model_source": resolved.model_source,
-            "active_data_source": _choose_data_dir(resolved.effective_model_id, model_dir),
+            "active_data_source": _choose_data_dir(
+                resolved.effective_model_id, model_dir
+            ),
             "requested_inference_date": requested_inference_date.isoformat(),
             "calendar_adjusted": calendar_adjusted,
             "data_trade_date": data_trade_date,
@@ -1029,7 +1093,11 @@ async def run_model_inference(
             data_trade_date=date.fromisoformat(data_trade_date),
             prediction_trade_date=date.fromisoformat(prediction_trade_date),
             status="failed",
-            request_payload={"model_id": requested_model_id, "inference_date": data_trade_date, "precheck": precheck},
+            request_payload={
+                "model_id": requested_model_id,
+                "inference_date": data_trade_date,
+                "precheck": precheck,
+            },
             created_at=inference_started_at,
         )
         await model_inference_persistence.update_run(
@@ -1059,6 +1127,7 @@ async def run_model_inference(
         return failure_payload
 
     run_id = str(result.run_id or provisional_run_id)
+
     def _to_str(val: Any) -> str:
         if val is None:
             return ""
@@ -1069,8 +1138,12 @@ async def run_model_inference(
     duration_ms = int((time.perf_counter() - start_ts) * 1000)
     stdout = _to_str(result.stdout)[-4000:]
     stderr = _to_str(result.stderr)[-4000:]
-    result_model_source = str(getattr(result, "model_source", "") or resolved.model_source)
-    result_effective_model_id = str(getattr(result, "effective_model_id", "") or resolved.effective_model_id)
+    result_model_source = str(
+        getattr(result, "model_source", "") or resolved.model_source
+    )
+    result_effective_model_id = str(
+        getattr(result, "effective_model_id", "") or resolved.effective_model_id
+    )
     success_payload = {
         "success": bool(result.success),
         "run_id": run_id,
@@ -1079,7 +1152,8 @@ async def run_model_inference(
         "effective_model_id": resolved.effective_model_id,
         "active_model_id": result.active_model_id or resolved.effective_model_id,
         "model_source": result_model_source,
-        "active_data_source": result.active_data_source or _choose_data_dir(resolved.effective_model_id, model_dir),
+        "active_data_source": result.active_data_source
+        or _choose_data_dir(resolved.effective_model_id, model_dir),
         "requested_inference_date": requested_inference_date.isoformat(),
         "calendar_adjusted": calendar_adjusted,
         "data_trade_date": data_trade_date,
@@ -1109,7 +1183,11 @@ async def run_model_inference(
         data_trade_date=date.fromisoformat(data_trade_date),
         prediction_trade_date=date.fromisoformat(prediction_trade_date),
         status="completed" if result.success else "failed",
-        request_payload={"model_id": requested_model_id, "inference_date": data_trade_date, "precheck": precheck},
+        request_payload={
+            "model_id": requested_model_id,
+            "inference_date": data_trade_date,
+            "precheck": precheck,
+        },
         created_at=inference_started_at,
     )
     await model_inference_persistence.update_run(
@@ -1127,7 +1205,8 @@ async def run_model_inference(
         active_model_id=result.active_model_id or resolved.effective_model_id,
         effective_model_id=result_effective_model_id,
         model_source=result_model_source,
-        active_data_source=result.active_data_source or _choose_data_dir(resolved.effective_model_id, model_dir),
+        active_data_source=result.active_data_source
+        or _choose_data_dir(resolved.effective_model_id, model_dir),
         result_payload=success_payload,
     )
     await model_inference_persistence.record_run_to_settings(
@@ -1144,7 +1223,6 @@ async def run_model_inference(
             await usage_service.increment_usage(user_id, tenant_id, "inference")
 
     return success_payload
-
 
 @router.get("/inference/runs", summary="查询模型推理历史（用户态）")
 async def list_model_inference_runs(
@@ -1168,14 +1246,15 @@ async def list_model_inference_runs(
         page_size=page_size,
     )
 
-
 @router.get("/inference/runs/{run_id}", summary="查看模型推理结果明细（用户态）")
 async def get_model_inference_run_detail(
     run_id: str,
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
     tenant_id, user_id = _owner_scope(current_user)
-    run = await model_inference_persistence.get_run(run_id=run_id, tenant_id=tenant_id, user_id=user_id)
+    run = await model_inference_persistence.get_run(
+        run_id=run_id, tenant_id=tenant_id, user_id=user_id
+    )
     if not run:
         raise HTTPException(status_code=404, detail="推理批次不存在")
 
@@ -1184,9 +1263,10 @@ async def get_model_inference_run_detail(
         try:
             async with get_session(read_only=True) as session:
                 rows = (
-                    await session.execute(
-                        text(
-                            """
+                    (
+                        await session.execute(
+                            text(
+                                """
                             SELECT
                                 symbol,
                                 fusion_score,
@@ -1203,13 +1283,21 @@ async def get_model_inference_run_detail(
                               AND user_id = :user_id
                             ORDER BY fusion_score DESC NULLS LAST, symbol ASC
                             """
-                        ),
-                        {"run_id": run_id, "tenant_id": tenant_id, "user_id": user_id},
+                            ),
+                            {
+                                "run_id": run_id,
+                                "tenant_id": tenant_id,
+                                "user_id": user_id,
+                            },
+                        )
                     )
-                ).mappings().all()
+                    .mappings()
+                    .all()
+                )
 
             # 获取股票名称映射器
             from backend.shared.stock_name_mapper import get_stock_name_mapper
+
             stock_mapper = get_stock_name_mapper()
 
             for row in rows:
@@ -1220,13 +1308,21 @@ async def get_model_inference_run_detail(
                 item["name"] = stock_mapper.get_name(item.get("symbol", ""))
                 signals.append(item)
         except Exception as exc:  # pragma: no cover - DB fallback
-            logger.warning("failed to load inference signal rows for %s: %s", run_id, exc)
+            logger.warning(
+                "failed to load inference signal rows for %s: %s", run_id, exc
+            )
             signals = []
 
     summary = dict(run)
     summary["rows_count"] = len(signals)
-    summary["symbols_count"] = len({str(item.get("symbol") or "") for item in signals if item.get("symbol")})
-    fusion_scores = [float(item["fusion_score"]) for item in signals if item.get("fusion_score") is not None]
+    summary["symbols_count"] = len(
+        {str(item.get("symbol") or "") for item in signals if item.get("symbol")}
+    )
+    fusion_scores = [
+        float(item["fusion_score"])
+        for item in signals
+        if item.get("fusion_score") is not None
+    ]
     summary["min_fusion_score"] = min(fusion_scores) if fusion_scores else None
     summary["max_fusion_score"] = max(fusion_scores) if fusion_scores else None
     summary["first_created_at"] = signals[0].get("created_at") if signals else None
@@ -1241,7 +1337,6 @@ async def get_model_inference_run_detail(
         "total": len(signals),
         "items": signals,
     }
-
 
 @router.delete("/inference/runs/{run_id}", summary="删除模型推理记录（用户态）")
 async def delete_model_inference_run(
@@ -1258,7 +1353,6 @@ async def delete_model_inference_run(
         raise HTTPException(status_code=404, detail="推理批次不存在或无权删除")
     return {"deleted": True, "run_id": run_id}
 
-
 @router.get("/inference/settings/{model_id}", summary="获取模型自动推理设置（用户态）")
 async def get_model_inference_settings(
     model_id: str,
@@ -1272,9 +1366,12 @@ async def get_model_inference_settings(
     )
     if settings.get("last_run_json") and not settings.get("last_run"):
         settings["last_run"] = settings["last_run_json"]
-    settings["next_run"] = _render_next_run(settings.get("next_run_at")) if settings.get("next_run_at") else settings.get("next_run")
+    settings["next_run"] = (
+        _render_next_run(settings.get("next_run_at"))
+        if settings.get("next_run_at")
+        else settings.get("next_run")
+    )
     return settings
-
 
 @router.get("/inference/dispatch-logs", summary="查询自动推理调度记录（用户态）")
 async def list_model_inference_dispatch_logs(
@@ -1286,9 +1383,10 @@ async def list_model_inference_dispatch_logs(
     try:
         async with get_session(read_only=True) as session:
             rows = (
-                await session.execute(
-                    text(
-                        """
+                (
+                    await session.execute(
+                        text(
+                            """
                         SELECT
                             id,
                             trigger_source,
@@ -1310,15 +1408,18 @@ async def list_model_inference_dispatch_logs(
                         ORDER BY created_at DESC, id DESC
                         LIMIT :limit
                         """
-                    ),
-                    {
-                        "tenant_id": tenant_id,
-                        "user_id": user_id,
-                        "model_id": model_id,
-                        "limit": int(limit),
-                    },
+                        ),
+                        {
+                            "tenant_id": tenant_id,
+                            "user_id": user_id,
+                            "model_id": model_id,
+                            "limit": int(limit),
+                        },
+                    )
                 )
-            ).mappings().all()
+                .mappings()
+                .all()
+            )
     except Exception as exc:
         logger.warning("读取自动推理调度记录失败: %s", exc)
         rows = []
@@ -1326,10 +1427,11 @@ async def list_model_inference_dispatch_logs(
     items = [_render_dispatch_log(dict(row)) for row in rows]
     return {"items": items, "total": len(items)}
 
-
 @router.get("/inference/latest", summary="获取当前生效推理批次（用户态）")
 async def get_model_inference_latest(
-    model_id: str | None = Query(None, description="模型ID，可选，用于检查是否与当前生效模型匹配"),
+    model_id: str | None = Query(
+        None, description="模型ID，可选，用于检查是否与当前生效模型匹配"
+    ),
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
     tenant_id, user_id = _owner_scope(current_user)
@@ -1345,10 +1447,12 @@ async def get_model_inference_latest(
     # 当传入 model_id 时，优先返回该模型最新 completed 批次，避免 Redis 消费指针落后时
     # “生产批次摘要”误显示旧 run。
     if model_id:
-        latest_model_run = await model_inference_persistence.get_latest_completed_run_by_model(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            model_id=str(model_id),
+        latest_model_run = (
+            await model_inference_persistence.get_latest_completed_run_by_model(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                model_id=str(model_id),
+            )
         )
         if isinstance(latest_model_run, dict):
             target_date = str(
@@ -1414,7 +1518,6 @@ async def get_model_inference_latest(
         "matched_model": matched_model,
     }
 
-
 @router.put("/inference/settings/{model_id}", summary="更新模型自动推理设置（用户态）")
 async def update_model_inference_settings(
     model_id: str,
@@ -1434,8 +1537,11 @@ async def update_model_inference_settings(
         schedule_time=payload.schedule_time,
     )
 
-
-@router.post("/training-runs/{run_id}/complete", summary="训练完成回调（用户态内部接口）")
+# T6.5-P3 residual, M4 migration: 训练容器回调接口仍接收 X-Internal-Call-Secret。
+# M4 迁移后将改为 X-Service-Token（service JWT）。
+@router.post(
+    "/training-runs/{run_id}/complete", summary="训练完成回调（用户态内部接口）"
+)
 async def training_complete_callback(
     run_id: str,
     result: dict[str, Any],

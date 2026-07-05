@@ -18,11 +18,13 @@ def strip_markdown_fences(code: str) -> str:
 
     # Prefer the first fenced block if present.
     try:
-        m = re.search(r"```(?:python)?\s*(.*?)\s*```", s, flags=re.IGNORECASE | re.DOTALL)
+        m = re.search(
+            r"```(?:python)?\s*(.*?)\s*```", s, flags=re.IGNORECASE | re.DOTALL
+        )
         if m:
             return (m.group(1) or "").strip() + "\n"
     except Exception:
-        pass
+        pass  # noqa: BLE001 - None
 
     # Fallback: drop fence lines.
     lines = [ln for ln in s.splitlines() if not ln.strip().startswith("```")]

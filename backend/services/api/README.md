@@ -72,8 +72,8 @@
 - 修复 `engine_proxy` 导入问题：补齐 `typing.Optional` 依赖，避免模块加载时报 `NameError`。
 - 修复 `trade_proxy` 导入问题：补齐 `typing.Optional` 依赖，避免 `api-server` 启动阶段异常退出。
 - `strategy` 代理收敛鉴权：`/api/v1/strategy*` 现在强制要求 Bearer Token（匿名请求返回 `401`）。
-- 身份头防伪造：网关不再透传外部 `X-User-Id`、`X-Tenant-Id`、`X-Internal-Call`，仅在鉴权成功后注入可信身份头。
-- 网关到引擎转发补充内部鉴别头：当 `strategy` 请求已鉴权时，自动注入 `X-Internal-Call`（值来自 `INTERNAL_CALL_SECRET`），与引擎侧内部鉴权中间件保持一致。
+- 身份头防伪造：网关不再透传外部 `X-User-Id`、`X-Tenant-Id`、`X-Service-Token`，仅在鉴权成功后注入可信身份头。
+- 网关到引擎转发补充内部鉴别头：当 `strategy` 请求已鉴权时，自动注入 `X-Service-Token`（service JWT，由 `SECRET_KEY` 签发），与引擎侧内部鉴权中间件保持一致。T6.5-P3 后已替代旧的 `X-Internal-Call`/`INTERNAL_CALL_SECRET` 方案。
 - 长耗时代理超时分级：`/api/v1/strategy/generate*` 默认使用更长读超时（`ENGINE_PROXY_LLM_TIMEOUT_SECONDS`，默认 `600s`），其余引擎接口仍使用 `ENGINE_PROXY_TIMEOUT_SECONDS`（默认 `120s`），避免 LLM 生成在网关层被提前截断。
 - 引擎代理上游默认地址调整为 `http://127.0.0.1:8001`（替代 `localhost`），并在 `localhost` 连接失败时自动回退重试 IPv4 地址，降低本地解析异常导致的 `503 engine upstream unavailable` 概率。
 - 引擎代理连接重试增强（2026-05-14）：`engine_proxy` 新增可配置重试参数 `ENGINE_PROXY_CONNECT_RETRIES`（默认 5）、`ENGINE_PROXY_RETRY_BASE_DELAY_SECONDS`（默认 1.0）、`ENGINE_PROXY_RETRY_MAX_DELAY_SECONDS`（默认 4.0），用于覆盖引擎容器短暂重启窗口，降低 `/api/v1/strategies`、`/api/v1/stocks/*` 短时 `503` 概率。

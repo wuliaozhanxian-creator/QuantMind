@@ -6,7 +6,7 @@ import asyncio
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import numpy as np
 
@@ -14,7 +14,6 @@ from ..observability.logging import get_logger
 from .base import BaseAIProvider, StrategyParameter, StrategyResponse
 
 logger = get_logger(__name__)
-
 
 class OptimizationMetric(Enum):
     """优化指标"""
@@ -27,7 +26,6 @@ class OptimizationMetric(Enum):
     CALMAR_RATIO = "calmar_ratio"
     SORTINO_RATIO = "sortino_ratio"
 
-
 @dataclass
 class OptimizationTarget:
     """优化目标"""
@@ -36,7 +34,6 @@ class OptimizationTarget:
     weight: float = 1.0
     target_value: float | None = None
     minimize: bool = False  # 是否要最小化该指标
-
 
 @dataclass
 class OptimizationResult:
@@ -48,7 +45,6 @@ class OptimizationResult:
     metric_scores: dict[str, float] = field(default_factory=dict)
     optimization_time: float = 0.0
     iterations: int = 0
-
 
 class StrategyOptimizer:
     """策略优化器"""
@@ -75,14 +71,20 @@ class StrategyOptimizer:
         )
 
         best_result = None
-        best_score = float("-in") if not optimization_targets[0].minimize else float("inf")
+        best_score = (
+            float("-in") if not optimization_targets[0].minimize else float("inf")
+        )
         optimization_history = []
 
         # 初始参数
-        current_parameters = {p.name: p.default_value for p in strategy_response.parameters}
+        current_parameters = {
+            p.name: p.default_value for p in strategy_response.parameters
+        }
 
         for iteration in range(max_iterations):
-            self.logger.debug(f"Optimization iteration {iteration + 1}/{max_iterations}")
+            self.logger.debug(
+                f"Optimization iteration {iteration + 1}/{max_iterations}"
+            )
 
             # 生成参数变体
             parameter_variants = self._generate_parameter_variants(
@@ -92,18 +94,22 @@ class StrategyOptimizer:
             # 并行测试参数组合
             tasks = []
             for variant in parameter_variants:
-                task = self._test_parameters(strategy_response, variant, historical_data, optimization_targets)
+                task = self._test_parameters(
+                    strategy_response, variant, historical_data, optimization_targets
+                )
                 tasks.append(task)
 
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
             # 找到最佳结果
-            for i, result in enumerate(results):
+            for _i, result in enumerate(results):
                 if isinstance(result, Exception):
                     self.logger.warning(f"Parameter test failed: {result}")
                     continue
 
-                score = self._calculate_composite_score(result["metric_scores"], optimization_targets)
+                score = self._calculate_composite_score(
+                    result["metric_scores"], optimization_targets
+                )
 
                 optimization_history.append(
                     {
@@ -142,7 +148,9 @@ class StrategyOptimizer:
         optimization_time = time.time() - start_time
 
         final_result = OptimizationResult(
-            best_parameters=(best_result["parameters"] if best_result else current_parameters),
+            best_parameters=(
+                best_result["parameters"] if best_result else current_parameters
+            ),
             best_score=best_score,
             optimization_history=optimization_history,
             metric_scores=best_result["metric_scores"] if best_result else {},
@@ -244,7 +252,11 @@ class StrategyOptimizer:
         import random
 
         max_variants = min(10, len(variants))
-        selected_variants = random.sample(variants, max_variants) if len(variants) > max_variants else variants
+        selected_variants = (
+            random.sample(variants, max_variants)
+            if len(variants) > max_variants
+            else variants
+        )
 
         return selected_variants
 
@@ -312,7 +324,10 @@ class StrategyOptimizer:
             return None
 
         history_summary = "\n".join(
-            [f"Iteration {h['iteration']}: Score={h['score']:.3f}, Params={h['parameters']}" for h in recent_history]
+            [
+                f"Iteration {h['iteration']}: Score={h['score']:.3f}, Params={h['parameters']}"
+                for h in recent_history
+            ]
         )
 
         prompt = f"""

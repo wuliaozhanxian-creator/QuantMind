@@ -1,7 +1,7 @@
 import logging
 import os
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
@@ -69,7 +69,9 @@ def get_market_engine() -> AsyncEngine:
     global _market_engine, _market_session_factory
     if _market_engine is None:
         _assert_readonly_credential()  # T5.1 只读凭据断言
-        logger.info(f"Initializing market DB engine: {MARKET_DB_HOST}:{MARKET_DB_PORT}/{MARKET_DB_NAME}")
+        logger.info(
+            f"Initializing market DB engine: {MARKET_DB_HOST}:{MARKET_DB_PORT}/{MARKET_DB_NAME}"
+        )
         _market_engine = create_async_engine(
             MARKET_DB_URL,
             pool_size=10,

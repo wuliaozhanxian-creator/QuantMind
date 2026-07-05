@@ -7,19 +7,16 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass
-from typing import Any, Dict, List, Tuple
+from typing import Any
 from collections.abc import Callable
-
 
 class LLMRateLimitError(RuntimeError):
     """LLM 调用触发限流。"""
-
 
 @dataclass
 class _CircuitState:
     failures: int = 0
     opened_until: float = 0.0
-
 
 class ResilientLLMRouter:
     """同步 LLM 代码生成调度器。"""
@@ -39,12 +36,20 @@ class ResilientLLMRouter:
         self._providers_lock = threading.Lock()
         self._user_api_keys: dict[str, str] = {}  # user_id -> api_key cache
 
-        self.max_retries = max_retries if max_retries is not None else int(os.getenv("LLM_PROVIDER_MAX_RETRIES", "2"))
+        self.max_retries = (
+            max_retries
+            if max_retries is not None
+            else int(os.getenv("LLM_PROVIDER_MAX_RETRIES", "2"))
+        )
         self.retry_base_seconds = (
-            retry_base_seconds if retry_base_seconds is not None else float(os.getenv("LLM_RETRY_BASE_SECONDS", "0.5"))
+            retry_base_seconds
+            if retry_base_seconds is not None
+            else float(os.getenv("LLM_RETRY_BASE_SECONDS", "0.5"))
         )
         self.failure_threshold = (
-            failure_threshold if failure_threshold is not None else int(os.getenv("LLM_CIRCUIT_FAILURE_THRESHOLD", "3"))
+            failure_threshold
+            if failure_threshold is not None
+            else int(os.getenv("LLM_CIRCUIT_FAILURE_THRESHOLD", "3"))
         )
         self.circuit_open_seconds = (
             circuit_open_seconds
@@ -52,13 +57,19 @@ class ResilientLLMRouter:
             else float(os.getenv("LLM_CIRCUIT_OPEN_SECONDS", "30"))
         )
         self.rate_limit_rpm = (
-            rate_limit_rpm if rate_limit_rpm is not None else int(os.getenv("LLM_RATE_LIMIT_RPM", "120"))
+            rate_limit_rpm
+            if rate_limit_rpm is not None
+            else int(os.getenv("LLM_RATE_LIMIT_RPM", "120"))
         )
         self.max_concurrency = (
-            max_concurrency if max_concurrency is not None else int(os.getenv("LLM_MAX_CONCURRENCY", "4"))
+            max_concurrency
+            if max_concurrency is not None
+            else int(os.getenv("LLM_MAX_CONCURRENCY", "4"))
         )
 
-        self._circuits: dict[str, _CircuitState] = {name: _CircuitState() for name in self._provider_factories.keys()}
+        self._circuits: dict[str, _CircuitState] = {
+            name: _CircuitState() for name in self._provider_factories.keys()
+        }
         self._circuits_lock = threading.Lock()
 
         self._request_times = deque()
@@ -77,11 +88,20 @@ class ResilientLLMRouter:
 
     def _provider_order(self, preferred: str | None = None) -> list[str]:
         preferred_name = (
-            (preferred or os.getenv("LLM_PROVIDER_FORCE") or os.getenv("LLM_PROVIDER") or "qwen").strip().lower()
+            (
+                preferred
+                or os.getenv("LLM_PROVIDER_FORCE")
+                or os.getenv("LLM_PROVIDER")
+                or "qwen"
+            )
+            .strip()
+            .lower()
         )
         fallback_env = os.getenv("LLM_FALLBACK_PROVIDERS", "").strip()
         if fallback_env:
-            fallbacks = [x.strip().lower() for x in fallback_env.split(",") if x.strip()]
+            fallbacks = [
+                x.strip().lower() for x in fallback_env.split(",") if x.strip()
+            ]
         else:
             fallbacks = ["deepseek"] if preferred_name == "qwen" else ["qwen"]
 
@@ -131,7 +151,11 @@ class ResilientLLMRouter:
                 state.opened_until = time.time() + self.circuit_open_seconds
 
     def generate_code(
-        self, prompt: str, preferred: str | None = None, mode: str = "simple", api_key: str | None = None
+        self,
+        prompt: str,
+        preferred: str | None = None,
+        mode: str = "simple",
+        api_key: str | None = None,
     ) -> tuple[str, dict[str, Any]]:
         self._acquire_rate_limit()
         providers = self._provider_order(preferred)
@@ -177,9 +201,7 @@ class ResilientLLMRouter:
         finally:
             self._semaphore.release()
 
-
 _router_instance: ResilientLLMRouter | None = None
-
 
 def get_resilient_llm_router() -> ResilientLLMRouter:
     global _router_instance

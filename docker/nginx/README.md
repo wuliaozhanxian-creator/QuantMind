@@ -9,7 +9,7 @@
 - `quantmind-engine` (`8001`)
 - `quantmind-stream` (`8003`)
 
-Qlib 回测相关路径（`/api/v1/qlib/*`、`/api/v1/backtest/*`、`/api/v1/strategies/*`）现在统一先转发到 `quantmind-api`，再由 API 网关注入内部信任头后转发到 `quantmind-engine`。这样可以避免前端直连 engine 时丢失 `X-Internal-Call` 或用户上下文，导致 `401 Unauthorized`。
+Qlib 回测相关路径（`/api/v1/qlib/*`、`/api/v1/backtest/*`、`/api/v1/strategies/*`）现在统一先转发到 `quantmind-api`，再由 API 网关注入内部信任头后转发到 `quantmind-engine`。这样可以避免前端直连 engine 时丢失 `X-Service-Token` 或用户上下文，导致 `401 Unauthorized`。
 
 ## 动态 DNS 防复发机制
 

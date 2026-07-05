@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 try:
     mp.set_start_method("spawn", force=True)
 except RuntimeError:
-    pass
+    pass  # noqa: BLE001 - 可选配置/依赖未启用，预期静默
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -181,8 +181,7 @@ async def lifespan(app: FastAPI):
                 name="simulation-margin-monitor-worker",
             )
         eod_enabled = (
-            str(os.getenv("SIM_EOD_ENABLED", "true")).strip().lower()
-            != "false"
+            str(os.getenv("SIM_EOD_ENABLED", "true")).strip().lower() != "false"
         )
         if eod_enabled:
             simulation_eod_task = asyncio.create_task(
@@ -332,7 +331,7 @@ async def lifespan(app: FastAPI):
         try:
             await task
         except asyncio.CancelledError:
-            pass
+            pass  # noqa: BLE001 - asyncio 任务取消信号，预期静默处理
         except Exception as e:
             logger.warning("trade background task stop failed: %s", e)
 
@@ -359,7 +358,7 @@ async def lifespan(app: FastAPI):
             try:
                 await vectorized_matcher_task
             except asyncio.CancelledError:
-                pass
+                pass  # noqa: BLE001 - asyncio 任务取消信号，预期静默处理
         except Exception as e:
             logger.warning("trade vectorized matcher stop failed: %s", e)
 
@@ -378,7 +377,7 @@ async def lifespan(app: FastAPI):
             try:
                 await sandbox_signal_consumer_task
             except asyncio.CancelledError:
-                pass
+                pass  # noqa: BLE001 - asyncio 任务取消信号，预期静默处理
         except Exception as e:
             logger.warning("trade sandbox signal consumer stop failed: %s", e)
 

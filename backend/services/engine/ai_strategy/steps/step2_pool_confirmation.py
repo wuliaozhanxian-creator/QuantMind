@@ -4,7 +4,7 @@ import logging
 import os
 import re
 from datetime import date
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from fastapi import HTTPException, Request, status
 from sqlalchemy import text
@@ -37,7 +37,6 @@ except ImportError:
 
                 def get_db():
                     raise ImportError("Cannot find database_pool module")
-
 
 from ..services.validators.sql_validator import (
     SQLValidationError,
@@ -91,20 +90,18 @@ ALLOWED_TAG_CODES: frozenset[str] = frozenset(
     }
 )
 
-
 def _validate_table_name(table_name: str) -> str:
     """校验动态表名是否在白名单内，防止 SQL 注入。
 
     所有需要拼接进 SQL 的表名必须经过此函数校验。
     """
     if table_name not in ALLOWED_TABLES:
-        raise ValueError(
-            f"非法表名 '{table_name}'，仅允许: {sorted(ALLOWED_TABLES)}"
-        )
+        raise ValueError(f"非法表名 '{table_name}'，仅允许: {sorted(ALLOWED_TABLES)}")
     return table_name
 
-
-def _tag_membership_sql(tag_code: str, *, negate: bool = False, symbol_ref: str | None = None) -> str:
+def _tag_membership_sql(
+    tag_code: str, *, negate: bool = False, symbol_ref: str | None = None
+) -> str:
     """生成判断 symbol 是否属于某标签的 EXISTS 谓词。
 
     tag_code 来自 stock_tag_utils 的受控别名表，作为字面量内联，无注入风险。
@@ -129,7 +126,6 @@ COMPATIBLE_COLUMN_CANDIDATES = {
     "amount": ["amount", "turnover"],
 }
 
-
 def _get_table_columns(session, table_name: str) -> set[str]:
     try:
         rows = session.execute(
@@ -145,13 +141,11 @@ def _get_table_columns(session, table_name: str) -> set[str]:
     except Exception:
         return set()
 
-
 def _resolve_compatible_column(columns: set[str], logical_name: str) -> str:
     for candidate in COMPATIBLE_COLUMN_CANDIDATES.get(logical_name, [logical_name]):
         if candidate in columns:
             return candidate
     return logical_name
-
 
 def _build_compat_table_sql(table_name: str, columns: set[str]) -> str:
     # 校验动态表名，防止 SQL 注入
@@ -159,7 +153,7 @@ def _build_compat_table_sql(table_name: str, columns: set[str]) -> str:
     if not columns:
         return table_name
 
-    select_fields = [col for col in sorted(columns)]
+    select_fields = sorted(columns)
     alias_targets = {
         "symbol": _resolve_compatible_column(columns, "symbol"),
         "code": _resolve_compatible_column(columns, "symbol"),
@@ -174,14 +168,21 @@ def _build_compat_table_sql(table_name: str, columns: set[str]) -> str:
 
     # v1.4.0 标签长表迁移后，idx_hs300/zz500/zz1000 不再是物理列。
     # LLM 生成的 SQL 可能仍 SELECT/WHERE 引用这些列，compat 子查询通过 EXISTS 投影暴露它们。
-    for col, tag_code in (("idx_hs300", "hs300"), ("idx_zz500", "csi500"), ("idx_zz1000", "csi1000")):
+    for col, tag_code in (
+        ("idx_hs300", "hs300"),
+        ("idx_zz500", "csi500"),
+        ("idx_zz1000", "csi1000"),
+    ):
         if col not in {c.lower() for c in columns}:
-            select_fields.append(f"{_tag_membership_sql(tag_code, symbol_ref=f'{table_name}.symbol')} AS {col}")
+            select_fields.append(
+                f"{_tag_membership_sql(tag_code, symbol_ref=f'{table_name}.symbol')} AS {col}"
+            )
 
     return f"(SELECT {', '.join(select_fields)} FROM {table_name})"
 
-
-def _replace_table_with_compat_subquery(sql: str, table_name: str, compat_table_sql: str) -> str:
+def _replace_table_with_compat_subquery(
+    sql: str, table_name: str, compat_table_sql: str
+) -> str:
     if compat_table_sql == table_name:
         return sql
 
@@ -197,7 +198,6 @@ def _replace_table_with_compat_subquery(sql: str, table_name: str, compat_table_
         return f"{keyword} {compat_table_sql} {alias}"
 
     return pattern.sub(_repl, sql)
-
 
 def _inject_trade_date_filter(sql: str, as_of_date: date | None) -> str:
     normalized = sql.strip().rstrip(";")
@@ -217,11 +217,16 @@ def _inject_trade_date_filter(sql: str, as_of_date: date | None) -> str:
 
     trade_clause = f"trade_date = '{as_of_date}'"
     if re.search(r"\bwhere\b", body, re.IGNORECASE):
-        body = re.sub(r"\bWHERE\b", f"WHERE {trade_clause} AND ", body, count=1, flags=re.IGNORECASE)
+        body = re.sub(
+            r"\bWHERE\b",
+            f"WHERE {trade_clause} AND ",
+            body,
+            count=1,
+            flags=re.IGNORECASE,
+        )
     else:
         body = f"{body} WHERE {trade_clause}"
     return f"{body}{tail}"
-
 
 def _query_pool_limit() -> int:
     """查询结果上限（防止超大结果拖垮接口），默认 10000。"""
@@ -231,7 +236,6 @@ def _query_pool_limit() -> int:
     except ValueError:
         value = 10000
     return max(1, min(value, 50000))
-
 
 def _require_user_id(request: Request) -> str:
     # 企业环境严格要求鉴权上下文，禁止回退默认用户。
@@ -257,7 +261,6 @@ def _require_user_id(request: Request) -> str:
 
     return str(user_id)
 
-
 def _get_universe_total(user_id: str) -> int:
     """
     获取覆盖率分母（候选全集大小）。
@@ -282,7 +285,7 @@ def _get_universe_total(user_id: str) -> int:
                 try:
                     session.rollback()
                 except Exception:
-                    pass
+                    logger.debug("ignored exception", exc_info=True)
                 pass
 
             n2 = session.execute(
@@ -291,7 +294,6 @@ def _get_universe_total(user_id: str) -> int:
             return int(n2 or 0)
     except Exception:
         return 0
-
 
 def _execute_raw_selection_sql(sql: str) -> tuple[list[PoolItem], date | None]:
     """直接执行由 LLM 生成的 SQL 语句
@@ -307,7 +309,7 @@ def _execute_raw_selection_sql(sql: str) -> tuple[list[PoolItem], date | None]:
             validated_sql = validate_and_sanitize(sql)
         except SQLValidationError as e:
             logger.error(f"SQL validation failed: {e}")
-            raise HTTPException(status_code=400, detail=f"SQL验证失败: {str(e)}")
+            raise HTTPException(status_code=400, detail=f"SQL验证失败: {str(e)}") from e
 
         sql_lower = validated_sql.lower()
         normalized_sql = validated_sql
@@ -316,19 +318,31 @@ def _execute_raw_selection_sql(sql: str) -> tuple[list[PoolItem], date | None]:
         if "from stock_selection" in sql_lower or "from stock_daily" in sql_lower:
             try:
                 if "from stock_selection" in sql_lower:
-                    normalized_sql = safe_table_replace(normalized_sql, "stock_selection", LATEST_TABLE)
+                    normalized_sql = safe_table_replace(
+                        normalized_sql, "stock_selection", LATEST_TABLE
+                    )
                 if "from stock_daily" in sql_lower:
-                    normalized_sql = safe_table_replace(normalized_sql, "stock_daily", LATEST_TABLE)
+                    normalized_sql = safe_table_replace(
+                        normalized_sql, "stock_daily", LATEST_TABLE
+                    )
             except SQLValidationError as e:
                 logger.error(f"Table replacement failed: {e}")
-                raise HTTPException(status_code=400, detail=f"表名替换失败: {str(e)}")
+                raise HTTPException(
+                    status_code=400, detail=f"表名替换失败: {str(e)}"
+                ) from e
 
-        target_table = LATEST_TABLE if f"from {LATEST_TABLE}" in normalized_sql.lower() else "stock_selection"
+        target_table = (
+            LATEST_TABLE
+            if f"from {LATEST_TABLE}" in normalized_sql.lower()
+            else "stock_selection"
+        )
         # 校验动态表名，防止 SQL 注入
         _validate_table_name(target_table)
 
         # 强制清除 LLM 可能生成的 LIMIT 限制，确保返回足够多的股票
-        normalized_sql = re.sub(r"limit\s+\d+", "", normalized_sql, flags=re.IGNORECASE).strip()
+        normalized_sql = re.sub(
+            r"limit\s+\d+", "", normalized_sql, flags=re.IGNORECASE
+        ).strip()
         max_rows = _query_pool_limit()
         if not normalized_sql.lower().endswith(f"limit {max_rows}"):
             normalized_sql += f" LIMIT {max_rows}"
@@ -336,11 +350,15 @@ def _execute_raw_selection_sql(sql: str) -> tuple[list[PoolItem], date | None]:
         with get_db() as session:
             target_columns = _get_table_columns(session, target_table)
             as_of_date = session.execute(
-                text(f"select max(trade_date) from {_validate_table_name(target_table)}")
+                text(
+                    f"select max(trade_date) from {_validate_table_name(target_table)}"
+                )
             ).scalar()
             compat_table_sql = _build_compat_table_sql(target_table, target_columns)
             normalized_sql = _inject_trade_date_filter(normalized_sql, as_of_date)
-            normalized_sql = _replace_table_with_compat_subquery(normalized_sql, target_table, compat_table_sql)
+            normalized_sql = _replace_table_with_compat_subquery(
+                normalized_sql, target_table, compat_table_sql
+            )
 
             result = session.execute(text(normalized_sql)).fetchall()
 
@@ -382,7 +400,6 @@ def _execute_raw_selection_sql(sql: str) -> tuple[list[PoolItem], date | None]:
         logger.error(f"Error in _execute_raw_selection_sql: {e}")
         raise
 
-
 def _query_stock_pool(
     conditions: list[dict[str, Any]], combiners: list[str], user_id: str
 ) -> tuple[list[PoolItem], date | None]:
@@ -402,7 +419,9 @@ def _query_stock_pool(
                 return [], None
 
             as_of_date = date_res[0]
-            logger.info(f"Targeting trade_date: {as_of_date} (covers {date_res[1]} stocks)")
+            logger.info(
+                f"Targeting trade_date: {as_of_date} (covers {date_res[1]} stocks)"
+            )
 
             # 2. 组装参数和条件
             params = {"d": as_of_date}
@@ -458,7 +477,7 @@ def _query_stock_pool(
 
             # 5. 执行最终查询 (全量返回，最高支持 10000 只股票)
             sql = f"""
-            SELECT 
+            SELECT
                 symbol,
                 name,
                 total_mv as market_cap,
@@ -483,20 +502,20 @@ def _query_stock_pool(
             for row in result:
                 # 使用 row_dict 确保字段取值稳健，不受列顺序影响
                 row_dict = row._asdict() if hasattr(row, "_asdict") else None
-                
+
                 if row_dict:
                     symbol = str(row_dict.get("symbol") or "")
                     name = row_dict.get("name")
-                    
+
                     # 兼容不同可能的字段名
                     market_cap = row_dict.get("market_cap")
                     if market_cap is None:
                         market_cap = row_dict.get("total_mv")
-                        
+
                     pe = row_dict.get("pe_ratio")
                     if pe is None:
                         pe = row_dict.get("pe_ttm")
-                        
+
                     pb = row_dict.get("pb_ratio")
                     if pb is None:
                         pb = row_dict.get("pb")
@@ -514,18 +533,19 @@ def _query_stock_pool(
                     symbol = str(row[0])
                     name = row[1] if len(row) > 1 else None
                     metrics = {
-                        "market_cap": float(row[2] or 0) * TOTAL_MV_TO_YI if len(row) > 2 else 0,
+                        "market_cap": float(row[2] or 0) * TOTAL_MV_TO_YI
+                        if len(row) > 2
+                        else 0,
                         "pe": float(row[3] or 0) if len(row) > 3 else 0,
                         "pb": float(row[4] or 0) if len(row) > 4 else 0,
                         "close": float(row[5] or 0) if len(row) > 5 else 0,
                     }
-                    
+
                 items.append(PoolItem(symbol=symbol, name=name, metrics=metrics))
             return items, as_of_date
     except Exception as e:
         logger.error(f"Critical error in _query_stock_pool: {e}", exc_info=True)
         raise
-
 
 def _build_pool_summary(
     items: list[PoolItem],
@@ -558,7 +578,6 @@ def _build_pool_summary(
     }
     return summary, charts
 
-
 def _is_full_market_query(text: str) -> bool:
     normalized = re.sub(r"\s+", "", text or "")
     if not normalized:
@@ -578,13 +597,11 @@ def _is_full_market_query(text: str) -> bool:
     ]
     return any(term in normalized for term in full_market_terms)
 
-
 def _build_full_market_sql() -> str:
     return (
         "SELECT symbol, name, close, total_mv as market_cap, pe_ttm as pe_ratio\n"
         "FROM stock_daily_latest"
     )
-
 
 def _is_full_market_sql(sql: str) -> bool:
     if not sql:
@@ -596,7 +613,6 @@ def _is_full_market_sql(sql: str) -> bool:
         re.IGNORECASE,
     )
     return pattern.search(s) is not None
-
 
 async def _ensure_latest_table_data(session) -> bool:
     """确保最新数据表中有可用数据，否则尝试检查原始表。"""
@@ -624,13 +640,14 @@ async def _ensure_latest_table_data(session) -> bool:
             logger.error(error_msg)
             raise HTTPException(status_code=503, detail=error_msg)
         else:
-            raise HTTPException(status_code=503, detail="数据库中未发现任何行情数据，请先执行数据导入。")
+            raise HTTPException(
+                status_code=503, detail="数据库中未发现任何行情数据，请先执行数据导入。"
+            )
     except Exception as e:
         if isinstance(e, HTTPException):
             raise
         logger.error(f"检查数据可用性失败: {e}")
         return False
-
 
 async def query_pool(dsl: str, user_id: str) -> QueryPoolResponse:
     """执行 DSL/SQL 查询并返回股票池"""
@@ -649,5 +666,7 @@ async def query_pool(dsl: str, user_id: str) -> QueryPoolResponse:
         items, as_of_date = _query_stock_pool(conditions, combiners, user_id)
 
     universe_total = _get_universe_total(user_id)
-    summary, charts = _build_pool_summary(items, as_of_date, universe_total=universe_total)
+    summary, charts = _build_pool_summary(
+        items, as_of_date, universe_total=universe_total
+    )
     return QueryPoolResponse(items=items, summary=summary, charts=charts)

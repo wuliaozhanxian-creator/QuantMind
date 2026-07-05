@@ -4,7 +4,6 @@ import asyncio
 import logging
 import os
 import re
-from typing import List
 
 from fastapi import APIRouter
 
@@ -30,11 +29,13 @@ def _strip_markdown_fences(code: str) -> str:
     if "```" not in s:
         return s + "\n"
     try:
-        m = re.search(r"```(?:python)?\s*(.*?)\s*```", s, flags=re.IGNORECASE | re.DOTALL)
+        m = re.search(
+            r"```(?:python)?\s*(.*?)\s*```", s, flags=re.IGNORECASE | re.DOTALL
+        )
         if m:
             return (m.group(1) or "").strip() + "\n"
     except Exception:
-        pass
+        logger.debug("ignored exception", exc_info=True)
     lines = [ln for ln in s.splitlines() if not ln.strip().startswith("```")]
     return "\n".join(lines).strip() + "\n"
 
@@ -58,7 +59,9 @@ async def validate_qlib_code(body: ValidateQlibRequest):
     try:
         validator = get_qlib_validator()
         normalized_code = _strip_markdown_fences(body.code)
-        result = await validator.validate_code(normalized_code, body.context, mode=body.mode)
+        result = await validator.validate_code(
+            normalized_code, body.context, mode=body.mode
+        )
 
         checks = [ValidationCheckResponse(**check.to_dict()) for check in result.checks]
 
@@ -78,7 +81,9 @@ async def validate_qlib_code(body: ValidateQlibRequest):
         )
     except Exception as e:
         logger.error("Qlib validation failed: %s", e, exc_info=True)
-        return ValidateQlibResponse(success=False, valid=False, checks=[], error=f"验证失败: {str(e)}")
+        return ValidateQlibResponse(
+            success=False, valid=False, checks=[], error=f"验证失败: {str(e)}"
+        )
 
 
 @router.post("/repair-qlib", response_model=RepairQlibResponse)
@@ -86,7 +91,11 @@ async def repair_qlib_code(body: RepairQlibRequest):
     """使用大模型尝试修复 Qlib 策略代码的语法/结构问题"""
     try:
         validator = get_qlib_validator()
-        provider_name = (os.getenv("LLM_PROVIDER_FORCE") or os.getenv("LLM_PROVIDER") or "qwen").strip().lower()
+        provider_name = (
+            (os.getenv("LLM_PROVIDER_FORCE") or os.getenv("LLM_PROVIDER") or "qwen")
+            .strip()
+            .lower()
+        )
         llm_router = get_resilient_llm_router()
 
         code = _strip_markdown_fences(body.code)
@@ -96,8 +105,12 @@ async def repair_qlib_code(body: RepairQlibRequest):
 
         for i in range(int(body.max_rounds)):
             attempts = i + 1
-            result = await validator.validate_code(code, context=None, mode="syntax_only")
-            last_checks = [ValidationCheckResponse(**c.to_dict()) for c in result.checks]
+            result = await validator.validate_code(
+                code, context=None, mode="syntax_only"
+            )
+            last_checks = [
+                ValidationCheckResponse(**c.to_dict()) for c in result.checks
+            ]
             last_warnings = list(result.warnings or [])
             if result.valid:
                 return RepairQlibResponse(
@@ -112,7 +125,9 @@ async def repair_qlib_code(body: RepairQlibRequest):
             err_parts: list[str] = []
             for c in result.checks:
                 if not c.passed:
-                    err_parts.append(f"{c.message} | {c.details}" if c.details else c.message)
+                    err_parts.append(
+                        f"{c.message} | {c.details}" if c.details else c.message
+                    )
             err_msg = body.error or "; ".join([p for p in err_parts if p]) or "语法错误"
 
             fixed, _meta = await asyncio.to_thread(
@@ -123,8 +138,12 @@ async def repair_qlib_code(body: RepairQlibRequest):
             )
             code = _strip_markdown_fences(fixed)
 
-        final_result = await validator.validate_code(code, context=None, mode="syntax_only")
-        last_checks = [ValidationCheckResponse(**c.to_dict()) for c in final_result.checks]
+        final_result = await validator.validate_code(
+            code, context=None, mode="syntax_only"
+        )
+        last_checks = [
+            ValidationCheckResponse(**c.to_dict()) for c in final_result.checks
+        ]
         last_warnings = list(final_result.warnings or [])
         if final_result.valid:
             return RepairQlibResponse(

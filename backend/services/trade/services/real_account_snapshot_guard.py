@@ -8,7 +8,6 @@ from typing import Any, Optional
 
 _EPSILON = 1e-8
 
-
 def _to_float(value: Any, default: float = 0.0) -> float:
     try:
         if value is None:
@@ -17,7 +16,6 @@ def _to_float(value: Any, default: float = 0.0) -> float:
         return parsed if parsed == parsed else default
     except Exception:
         return default
-
 
 def extract_positions_count(payload_json: dict[str, Any] | None = None) -> int:
     if not isinstance(payload_json, dict):
@@ -28,7 +26,6 @@ def extract_positions_count(payload_json: dict[str, Any] | None = None) -> int:
     if isinstance(positions, dict):
         return len(positions)
     return 0
-
 
 def is_effectively_empty_snapshot(
     *,
@@ -54,7 +51,6 @@ def is_effectively_empty_snapshot(
         and positions_count <= 0
     )
 
-
 def is_inconsistent_zero_total_snapshot(
     *,
     total_asset: Any,
@@ -72,15 +68,9 @@ def is_inconsistent_zero_total_snapshot(
     cash_num = _to_float(cash, 0.0)
     market_value_num = _to_float(market_value, 0.0)
     positions_count = extract_positions_count(payload_json)
-    return (
-        total_asset_num <= _EPSILON
-        and (
-            cash_num > _EPSILON
-            or market_value_num > _EPSILON
-            or positions_count > 0
-        )
+    return total_asset_num <= _EPSILON and (
+        cash_num > _EPSILON or market_value_num > _EPSILON or positions_count > 0
     )
-
 
 def is_suspicious_asset_jump(
     *,
@@ -109,7 +99,9 @@ def is_suspicious_asset_jump(
     total_asset_drop_ratio = total_asset_num / prev_total_asset_num
     cash_drop_ratio = cash_num / prev_cash_num if prev_cash_num > _EPSILON else 1.0
     market_value_drop_ratio = (
-        market_value_num / prev_market_value_num if prev_market_value_num > _EPSILON else 1.0
+        market_value_num / prev_market_value_num
+        if prev_market_value_num > _EPSILON
+        else 1.0
     )
 
     severe_balance_sheet_collapse = (

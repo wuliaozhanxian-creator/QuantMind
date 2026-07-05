@@ -16,7 +16,7 @@ import json
 import logging
 import os
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Body, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
@@ -52,7 +52,6 @@ from .support import router as support_router
 
 logger = logging.getLogger(__name__)
 
-
 try:  # 部署模式优先 shared
     from shared.database_manager_v2 import get_session  # type: ignore
     from shared.errors import ErrorCode  # type: ignore
@@ -66,7 +65,6 @@ router = APIRouter()
 router.include_router(support_router)
 router.include_router(pool_files_router)
 
-
 def _legacy_routes_enabled() -> bool:
     return os.getenv("AI_STRATEGY_ENABLE_LEGACY_ROUTES", "false").strip().lower() in (
         "1",
@@ -74,7 +72,6 @@ def _legacy_routes_enabled() -> bool:
         "yes",
         "on",
     )
-
 
 def _mock_disabled() -> bool:
     return os.getenv("ENGINE_DISABLE_MOCK", "true").strip().lower() in (
@@ -84,30 +81,24 @@ def _mock_disabled() -> bool:
         "on",
     )
 
-
 class StockSelectionRequest(BaseModel):
     query: str
     limit: int = 200
     user_id: str | None = None
 
-
 class SelectionParseRequest(BaseModel):
     query: str
-
 
 class SelectionExecuteRequest(BaseModel):
     sql: str
 
-
 class ConfigExtractionRequest(BaseModel):
     code: str
-
 
 def _resolve_provider(provider_name: str | None = None):
     if provider_name and provider_name in REGISTRY:
         return REGISTRY[provider_name]()
     return get_provider()
-
 
 @router.post("/strategy/generate")
 async def generate_strategy(payload: StrategyGenerationRequest, request: Request):
@@ -116,13 +107,24 @@ async def generate_strategy(payload: StrategyGenerationRequest, request: Request
         provider = _resolve_provider(payload.provider)
         result = await provider.generate(payload)
 
-        generated_at = result.generated_at.isoformat() if hasattr(result.generated_at, "isoformat") else str(result.generated_at)
+        generated_at = (
+            result.generated_at.isoformat()
+            if hasattr(result.generated_at, "isoformat")
+            else str(result.generated_at)
+        )
         return success(
             {
                 "strategy_name": result.strategy_name,
                 "rationale": result.rationale,
-                "artifacts": [artifact.model_dump() if hasattr(artifact, "model_dump") else artifact for artifact in result.artifacts],
-                "metadata": result.metadata.model_dump() if hasattr(result.metadata, "model_dump") else result.metadata,
+                "artifacts": [
+                    artifact.model_dump()
+                    if hasattr(artifact, "model_dump")
+                    else artifact
+                    for artifact in result.artifacts
+                ],
+                "metadata": result.metadata.model_dump()
+                if hasattr(result.metadata, "model_dump")
+                else result.metadata,
                 "provider": result.provider,
                 "generated_at": generated_at,
             }
@@ -130,7 +132,6 @@ async def generate_strategy(payload: StrategyGenerationRequest, request: Request
     except Exception as exc:
         logger.error("Strategy generation failed: %s", exc, exc_info=True)
         return error(ErrorCode.INTERNAL_ERROR, f"策略生成失败: {exc}")
-
 
 @router.post("/extract-config")
 async def extract_strategy_config(request: ConfigExtractionRequest):
@@ -145,7 +146,6 @@ async def extract_strategy_config(request: ConfigExtractionRequest):
     except Exception as exc:
         logger.error(f"Extract config failed: {exc}")
         return error(ErrorCode.INTERNAL_ERROR, f"解析失败: {exc}")
-
 
 @router.post("/stocks/select")
 async def select_stocks(payload: StockSelectionRequest):
@@ -171,7 +171,6 @@ async def select_stocks(payload: StockSelectionRequest):
         logger.error(f"Unified stock selection failed: {exc}")
         return error(ErrorCode.INTERNAL_ERROR, f"选股失败: {exc}")
 
-
 @router.post("/selection/parse")
 async def parse_selection(payload: SelectionParseRequest):
     """解析自然语言选股指令"""
@@ -186,8 +185,9 @@ async def parse_selection(payload: SelectionParseRequest):
     # 2. 生成 SQL
     sql = await generator.generate_sql(intent)
 
-    return success({"intent": intent, "sql": sql, "status": "success" if sql else "failed"})
-
+    return success(
+        {"intent": intent, "sql": sql, "status": "success" if sql else "failed"}
+    )
 
 @router.post("/selection/execute")
 async def execute_selection(payload: SelectionExecuteRequest):
@@ -210,7 +210,6 @@ async def execute_selection(payload: SelectionExecuteRequest):
         logger.error(f"SQL execution failed: {e}")
         return error(ErrorCode.INTERNAL_ERROR, f"SQL执行失败: {e}")
 
-
 @router.post("/chat/stream")
 async def chat_stream(payload: ChatRequest):
     """SSE流式对话端点"""
@@ -228,7 +227,9 @@ async def chat_stream(payload: ChatRequest):
                     yield f"data: {json.dumps({'type': 'text', 'content': chunk})}\n\n"
             else:
                 # 如果不支持聊天流式，使用策略生成流式
-                strategy_req = StrategyGenerationRequest(description=payload.message, user_id=payload.user_id)
+                strategy_req = StrategyGenerationRequest(
+                    description=payload.message, user_id=payload.user_id
+                )
                 if hasattr(provider, "generate_stream"):
                     async for chunk in provider.generate_stream(strategy_req):
                         yield f"data: {json.dumps({'type': 'text', 'content': chunk})}\n\n"
@@ -247,7 +248,6 @@ async def chat_stream(payload: ChatRequest):
             "Access-Control-Allow-Origin": "*",
         },
     )
-
 
 @router.get("/legacy/strategies", include_in_schema=False)
 async def get_strategies(
@@ -299,7 +299,9 @@ async def get_strategies(
         # 回退到原有简易逻辑
         from .routes import list_strategies  # 假设存在本地 fallback
 
-        data = list_strategies(offset=offset, limit=limit, keyword=keyword, user_id=user_id)
+        data = list_strategies(
+            offset=offset, limit=limit, keyword=keyword, user_id=user_id
+        )
         return success(
             {
                 "strategies": data["items"],
@@ -308,7 +310,6 @@ async def get_strategies(
                 "limit": limit,
             }
         )
-
 
 @router.post("/legacy/strategies", include_in_schema=False)
 async def create_strategy(payload: dict):
@@ -335,12 +336,11 @@ async def create_strategy(payload: dict):
         logger.error(f"Unified strategy save failed: {e}")
         return error(ErrorCode.INTERNAL_ERROR, str(e))
 
-
 @router.get("/providers")
 async def list_providers():
     active = get_provider_name()
     providers = []
-    for name, factory in REGISTRY.items():
+    for name, _factory in REGISTRY.items():
         healthy = True
         supports_stream = False
         try:
@@ -360,7 +360,6 @@ async def list_providers():
         )
     return success({"providers": providers, "active": active})
 
-
 @router.get("/legacy/strategies/{strategy_id}", include_in_schema=False)
 async def get_strategy(strategy_id: str):
     """获取策略详情"""
@@ -369,7 +368,6 @@ async def get_strategy(strategy_id: str):
         return success(result["strategy"])
     else:
         return error(ErrorCode.NOT_FOUND, result["error"])
-
 
 @router.get("/strategies/{strategy_id}/code")
 async def get_strategy_code_endpoint(strategy_id: str):
@@ -381,7 +379,8 @@ async def get_strategy_code_endpoint(strategy_id: str):
                 "strategy_id": result["strategy_id"],
                 "name": result["name"],
                 "provider": result["provider"],
-                "code": result.get("code_from_cos") or result["code"],  # 优先使用COS中的代码
+                "code": result.get("code_from_cos")
+                or result["code"],  # 优先使用COS中的代码
                 "cos_file_url": result["cos_file_url"],
                 "cos_updated": result.get("cos_updated", False),
                 "cos_error": result.get("cos_error"),
@@ -389,7 +388,6 @@ async def get_strategy_code_endpoint(strategy_id: str):
         )
     else:
         return error(ErrorCode.NOT_FOUND, result["error"])
-
 
 @router.get("/strategies/{strategy_id}/download")
 async def download_strategy_file(strategy_id: str):
@@ -406,7 +404,6 @@ async def download_strategy_file(strategy_id: str):
 
     return RedirectResponse(url=result["cos_file_url"])
 
-
 @router.put("/legacy/strategies/{strategy_id}", include_in_schema=False)
 async def update_strategy(strategy_id: str, updates: dict):
     """更新策略"""
@@ -420,7 +417,6 @@ async def update_strategy(strategy_id: str, updates: dict):
             return error(ErrorCode.NOT_FOUND, result["error"])
     except Exception as exc:
         return error(ErrorCode.INTERNAL_ERROR, f"更新策略失败: {exc}")
-
 
 @router.delete("/legacy/strategies/{strategy_id}", include_in_schema=False)
 async def delete_strategy(strategy_id: str):
@@ -436,7 +432,6 @@ async def delete_strategy(strategy_id: str):
     except Exception as exc:
         return error(ErrorCode.INTERNAL_ERROR, f"删除策略失败: {exc}")
 
-
 @router.post("/strategies/{strategy_id}/duplicate")
 async def duplicate_strategy(strategy_id: str, name: str | None = None):
     """复制策略"""
@@ -451,7 +446,6 @@ async def duplicate_strategy(strategy_id: str, name: str | None = None):
     except Exception as exc:
         return error(ErrorCode.INTERNAL_ERROR, f"复制策略失败: {exc}")
 
-
 @router.get("/strategies/stats")
 async def get_strategy_stats():
     """获取策略统计信息"""
@@ -462,7 +456,6 @@ async def get_strategy_stats():
         return success(stats)
     except Exception as exc:
         return error(ErrorCode.INTERNAL_ERROR, f"获取策略统计失败: {exc}")
-
 
 @router.post("/strategies/{strategy_id}/refine")
 async def refine_strategy(strategy_id: str, request: StrategyRefineRequest):
@@ -504,7 +497,9 @@ async def refine_strategy(strategy_id: str, request: StrategyRefineRequest):
         # 使用provider进行完善
         from ...models import ChatRequest
 
-        chat_request = ChatRequest(message=refine_prompt, user_id=request.user_id, provider=request.provider)
+        chat_request = ChatRequest(
+            message=refine_prompt, user_id=request.user_id, provider=request.provider
+        )
 
         # 如果provider支持流式输出，使用流式接口
         if hasattr(provider, "generate_stream"):
@@ -538,7 +533,7 @@ async def refine_strategy(strategy_id: str, request: StrategyRefineRequest):
                 try:
                     refine_result = json.loads(json_match.group())
                 except json.JSONDecodeError:
-                    pass
+                    pass  # noqa: BLE001 - JSON 解析失败，预期静默
 
                     # 如果还是无法解析，返回基本结构
         if not refine_result:
@@ -555,7 +550,9 @@ async def refine_strategy(strategy_id: str, request: StrategyRefineRequest):
                 "refined_code": refine_result.get("refined_code", request.current_code),
                 "explanation": refine_result.get("explanation", "策略完善完成"),
                 "changes": refine_result.get("changes", []),
-                "validation": refine_result.get("validation", {"is_valid": True, "errors": [], "warnings": []}),
+                "validation": refine_result.get(
+                    "validation", {"is_valid": True, "errors": [], "warnings": []}
+                ),
                 "provider": provider.__class__.__name__ if provider else "unknown",
                 "refined_at": datetime.now().isoformat(),
             }
@@ -563,7 +560,6 @@ async def refine_strategy(strategy_id: str, request: StrategyRefineRequest):
 
     except Exception as exc:
         return error(ErrorCode.INTERNAL_ERROR, f"策略完善失败: {exc}")
-
 
 @router.post("/strategies/{strategy_id}/analyze")
 async def analyze_strategy(strategy_id: str, request: StrategyAnalysisRequest):
@@ -642,7 +638,7 @@ async def analyze_strategy(strategy_id: str, request: StrategyAnalysisRequest):
                 try:
                     analysis_result = json.loads(json_match.group())
                 except json.JSONDecodeError:
-                    pass
+                    pass  # noqa: BLE001 - JSON 解析失败，预期静默
 
                     # 默认分析结果
         if not analysis_result:
@@ -666,7 +662,6 @@ async def analyze_strategy(strategy_id: str, request: StrategyAnalysisRequest):
 
     except Exception as exc:
         return error(ErrorCode.INTERNAL_ERROR, f"策略分析失败: {exc}")
-
 
 @router.post("/strategies/{strategy_id}/execute")
 async def execute_strategy(strategy_id: str, request: StrategyExecutionRequest):
@@ -692,7 +687,7 @@ async def execute_strategy(strategy_id: str, request: StrategyExecutionRequest):
             return error(ErrorCode.INTERNAL_ERROR, "策略代码为空")
 
             # 生成执行ID
-        execution_id = f"exec_{int(datetime.now().timestamp()*1000)}"
+        execution_id = f"exec_{int(datetime.now().timestamp() * 1000)}"
 
         # 模拟策略执行（实际项目中这里会调用专门的执行引擎）
         async def simulate_execution():
@@ -749,7 +744,6 @@ async def execute_strategy(strategy_id: str, request: StrategyExecutionRequest):
     except Exception as exc:
         return error(ErrorCode.INTERNAL_ERROR, f"策略执行失败: {exc}")
 
-
 @router.get("/strategies/executions/{execution_id}")
 async def get_execution_status(execution_id: str):
     """获取策略执行状态"""
@@ -777,7 +771,6 @@ async def get_execution_status(execution_id: str):
     except Exception as exc:
         return error(ErrorCode.INTERNAL_ERROR, f"获取执行状态失败: {exc}")
 
-
 @router.post("/strategies/executions/{execution_id}/stop")
 async def stop_execution(execution_id: str):
     """停止策略执行"""
@@ -801,7 +794,6 @@ async def stop_execution(execution_id: str):
         return error(ErrorCode.INTERNAL_ERROR, f"停止执行失败: {exc}")
 
         # ==================== 策略导入导出相关API ====================
-
 
 @router.post("/strategies/{strategy_id}/export")
 async def export_strategy(strategy_id: str, format: str = "json"):
@@ -855,7 +847,6 @@ async def export_strategy(strategy_id: str, format: str = "json"):
     except Exception as exc:
         return error(ErrorCode.INTERNAL_ERROR, f"导出策略失败: {exc}")
 
-
 @router.post("/strategies/import")
 async def import_strategy(file: UploadFile = None, data: dict = None):
     """导入策略"""
@@ -883,7 +874,7 @@ async def import_strategy(file: UploadFile = None, data: dict = None):
             return error(ErrorCode.PARAM_REQUIRED, "请提供文件或数据")
 
             # 生成新的策略ID
-        f"import_{int(datetime.now().timestamp()*1000)}"
+        f"import_{int(datetime.now().timestamp() * 1000)}"
 
         # 保存导入的策略
         from ...models import (
@@ -900,7 +891,11 @@ async def import_strategy(file: UploadFile = None, data: dict = None):
         result = StrategyGenerationResult(
             strategy_name=strategy_data.get("name", "导入的策略"),
             rationale=strategy_data.get("description", "从外部导入的策略"),
-            artifacts=[StrategyCodeArtifact(filename="strategy.py", language="python", code=code_data)],
+            artifacts=[
+                StrategyCodeArtifact(
+                    filename="strategy.py", language="python", code=code_data
+                )
+            ],
             metadata=StrategyMetadata(
                 factors=strategy_data.get("factors", []),
                 risk_controls=strategy_data.get("risk_controls", []),
@@ -931,9 +926,10 @@ async def import_strategy(file: UploadFile = None, data: dict = None):
     except Exception as exc:
         return error(ErrorCode.INTERNAL_ERROR, f"导入策略失败: {exc}")
 
-
 @router.post("/strategies/{strategy_id}/share")
-async def share_strategy(strategy_id: str, visibility: str = "private", description: str = ""):
+async def share_strategy(
+    strategy_id: str, visibility: str = "private", description: str = ""
+):
     """分享策略"""
     try:
         from ...storage.database import get_strategy_by_id
@@ -944,7 +940,7 @@ async def share_strategy(strategy_id: str, visibility: str = "private", descript
             return error(ErrorCode.NOT_FOUND, f"策略 {strategy_id} 不存在")
 
             # 生成分享信息
-        share_id = f"share_{int(datetime.now().timestamp()*1000)}"
+        share_id = f"share_{int(datetime.now().timestamp() * 1000)}"
 
         # 实际项目中这里应该保存到分享表
         return success(

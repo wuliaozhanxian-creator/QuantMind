@@ -8,7 +8,7 @@ Updated: 2025-11-12 - 集成真实数据源
 import asyncio
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import pandas as pd
 
@@ -20,7 +20,6 @@ logger = logging.getLogger(__name__)
 # 延迟导入避免循环依赖
 _stock_repository = None
 _market_data_repository = None
-
 
 def get_stock_repository():
     """获取股票仓储实例"""
@@ -36,7 +35,6 @@ def get_stock_repository():
             _stock_repository = None
     return _stock_repository
 
-
 def get_market_data_repository():
     """获取市场数据仓储实例"""
     global _market_data_repository
@@ -50,7 +48,6 @@ def get_market_data_repository():
             logger.warning(f"无法获取MarketDataRepository: {e}")
             _market_data_repository = None
     return _market_data_repository
-
 
 class IndicatorPusher:
     """实时指标推送器
@@ -94,7 +91,7 @@ class IndicatorPusher:
             try:
                 await task
             except asyncio.CancelledError:
-                pass
+                pass  # noqa: BLE001 - asyncio 任务取消信号，预期静默处理
 
         self.push_tasks.clear()
         logger.info("实时指标推送器停止")
@@ -118,7 +115,9 @@ class IndicatorPusher:
             return
 
             # 创建推送任务
-        task = asyncio.create_task(self._push_indicator_loop(stock_code, indicator_name))
+        task = asyncio.create_task(
+            self._push_indicator_loop(stock_code, indicator_name)
+        )
         self.push_tasks[task_key] = task
         logger.info(f"开始推送指标: {task_key}")
 
@@ -138,7 +137,7 @@ class IndicatorPusher:
             try:
                 await task
             except asyncio.CancelledError:
-                pass
+                pass  # noqa: BLE001 - asyncio 任务取消信号，预期静默处理
             del self.push_tasks[task_key]
             logger.info(f"停止推送指标: {task_key}")
 
@@ -174,7 +173,10 @@ class IndicatorPusher:
                     count = await manager.publish(topic, message)
 
                     if count > 0:
-                        logger.debug(f"推送指标 {indicator_name} ({stock_code}) " f"到 {count} 个客户端")
+                        logger.debug(
+                            f"推送指标 {indicator_name} ({stock_code}) "
+                            f"到 {count} 个客户端"
+                        )
 
                         # 等待下次推送
                 await asyncio.sleep(self.push_interval)
@@ -185,7 +187,9 @@ class IndicatorPusher:
                 logger.error(f"推送指标错误 {stock_code} {indicator_name}: {e}")
                 await asyncio.sleep(self.push_interval)
 
-    async def _get_kline_data(self, stock_code: str, limit: int = 100) -> pd.DataFrame | None:
+    async def _get_kline_data(
+        self, stock_code: str, limit: int = 100
+    ) -> pd.DataFrame | None:
         """
         获取K线数据
 
@@ -218,7 +222,9 @@ class IndicatorPusher:
 
         return df
 
-    async def _fetch_kline_data(self, stock_code: str, limit: int = 100) -> pd.DataFrame | None:
+    async def _fetch_kline_data(
+        self, stock_code: str, limit: int = 100
+    ) -> pd.DataFrame | None:
         """
         获取完整K线数据（混合模式：历史日线 + 当日实时分钟线）
         解决早盘指标空窗 Bug
@@ -233,7 +239,7 @@ class IndicatorPusher:
 
         # SQL 1: 获取历史日线数据
         sql_hist = text("""
-            SELECT 
+            SELECT
                 trade_date as date,
                 open_price as open,
                 high_price as high,
@@ -248,7 +254,7 @@ class IndicatorPusher:
 
         # SQL 2: 聚合当日实时分钟线 (quotes 表)
         sql_today = text("""
-            SELECT 
+            SELECT
                 date_trunc('minute', timestamp) as minute_ts,
                 (array_agg(current_price ORDER BY timestamp ASC))[1] as open,
                 MAX(current_price) as high,
@@ -264,7 +270,9 @@ class IndicatorPusher:
         try:
             async with AsyncSessionLocal() as session:
                 # 并发执行两个查询
-                hist_task = session.execute(sql_hist, {"symbol": stock_code, "hist_limit": hist_depth})
+                hist_task = session.execute(
+                    sql_hist, {"symbol": stock_code, "hist_limit": hist_depth}
+                )
                 today_task = session.execute(sql_today, {"symbol": stock_code})
 
                 hist_res, today_res = await asyncio.gather(hist_task, today_task)
@@ -274,7 +282,10 @@ class IndicatorPusher:
 
                 # 1. 处理历史数据
                 if hist_rows:
-                    df_hist = pd.DataFrame(hist_rows, columns=["date", "open", "high", "low", "close", "volume"])
+                    df_hist = pd.DataFrame(
+                        hist_rows,
+                        columns=["date", "open", "high", "low", "close", "volume"],
+                    )
                     # 将 trade_date (date 对象) 转换为 datetime 以便拼接
                     df_hist["date"] = pd.to_datetime(df_hist["date"])
                     df_hist = df_hist.sort_values("date")
@@ -283,7 +294,10 @@ class IndicatorPusher:
 
                 # 2. 处理当日数据
                 if today_rows:
-                    df_today = pd.DataFrame(today_rows, columns=["date", "open", "high", "low", "close", "volume"])
+                    df_today = pd.DataFrame(
+                        today_rows,
+                        columns=["date", "open", "high", "low", "close", "volume"],
+                    )
                 else:
                     df_today = pd.DataFrame()
 
@@ -309,7 +323,7 @@ class IndicatorPusher:
         dates = pd.date_range(end=pd.Timestamp.now(), periods=limit, freq="1min")
         base_price = 100.0
         prices = []
-        for i in range(limit):
+        for _i in range(limit):
             change = np.random.randn() * 0.5
             price = base_price + change
             prices.append(price)
@@ -376,7 +390,9 @@ class IndicatorPusher:
 
         return new_bar
 
-    async def batch_calculate(self, stock_codes: list[str], indicator_names: list[str]) -> dict[str, dict[str, Any]]:
+    async def batch_calculate(
+        self, stock_codes: list[str], indicator_names: list[str]
+    ) -> dict[str, dict[str, Any]]:
         """
         批量计算指标
 
@@ -422,6 +438,5 @@ class IndicatorPusher:
         }
 
         # 全局推送器实例
-
 
 indicator_pusher = IndicatorPusher()

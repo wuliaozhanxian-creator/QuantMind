@@ -26,7 +26,9 @@ def run_command(cmd, cwd=None):
         env = os.environ.copy()
         env["PYTHONPATH"] = os.pathsep.join(pythonpath_entries)
 
-        result = subprocess.run(cmd, cwd=cwd, check=True, capture_output=True, text=True, env=env)
+        result = subprocess.run(
+            cmd, cwd=cwd, check=True, capture_output=True, text=True, env=env
+        )
 
         if result.stdout:
             print(result.stdout)
@@ -99,7 +101,9 @@ def run_integration_tests():
 def run_e2e_tests():
     """运行端到端测试"""
     print("🌐 运行端到端测试...")
-    return run_command([sys.executable, "-m", "pytest", "tests/", "-m", "e2e", "-v", "--tb=short"])
+    return run_command(
+        [sys.executable, "-m", "pytest", "tests/", "-m", "e2e", "-v", "--tb=short"]
+    )
 
 
 def run_api_service_tests():
@@ -180,7 +184,9 @@ def run_performance_tests():
 def run_parallel_tests():
     """并行运行测试"""
     print("🚀 并行运行测试...")
-    return run_command([sys.executable, "-m", "pytest", "tests/", "-n", "auto", "-v", "--tb=short"])
+    return run_command(
+        [sys.executable, "-m", "pytest", "tests/", "-n", "auto", "-v", "--tb=short"]
+    )
 
 
 def run_trade_long_short_mvp_tests():
@@ -241,7 +247,9 @@ def check_test_environment():
 
     # 检查Python版本
     python_version = sys.version_info
-    print(f"  Python版本: {python_version.major}.{python_version.minor}.{python_version.micro}")
+    print(
+        f"  Python版本: {python_version.major}.{python_version.minor}.{python_version.micro}"
+    )
 
     if python_version < (3, 8):
         print("❌ Python版本过低，需要3.8或更高版本")
@@ -265,7 +273,13 @@ def check_test_environment():
     print(f"  找到 {len(test_files)} 个测试文件")
 
     # 检查配置文件
-    config_files = ["../pyproject.toml", "pyproject.toml", "pytest.ini", "conftest.py", "tests/conftest.py"]
+    config_files = [
+        "../pyproject.toml",
+        "pyproject.toml",
+        "pytest.ini",
+        "conftest.py",
+        "tests/conftest.py",
+    ]
 
     for config_file in config_files:
         path = Path(config_file)

@@ -1,12 +1,15 @@
 """Qlib 参数优化路由"""
 
 from datetime import datetime
-from typing import Any, Dict, List, Union
+from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from backend.services.engine.qlib_app import get_genetic_optimization_service, get_optimization_service
+from backend.services.engine.qlib_app import (
+    get_genetic_optimization_service,
+    get_optimization_service,
+)
 from backend.services.engine.qlib_app.api.identity import _identity_from_request
 from backend.services.engine.qlib_app.schemas.backtest import (
     OptimizationTaskResponse,
@@ -17,15 +20,20 @@ from backend.services.engine.qlib_app.schemas.backtest import (
     QlibOptimizationRequest,
     QlibOptimizationResult,
 )
-from backend.services.engine.qlib_app.services.genetic_optimization_service import GeneticOptimizationService
-from backend.services.engine.qlib_app.services.optimization_persistence import OptimizationPersistence
-from backend.services.engine.qlib_app.services.optimization_service import OptimizationService
+from backend.services.engine.qlib_app.services.genetic_optimization_service import (
+    GeneticOptimizationService,
+)
+from backend.services.engine.qlib_app.services.optimization_persistence import (
+    OptimizationPersistence,
+)
+from backend.services.engine.qlib_app.services.optimization_service import (
+    OptimizationService,
+)
 from backend.shared.utils import normalize_user_id
 
 router = APIRouter(tags=["qlib"])
 
 optimization_persistence = OptimizationPersistence()
-
 
 @router.get(
     "/optimization/history",
@@ -48,7 +56,6 @@ async def get_optimization_history(
     )
     return history
 
-
 @router.delete("/optimization/history/clear")
 async def clear_optimization_history(
     request_ctx: Request,
@@ -64,7 +71,6 @@ async def clear_optimization_history(
         tenant_id=auth_tenant_id,
     )
     return {"success": success, "message": "Optimization history cleared successfully"}
-
 
 @router.get(
     "/optimization/{optimization_id}",
@@ -89,10 +95,9 @@ async def get_optimization_detail(
         raise HTTPException(status_code=404, detail="优化记录不存在")
     return detail
 
-
 @router.post(
     "/optimize",
-    response_model=Union[QlibOptimizationResult, OptimizationTaskResponse],
+    response_model=QlibOptimizationResult | OptimizationTaskResponse,
 )
 async def run_optimization(
     request_ctx: Request,
@@ -127,12 +132,16 @@ async def run_optimization(
                 base_request=request.base_request.model_dump(mode="json"),
                 config_snapshot={
                     "base_request": request.base_request.model_dump(mode="json"),
-                    "param_ranges": [item.model_dump(mode="json") for item in request.param_ranges],
+                    "param_ranges": [
+                        item.model_dump(mode="json") for item in request.param_ranges
+                    ],
                     "optimization_target": request.optimization_target,
                     "max_parallel": request.max_parallel,
                 },
                 optimization_target=request.optimization_target,
-                param_ranges=[item.model_dump(mode="json") for item in request.param_ranges],
+                param_ranges=[
+                    item.model_dump(mode="json") for item in request.param_ranges
+                ],
                 total_tasks=request.total_combinations(),
             )
 
@@ -147,12 +156,11 @@ async def run_optimization(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"优化执行失败: {str(e)}")
-
+        raise HTTPException(status_code=500, detail=f"优化执行失败: {str(e)}") from e
 
 @router.post(
     "/optimize/genetic",
-    response_model=Union[QlibGeneticOptimizationResult, OptimizationTaskResponse],
+    response_model=QlibGeneticOptimizationResult | OptimizationTaskResponse,
 )
 async def run_genetic_optimization(
     request_ctx: Request,
@@ -171,7 +179,9 @@ async def run_genetic_optimization(
         request.base_request.tenant_id = auth_tenant_id
 
         if async_mode:
-            from backend.services.engine.qlib_app.tasks import run_genetic_optimization_async
+            from backend.services.engine.qlib_app.tasks import (
+                run_genetic_optimization_async,
+            )
 
             optimization_id = request.optimization_id
             request_dict = request.dict()
@@ -188,4 +198,6 @@ async def run_genetic_optimization(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"遗传算法优化失败: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"遗传算法优化失败: {str(e)}"
+        ) from e

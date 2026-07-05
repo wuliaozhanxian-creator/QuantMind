@@ -4,12 +4,11 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from backend.services.trade.redis_client import get_redis
 
 logger = logging.getLogger(__name__)
-
 
 def _int_env(name: str, default: int) -> int:
     try:
@@ -17,20 +16,33 @@ def _int_env(name: str, default: int) -> int:
     except Exception:
         return default
 
-
 class ManualExecutionLogStream:
     """手动执行任务级日志流，使用 Redis Stream + 状态快照。"""
 
     def __init__(self) -> None:
-        self.enabled = str(os.getenv("MANUAL_EXECUTION_LOG_STREAM_ENABLED", "true")).strip().lower() in {
+        self.enabled = str(
+            os.getenv("MANUAL_EXECUTION_LOG_STREAM_ENABLED", "true")
+        ).strip().lower() in {
             "1",
             "true",
             "yes",
             "on",
         }
-        self.stream_prefix = str(os.getenv("MANUAL_EXECUTION_LOG_STREAM_PREFIX", "qm:real-trading:manual-execution")).strip() or "qm:real-trading:manual-execution"
-        self.stream_maxlen = max(500, _int_env("MANUAL_EXECUTION_LOG_STREAM_MAXLEN", 4000))
-        self.state_ttl_sec = max(600, _int_env("MANUAL_EXECUTION_LOG_STATE_TTL_SECONDS", 172800))
+        self.stream_prefix = (
+            str(
+                os.getenv(
+                    "MANUAL_EXECUTION_LOG_STREAM_PREFIX",
+                    "qm:real-trading:manual-execution",
+                )
+            ).strip()
+            or "qm:real-trading:manual-execution"
+        )
+        self.stream_maxlen = max(
+            500, _int_env("MANUAL_EXECUTION_LOG_STREAM_MAXLEN", 4000)
+        )
+        self.state_ttl_sec = max(
+            600, _int_env("MANUAL_EXECUTION_LOG_STATE_TTL_SECONDS", 172800)
+        )
         self._client = None
         self._client_init_failed = False
 
@@ -198,11 +210,17 @@ class ManualExecutionLogStream:
             state["summary"] = summary
 
         try:
-            client.setex(self._state_key(task_id), self.state_ttl_sec, json.dumps(state, ensure_ascii=False))
+            client.setex(
+                self._state_key(task_id),
+                self.state_ttl_sec,
+                json.dumps(state, ensure_ascii=False),
+            )
         except Exception:
             return
 
-    def fetch_snapshot(self, task_id: str, *, line_limit: int = 200) -> dict[str, Any] | None:
+    def fetch_snapshot(
+        self, task_id: str, *, line_limit: int = 200
+    ) -> dict[str, Any] | None:
         client = self._get_client()
         if client is None:
             return None
@@ -246,7 +264,9 @@ class ManualExecutionLogStream:
             "logs_tail": "\n".join(lines).strip(),
         }
 
-    def fetch_entries(self, task_id: str, *, after_id: str = "0-0", limit: int = 200) -> dict[str, Any]:
+    def fetch_entries(
+        self, task_id: str, *, after_id: str = "0-0", limit: int = 200
+    ) -> dict[str, Any]:
         client = self._get_client()
         if client is None:
             return {"entries": [], "next_id": after_id, "snapshot": None}
@@ -254,7 +274,9 @@ class ManualExecutionLogStream:
         min_id = "-" if not after_id or after_id == "0-0" else f"({after_id}"
         max_count = max(1, min(int(limit), 500))
         try:
-            records = client.xrange(self._stream_key(task_id), min=min_id, max="+", count=max_count)
+            records = client.xrange(
+                self._stream_key(task_id), min=min_id, max="+", count=max_count
+            )
         except Exception:
             records = []
 
@@ -277,17 +299,21 @@ class ManualExecutionLogStream:
                 try:
                     item["progress"] = int(float(self._decode(payload.get("progress"))))
                 except Exception:
-                    pass
+                    logger.debug("ignored exception", exc_info=True)
             if payload.get("signal_index") is not None:
                 try:
-                    item["signal_index"] = int(float(self._decode(payload.get("signal_index"))))
+                    item["signal_index"] = int(
+                        float(self._decode(payload.get("signal_index")))
+                    )
                 except Exception:
-                    pass
+                    logger.debug("ignored exception", exc_info=True)
             if payload.get("order_index") is not None:
                 try:
-                    item["order_index"] = int(float(self._decode(payload.get("order_index"))))
+                    item["order_index"] = int(
+                        float(self._decode(payload.get("order_index")))
+                    )
                 except Exception:
-                    pass
+                    logger.debug("ignored exception", exc_info=True)
             if payload.get("summary"):
                 raw_summary = self._decode(payload.get("summary"))
                 if raw_summary:
@@ -304,6 +330,4 @@ class ManualExecutionLogStream:
             "snapshot": self.fetch_snapshot(task_id),
         }
 
-
 manual_execution_log_stream = ManualExecutionLogStream()
-

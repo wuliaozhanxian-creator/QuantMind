@@ -26,7 +26,9 @@ payload = {"app_id": app_id}
 
 print("\n发起请求:")
 print(f"  URL: {url}")
-print(f"  Headers: {json.dumps({k: v[:50]+'...' if k=='Authorization' else v for k,v in headers.items()}, indent=4)}")
+print(
+    f"  Headers: {json.dumps({k: v[:50] + '...' if k == 'Authorization' else v for k, v in headers.items()}, indent=4)}"
+)
 print(f"  Payload: {json.dumps(payload, indent=4)}")
 
 try:

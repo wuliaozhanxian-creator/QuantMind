@@ -3,7 +3,6 @@
 """
 
 from datetime import datetime
-from typing import Dict
 
 
 class Position:
@@ -56,7 +55,9 @@ class Position:
         elif self.quantity < 0:
             # 加仓空头：更新平均开仓价
             total_short = abs(self.quantity) + quantity
-            self.avg_cost = (abs(self.quantity) * self.avg_cost + quantity * price) / total_short
+            self.avg_cost = (
+                abs(self.quantity) * self.avg_cost + quantity * price
+            ) / total_short
             self.quantity -= quantity
         else:
             raise ValueError("持仓已为多头，不可直接开空，请先平多")
@@ -124,11 +125,15 @@ class Portfolio:
         self.last_total_value = self.initial_cash
         self.updated_at = datetime.now()
 
-    def short_sell(self, symbol: str, quantity: float, price: float, commission: float = 0.0) -> None:
+    def short_sell(
+        self, symbol: str, quantity: float, price: float, commission: float = 0.0
+    ) -> None:
         """融券开空：扣除手续费，冻结做空所得资金"""
         # 只扣手续费，卖出所得不增加可用现金（A股融券规则）
         if commission > self.cash:
-            raise ValueError(f"现金不足以支付融券手续费，需要 {commission}，可用 {self.cash}")
+            raise ValueError(
+                f"现金不足以支付融券手续费，需要 {commission}，可用 {self.cash}"
+            )
         self.cash -= commission
 
         if symbol not in self.positions:
@@ -137,7 +142,9 @@ class Portfolio:
         self.positions[symbol].update_market_value(price)
         self._update_total_value()
 
-    def buy_to_cover(self, symbol: str, quantity: float, price: float, commission: float = 0.0) -> float:
+    def buy_to_cover(
+        self, symbol: str, quantity: float, price: float, commission: float = 0.0
+    ) -> float:
         """买入平空：支付平仓成本，返回实现盈亏"""
         if symbol not in self.positions or self.positions[symbol].quantity >= 0:
             raise ValueError(f"无空头持仓可平: {symbol}")
@@ -157,7 +164,6 @@ class Portfolio:
         self._update_total_value()
         return realized_pnl
 
-
         """买入"""
         total_cost = quantity * price + commission
         if total_cost > self.cash:
@@ -176,10 +182,14 @@ class Portfolio:
         # 更新总价值
         self._update_total_value()
 
-    def sell(self, symbol: str, quantity: float, price: float, commission: float = 0.0) -> float:
+    def sell(
+        self, symbol: str, quantity: float, price: float, commission: float = 0.0
+    ) -> float:
         """卖出"""
         if symbol not in self.positions or self.positions[symbol].quantity < quantity:
-            raise ValueError(f"持仓不足，{symbol} 持仓 {self.positions.get(symbol, Position(symbol)).quantity}")
+            raise ValueError(
+                f"持仓不足，{symbol} 持仓 {self.positions.get(symbol, Position(symbol)).quantity}"
+            )
 
             # 更新持仓
         position = self.positions[symbol]

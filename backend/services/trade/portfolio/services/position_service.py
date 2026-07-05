@@ -5,7 +5,7 @@ Position Service - 持仓业务逻辑
 import logging
 from datetime import datetime
 from decimal import Decimal
-from typing import List, Optional
+from typing import Optional
 
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,12 +22,13 @@ from backend.services.trade.portfolio.utils import cache, get_cache_key
 
 logger = logging.getLogger(__name__)
 
-
 class PositionService:
     """持仓服务"""
 
     @staticmethod
-    async def create_position(db: AsyncSession, portfolio_id: int, data: PositionCreate) -> Position:
+    async def create_position(
+        db: AsyncSession, portfolio_id: int, data: PositionCreate
+    ) -> Position:
         """创建持仓（开仓）"""
         # 检查组合是否存在
         stmt = select(Portfolio).where(Portfolio.id == portfolio_id)
@@ -57,7 +58,9 @@ class PositionService:
         position_count = result.scalar()
 
         if position_count >= settings.MAX_POSITIONS_PER_PORTFOLIO:
-            raise ValueError(f"超过最大持仓数量限制: {settings.MAX_POSITIONS_PER_PORTFOLIO}")
+            raise ValueError(
+                f"超过最大持仓数量限制: {settings.MAX_POSITIONS_PER_PORTFOLIO}"
+            )
 
         # 计算成本
         total_cost = data.quantity * data.price
@@ -121,7 +124,9 @@ class PositionService:
             cached = await cache.get(cache_key)
             if cached:
                 # Reconstruction from cache dict
-                return Position(**{k: v for k, v in cached.items() if k != "_sa_instance_state"})
+                return Position(
+                    **{k: v for k, v in cached.items() if k != "_sa_instance_state"}
+                )
 
         stmt = select(Position).where(Position.id == position_id)
         if user_id is not None or tenant_id is not None:
@@ -134,13 +139,17 @@ class PositionService:
         position = result.scalar_one_or_none()
 
         if position and use_cache:
-            p_dict = {k: v for k, v in position.__dict__.items() if k != "_sa_instance_state"}
+            p_dict = {
+                k: v for k, v in position.__dict__.items() if k != "_sa_instance_state"
+            }
             await cache.set(cache_key, p_dict, settings.CACHE_TTL_POSITION)
 
         return position
 
     @staticmethod
-    async def list_positions(db: AsyncSession, portfolio_id: int, status: str | None = None) -> list[Position]:
+    async def list_positions(
+        db: AsyncSession, portfolio_id: int, status: str | None = None
+    ) -> list[Position]:
         """查询持仓列表"""
         stmt = select(Position).where(Position.portfolio_id == portfolio_id)
 
@@ -163,7 +172,9 @@ class PositionService:
         tenant_id: str | None = None,
     ) -> Position:
         """更新持仓价格（用于行情更新）"""
-        position = await PositionService.get_position(db, position_id, user_id=user_id, tenant_id=tenant_id)
+        position = await PositionService.get_position(
+            db, position_id, user_id=user_id, tenant_id=tenant_id
+        )
         if not position:
             raise ValueError("持仓不存在")
 
@@ -194,7 +205,9 @@ class PositionService:
         tenant_id: str | None = None,
     ) -> Position:
         """调整持仓（加仓/减仓）"""
-        position = await PositionService.get_position(db, position_id, user_id=user_id, tenant_id=tenant_id)
+        position = await PositionService.get_position(
+            db, position_id, user_id=user_id, tenant_id=tenant_id
+        )
         if not position:
             raise ValueError("持仓不存在")
 
@@ -216,9 +229,6 @@ class PositionService:
                 raise ValueError("可用资金不足")
 
             # 更新持仓
-            position.total_cost
-            position.quantity
-
             position.quantity += data.quantity
             position.available_quantity += data.quantity
             position.total_cost += amount
@@ -276,7 +286,9 @@ class PositionService:
                 price=data.price,
                 amount=amount,
                 quantity_after=position.quantity,
-                avg_cost_after=(position.avg_cost if position.quantity > 0 else Decimal("0")),
+                avg_cost_after=(
+                    position.avg_cost if position.quantity > 0 else Decimal("0")
+                ),
                 note=data.note or f"减仓，已实现盈亏: {realized_pnl}",
             )
             db.add(history)
@@ -305,7 +317,9 @@ class PositionService:
         tenant_id: str | None = None,
     ) -> Position:
         """平仓"""
-        position = await PositionService.get_position(db, position_id, user_id=user_id, tenant_id=tenant_id)
+        position = await PositionService.get_position(
+            db, position_id, user_id=user_id, tenant_id=tenant_id
+        )
         if not position:
             raise ValueError("持仓不存在")
 
@@ -323,7 +337,9 @@ class PositionService:
             note=note or "平仓",
         )
 
-        return await PositionService.adjust_position(db, position_id, adjust_data, user_id=user_id, tenant_id=tenant_id)
+        return await PositionService.adjust_position(
+            db, position_id, adjust_data, user_id=user_id, tenant_id=tenant_id
+        )
 
     @staticmethod
     async def get_position_history(
@@ -335,7 +351,9 @@ class PositionService:
     ) -> list[PositionHistory]:
         """查询持仓历史"""
         if user_id is not None:
-            position = await PositionService.get_position(db, position_id, user_id=user_id, tenant_id=tenant_id)
+            position = await PositionService.get_position(
+                db, position_id, user_id=user_id, tenant_id=tenant_id
+            )
             if not position:
                 return []
 
@@ -353,7 +371,9 @@ class PositionService:
     async def sync_trade_update(db: AsyncSession, data: TradeSync) -> Position:
         """根据成交信息同步持仓（供 trade service 内部调用）"""
         # 使用 with_for_update 锁定组合，确保资金更新原子性
-        stmt = select(Portfolio).where(Portfolio.id == data.portfolio_id).with_for_update()
+        stmt = (
+            select(Portfolio).where(Portfolio.id == data.portfolio_id).with_for_update()
+        )
         result = await db.execute(stmt)
         portfolio = result.scalar_one_or_none()
         if not portfolio:
@@ -362,32 +382,41 @@ class PositionService:
         symbol = data.symbol.upper()
         price = Decimal(str(data.price))
         quantity = int(data.quantity)
-        
+
         # 细化费用核算：优先使用总费用字段，若无则累加各项
-        if hasattr(data, 'total_fee') and data.total_fee is not None:
+        if hasattr(data, "total_fee") and data.total_fee is not None:
             total_fees = Decimal(str(data.total_fee))
         else:
             commission = Decimal(str(data.commission or 0))
-            stamp_duty = Decimal(str(getattr(data, 'stamp_duty', 0) or 0))
-            transfer_fee = Decimal(str(getattr(data, 'transfer_fee', 0) or 0))
+            stamp_duty = Decimal(str(getattr(data, "stamp_duty", 0) or 0))
+            transfer_fee = Decimal(str(getattr(data, "transfer_fee", 0) or 0))
             total_fees = commission + stamp_duty + transfer_fee
 
         side = (data.side or "").lower()
         if side not in ("buy", "sell"):
             raise ValueError("side 必须是 buy 或 sell")
-        
+
         position_side = data.position_side or PositionSide.LONG
         trade_action = data.trade_action
-        
+
         # 使用 with_for_update 锁定持仓
-        pos_stmt = select(Position).where(
-            and_(
-                Position.portfolio_id == data.portfolio_id,
-                Position.symbol == symbol,
-                Position.side == (position_side.value if isinstance(position_side, PositionSide) else position_side),
-                Position.status == "holding",
+        pos_stmt = (
+            select(Position)
+            .where(
+                and_(
+                    Position.portfolio_id == data.portfolio_id,
+                    Position.symbol == symbol,
+                    Position.side
+                    == (
+                        position_side.value
+                        if isinstance(position_side, PositionSide)
+                        else position_side
+                    ),
+                    Position.status == "holding",
+                )
             )
-        ).with_for_update()
+            .with_for_update()
+        )
         pos_result = await db.execute(pos_stmt)
         position = pos_result.scalar_one_or_none()
 
@@ -411,7 +440,11 @@ class PositionService:
                     current_price=price,
                     market_value=gross,
                     unrealized_pnl=-commission,
-                    unrealized_pnl_rate=((-commission / total_amount) if total_amount > 0 else Decimal("0")),
+                    unrealized_pnl_rate=(
+                        (-commission / total_amount)
+                        if total_amount > 0
+                        else Decimal("0")
+                    ),
                     realized_pnl=Decimal("0"),
                     status="holding",
                     opened_at=datetime.now(),
@@ -424,16 +457,26 @@ class PositionService:
                 old_cost = Decimal(str(position.total_cost))
                 new_cost = old_cost + total_amount
                 position.quantity = new_qty
-                position.available_quantity = int(position.available_quantity) + quantity
+                position.available_quantity = (
+                    int(position.available_quantity) + quantity
+                )
                 position.total_cost = new_cost
-                position.avg_cost = (new_cost / Decimal(str(new_qty))) if new_qty > 0 else Decimal("0")
+                position.avg_cost = (
+                    (new_cost / Decimal(str(new_qty))) if new_qty > 0 else Decimal("0")
+                )
                 position.current_price = price
                 position.market_value = Decimal(str(new_qty)) * price
                 position.unrealized_pnl = position.market_value - new_cost
-                position.unrealized_pnl_rate = (position.unrealized_pnl / new_cost) if new_cost > 0 else Decimal("0")
+                position.unrealized_pnl_rate = (
+                    (position.unrealized_pnl / new_cost)
+                    if new_cost > 0
+                    else Decimal("0")
+                )
                 position.updated_at = datetime.now()
 
-            portfolio.available_cash = Decimal(str(portfolio.available_cash)) - total_amount
+            portfolio.available_cash = (
+                Decimal(str(portfolio.available_cash)) - total_amount
+            )
 
             history = PositionHistory(
                 position_id=position.id,
@@ -463,7 +506,9 @@ class PositionService:
             position.current_price = price
             if int(position.quantity) > 0:
                 position.market_value = Decimal(str(position.quantity)) * price
-                position.unrealized_pnl = position.market_value - Decimal(str(position.total_cost))
+                position.unrealized_pnl = position.market_value - Decimal(
+                    str(position.total_cost)
+                )
                 position.unrealized_pnl_rate = (
                     (position.unrealized_pnl / Decimal(str(position.total_cost)))
                     if Decimal(str(position.total_cost)) > 0
@@ -477,7 +522,9 @@ class PositionService:
                 position.closed_at = datetime.now()
             position.updated_at = datetime.now()
 
-            portfolio.available_cash = Decimal(str(portfolio.available_cash)) + net_amount
+            portfolio.available_cash = (
+                Decimal(str(portfolio.available_cash)) + net_amount
+            )
 
             history = PositionHistory(
                 position_id=position.id,
@@ -512,7 +559,11 @@ class PositionService:
                     current_price=price,
                     market_value=gross,
                     unrealized_pnl=-(borrow_fee + commission),
-                    unrealized_pnl_rate=((-(borrow_fee + commission) / gross) if gross > 0 else Decimal("0")),
+                    unrealized_pnl_rate=(
+                        (-(borrow_fee + commission) / gross)
+                        if gross > 0
+                        else Decimal("0")
+                    ),
                     realized_pnl=Decimal("0"),
                     borrow_fee=borrow_fee,
                     financing_fee=Decimal("0"),
@@ -529,24 +580,38 @@ class PositionService:
                 old_cost = Decimal(str(position.total_cost))
                 new_cost = old_cost + gross
                 position.quantity = new_qty
-                position.available_quantity = int(position.available_quantity) + quantity
+                position.available_quantity = (
+                    int(position.available_quantity) + quantity
+                )
                 position.total_cost = new_cost
-                position.avg_cost = (new_cost / Decimal(str(new_qty))) if new_qty > 0 else Decimal("0")
+                position.avg_cost = (
+                    (new_cost / Decimal(str(new_qty))) if new_qty > 0 else Decimal("0")
+                )
                 position.current_price = price
                 position.market_value = Decimal(str(new_qty)) * price
                 position.borrow_fee = Decimal(str(position.borrow_fee)) + borrow_fee
-                position.margin_occupied = Decimal(str(position.margin_occupied)) + margin_required
+                position.margin_occupied = (
+                    Decimal(str(position.margin_occupied)) + margin_required
+                )
                 position.unrealized_pnl = (
                     (Decimal(str(position.avg_cost)) - price) * Decimal(str(new_qty))
                     - Decimal(str(position.borrow_fee))
                     - Decimal(str(commission))
                 )
-                position.unrealized_pnl_rate = (position.unrealized_pnl / new_cost) if new_cost > 0 else Decimal("0")
+                position.unrealized_pnl_rate = (
+                    (position.unrealized_pnl / new_cost)
+                    if new_cost > 0
+                    else Decimal("0")
+                )
                 position.updated_at = datetime.now()
 
-            portfolio.available_cash = Decimal(str(portfolio.available_cash)) - total_required
+            portfolio.available_cash = (
+                Decimal(str(portfolio.available_cash)) - total_required
+            )
             portfolio.liabilities = Decimal(str(portfolio.liabilities)) + gross
-            portfolio.short_market_value = Decimal(str(portfolio.short_market_value)) + gross
+            portfolio.short_market_value = (
+                Decimal(str(portfolio.short_market_value)) + gross
+            )
 
             history = PositionHistory(
                 position_id=position.id,
@@ -573,16 +638,20 @@ class PositionService:
             )
             position.quantity = int(position.quantity) - quantity
             position.available_quantity = int(position.available_quantity) - quantity
-            position.total_cost = Decimal(str(position.total_cost)) - (avg_cost * quantity)
+            position.total_cost = Decimal(str(position.total_cost)) - (
+                avg_cost * quantity
+            )
             position.realized_pnl = Decimal(str(position.realized_pnl)) + realized
             position.borrow_fee = Decimal(str(position.borrow_fee)) + borrow_fee
-            position.margin_occupied = Decimal(str(position.margin_occupied)) - margin_release
+            position.margin_occupied = (
+                Decimal(str(position.margin_occupied)) - margin_release
+            )
             position.current_price = price
             if int(position.quantity) > 0:
                 position.market_value = Decimal(str(position.quantity)) * price
-                position.unrealized_pnl = (Decimal(str(position.avg_cost)) - price) * Decimal(
-                    str(position.quantity)
-                ) - Decimal(str(position.borrow_fee))
+                position.unrealized_pnl = (
+                    Decimal(str(position.avg_cost)) - price
+                ) * Decimal(str(position.quantity)) - Decimal(str(position.borrow_fee))
                 position.unrealized_pnl_rate = (
                     (position.unrealized_pnl / Decimal(str(position.total_cost)))
                     if Decimal(str(position.total_cost)) > 0
@@ -597,7 +666,11 @@ class PositionService:
             position.updated_at = datetime.now()
 
             portfolio.available_cash = (
-                Decimal(str(portfolio.available_cash)) - gross - commission - borrow_fee + margin_release
+                Decimal(str(portfolio.available_cash))
+                - gross
+                - commission
+                - borrow_fee
+                + margin_release
             )
             portfolio.liabilities = max(
                 Decimal("0"),
@@ -624,17 +697,27 @@ class PositionService:
 
         # 轻量更新组合资金快照
         port_pos_stmt = select(Position).where(
-            and_(Position.portfolio_id == data.portfolio_id, Position.status == "holding")
+            and_(
+                Position.portfolio_id == data.portfolio_id, Position.status == "holding"
+            )
         )
         port_positions = (await db.execute(port_pos_stmt)).scalars().all()
         total_market_value = sum(
-            (Decimal(str(p.market_value)) if p.side == PositionSide.LONG else -Decimal(str(p.market_value)))
+            (
+                Decimal(str(p.market_value))
+                if p.side == PositionSide.LONG
+                else -Decimal(str(p.market_value))
+            )
             for p in port_positions
         )
-        portfolio.current_capital = Decimal(str(portfolio.available_cash)) + total_market_value
+        portfolio.current_capital = (
+            Decimal(str(portfolio.available_cash)) + total_market_value
+        )
         portfolio.total_value = portfolio.current_capital
         if Decimal(str(portfolio.liabilities or 0)) > 0:
-            portfolio.maintenance_margin_ratio = portfolio.current_capital / Decimal(str(portfolio.liabilities))
+            portfolio.maintenance_margin_ratio = portfolio.current_capital / Decimal(
+                str(portfolio.liabilities)
+            )
             if portfolio.maintenance_margin_ratio <= Decimal("1.1"):
                 portfolio.warning_level = "closeout"
             elif portfolio.maintenance_margin_ratio <= Decimal("1.3"):

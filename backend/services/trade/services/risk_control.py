@@ -37,31 +37,26 @@ from collections.abc import Awaitable, Callable
 
 logger = logging.getLogger(__name__)
 
-
 # ─── 枚举定义 ─────────────────────────────────────────────────────────────────
-
 
 class RuleType(str, Enum):
     """风控规则类型 (T4.2 要求的 5 类 + 扩展预留)"""
 
-    PRICE_LIMIT = "PRICE_LIMIT"              # 涨跌停价格检查
-    POSITION_LIMIT = "POSITION_LIMIT"        # 持仓上限检查 (单股 + 总仓位)
-    ORDER_LIMIT = "ORDER_LIMIT"              # 单笔下单金额/数量限额
-    FREQUENCY_LIMIT = "FREQUENCY_LIMIT"      # 日内交易频次限制
-    CAPITAL_CHECK = "CAPITAL_CHECK"          # 可用资金/持仓检查
-
+    PRICE_LIMIT = "PRICE_LIMIT"  # 涨跌停价格检查
+    POSITION_LIMIT = "POSITION_LIMIT"  # 持仓上限检查 (单股 + 总仓位)
+    ORDER_LIMIT = "ORDER_LIMIT"  # 单笔下单金额/数量限额
+    FREQUENCY_LIMIT = "FREQUENCY_LIMIT"  # 日内交易频次限制
+    CAPITAL_CHECK = "CAPITAL_CHECK"  # 可用资金/持仓检查
 
 class RuleAction(str, Enum):
     """规则命中后的处置动作"""
 
-    REJECT = "REJECT"                        # 立即拒绝，阻断订单
-    WARN = "WARN"                            # 警告，继续检查后续规则
+    REJECT = "REJECT"  # 立即拒绝，阻断订单
+    WARN = "WARN"  # 警告，继续检查后续规则
     REQUIRE_CONFIRMATION = "REQUIRE_CONFIRMATION"  # 需人工确认
-    PASS = "PASS"                            # 通过 (仅用于结果)
-
+    PASS = "PASS"  # 通过 (仅用于结果)
 
 # ─── 数据结构 ─────────────────────────────────────────────────────────────────
-
 
 @dataclass
 class RiskRuleConfig:
@@ -73,19 +68,17 @@ class RiskRuleConfig:
     发生命名冲突。两者可通过 ``RiskRuleLoader.from_orm_rules`` 互转。
     """
 
-    rule_id: str                             # 唯一标识，如 "price_limit_main"
-    rule_type: str | RuleType          # 规则类型
-    enabled: bool = True                     # 是否启用
+    rule_id: str  # 唯一标识，如 "price_limit_main"
+    rule_type: str | RuleType  # 规则类型
+    enabled: bool = True  # 是否启用
     params: dict[str, Any] = field(default_factory=dict)  # 规则参数
-    action: str | RuleAction = RuleAction.REJECT     # 处置动作
-    priority: int = 100                      # 数字越小优先级越高，越早执行
-    description: str = ""                    # 规则描述
+    action: str | RuleAction = RuleAction.REJECT  # 处置动作
+    priority: int = 100  # 数字越小优先级越高，越早执行
+    description: str = ""  # 规则描述
 
     def __post_init__(self) -> None:
         # 归一化类型为字符串大写，便于 dispatch
-        self.rule_type = str(
-            getattr(self.rule_type, "value", self.rule_type)
-        ).upper()
+        self.rule_type = str(getattr(self.rule_type, "value", self.rule_type)).upper()
         self.action = str(getattr(self.action, "value", self.action)).upper()
 
     @classmethod
@@ -124,7 +117,6 @@ class RiskRuleConfig:
             description=str(getattr(orm_rule, "description", "") or ""),
         )
 
-
 def _map_orm_rule_type(raw_type: str, params: dict[str, Any]) -> str:
     """将 ORM 旧式 rule_type (max_order_size 等) 映射为引擎标准 RuleType。"""
     mapping = {
@@ -135,15 +127,14 @@ def _map_orm_rule_type(raw_type: str, params: dict[str, Any]) -> str:
     }
     return mapping.get(raw_type, raw_type.upper() or RuleType.ORDER_LIMIT.value)
 
-
 @dataclass
 class RiskCheckResult:
     """单次风控检查结果。"""
 
-    action: str = RuleAction.PASS.value       # PASS / REJECT / WARN / REQUIRE_CONFIRMATION
-    rule_id: str | None = None             # 命中的规则 ID (PASS 时为 None)
-    rule_type: str | None = None           # 命中的规则类型
-    message: str = ""                         # 人可读说明
+    action: str = RuleAction.PASS.value  # PASS / REJECT / WARN / REQUIRE_CONFIRMATION
+    rule_id: str | None = None  # 命中的规则 ID (PASS 时为 None)
+    rule_type: str | None = None  # 命中的规则类型
+    message: str = ""  # 人可读说明
     details: dict[str, Any] = field(default_factory=dict)  # 命中详情 (数值等)
     violations: list[dict[str, Any]] = field(default_factory=list)  # 累积违规列表
 
@@ -195,13 +186,12 @@ class RiskCheckResult:
             ],
         )
 
-
 # 审计日志回调协议：async (event_type, rule, order_info, details) -> None
-RiskAuditCallback = Callable[[str, RiskRuleConfig, dict[str, Any], dict[str, Any]], Awaitable[None]]
-
+RiskAuditCallback = Callable[
+    [str, RiskRuleConfig, dict[str, Any], dict[str, Any]], Awaitable[None]
+]
 
 # ─── 板块识别工具 ─────────────────────────────────────────────────────────────
-
 
 def detect_board(symbol: str) -> str:
     """
@@ -222,18 +212,19 @@ def detect_board(symbol: str) -> str:
     code = "".join(ch for ch in code if ch.isdigit())
 
     if code.startswith("688"):
-        return "STAR"        # 科创板 ±20%
+        return "STAR"  # 科创板 ±20%
     if code.startswith("30"):
-        return "GEM"         # 创业板 ±20%
+        return "GEM"  # 创业板 ±20%
     if code.startswith(("4", "8")) and not code.startswith("83"):
         # 北交所：4xx/8xx (83 段部分仍归属北交所，统一按 BJ 处理)
-        return "BJ"          # 北交所 ±30%
+        return "BJ"  # 北交所 ±30%
     if code.startswith("8") or code.startswith("9"):
         return "BJ"
-    return "MAIN"            # 主板 ±10%
+    return "MAIN"  # 主板 ±10%
 
-
-def compute_limit_prices(prev_close: float, board: str, params: dict[str, Any]) -> tuple[float, float]:
+def compute_limit_prices(
+    prev_close: float, board: str, params: dict[str, Any]
+) -> tuple[float, float]:
     """
     基于昨收价与板块涨跌停比例，计算涨停价 / 跌停价。
 
@@ -254,9 +245,7 @@ def compute_limit_prices(prev_close: float, board: str, params: dict[str, Any]) 
     limit_down = round(prev_close * (1.0 - pct), 2)
     return limit_up, limit_down
 
-
 # ─── 订单/账户字段访问辅助 ─────────────────────────────────────────────────────
-
 
 def _get(obj: Any, key: str, default: Any = None) -> Any:
     """兼容 ORM Order 对象 (属性) 与 dict 的字段读取。"""
@@ -273,7 +262,6 @@ def _get(obj: Any, key: str, default: Any = None) -> Any:
     except Exception:
         return default
 
-
 def _get_float(obj: Any, key: str, default: float = 0.0) -> float:
     val = _get(obj, key, default)
     try:
@@ -281,14 +269,12 @@ def _get_float(obj: Any, key: str, default: float = 0.0) -> float:
     except (TypeError, ValueError):
         return default
 
-
 def _get_str(obj: Any, key: str, default: str = "") -> str:
     val = _get(obj, key, default)
     if val is None:
         return default
     # 兼容 Enum (OrderSide.BUY 等)
     return str(getattr(val, "value", val) or default)
-
 
 def _build_order_info(order: Any, context: dict[str, Any]) -> dict[str, Any]:
     """构造审计日志用的订单摘要。"""
@@ -305,9 +291,7 @@ def _build_order_info(order: Any, context: dict[str, Any]) -> dict[str, Any]:
         "user_id": str(context.get("user_id", "")),
     }
 
-
 # ─── 规则引擎 ─────────────────────────────────────────────────────────────────
-
 
 class RiskControlEngine:
     """
@@ -401,15 +385,21 @@ class RiskControlEngine:
             if not rule.enabled:
                 continue
             try:
-                hit, message, details = await self._apply_rule(rule, order, account, context)
+                hit, message, details = await self._apply_rule(
+                    rule, order, account, context
+                )
             except Exception as exc:  # 单条规则异常不阻断整体检查
                 logger.exception(
                     "[RiskEngine] rule %s raised exception: %s", rule.rule_id, exc
                 )
-                hit, message, details = True, f"rule_internal_error: {exc}", {
-                    "rule_id": rule.rule_id,
-                    "exception": str(exc),
-                }
+                hit, message, details = (
+                    True,
+                    f"rule_internal_error: {exc}",
+                    {
+                        "rule_id": rule.rule_id,
+                        "exception": str(exc),
+                    },
+                )
 
             if not hit:
                 continue
@@ -458,7 +448,10 @@ class RiskControlEngine:
                 warn_message = message
                 warn_details = details
 
-            if rule.action == RuleAction.REQUIRE_CONFIRMATION.value and warn_rule is None:
+            if (
+                rule.action == RuleAction.REQUIRE_CONFIRMATION.value
+                and warn_rule is None
+            ):
                 warn_rule = rule
                 warn_message = message
                 warn_details = details
@@ -491,7 +484,9 @@ class RiskControlEngine:
         handler = self._HANDLERS.get(str(rule.rule_type))
         if handler is None:
             # 未识别的规则类型跳过 (不阻断)
-            logger.debug("[RiskEngine] no handler for rule_type=%s, skip", rule.rule_type)
+            logger.debug(
+                "[RiskEngine] no handler for rule_type=%s, skip", rule.rule_type
+            )
             return False, "", {}
         return await handler(self, rule, order, account, context)
 
@@ -538,22 +533,38 @@ class RiskControlEngine:
 
         # 价格超出涨跌停区间
         if price > limit_up + 1e-9:
-            return True, (
-                f"价格 {price:.2f} 超过涨停价 {limit_up:.2f} (板块={board}, 昨收={prev_close:.2f})"
-            ), details
+            return (
+                True,
+                (
+                    f"价格 {price:.2f} 超过涨停价 {limit_up:.2f} (板块={board}, 昨收={prev_close:.2f})"
+                ),
+                details,
+            )
         if price < limit_down - 1e-9:
-            return True, (
-                f"价格 {price:.2f} 低于跌停价 {limit_down:.2f} (板块={board}, 昨收={prev_close:.2f})"
-            ), details
+            return (
+                True,
+                (
+                    f"价格 {price:.2f} 低于跌停价 {limit_down:.2f} (板块={board}, 昨收={prev_close:.2f})"
+                ),
+                details,
+            )
 
         # 已涨停时禁止买入、已跌停时禁止卖出 (避免无效委托)
         # 通过 params["block_near_limit"]=true 开启，near_limit_tolerance 控制贴近容差
         block_near_limit = bool(rule.params.get("block_near_limit", False))
         tolerance = float(rule.params.get("near_limit_tolerance", 0.01))
         if block_near_limit and side == "buy" and abs(price - limit_up) <= tolerance:
-            return True, f"标的已涨停 (价格={price:.2f}≈涨停价{limit_up:.2f})，禁止买入", details
+            return (
+                True,
+                f"标的已涨停 (价格={price:.2f}≈涨停价{limit_up:.2f})，禁止买入",
+                details,
+            )
         if block_near_limit and side == "sell" and abs(price - limit_down) <= tolerance:
-            return True, f"标的已跌停 (价格={price:.2f}≈跌停价{limit_down:.2f})，禁止卖出", details
+            return (
+                True,
+                f"标的已跌停 (价格={price:.2f}≈跌停价{limit_down:.2f})，禁止卖出",
+                details,
+            )
 
         return False, "", details
 
@@ -594,25 +605,33 @@ class RiskControlEngine:
         # 单股持仓上限
         expected_single_pct = (current_pos_value + order_value) / portfolio_value
         if expected_single_pct > max_single + 1e-9:
-            return True, (
-                f"单股持仓占比 {expected_single_pct:.1%} 超过上限 {max_single:.1%} "
-                f"(当前={current_pos_value:.2f}, 本次={order_value:.2f}, 总资产={portfolio_value:.2f})"
-            ), {
-                "symbol": _get_str(order, "symbol", ""),
-                "expected_single_pct": expected_single_pct,
-                "max_single_position_pct": max_single,
-            }
+            return (
+                True,
+                (
+                    f"单股持仓占比 {expected_single_pct:.1%} 超过上限 {max_single:.1%} "
+                    f"(当前={current_pos_value:.2f}, 本次={order_value:.2f}, 总资产={portfolio_value:.2f})"
+                ),
+                {
+                    "symbol": _get_str(order, "symbol", ""),
+                    "expected_single_pct": expected_single_pct,
+                    "max_single_position_pct": max_single,
+                },
+            )
 
         # 总仓位上限
         expected_total_pct = (total_position_value + order_value) / portfolio_value
         if expected_total_pct > max_total + 1e-9:
-            return True, (
-                f"总仓位占比 {expected_total_pct:.1%} 超过上限 {max_total:.1%} "
-                f"(当前总持仓={total_position_value:.2f}, 本次={order_value:.2f})"
-            ), {
-                "expected_total_pct": expected_total_pct,
-                "max_total_position_pct": max_total,
-            }
+            return (
+                True,
+                (
+                    f"总仓位占比 {expected_total_pct:.1%} 超过上限 {max_total:.1%} "
+                    f"(当前总持仓={total_position_value:.2f}, 本次={order_value:.2f})"
+                ),
+                {
+                    "expected_total_pct": expected_total_pct,
+                    "max_total_position_pct": max_total,
+                },
+            )
 
         return False, "", {"expected_single_pct": expected_single_pct}
 
@@ -638,17 +657,23 @@ class RiskControlEngine:
         max_qty = rule.params.get("max_order_quantity")
 
         if order_value > max_value + 1e-9:
-            return True, (
-                f"单笔金额 {order_value:.2f} 超过上限 {max_value:.2f}"
-            ), {"order_value": order_value, "max_order_value": max_value}
+            return (
+                True,
+                (f"单笔金额 {order_value:.2f} 超过上限 {max_value:.2f}"),
+                {"order_value": order_value, "max_order_value": max_value},
+            )
         if order_value > 0 and order_value < min_value - 1e-9:
-            return True, (
-                f"单笔金额 {order_value:.2f} 低于下限 {min_value:.2f}"
-            ), {"order_value": order_value, "min_order_value": min_value}
+            return (
+                True,
+                (f"单笔金额 {order_value:.2f} 低于下限 {min_value:.2f}"),
+                {"order_value": order_value, "min_order_value": min_value},
+            )
         if max_qty is not None and quantity > float(max_qty) + 1e-9:
-            return True, (
-                f"单笔数量 {quantity:.0f} 超过上限 {float(max_qty):.0f}"
-            ), {"quantity": quantity, "max_order_quantity": float(max_qty)}
+            return (
+                True,
+                (f"单笔数量 {quantity:.0f} 超过上限 {float(max_qty):.0f}"),
+                {"quantity": quantity, "max_order_quantity": float(max_qty)},
+            )
 
         return False, "", {"order_value": order_value}
 
@@ -675,24 +700,34 @@ class RiskControlEngine:
         symbol_count = int(context.get("symbol_trade_count", 0) or 0)
 
         if daily_count >= max_daily:
-            return True, (
-                f"日内交易次数 {daily_count} 已达上限 {max_daily}"
-            ), {"daily_trade_count": daily_count, "max_daily_trades": max_daily}
+            return (
+                True,
+                (f"日内交易次数 {daily_count} 已达上限 {max_daily}"),
+                {"daily_trade_count": daily_count, "max_daily_trades": max_daily},
+            )
         if symbol_count >= max_per_symbol:
             symbol = _get_str(order, "symbol", "")
-            return True, (
-                f"标的 {symbol} 日内交易次数 {symbol_count} "
-                f"已达上限 {max_per_symbol}"
-            ), {
-                "symbol": symbol,
-                "symbol_trade_count": symbol_count,
-                "max_per_symbol_trades": max_per_symbol,
-            }
+            return (
+                True,
+                (
+                    f"标的 {symbol} 日内交易次数 {symbol_count} "
+                    f"已达上限 {max_per_symbol}"
+                ),
+                {
+                    "symbol": symbol,
+                    "symbol_trade_count": symbol_count,
+                    "max_per_symbol_trades": max_per_symbol,
+                },
+            )
 
-        return False, "", {
-            "daily_trade_count": daily_count,
-            "symbol_trade_count": symbol_count,
-        }
+        return (
+            False,
+            "",
+            {
+                "daily_trade_count": daily_count,
+                "symbol_trade_count": symbol_count,
+            },
+        )
 
     async def _check_capital_check(
         self,
@@ -729,14 +764,18 @@ class RiskControlEngine:
             commission = max(order_value * rate, min_comm)
             required = order_value + commission
             if required > available_cash + 1e-9:
-                return True, (
-                    f"可用资金不足: 需要 {required:.2f} (含佣金 {commission:.2f}), "
-                    f"可用 {available_cash:.2f}"
-                ), {
-                    "required": required,
-                    "available_cash": available_cash,
-                    "commission": commission,
-                }
+                return (
+                    True,
+                    (
+                        f"可用资金不足: 需要 {required:.2f} (含佣金 {commission:.2f}), "
+                        f"可用 {available_cash:.2f}"
+                    ),
+                    {
+                        "required": required,
+                        "available_cash": available_cash,
+                        "commission": commission,
+                    },
+                )
             return False, "", {"required": required, "available_cash": available_cash}
 
         if side == "sell":
@@ -744,16 +783,24 @@ class RiskControlEngine:
             if available_position < 0:
                 return False, "", {"skipped": "available_position unknown"}
             if quantity > available_position + 1e-9:
-                return True, (
-                    f"可用持仓不足: 需要 {quantity:.0f}, 可用 {available_position:.0f}"
-                ), {
+                return (
+                    True,
+                    (
+                        f"可用持仓不足: 需要 {quantity:.0f}, 可用 {available_position:.0f}"
+                    ),
+                    {
+                        "quantity": quantity,
+                        "available_position": available_position,
+                    },
+                )
+            return (
+                False,
+                "",
+                {
                     "quantity": quantity,
                     "available_position": available_position,
-                }
-            return False, "", {
-                "quantity": quantity,
-                "available_position": available_position,
-            }
+                },
+            )
 
         return False, "", {"skipped": f"unknown side={side}"}
 
@@ -762,7 +809,6 @@ class RiskControlEngine:
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
-
 
 # 注册处理器 (在类定义完成后绑定)
 RiskControlEngine._HANDLERS = {
@@ -773,9 +819,7 @@ RiskControlEngine._HANDLERS = {
     RuleType.CAPITAL_CHECK.value: RiskControlEngine._check_capital_check,
 }
 
-
 # ─── 配置加载器 ───────────────────────────────────────────────────────────────
-
 
 class RiskRuleLoader:
     """
@@ -825,9 +869,7 @@ class RiskRuleLoader:
                 try:
                     rules.append(RiskRuleConfig.from_dict(raw))
                 except (KeyError, TypeError) as exc:
-                    logger.warning(
-                        "[RiskLoader] skip invalid rule %s: %s", raw, exc
-                    )
+                    logger.warning("[RiskLoader] skip invalid rule %s: %s", raw, exc)
 
             # 更新 mtime 快照
             self._last_mtime = self.config_path.stat().st_mtime
@@ -837,7 +879,9 @@ class RiskRuleLoader:
                 self.config_path,
             )
         except Exception as exc:
-            logger.exception("[RiskLoader] failed to load %s: %s", self.config_path, exc)
+            logger.exception(
+                "[RiskLoader] failed to load %s: %s", self.config_path, exc
+            )
         return rules
 
     def has_changed(self) -> bool:
@@ -886,13 +930,11 @@ class RiskRuleLoader:
             merged[r.rule_id] = r
         return list(merged.values())
 
-
 # ─── 模块级便捷单例 (惰性初始化，避免 import 时强依赖配置文件) ───────────────────
 
 _default_engine: RiskControlEngine | None = None
 _default_loader: RiskRuleLoader | None = None
 _engine_lock = threading.Lock()
-
 
 def _default_config_path() -> Path:
     """定位默认配置文件路径 config/risk_rules.yaml。"""
@@ -909,8 +951,9 @@ def _default_config_path() -> Path:
             return cand
     return candidates[0]  # 返回默认期望路径 (即使不存在)
 
-
-def get_default_engine(audit_callback: RiskAuditCallback | None = None) -> RiskControlEngine:
+def get_default_engine(
+    audit_callback: RiskAuditCallback | None = None,
+) -> RiskControlEngine:
     """
     获取模块级默认引擎单例。
 
@@ -927,7 +970,6 @@ def get_default_engine(audit_callback: RiskAuditCallback | None = None) -> RiskC
                 "[RiskEngine] default engine initialized with %d rules", len(rules)
             )
         return _default_engine
-
 
 def reload_default_engine() -> bool:
     """热加载默认引擎的规则 (若配置文件已变更)。"""

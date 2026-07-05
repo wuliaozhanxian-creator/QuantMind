@@ -11,7 +11,7 @@
 import asyncio
 import logging
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Optional
 
 import pandas as pd
 
@@ -19,10 +19,11 @@ from backend.services.engine.qlib_app.services.basic_risk_service import (
     BasicRiskService,
 )
 from backend.services.engine.qlib_app.websocket.connection_manager import ws_manager
-from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
+from backend.services.engine.qlib_app.utils.structured_logger import (
+    StructuredTaskLogger,
+)
 
 logger = logging.getLogger(__name__)
-
 
 class RiskControlConfig:
     """风控配置"""
@@ -42,7 +43,6 @@ class RiskControlConfig:
         self.var_threshold = var_threshold
         self.position_concentration_threshold = position_concentration_threshold
         self.enable_auto_stop = enable_auto_stop
-
 
 class RiskAlert:
     """风险告警"""
@@ -73,7 +73,6 @@ class RiskAlert:
             "message": self.message,
             "timestamp": self.timestamp.isoformat(),
         }
-
 
 class RealTimeRiskMonitor:
     """实时风控监控器"""
@@ -114,7 +113,9 @@ class RealTimeRiskMonitor:
         try:
             while self.is_monitoring and not self._stop_signal:
                 # 1. 计算当前风险指标
-                risk_metrics = await self._calculate_current_risk(equity_curve, positions)
+                risk_metrics = await self._calculate_current_risk(
+                    equity_curve, positions
+                )
 
                 # 2. 检查风险阈值
                 alerts = self._check_risk_thresholds(risk_metrics)
@@ -240,7 +241,8 @@ class RealTimeRiskMonitor:
                     indicator="max_drawdown",
                     current_value=max_drawdown,
                     threshold=-self.config.max_drawdown_threshold,
-                    message=f"最大回撤 {max_drawdown:.2%} 超过阈值 " f"{self.config.max_drawdown_threshold:.2%}",
+                    message=f"最大回撤 {max_drawdown:.2%} 超过阈值 "
+                    f"{self.config.max_drawdown_threshold:.2%}",
                 )
             )
 
@@ -253,7 +255,8 @@ class RealTimeRiskMonitor:
                     indicator="sharpe_ratio",
                     current_value=sharpe,
                     threshold=self.config.sharpe_threshold,
-                    message=f"夏普比率 {sharpe:.2f} 低于阈值 " f"{self.config.sharpe_threshold:.2f}",
+                    message=f"夏普比率 {sharpe:.2f} 低于阈值 "
+                    f"{self.config.sharpe_threshold:.2f}",
                 )
             )
 
@@ -266,7 +269,8 @@ class RealTimeRiskMonitor:
                     indicator="volatility",
                     current_value=volatility,
                     threshold=self.config.volatility_threshold,
-                    message=f"波动率 {volatility:.2%} 超过阈值 " f"{self.config.volatility_threshold:.2%}",
+                    message=f"波动率 {volatility:.2%} 超过阈值 "
+                    f"{self.config.volatility_threshold:.2%}",
                 )
             )
 
@@ -279,13 +283,17 @@ class RealTimeRiskMonitor:
                     indicator="var_95",
                     current_value=var_95,
                     threshold=self.config.var_threshold,
-                    message=f"VaR(95%) {var_95:.2%} 超过阈值 " f"{self.config.var_threshold:.2%}",
+                    message=f"VaR(95%) {var_95:.2%} 超过阈值 "
+                    f"{self.config.var_threshold:.2%}",
                 )
             )
 
         # 检查持仓集中度
         max_position = risk_metrics.get("max_position_ratio")
-        if max_position is not None and max_position > self.config.position_concentration_threshold:
+        if (
+            max_position is not None
+            and max_position > self.config.position_concentration_threshold
+        ):
             alerts.append(
                 RiskAlert(
                     alert_type="warning",
@@ -334,13 +342,23 @@ class RealTimeRiskMonitor:
                     logger,
                     "risk-monitor-service",
                     {"backtest_id": self.backtest_id, "alert_type": "critical"},
-                ).error("alert", alert.message, indicator=alert.indicator, threshold=alert.threshold)
+                ).error(
+                    "alert",
+                    alert.message,
+                    indicator=alert.indicator,
+                    threshold=alert.threshold,
+                )
             else:
                 StructuredTaskLogger(
                     logger,
                     "risk-monitor-service",
                     {"backtest_id": self.backtest_id, "alert_type": "warning"},
-                ).warning("alert", alert.message, indicator=alert.indicator, threshold=alert.threshold)
+                ).warning(
+                    "alert",
+                    alert.message,
+                    indicator=alert.indicator,
+                    threshold=alert.threshold,
+                )
 
         # 检查是否需要自动停止
         if self.config.enable_auto_stop:
@@ -350,7 +368,11 @@ class RealTimeRiskMonitor:
                     logger,
                     "risk-monitor-service",
                     {"backtest_id": self.backtest_id},
-                ).error("auto_stop", "触发自动停止", critical_alert_count=len(critical_alerts))
+                ).error(
+                    "auto_stop",
+                    "触发自动停止",
+                    critical_alert_count=len(critical_alerts),
+                )
                 await self.stop_monitoring()
 
                 # 发送停止通知
@@ -374,16 +396,18 @@ class RealTimeRiskMonitor:
         """
         return {
             "total_alerts": len(self.alerts),
-            "critical_alerts": len([a for a in self.alerts if a.alert_type == "critical"]),
-            "warning_alerts": len([a for a in self.alerts if a.alert_type == "warning"]),
+            "critical_alerts": len(
+                [a for a in self.alerts if a.alert_type == "critical"]
+            ),
+            "warning_alerts": len(
+                [a for a in self.alerts if a.alert_type == "warning"]
+            ),
             # 最近5条
             "latest_alerts": [alert.to_dict() for alert in self.alerts[-5:]],
         }
 
-
 # 全局监控器管理
 _active_monitors: dict[str, RealTimeRiskMonitor] = {}
-
 
 async def start_risk_monitoring(
     backtest_id: str,
@@ -418,7 +442,6 @@ async def start_risk_monitoring(
 
     return monitor
 
-
 async def stop_risk_monitoring(backtest_id: str):
     """
     停止风控监控
@@ -429,7 +452,6 @@ async def stop_risk_monitoring(backtest_id: str):
     if backtest_id in _active_monitors:
         await _active_monitors[backtest_id].stop_monitoring()
         del _active_monitors[backtest_id]
-
 
 def get_active_monitor(backtest_id: str) -> RealTimeRiskMonitor | None:
     """
@@ -442,7 +464,6 @@ def get_active_monitor(backtest_id: str) -> RealTimeRiskMonitor | None:
         监控器实例或None
     """
     return _active_monitors.get(backtest_id)
-
 
 def get_all_active_monitors() -> dict[str, RealTimeRiskMonitor]:
     """

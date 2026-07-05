@@ -1,8 +1,7 @@
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import httpx
-
 
 class StockSelectionClient:
     """调用 OpenClaw 的选股服务"""
@@ -12,7 +11,9 @@ class StockSelectionClient:
         base_url: str | None = None,
         timeout: float = 15.0,
     ) -> None:
-        self.base_url = base_url or os.getenv("OPENCLAW_BASE_URL", "http://127.0.0.1:8015")
+        self.base_url = base_url or os.getenv(
+            "OPENCLAW_BASE_URL", "http://127.0.0.1:8015"
+        )
         self.timeout = timeout
 
     async def select_stocks(

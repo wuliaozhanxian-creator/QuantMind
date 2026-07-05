@@ -5,7 +5,7 @@ import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 try:
     import redis as redis_lib
@@ -13,7 +13,6 @@ except Exception:  # pragma: no cover
     redis_lib = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
-
 
 def _get_env_with_root_fallback(key: str, default: str = "") -> str:
     raw = os.getenv(key)
@@ -31,9 +30,8 @@ def _get_env_with_root_fallback(key: str, default: str = "") -> str:
                 if env_key.strip() == key:
                     return env_value.strip().strip("'").strip('"')
     except Exception:
-        pass
+        logger.debug("ignored exception", exc_info=True)
     return default
-
 
 class TrainingRunLogStream:
     """训练任务容器日志实时流（Redis Stream + 最新状态快照）。"""
@@ -258,7 +256,7 @@ class TrainingRunLogStream:
                     try:
                         last_progress = int(progress_val)
                     except Exception:
-                        pass
+                        logger.debug("ignored exception", exc_info=True)
 
         return {
             "status": last_status,

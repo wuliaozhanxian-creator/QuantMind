@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,7 +13,6 @@ from backend.services.api.community_app.models import AuditLogRecord
 from backend.services.api.routers.community.auth import Principal
 
 logger = logging.getLogger(__name__)
-
 
 async def write_audit_log(
     session: AsyncSession,
@@ -32,7 +31,9 @@ async def write_audit_log(
     ip = None
     ua = None
     if request is not None:
-        ip = (request.client.host if request.client else None) or request.headers.get("x-forwarded-for")
+        ip = (request.client.host if request.client else None) or request.headers.get(
+            "x-forwarded-for"
+        )
         ua = request.headers.get("user-agent")
 
     rec = AuditLogRecord(

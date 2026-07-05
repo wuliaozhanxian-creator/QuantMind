@@ -11,17 +11,14 @@ from backend.shared.auth import create_service_token
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-
 class LLMConfig(BaseModel):
     qwen_api_key: str
-
 
 def _get_user_info(request: Request):
     user = getattr(request.state, "user", None)
     if not user:
         raise HTTPException(status_code=401, detail="Authentication required")
     return user
-
 
 def _get_api_gateway_url():
     """获取 API Gateway URL，OSS 模式下使用 127.0.0.1"""
@@ -31,7 +28,6 @@ def _get_api_gateway_url():
         return url
     # OSS 单容器模式，所有服务在同一容器内
     return "http://127.0.0.1:8000"
-
 
 @router.get("/llm")
 async def get_llm_config(request: Request):
@@ -51,7 +47,9 @@ async def get_llm_config(request: Request):
                 "X-Tenant-Id": tenant_id,
             }
             # 调用 Gateway 的 profiles 接口获取详情
-            resp = await client.get(f"{api_gateway}/api/v1/profiles/{user_id}", headers=headers)
+            resp = await client.get(
+                f"{api_gateway}/api/v1/profiles/{user_id}", headers=headers
+            )
             if resp.status_code == 200:
                 body = resp.json()
                 data = body.get("data", {})
@@ -64,12 +62,13 @@ async def get_llm_config(request: Request):
                     "masked_key": masked,
                 }
             else:
-                logger.warning(f"Failed to fetch profile: {resp.status_code} {resp.text}")
+                logger.warning(
+                    f"Failed to fetch profile: {resp.status_code} {resp.text}"
+                )
     except Exception as e:
         logger.error(f"Failed to fetch profile for user {user_id}: {e}")
 
     return {"success": True, "has_key": False, "masked_key": ""}
-
 
 @router.post("/llm")
 async def save_llm_config(request: Request, config: LLMConfig):
@@ -99,12 +98,16 @@ async def save_llm_config(request: Request, config: LLMConfig):
                 json={"api_key": new_key},
             )
             if resp.status_code != 200:
-                logger.error(f"Failed to update profile for user {user_id}: {resp.text}")
-                raise HTTPException(status_code=resp.status_code, detail="同步到用户服务失败")
+                logger.error(
+                    f"Failed to update profile for user {user_id}: {resp.text}"
+                )
+                raise HTTPException(
+                    status_code=resp.status_code, detail="同步到用户服务失败"
+                )
 
         return {"success": True, "message": "配置已成功同步到个人档案"}
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to save config for user {user_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e

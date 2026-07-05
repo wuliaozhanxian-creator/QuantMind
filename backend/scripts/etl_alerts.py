@@ -35,10 +35,8 @@ LEVEL_INFO = "info"
 LEVEL_WARNING = "warning"
 LEVEL_ERROR = "error"
 
-
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
-
 
 class MonitorStateStore:
     """ETL 监控状态持久化（本地 JSON）
@@ -114,11 +112,9 @@ class MonitorStateStore:
         with self._lock:
             return json.loads(json.dumps(self._cache))
 
-
 # 全局单例（懒加载）
 _global_store: Optional[MonitorStateStore] = None
 _global_store_lock = threading.Lock()
-
 
 def get_monitor_state_store() -> MonitorStateStore:
     global _global_store
@@ -128,14 +124,12 @@ def get_monitor_state_store() -> MonitorStateStore:
                 _global_store = MonitorStateStore()
     return _global_store
 
-
 def reset_monitor_state_store(path: str | Path | None = None) -> MonitorStateStore:
     """重置全局单例（测试用）"""
     global _global_store
     with _global_store_lock:
         _global_store = MonitorStateStore(path)
     return _global_store
-
 
 # ============================================================
 # Redis pub/sub 告警发布（best-effort）
@@ -160,7 +154,6 @@ def _build_redis_client():
     except Exception as exc:
         logger.debug("ETL 告警 Redis 客户端初始化失败: %s", exc)
         return None
-
 
 def publish_alert(
     *,
@@ -209,7 +202,7 @@ def publish_alert(
             try:
                 client.close()
             except Exception:
-                pass
+                logger.debug("ignored exception", exc_info=True)
 
     # 3. 结构化日志
     log_msg = "ETL告警 [%s/%s] %s: %s"

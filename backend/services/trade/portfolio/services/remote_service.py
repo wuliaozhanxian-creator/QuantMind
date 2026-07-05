@@ -17,7 +17,9 @@ class RemoteService:
         # 设置超时
         self.timeout = httpx.Timeout(10.0, connect=5.0)
 
-    async def get_strategy_code(self, strategy_id: int, user_id: int, token: str) -> dict:
+    async def get_strategy_code(
+        self, strategy_id: int, user_id: int, token: str
+    ) -> dict:
         """
         从 Strategy Service 获取策略详情 (包含代码/配置)
         """
@@ -34,11 +36,17 @@ class RemoteService:
             except httpx.HTTPStatusError as e:
                 logger.error(f"Failed to get strategy {strategy_id}: {e.response.text}")
                 if e.response.status_code == 404:
-                    raise HTTPException(status_code=404, detail="Strategy not found")
-                raise HTTPException(status_code=500, detail="Failed to fetch strategy")
+                    raise HTTPException(
+                        status_code=404, detail="Strategy not found"
+                    ) from e
+                raise HTTPException(
+                    status_code=500, detail="Failed to fetch strategy"
+                ) from e
             except Exception as e:
                 logger.error(f"Error connecting to Strategy Service: {e}")
-                raise HTTPException(status_code=503, detail="Strategy Service unavailable")
+                raise HTTPException(
+                    status_code=503, detail="Strategy Service unavailable"
+                ) from e
 
     async def start_real_trading(
         self, user_id: str, strategy_code: str, strategy_filename: str = "strategy.py"
@@ -52,7 +60,9 @@ class RemoteService:
         files = {"file": (strategy_filename, strategy_code, "text/x-python")}
         data = {"user_id": user_id}
 
-        async with httpx.AsyncClient(timeout=120.0) as client:  # 启动K8s可能较慢，增加超时
+        async with httpx.AsyncClient(
+            timeout=120.0
+        ) as client:  # 启动K8s可能较慢，增加超时
             try:
                 response = await client.post(url, data=data, files=files)
                 response.raise_for_status()
@@ -62,10 +72,12 @@ class RemoteService:
                 raise HTTPException(
                     status_code=e.response.status_code,
                     detail=f"Real Trading Error: {e.response.text}",
-                )
+                ) from e
             except Exception as e:
                 logger.error(f"Error connecting to Real Trading Service: {e}")
-                raise HTTPException(status_code=503, detail="Real Trading Service unavailable")
+                raise HTTPException(
+                    status_code=503, detail="Real Trading Service unavailable"
+                ) from e
 
     async def stop_real_trading(self, user_id: str) -> dict:
         """
@@ -84,10 +96,12 @@ class RemoteService:
                 raise HTTPException(
                     status_code=e.response.status_code,
                     detail=f"Real Trading Error: {e.response.text}",
-                )
+                ) from e
             except Exception as e:
                 logger.error(f"Error connecting to Real Trading Service: {e}")
-                raise HTTPException(status_code=503, detail="Real Trading Service unavailable")
+                raise HTTPException(
+                    status_code=503, detail="Real Trading Service unavailable"
+                ) from e
 
     async def get_real_trading_status(self, user_id: str) -> dict:
         """

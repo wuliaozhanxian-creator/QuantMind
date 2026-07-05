@@ -24,7 +24,6 @@ from urllib.request import urlopen
 import psycopg2
 import psycopg2.extras
 
-
 @dataclass
 class Counters:
     total: int = 0
@@ -34,11 +33,9 @@ class Counters:
     skipped_code_missing: int = 0
     failed: int = 0
 
-
 def _env(name: str, default: str) -> str:
     val = os.getenv(name)
     return val if val is not None and val != "" else default
-
 
 def _db_config_from_env() -> Dict[str, Any]:
     return {
@@ -48,7 +45,6 @@ def _db_config_from_env() -> Dict[str, Any]:
         "user": _env("DB_USER", "quantmind"),
         "password": _env("DB_PASSWORD", ""),
     }
-
 
 def _parse_tags(raw: Any) -> List[str]:
     if raw is None:
@@ -70,10 +66,9 @@ def _parse_tags(raw: Any) -> List[str]:
             if isinstance(parsed, list):
                 return [str(x) for x in parsed]
         except Exception:
-            pass
+            pass  # noqa: BLE001 - None
         return [s]
     return []
-
 
 def _json_or_default(raw: Any, default: Any) -> Any:
     if raw is None:
@@ -89,7 +84,6 @@ def _json_or_default(raw: Any, default: Any) -> Any:
         except Exception:
             return default
     return default
-
 
 def _read_code_from_url(url: Optional[str]) -> str:
     if not url:
@@ -109,7 +103,6 @@ def _read_code_from_url(url: Optional[str]) -> str:
     except Exception:
         return ""
 
-
 def _resolve_user_int_id(cur, legacy_user_id: str) -> Optional[int]:
     # 优先按业务 user_id 映射
     cur.execute("SELECT id FROM users WHERE user_id = %s", (legacy_user_id,))
@@ -125,7 +118,6 @@ def _resolve_user_int_id(cur, legacy_user_id: str) -> Optional[int]:
             return int(row2[0])
     return None
 
-
 def _already_migrated(cur, legacy_id: str) -> bool:
     cur.execute(
         """
@@ -137,7 +129,6 @@ def _already_migrated(cur, legacy_id: str) -> bool:
         (legacy_id,),
     )
     return cur.fetchone() is not None
-
 
 def migrate(args) -> int:
     cfg = _db_config_from_env()
@@ -284,7 +275,6 @@ def migrate(args) -> int:
 
     return 0 if counters.failed == 0 else 2
 
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="一次性迁移 user_strategies 到 strategies（幂等）")
     parser.add_argument("--user-id", default="", help="仅迁移指定 user_strategies.user_id")
@@ -306,12 +296,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     return parser
 
-
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
     return migrate(args)
-
 
 if __name__ == "__main__":
     sys.exit(main())

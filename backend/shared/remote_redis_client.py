@@ -10,10 +10,16 @@ logger = logging.getLogger(__name__)
 # ============================================================
 # Redis 配置 — 默认使用本地 Redis（通过环境变量覆盖）
 # ============================================================
-REMOTE_REDIS_HOST = os.getenv("REMOTE_QUOTE_REDIS_HOST", os.getenv("REDIS_HOST", "localhost"))
-REMOTE_REDIS_PORT = int(os.getenv("REMOTE_QUOTE_REDIS_PORT", os.getenv("REDIS_PORT", "6379")))
+REMOTE_REDIS_HOST = os.getenv(
+    "REMOTE_QUOTE_REDIS_HOST", os.getenv("REDIS_HOST", "localhost")
+)
+REMOTE_REDIS_PORT = int(
+    os.getenv("REMOTE_QUOTE_REDIS_PORT", os.getenv("REDIS_PORT", "6379"))
+)
 REMOTE_REDIS_USER = os.getenv("REMOTE_QUOTE_REDIS_USER", os.getenv("REDIS_USER", ""))
-REMOTE_REDIS_PASSWORD = os.getenv("REMOTE_QUOTE_REDIS_PASSWORD", os.getenv("REDIS_PASSWORD", ""))
+REMOTE_REDIS_PASSWORD = os.getenv(
+    "REMOTE_QUOTE_REDIS_PASSWORD", os.getenv("REDIS_PASSWORD", "")
+)
 REMOTE_REDIS_DB = int(os.getenv("REMOTE_QUOTE_REDIS_DB", os.getenv("REDIS_DB", "0")))
 
 # 连接池上限（参考 redis_sentinel_client.py 的 REDIS_MAX_CONNECTIONS）
@@ -27,7 +33,6 @@ REMOTE_REDIS_MAX_CONNECTIONS = int(os.getenv("REMOTE_REDIS_MAX_CONNECTIONS", "50
 # 未配置用户名时（本地 Redis 无 ACL），允许通过。
 # ============================================================
 READONLY_REDIS_USERS = {"readonly_monitor", "quantmind_readonly"}
-
 
 def _assert_readonly_redis_user() -> None:
     """T5.1 远程 Redis 只读凭据隔离断言
@@ -46,7 +51,6 @@ def _assert_readonly_redis_user() -> None:
             f"远程行情 Redis 仅允许只读访问，禁止使用读写凭据连接。"
         )
 
-
 # ============================================================
 # 连接池单例（按 db 分组）
 # —— Redis 连接池绑定特定 db，为保持 get_remote_redis_client(db=...)
@@ -59,7 +63,6 @@ def _assert_readonly_redis_user() -> None:
 _pools: dict[int, ConnectionPool] = {}
 _clients: dict[int, Redis] = {}
 _lock = threading.Lock()
-
 
 def _build_pool(db: int) -> ConnectionPool:
     """构造一个绑定到指定 db 的连接池"""
@@ -76,7 +79,6 @@ def _build_pool(db: int) -> ConnectionPool:
         socket_keepalive=True,
         health_check_interval=30,
     )
-
 
 def get_remote_redis_client(db: int = None) -> Redis:
     """获取 Redis 客户端（基于连接池的单例，按 db 分组）
@@ -110,8 +112,7 @@ def get_remote_redis_client(db: int = None) -> Redis:
             _clients[db] = client
         return client
 
-
-def close_remote_redis_client(db: Optional[int] = None) -> None:
+def close_remote_redis_client(db: int | None = None) -> None:
     """关闭远程 Redis 连接池，优雅释放资源
 
     Args:

@@ -20,7 +20,7 @@ import time
 from dataclasses import dataclass, field
 from functools import wraps
 from threading import RLock
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Optional
 from collections.abc import Callable
 
 try:
@@ -40,9 +40,13 @@ logger = logging.getLogger(__name__)
 
 # Prometheus指标
 cache_hits = Counter("cache_hits_total", "Total cache hits", ["level", "key_prefix"])
-cache_misses = Counter("cache_misses_total", "Total cache misses", ["level", "key_prefix"])
+cache_misses = Counter(
+    "cache_misses_total", "Total cache misses", ["level", "key_prefix"]
+)
 cache_sets = Counter("cache_sets_total", "Total cache sets", ["level", "key_prefix"])
-cache_errors = Counter("cache_errors_total", "Total cache errors", ["level", "operation"])
+cache_errors = Counter(
+    "cache_errors_total", "Total cache errors", ["level", "operation"]
+)
 
 cache_size = Gauge("cache_size_bytes", "Cache size in bytes", ["level"])
 cache_items = Gauge("cache_items_total", "Total cache items", ["level"])
@@ -53,7 +57,6 @@ cache_operation_duration = Histogram(
     "Cache operation duration",
     ["operation", "level"],
 )
-
 
 @dataclass
 class CacheEntry:
@@ -83,7 +86,6 @@ class CacheEntry:
 
         # LFU + LRU混合策略
         return (frequency * 0.7) - (recency * 0.2) - (age * 0.1)
-
 
 class EnhancedMemoryCache:
     """增强的内存缓存"""
@@ -129,7 +131,9 @@ class EnhancedMemoryCache:
         with self._lock:
             if key not in self._cache:
                 self._stats["misses"] += 1
-                cache_misses.labels(level="memory", key_prefix=self._get_key_prefix(key)).inc()
+                cache_misses.labels(
+                    level="memory", key_prefix=self._get_key_prefix(key)
+                ).inc()
                 return None
 
             entry = self._cache[key]
@@ -138,21 +142,27 @@ class EnhancedMemoryCache:
             if entry.is_expired():
                 self._delete_entry(key)
                 self._stats["misses"] += 1
-                cache_misses.labels(level="memory", key_prefix=self._get_key_prefix(key)).inc()
+                cache_misses.labels(
+                    level="memory", key_prefix=self._get_key_prefix(key)
+                ).inc()
                 return None
 
             # 记录命中
             if track_hit:
                 entry.hit()
                 self._stats["hits"] += 1
-                cache_hits.labels(level="memory", key_prefix=self._get_key_prefix(key)).inc()
+                cache_hits.labels(
+                    level="memory", key_prefix=self._get_key_prefix(key)
+                ).inc()
 
                 # 热点数据识别
                 if entry.hit_count > 10:
                     self._hot_keys.add(key)
 
             duration = time.time() - start_time
-            cache_operation_duration.labels(operation="get", level="memory").observe(duration)
+            cache_operation_duration.labels(operation="get", level="memory").observe(
+                duration
+            )
 
             return entry.value
 
@@ -192,14 +202,18 @@ class EnhancedMemoryCache:
             self._stats["memory_bytes"] += size_bytes
             self._stats["sets"] += 1
 
-            cache_sets.labels(level="memory", key_prefix=self._get_key_prefix(key)).inc()
+            cache_sets.labels(
+                level="memory", key_prefix=self._get_key_prefix(key)
+            ).inc()
 
             # 定期清理
             if time.time() - self._last_cleanup > self.cleanup_interval:
                 self._cleanup_expired()
 
             duration = time.time() - start_time
-            cache_operation_duration.labels(operation="set", level="memory").observe(duration)
+            cache_operation_duration.labels(operation="set", level="memory").observe(
+                duration
+            )
 
             # 更新指标
             cache_size.labels(level="memory").set(self._stats["memory_bytes"])
@@ -316,7 +330,6 @@ class EnhancedMemoryCache:
         parts = key.split(":", 1)
         return parts[0] if len(parts) > 1 else "default"
 
-
 class CacheProtection:
     """缓存保护机制"""
 
@@ -351,7 +364,6 @@ class CacheProtection:
             else:
                 del self._null_cache[key]
         return False
-
 
 class EnhancedCacheManager:
     """增强的缓存管理器"""
@@ -404,7 +416,9 @@ class EnhancedCacheManager:
         # 缓存保护
         self.protection = CacheProtection()
 
-        logger.info(f"✅ 增强缓存管理器初始化 - 内存: {use_memory}, Redis: {self.use_redis}")
+        logger.info(
+            f"✅ 增强缓存管理器初始化 - 内存: {use_memory}, Redis: {self.use_redis}"
+        )
 
     def get(self, key: str) -> Any | None:
         """多级缓存获取"""
@@ -427,16 +441,20 @@ class EnhancedCacheManager:
                     try:
                         value = json.loads(value)
                     except (json.JSONDecodeError, TypeError):
-                        pass
+                        pass  # noqa: BLE001 - 已知类型不匹配，预期静默
 
                     # 回写L1
                     if self.memory_cache:
                         self.memory_cache.set(key, value, ttl=60)
 
-                    cache_hits.labels(level="redis", key_prefix=self._get_key_prefix(key)).inc()
+                    cache_hits.labels(
+                        level="redis", key_prefix=self._get_key_prefix(key)
+                    ).inc()
                     return value
                 else:
-                    cache_misses.labels(level="redis", key_prefix=self._get_key_prefix(key)).inc()
+                    cache_misses.labels(
+                        level="redis", key_prefix=self._get_key_prefix(key)
+                    ).inc()
             except Exception as e:
                 logger.error(f"Redis get error: {e}")
                 cache_errors.labels(level="redis", operation="get").inc()
@@ -477,7 +495,9 @@ class EnhancedCacheManager:
                     serialized = str(value)
 
                 success &= bool(self.redis_client.setex(key, ttl, serialized))
-                cache_sets.labels(level="redis", key_prefix=self._get_key_prefix(key)).inc()
+                cache_sets.labels(
+                    level="redis", key_prefix=self._get_key_prefix(key)
+                ).inc()
             except Exception as e:
                 logger.error(f"Redis set error: {e}")
                 cache_errors.labels(level="redis", operation="set").inc()
@@ -551,7 +571,11 @@ class EnhancedCacheManager:
                     "used_memory_mb": info.get("used_memory", 0) / 1024 / 1024,
                     "keyspace_hits": info.get("keyspace_hits", 0),
                     "keyspace_misses": info.get("keyspace_misses", 0),
-                    "keys": (keyspace.get("db0", {}).get("keys", 0) if "db0" in keyspace else 0),
+                    "keys": (
+                        keyspace.get("db0", {}).get("keys", 0)
+                        if "db0" in keyspace
+                        else 0
+                    ),
                 }
 
                 # 计算Redis命中率
@@ -574,7 +598,6 @@ class EnhancedCacheManager:
         """获取键前缀"""
         parts = key.split(":", 1)
         return parts[0] if len(parts) > 1 else "default"
-
 
 def cached(
     ttl: int = 3600,
@@ -608,7 +631,9 @@ def cached(
             # 使用全局缓存管理器
             global enhanced_cache_manager
             if enhanced_cache_manager is None:
-                enhanced_cache_manager = EnhancedCacheManager(use_memory=True, use_redis=True)
+                enhanced_cache_manager = EnhancedCacheManager(
+                    use_memory=True, use_redis=True
+                )
 
             return enhanced_cache_manager.get_or_set(
                 cache_key,
@@ -621,10 +646,8 @@ def cached(
 
     return decorator
 
-
 # 全局缓存实例
 enhanced_cache_manager: EnhancedCacheManager | None = None
-
 
 def get_cache_manager() -> EnhancedCacheManager:
     """获取全局缓存管理器"""

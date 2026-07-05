@@ -219,7 +219,9 @@ class TestTradeTenantIsolation:
     """验证订单/成交单条读取时的租户隔离"""
 
     @pytest.mark.asyncio
-    async def test_get_order_scoped_by_tenant_user_returns_404_when_not_found(self, monkeypatch):
+    async def test_get_order_scoped_by_tenant_user_returns_404_when_not_found(
+        self, monkeypatch
+    ):
         from uuid import uuid4
 
         from backend.services.trade.deps import AuthContext
@@ -253,7 +255,9 @@ class TestTradeTenantIsolation:
         assert captured["user_id"] == 1001
 
     @pytest.mark.asyncio
-    async def test_get_trade_scoped_by_tenant_user_returns_404_when_not_found(self, monkeypatch):
+    async def test_get_trade_scoped_by_tenant_user_returns_404_when_not_found(
+        self, monkeypatch
+    ):
         from uuid import uuid4
 
         from backend.services.trade.deps import AuthContext
@@ -293,7 +297,12 @@ class TestTradeTenantIsolation:
         from backend.services.trade.deps import AuthContext
         from backend.services.trade.routers import trading_orders
 
-        auth = AuthContext(user_id="invalid-user", tenant_id="tenant-a", raw_sub="invalid-user", roles=[])
+        auth = AuthContext(
+            user_id="invalid-user",
+            tenant_id="tenant-a",
+            raw_sub="invalid-user",
+            roles=[],
+        )
 
         with pytest.raises(HTTPException) as exc:
             await trading_orders.get_order(
@@ -312,7 +321,12 @@ class TestTradeTenantIsolation:
         from backend.services.trade.deps import AuthContext
         from backend.services.trade.routers import trading_history
 
-        auth = AuthContext(user_id="invalid-user", tenant_id="tenant-b", raw_sub="invalid-user", roles=[])
+        auth = AuthContext(
+            user_id="invalid-user",
+            tenant_id="tenant-b",
+            raw_sub="invalid-user",
+            roles=[],
+        )
 
         with pytest.raises(HTTPException) as exc:
             await trading_history.get_trade(
@@ -336,7 +350,9 @@ class TestTradeTenantIsolation:
             captured["tenant_id"] = tenant_id
             return None
 
-        monkeypatch.setattr(portfolios.PortfolioService, "get_portfolio", fake_get_portfolio)
+        monkeypatch.setattr(
+            portfolios.PortfolioService, "get_portfolio", fake_get_portfolio
+        )
 
         with pytest.raises(HTTPException) as exc:
             await portfolios.calculate_portfolio_metrics(
@@ -400,7 +416,9 @@ class TestTradeTenantIsolation:
     async def test_simulation_orders_list_orders_forwards_date_range(self, monkeypatch):
         from backend.services.trade.deps import AuthContext
         from backend.services.trade.routers import simulation_orders
-        from backend.services.trade.simulation.services.order_service import SimOrderService
+        from backend.services.trade.simulation.services.order_service import (
+            SimOrderService,
+        )
 
         captured = {}
 
@@ -468,7 +486,9 @@ class TestTradeTenantIsolation:
             captured["tenant_id"] = tenant_id
             return None
 
-        monkeypatch.setattr(positions.PositionService, "get_position", fake_get_position)
+        monkeypatch.setattr(
+            positions.PositionService, "get_position", fake_get_position
+        )
 
         with pytest.raises(HTTPException) as exc:
             await positions.get_position(
@@ -492,7 +512,9 @@ class TestTradeTenantIsolation:
 
         captured = {}
 
-        async def fake_update_position_price(db, position_id, current_price, user_id=None, tenant_id=None):
+        async def fake_update_position_price(
+            db, position_id, current_price, user_id=None, tenant_id=None
+        ):
             captured["position_id"] = position_id
             captured["user_id"] = user_id
             captured["tenant_id"] = tenant_id

@@ -20,11 +20,12 @@ logger = logging.getLogger(__name__)
 
 ENGINE_BASE_URL = os.getenv("ENGINE_SERVICE_URL", "http://127.0.0.1:8001").rstrip("/")
 ENGINE_PROXY_TIMEOUT_SECONDS = float(os.getenv("ENGINE_PROXY_TIMEOUT_SECONDS", "120"))
-ENGINE_PROXY_LLM_TIMEOUT_SECONDS = float(os.getenv("ENGINE_PROXY_LLM_TIMEOUT_SECONDS", "600"))
+ENGINE_PROXY_LLM_TIMEOUT_SECONDS = float(
+    os.getenv("ENGINE_PROXY_LLM_TIMEOUT_SECONDS", "600")
+)
 
 # 注意：这里不设 prefix，在 main.py 挂载
 router = APIRouter()
-
 
 def _resolve_timeout_seconds(path: str) -> float:
     # LLM 生成类接口常超过普通代理时长，单独使用更长超时。
@@ -35,7 +36,6 @@ def _resolve_timeout_seconds(path: str) -> float:
         return max(ENGINE_PROXY_TIMEOUT_SECONDS, 300.0)
     return ENGINE_PROXY_TIMEOUT_SECONDS
 
-
 async def _proxy(request: Request, user: dict | None = None) -> Response:
     path = request.url.path
     url = f"{ENGINE_BASE_URL}{path}"
@@ -43,7 +43,9 @@ async def _proxy(request: Request, user: dict | None = None) -> Response:
         url = f"{url}?{request.url.query}"
 
     headers = {
-        k: v for k, v in request.headers.items() if k.lower() not in {"host", "content-length", "transfer-encoding"}
+        k: v
+        for k, v in request.headers.items()
+        if k.lower() not in {"host", "content-length", "transfer-encoding"}
     }
     # T6.5-P3: service JWT（专用 X-Service-Token header）
     headers["X-Service-Token"] = create_service_token("api")
@@ -65,7 +67,9 @@ async def _proxy(request: Request, user: dict | None = None) -> Response:
     for attempt in range(max_retries):
         try:
             # 简化 client 创建，移除自定义 transport 实验，回归标准模式
-            async with httpx.AsyncClient(timeout=timeout_seconds, trust_env=False) as client:
+            async with httpx.AsyncClient(
+                timeout=timeout_seconds, trust_env=False
+            ) as client:
                 resp = await client.request(
                     method=request.method,
                     url=url,
@@ -97,25 +101,62 @@ async def _proxy(request: Request, user: dict | None = None) -> Response:
     logger.error(
         f"❌ ENGINE PROXY FINAL FAILURE: {request.method} {url} -> {type(last_exc).__name__}: {last_exc}"
     )
-    raise map_upstream_http_error("engine", last_exc or Exception("Unknown proxy error"))
-
+    raise map_upstream_http_error(
+        "engine", last_exc or Exception("Unknown proxy error")
+    )
 
 # 终极捕获规则：匹配所有策略、回测、推理相关的已知路径
 @router.api_route(
-    "/api/v1/strategies/{p:path}", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"], include_in_schema=False
+    "/api/v1/strategies/{p:path}",
+    methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    include_in_schema=False,
 )
-@router.api_route("/api/v1/strategies", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"], include_in_schema=False)
 @router.api_route(
-    "/api/v1/strategy/{p:path}", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"], include_in_schema=False
+    "/api/v1/strategies",
+    methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    include_in_schema=False,
 )
-@router.api_route("/api/v1/backtest/{p:path}", methods=["GET", "POST", "DELETE", "OPTIONS"], include_in_schema=False)
-@router.api_route("/api/v1/qlib/{p:path}", methods=["GET", "POST", "DELETE", "OPTIONS"], include_in_schema=False)
-@router.api_route("/api/v1/analysis/{p:path}", methods=["GET", "POST", "OPTIONS"], include_in_schema=False)
-@router.api_route("/api/v1/inference/{p:path}", methods=["GET", "POST", "OPTIONS"], include_in_schema=False)
-@router.api_route("/api/v1/selection/{p:path}", methods=["GET", "POST", "OPTIONS"], include_in_schema=False)
 @router.api_route(
-    "/api/v1/stocks/{p:path}", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"], include_in_schema=False
+    "/api/v1/strategy/{p:path}",
+    methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    include_in_schema=False,
 )
-@router.api_route("/api/v1/stocks", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"], include_in_schema=False)
-async def engine_catch_all(request: Request, user: dict | None = Depends(get_optional_user)):
+@router.api_route(
+    "/api/v1/backtest/{p:path}",
+    methods=["GET", "POST", "DELETE", "OPTIONS"],
+    include_in_schema=False,
+)
+@router.api_route(
+    "/api/v1/qlib/{p:path}",
+    methods=["GET", "POST", "DELETE", "OPTIONS"],
+    include_in_schema=False,
+)
+@router.api_route(
+    "/api/v1/analysis/{p:path}",
+    methods=["GET", "POST", "OPTIONS"],
+    include_in_schema=False,
+)
+@router.api_route(
+    "/api/v1/inference/{p:path}",
+    methods=["GET", "POST", "OPTIONS"],
+    include_in_schema=False,
+)
+@router.api_route(
+    "/api/v1/selection/{p:path}",
+    methods=["GET", "POST", "OPTIONS"],
+    include_in_schema=False,
+)
+@router.api_route(
+    "/api/v1/stocks/{p:path}",
+    methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    include_in_schema=False,
+)
+@router.api_route(
+    "/api/v1/stocks",
+    methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    include_in_schema=False,
+)
+async def engine_catch_all(
+    request: Request, user: dict | None = Depends(get_optional_user)
+):
     return await _proxy(request, user)

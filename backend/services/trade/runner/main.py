@@ -13,7 +13,7 @@ import sys
 import time
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -31,7 +31,6 @@ try:
 except ImportError:  # pragma: no cover - optional dependency in local/unit test env
     get_calendar = None
 
-
 # --- 结构化日志配置 (RC2 增强) ---
 class CloudJsonFormatter(logging.Formatter):
     def format(self, record):
@@ -47,7 +46,6 @@ class CloudJsonFormatter(logging.Formatter):
             log_entry.update(record.extra_data)
         return json.dumps(log_entry)
 
-
 # 强制替换标准输出的格式
 root_logger = logging.getLogger()
 handler = logging.StreamHandler(sys.stdout)
@@ -57,11 +55,9 @@ root_logger.setLevel(logging.INFO)
 
 logger = logging.getLogger("quantmind.realtime.runner")
 
-
 def log_business(message, extra: dict, level=logging.INFO):
     """辅助函数：记录带元数据的业务日志"""
     logger.log(level, message, extra={"extra_data": extra})
-
 
 # -------------------------------
 
@@ -81,7 +77,6 @@ _DEFAULT_LIVE_TRADE_CONFIG = {
     "max_orders_per_cycle": 20,
 }
 
-
 def _safe_json_loads(val: Any, default: Any) -> Any:
     if not val:
         return default
@@ -89,7 +84,6 @@ def _safe_json_loads(val: Any, default: Any) -> Any:
         return json.loads(val)
     except Exception:
         return default
-
 
 def _headers(user_id: str, tenant_id: str) -> dict[str, str]:
     h = {
@@ -102,23 +96,25 @@ def _headers(user_id: str, tenant_id: str) -> dict[str, str]:
         try:
             h["X-Service-Token"] = _shared_create_service_token("trade")
         except Exception:
-            pass  # SECRET_KEY 未配置或 jose 未安装
+            logger.debug("ignored exception", exc_info=True)
     return h
-
 
 def _load_live_trade_config() -> dict[str, Any]:
     raw = os.getenv("LIVE_TRADE_CONFIG", "")
     cfg = _safe_json_loads(raw, {})
     merged = {**_DEFAULT_LIVE_TRADE_CONFIG, **(cfg or {})}
     merged["schedule_type"] = str(merged.get("schedule_type") or "interval").lower()
-    merged["trade_weekdays"] = [str(item).upper() for item in (merged.get("trade_weekdays") or [])]
-    merged["enabled_sessions"] = [str(item).upper() for item in (merged.get("enabled_sessions") or ["PM"])]
+    merged["trade_weekdays"] = [
+        str(item).upper() for item in (merged.get("trade_weekdays") or [])
+    ]
+    merged["enabled_sessions"] = [
+        str(item).upper() for item in (merged.get("enabled_sessions") or ["PM"])
+    ]
     merged["order_type"] = str(merged.get("order_type") or "MARKET").upper()
     merged["rebalance_days"] = int(merged.get("rebalance_days") or 3)
     merged["max_orders_per_cycle"] = int(merged.get("max_orders_per_cycle") or 20)
     merged["sell_first"] = bool(merged.get("sell_first", True))
     return merged
-
 
 def _load_execution_config() -> dict[str, Any]:
     raw = os.getenv("EXECUTION_CONFIG", "")
@@ -127,14 +123,11 @@ def _load_execution_config() -> dict[str, Any]:
         cfg = {}
     return dict(cfg)
 
-
 def _current_local_ts():
     return time.time()
 
-
 def _runner_local_dt(ts_value: float) -> datetime:
     return datetime.fromtimestamp(ts_value, tz=_RUNNER_TZ)
-
 
 def _is_rebalance_day(ts_value: float, live_trade_config: dict[str, Any]) -> bool:
     local_dt = _runner_local_dt(ts_value)
@@ -148,13 +141,14 @@ def _is_rebalance_day(ts_value: float, live_trade_config: dict[str, Any]) -> boo
         if get_calendar is None:
             raise RuntimeError("exchange_calendars unavailable")
         calendar = get_calendar("XSHG")
-        session = calendar.date_to_session(pd.Timestamp(local_dt.date()), direction="previous")
+        session = calendar.date_to_session(
+            pd.Timestamp(local_dt.date()), direction="previous"
+        )
         idx = int(calendar.sessions.get_loc(session))
         return idx % rebalance_days == 0
     except Exception:
         day_of_year = int(local_dt.strftime("%j"))
         return day_of_year % rebalance_days == 0
-
 
 def _current_phase(now_hhmm: str, live_trade_config: dict[str, Any]) -> str:
     sell_time = str(live_trade_config.get("sell_time") or "14:45")
@@ -165,8 +159,9 @@ def _current_phase(now_hhmm: str, live_trade_config: dict[str, Any]) -> str:
         return "SELL" if live_trade_config.get("sell_first", True) else "BUY"
     return "BUY"
 
-
-def _is_within_enabled_session(now_hhmm: str, live_trade_config: dict[str, Any]) -> bool:
+def _is_within_enabled_session(
+    now_hhmm: str, live_trade_config: dict[str, Any]
+) -> bool:
     enabled = set(live_trade_config.get("enabled_sessions") or [])
     if "AM" in enabled and "09:30" <= now_hhmm <= "11:30":
         return True
@@ -174,8 +169,9 @@ def _is_within_enabled_session(now_hhmm: str, live_trade_config: dict[str, Any])
         return True
     return False
 
-
-def _filter_signals_by_phase(signals: list[dict[str, Any]], phase: str) -> list[dict[str, Any]]:
+def _filter_signals_by_phase(
+    signals: list[dict[str, Any]], phase: str
+) -> list[dict[str, Any]]:
     def _resolve_action(sig: dict[str, Any]) -> str:
         trade_action = str(sig.get("trade_action") or "").upper()
         if trade_action in {"SELL_TO_CLOSE", "SELL_TO_OPEN"}:
@@ -192,35 +188,44 @@ def _filter_signals_by_phase(signals: list[dict[str, Any]], phase: str) -> list[
         return signals
     return []
 
-
 def _signal_stream_name(tenant_id: str) -> str:
     return f"qm:signal:stream:{tenant_id}"
-
 
 def _latest_signal_run_key(tenant_id: str, user_id: str) -> str:
     return f"qm:signal:latest:{tenant_id}:{user_id}"
 
-
-def _get_latest_signal_run_id(redis_client: redis.Redis, tenant_id: str, user_id: str) -> str | None:
+def _get_latest_signal_run_id(
+    redis_client: redis.Redis, tenant_id: str, user_id: str
+) -> str | None:
     try:
-        latest = str(redis_client.get(_latest_signal_run_key(tenant_id, user_id)) or "").strip()
+        latest = str(
+            redis_client.get(_latest_signal_run_key(tenant_id, user_id)) or ""
+        ).strip()
         return latest or None
     except Exception as e:
         logger.warning("[SignalStream] 读取最新推理版本失败: %s", e)
         return None
 
+def _signal_stream_group_name(
+    tenant_id: str, user_id: str, strategy: str, exec_config: dict[str, Any]
+) -> str:
+    return (
+        exec_config.get("signal_stream_group")
+        or f"signal-runners-{tenant_id}-{user_id}"
+    )
 
-def _signal_stream_group_name(tenant_id: str, user_id: str, strategy: str, exec_config: dict[str, Any]) -> str:
-    return exec_config.get("signal_stream_group") or f"signal-runners-{tenant_id}-{user_id}"
-
-
-def _signal_stream_consumer_name(tenant_id: str, user_id: str, strategy: str, exec_config: dict[str, Any]) -> str:
+def _signal_stream_consumer_name(
+    tenant_id: str, user_id: str, strategy: str, exec_config: dict[str, Any]
+) -> str:
     pod_name = os.getenv("HOSTNAME", "local-runner")
     return f"runner-{pod_name}"
 
-
 def _ensure_signal_stream_group(
-    redis_client: redis.Redis, tenant_id: str, user_id: str, strategy: str, exec_config: dict[str, Any]
+    redis_client: redis.Redis,
+    tenant_id: str,
+    user_id: str,
+    strategy: str,
+    exec_config: dict[str, Any],
 ):
     stream = _signal_stream_name(tenant_id)
     group = _signal_stream_group_name(tenant_id, user_id, strategy, exec_config)
@@ -233,7 +238,6 @@ def _ensure_signal_stream_group(
         else:
             logger.warning("[SignalStream] xgroup_create 失败: %s", e)
 
-
 def fetch_market_snapshot(redis_client: redis.Redis) -> dict[str, Any]:
     try:
         data = redis_client.get("market:snapshot")
@@ -242,11 +246,11 @@ def fetch_market_snapshot(redis_client: redis.Redis) -> dict[str, Any]:
         logger.error("获取行情快照失败: %s", e)
         return {}
 
-
 def _fetch_account_state(user_id: str, tenant_id: str) -> dict[str, Any]:
-    base_url = os.getenv("TRADE_SERVICE_INTERNAL_URL", "http://quantmind-trade:8002/api/v1/internal/strategy").rstrip(
-        "/"
-    )
+    base_url = os.getenv(
+        "TRADE_SERVICE_INTERNAL_URL",
+        "http://quantmind-trade:8002/api/v1/internal/strategy",
+    ).rstrip("/")
     url = f"{base_url}/sync-account"
     try:
         resp = requests.get(url, headers=_headers(user_id, tenant_id), timeout=3)
@@ -256,9 +260,7 @@ def _fetch_account_state(user_id: str, tenant_id: str) -> dict[str, Any]:
         logger.warning("[Risk] 获取账户状态失败，使用空账户降级: %s", e)
         return {"cash": 0, "total_value": 0, "positions": {}, "drawdown": 0}
 
-
 from backend.services.trade.runner.risk_gate import RiskGate
-
 
 def _to_float(value):
     """向后兼容保留，内部已迁移至 risk_gate.py。"""
@@ -269,19 +271,23 @@ def _to_float(value):
     except Exception:
         return None
 
-
-def _apply_portfolio_risk_gate(signals, account, exec_config, market_snapshot, live_trade_config=None):
+def _apply_portfolio_risk_gate(
+    signals, account, exec_config, market_snapshot, live_trade_config=None
+):
     """委托 RiskGate.apply()，保留此名称以兼容已有调用点。"""
-    return RiskGate.apply(signals, account, exec_config, market_snapshot, live_trade_config)
-
+    return RiskGate.apply(
+        signals, account, exec_config, market_snapshot, live_trade_config
+    )
 
 def _signal_fingerprint(signals):
     return RiskGate.fingerprint(signals)
 
-
-def _acquire_idempotency_lock(redis_client, tenant_id, user_id, strategy, fingerprint, ttl_seconds):
-    return RiskGate.acquire_lock(redis_client, tenant_id, user_id, strategy, fingerprint, ttl_seconds)
-
+def _acquire_idempotency_lock(
+    redis_client, tenant_id, user_id, strategy, fingerprint, ttl_seconds
+):
+    return RiskGate.acquire_lock(
+        redis_client, tenant_id, user_id, strategy, fingerprint, ttl_seconds
+    )
 
 def _report_dispatch_item_status(
     batch_id: str,
@@ -295,7 +301,9 @@ def _report_dispatch_item_status(
 ) -> None:
     if not batch_id or not run_id:
         return
-    base_url = os.getenv("ENGINE_SERVICE_INTERNAL_URL", "http://quantmind-engine:8001/api/v1").rstrip("/")
+    base_url = os.getenv(
+        "ENGINE_SERVICE_INTERNAL_URL", "http://quantmind-engine:8001/api/v1"
+    ).rstrip("/")
     url = f"{base_url}/dispatch/{batch_id}/items/upsert"
     payload = {
         "run_id": run_id,
@@ -322,10 +330,11 @@ def _report_dispatch_item_status(
         ],
     }
     try:
-        requests.post(url, json=payload, headers=_headers(user_id, tenant_id), timeout=3)
+        requests.post(
+            url, json=payload, headers=_headers(user_id, tenant_id), timeout=3
+        )
     except Exception as e:
         logger.warning("[E2E] 状态机回写失败: %s", e)
-
 
 def _consume_signal_events(
     user_id: str,
@@ -340,9 +349,13 @@ def _consume_signal_events(
     group = _signal_stream_group_name(tenant_id, user_id, strategy, exec_config)
     consumer = _signal_stream_consumer_name(tenant_id, user_id, strategy, exec_config)
     batch_size = int(exec_config.get("signal_stream_batch_size", 100))
-    block_ms = int(exec_config.get("signal_stream_block_ms", 1000)) if last_id == ">" else None
+    block_ms = (
+        int(exec_config.get("signal_stream_block_ms", 1000)) if last_id == ">" else None
+    )
 
-    records = redis_client.xreadgroup(group, consumer, {stream: last_id}, count=batch_size, block=block_ms)
+    records = redis_client.xreadgroup(
+        group, consumer, {stream: last_id}, count=batch_size, block=block_ms
+    )
     if not records:
         return [], []
 
@@ -379,7 +392,9 @@ def _consume_signal_events(
                         "action": side,
                         "trade_action": str(fields.get("trade_action") or "") or None,
                         "position_side": str(fields.get("position_side") or "") or None,
-                        "is_margin_trade": str(fields.get("is_margin_trade") or "").lower()
+                        "is_margin_trade": str(
+                            fields.get("is_margin_trade") or ""
+                        ).lower()
                         in {"1", "true", "yes", "on"},
                         "volume": int(float(fields.get("quantity") or 0)),
                         "price": float(fields.get("price") or 0),
@@ -393,7 +408,6 @@ def _consume_signal_events(
                 ack_ids.append(mid)
     return signals, ack_ids
 
-
 def create_hosted_execution_task(
     user_id: str,
     tenant_id: str,
@@ -404,9 +418,10 @@ def create_hosted_execution_task(
     trigger_context: dict[str, Any],
     task_id: str,
 ):
-    base_url = os.getenv("TRADE_SERVICE_INTERNAL_URL", "http://quantmind-trade:8002/api/v1/internal/strategy").rstrip(
-        "/"
-    )
+    base_url = os.getenv(
+        "TRADE_SERVICE_INTERNAL_URL",
+        "http://quantmind-trade:8002/api/v1/internal/strategy",
+    ).rstrip("/")
     trade_api = f"{base_url}/hosted-executions"
     mode = str(exec_config.get("trading_mode", "REAL")).upper()
     payload = {
@@ -428,7 +443,9 @@ def create_hosted_execution_task(
                 "trigger_context": trigger_context,
             },
         )
-        resp = requests.post(trade_api, json=payload, headers=_headers(user_id, tenant_id), timeout=8)
+        resp = requests.post(
+            trade_api, json=payload, headers=_headers(user_id, tenant_id), timeout=8
+        )
         resp.raise_for_status()
         return resp.json()
     except Exception as e:
@@ -438,7 +455,6 @@ def create_hosted_execution_task(
             level=logging.ERROR,
         )
         return None
-
 
 def _ack_signal_events(
     redis_client: redis.Redis,
@@ -456,7 +472,6 @@ def _ack_signal_events(
         redis_client.xack(stream, group, *ack_ids)
     except Exception as e:
         logger.warning("[SignalStream] ACK 失败: %s", e)
-
 
 def _build_hosted_runner_task_id(
     tenant_id: str,
@@ -480,7 +495,6 @@ def _build_hosted_runner_task_id(
     digest = hashlib.sha1(source.encode("utf-8")).hexdigest()[:16]
     return f"hosted_{digest}"
 
-
 def _hosted_trigger_lock_key(
     tenant_id: str,
     user_id: str,
@@ -490,7 +504,6 @@ def _hosted_trigger_lock_key(
 ) -> str:
     return f"qm:hosted:runner:{tenant_id}:{user_id}:{strategy}:{trade_date}:{phase}"
 
-
 def process_cycle(
     user_id: str,
     tenant_id: str,
@@ -499,7 +512,12 @@ def process_cycle(
     exec_config: dict[str, Any],
     live_trade_config: dict[str, Any],
 ):
-    test_mode = str(os.getenv("RUNNER_TEST_MODE", "")).strip().lower() in {"1", "true", "yes", "on"}
+    test_mode = str(os.getenv("RUNNER_TEST_MODE", "")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
     current_ts = _current_local_ts()
     now_hhmm = _runner_local_dt(current_ts).strftime("%H:%M")
     is_rebalance_day = _is_rebalance_day(current_ts, live_trade_config)
@@ -523,7 +541,9 @@ def process_cycle(
     )
 
     if not test_mode and (
-        not is_rebalance_day or not _is_within_enabled_session(now_hhmm, live_trade_config) or phase == "IDLE"
+        not is_rebalance_day
+        or not _is_within_enabled_session(now_hhmm, live_trade_config)
+        or phase == "IDLE"
     ):
         return False
 
@@ -543,7 +563,9 @@ def process_cycle(
     except Exception as e:
         logger.warning("[HostedRunner] 读取调度锁失败: %s", e)
 
-    task_id = _build_hosted_runner_task_id(tenant_id, user_id, strategy, trade_date, phase)
+    task_id = _build_hosted_runner_task_id(
+        tenant_id, user_id, strategy, trade_date, phase
+    )
     trigger_context = {
         "schedule_type": str(live_trade_config.get("schedule_type") or "interval"),
         "phase": phase,
@@ -572,7 +594,6 @@ def process_cycle(
         logger.warning("[HostedRunner] 写入调度锁失败: %s", e)
     return True
 
-
 def _build_redis_client() -> redis.Redis:
     host = os.getenv("REDIS_HOST", "quantmind-trade-redis")
     port = int(os.getenv("REDIS_PORT", "6379"))
@@ -587,7 +608,6 @@ def _build_redis_client() -> redis.Redis:
         socket_timeout=2,
     )
 
-
 def _resolve_runner_identity(args: argparse.Namespace) -> tuple[str, str, str] | None:
     user_id = str(
         getattr(args, "user_id", None)
@@ -601,19 +621,19 @@ def _resolve_runner_identity(args: argparse.Namespace) -> tuple[str, str, str] |
         or os.getenv("RUNNER_STRATEGY_ID")
         or ""
     ).strip()
-    tenant_id = str(
-        getattr(args, "tenant_id", None)
-        or os.getenv("TENANT_ID")
-        or os.getenv("RUNNER_TENANT_ID")
+    tenant_id = (
+        str(
+            getattr(args, "tenant_id", None)
+            or os.getenv("TENANT_ID")
+            or os.getenv("RUNNER_TENANT_ID")
+            or "default"
+        ).strip()
         or "default"
-    ).strip() or "default"
+    )
     if not user_id or not strategy:
-        logger.error(
-            "缺少必要参数: user_id 或 strategy (可通过命令行或环境变量提供)"
-        )
+        logger.error("缺少必要参数: user_id 或 strategy (可通过命令行或环境变量提供)")
         return None
     return user_id, strategy, tenant_id
-
 
 def _run_scheduler_once(
     *,
@@ -632,7 +652,6 @@ def _run_scheduler_once(
         exec_config=exec_config,
         live_trade_config=live_trade_config,
     )
-
 
 def _run_scheduler_loop(
     *,
@@ -671,7 +690,6 @@ def _run_scheduler_loop(
             break
         time.sleep(interval)
 
-
 def _bootstrap_from_cli() -> int:
     parser = argparse.ArgumentParser(add_help=True)
     parser.add_argument("--user_id", type=str, default=None)
@@ -705,7 +723,6 @@ def _bootstrap_from_cli() -> int:
         once=bool(args.once),
     )
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(_bootstrap_from_cli())

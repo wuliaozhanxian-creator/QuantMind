@@ -7,7 +7,7 @@ import json
 import hashlib
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import List, Optional
+from typing import Optional
 from uuid import UUID
 
 from backend.services.trade.utils.stock_lookup import lookup_symbol_name
@@ -32,7 +32,6 @@ from backend.services.trade.trade_config import settings
 
 logger = logging.getLogger(__name__)
 
-
 class OrderService:
     """Order management service"""
 
@@ -40,7 +39,9 @@ class OrderService:
         self.db = db
         self.redis = redis
 
-    def _validate_transition(self, current_status: OrderStatus, new_status: OrderStatus) -> bool:
+    def _validate_transition(
+        self, current_status: OrderStatus, new_status: OrderStatus
+    ) -> bool:
         if current_status == new_status:
             return True
 
@@ -74,8 +75,16 @@ class OrderService:
         if order_data.trade_action is not None:
             return order_data.trade_action
         if order_data.position_side == PositionSide.SHORT:
-            return TradeAction.SELL_TO_OPEN if order_data.side.value == "sell" else TradeAction.BUY_TO_CLOSE
-        return TradeAction.BUY_TO_OPEN if order_data.side.value == "buy" else TradeAction.SELL_TO_CLOSE
+            return (
+                TradeAction.SELL_TO_OPEN
+                if order_data.side.value == "sell"
+                else TradeAction.BUY_TO_CLOSE
+            )
+        return (
+            TradeAction.BUY_TO_OPEN
+            if order_data.side.value == "buy"
+            else TradeAction.SELL_TO_CLOSE
+        )
 
     @staticmethod
     def _normalize_query_datetime(value: datetime | None) -> datetime | None:
@@ -106,7 +115,9 @@ class OrderService:
         key_str = ":".join(key_parts)
         return f"order:list:{hashlib.md5(key_str.encode()).hexdigest()}"
 
-    async def _invalidate_order_cache(self, user_id: int, portfolio_id: int | None = None):
+    async def _invalidate_order_cache(
+        self, user_id: int, portfolio_id: int | None = None
+    ):
         """Invalidate order list caches"""
         patterns = [
             f"order:list:user:{user_id}:*",
@@ -126,7 +137,7 @@ class OrderService:
                 data[c.name] = str(v)
             elif isinstance(v, Decimal):
                 data[c.name] = str(v)
-            elif hasattr(v, 'value'):
+            elif hasattr(v, "value"):
                 data[c.name] = v.value
             else:
                 data[c.name] = v
@@ -156,7 +167,7 @@ class OrderService:
         return result.scalar_one_or_none()
 
     async def list_orders(self, query: OrderListQuery) -> list[Order]:
-        """List orders with Redis caching"""
+        """list orders with Redis caching"""
         cache_key = self._get_order_list_cache_key(query)
 
         cached = self.redis.get(cache_key)
@@ -208,7 +219,9 @@ class OrderService:
             logger.warning(
                 f"Invalid status transition attempted: {order.status} -> {new_status} for order {order.order_id}"
             )
-            raise ValueError(f"Invalid status transition: {order.status} -> {new_status}")
+            raise ValueError(
+                f"Invalid status transition: {order.status} -> {new_status}"
+            )
 
         old_status = order.status
         # 快照原始字段，commit 失败时回滚内存状态，避免调用方基于“假成功”继续外部提交。
@@ -231,7 +244,9 @@ class OrderService:
             order.expired_at = datetime.now()
 
         if remarks:
-            order.remarks = f"{order.remarks or ''} [{new_status.value.upper()}: {remarks}]"
+            order.remarks = (
+                f"{order.remarks or ''} [{new_status.value.upper()}: {remarks}]"
+            )
 
         try:
             await self.db.commit()
@@ -265,13 +280,17 @@ class OrderService:
 
         await self.db.refresh(order)
 
-        logger.info(f"Order {order.order_id} transitioned: {old_status} -> {new_status}")
+        logger.info(
+            f"Order {order.order_id} transitioned: {old_status} -> {new_status}"
+        )
         await self._invalidate_order_cache(order.user_id, order.portfolio_id)
         self.redis.delete(self._get_order_cache_key(order.order_id))
 
         return order
 
-    async def create_order(self, user_id: int, tenant_id: str, order_data: OrderCreate) -> Order:
+    async def create_order(
+        self, user_id: int, tenant_id: str, order_data: OrderCreate
+    ) -> Order:
         if order_data.order_type.value in ["market"]:
             order_value = order_data.quantity * 0
         else:
@@ -283,7 +302,8 @@ class OrderService:
             portfolio_id=order_data.portfolio_id,
             strategy_id=order_data.strategy_id,
             symbol=order_data.symbol.upper(),
-            symbol_name=order_data.symbol_name or lookup_symbol_name(order_data.symbol.upper()),
+            symbol_name=order_data.symbol_name
+            or lookup_symbol_name(order_data.symbol.upper()),
             side=order_data.side,
             trade_action=self._resolve_trade_action(order_data),
             position_side=order_data.position_side,
@@ -356,7 +376,9 @@ class OrderService:
 
         return await self.transition_order_status(order, OrderStatus.CANCELLED, reason)
 
-    async def get_order_statistics(self, tenant_id: str, user_id: int, portfolio_id: int | None = None) -> dict:
+    async def get_order_statistics(
+        self, tenant_id: str, user_id: int, portfolio_id: int | None = None
+    ) -> dict:
         conditions = [Order.tenant_id == tenant_id, Order.user_id == user_id]
         if portfolio_id:
             conditions.append(Order.portfolio_id == portfolio_id)

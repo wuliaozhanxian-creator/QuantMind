@@ -3,12 +3,11 @@ Simulation trade schemas.
 """
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Optional
 
 from pydantic import UUID4, BaseModel, ConfigDict, Field
 
 from backend.services.trade.simulation.models.order import OrderSide, TradingMode
-
 
 class SimTradeResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -32,12 +31,10 @@ class SimTradeResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-
 class TradeStatsDailyPoint(BaseModel):
     timestamp: str
     value: int
     label: str = "trade_count"
-
 
 class SimTradeStatsResponse(BaseModel):
     daily_counts: list[TradeStatsDailyPoint] = Field(default_factory=list)
@@ -46,7 +43,6 @@ class SimTradeStatsResponse(BaseModel):
     total_commission: float
     buy_trades: int
     sell_trades: int
-
 
 class SimTradeListQuery(BaseModel):
     portfolio_id: int | None = None

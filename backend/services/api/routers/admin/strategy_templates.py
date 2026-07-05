@@ -5,7 +5,7 @@
 
 import logging
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -19,7 +19,6 @@ router = APIRouter()
 
 _ENGINE_BASE_URL = os.getenv("ENGINE_SERVICE_URL", "http://127.0.0.1:8001").rstrip("/")
 _ENGINE_TEMPLATES_BASE = f"{_ENGINE_BASE_URL}/api/v1/admin/strategy-templates"
-
 
 async def _proxy(
     method: str,
@@ -47,13 +46,11 @@ async def _proxy(
         raise
     except Exception as e:
         logger.error("代理请求 engine 失败 [%s %s]: %s", method, url, e)
-        raise HTTPException(status_code=502, detail=f"Engine 服务不可用: {e}")
-
+        raise HTTPException(status_code=502, detail=f"Engine 服务不可用: {e}") from e
 
 # ---------------------------------------------------------------------------
 # 端点（统一鉴权：require_admin）
 # ---------------------------------------------------------------------------
-
 
 @router.get("")
 async def list_templates(
@@ -61,7 +58,6 @@ async def list_templates(
 ):
     """列出所有策略模板（管理员视图，含完整代码）。"""
     return await _proxy("GET", _ENGINE_TEMPLATES_BASE, current_user)
-
 
 @router.post("", status_code=201)
 async def create_template(
@@ -71,7 +67,6 @@ async def create_template(
     """新建策略模板。"""
     body = await request.json()
     return await _proxy("POST", _ENGINE_TEMPLATES_BASE, current_user, json_body=body)
-
 
 @router.put("/{template_id}")
 async def update_template(
@@ -83,7 +78,6 @@ async def update_template(
     body = await request.json()
     url = f"{_ENGINE_TEMPLATES_BASE}/{template_id}"
     return await _proxy("PUT", url, current_user, json_body=body)
-
 
 @router.delete("/{template_id}")
 async def delete_template(

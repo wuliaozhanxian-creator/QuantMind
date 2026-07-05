@@ -20,7 +20,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-
 def _build_check(key: str, label: str, passed: bool, detail: str) -> dict[str, Any]:
     return {
         "key": key,
@@ -28,7 +27,6 @@ def _build_check(key: str, label: str, passed: bool, detail: str) -> dict[str, A
         "passed": bool(passed),
         "detail": detail,
     }
-
 
 def _collect_model_artifacts(production_dir: Path) -> list[str]:
     if not production_dir.exists() or not production_dir.is_dir():
@@ -55,13 +53,15 @@ def _collect_model_artifacts(production_dir: Path) -> list[str]:
 
     return [str(path) for path in found_paths]
 
-
 def _is_true_flag(value: str) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
-
-async def _resolve_user_model_context(*, tenant_id: str, user_id: str) -> dict[str, Any]:
-    default_dir = Path(os.getenv("MODELS_PRODUCTION", "/app/models/production/model_qlib"))
+async def _resolve_user_model_context(
+    *, tenant_id: str, user_id: str
+) -> dict[str, Any]:
+    default_dir = Path(
+        os.getenv("MODELS_PRODUCTION", "/app/models/production/model_qlib")
+    )
     context: dict[str, Any] = {
         "model_dir": default_dir,
         "effective_model_id": "",
@@ -92,15 +92,20 @@ async def _resolve_user_model_context(*, tenant_id: str, user_id: str) -> dict[s
         storage_path = str(getattr(resolved, "storage_path", "") or "").strip()
         if storage_path:
             context["model_dir"] = Path(storage_path)
-        context["effective_model_id"] = str(getattr(resolved, "effective_model_id", "") or "").strip()
-        context["model_source"] = str(getattr(resolved, "model_source", "") or "").strip() or "model_registry"
+        context["effective_model_id"] = str(
+            getattr(resolved, "effective_model_id", "") or ""
+        ).strip()
+        context["model_source"] = (
+            str(getattr(resolved, "model_source", "") or "").strip() or "model_registry"
+        )
         context["fallback_used"] = bool(getattr(resolved, "fallback_used", False))
-        context["fallback_reason"] = str(getattr(resolved, "fallback_reason", "") or "").strip()
+        context["fallback_reason"] = str(
+            getattr(resolved, "fallback_reason", "") or ""
+        ).strip()
     except Exception as exc:
         context["model_source"] = "env_default(model_registry_failed)"
         context["resolve_error"] = str(exc)
     return context
-
 
 def _resolve_runner_image() -> tuple[str, str]:
     configured = str(os.getenv("STRATEGY_RUNNER_IMAGE", "")).strip()
@@ -113,7 +118,6 @@ def _resolve_runner_image() -> tuple[str, str]:
         else "asia-east1-docker.pkg.dev/gen-lang-client-0953736716/quantmind-repo/quantmind-qlib-runner:latest"
     )
     return default_image, "default"
-
 
 def _get_env_with_root_fallback(key: str, default: str = "") -> str:
     value = os.getenv(key)
@@ -135,10 +139,16 @@ def _get_env_with_root_fallback(key: str, default: str = "") -> str:
 
     return default
 
-
 def _get_stream_series_redis_client():
-    host = _get_env_with_root_fallback("REMOTE_QUOTE_REDIS_HOST", os.getenv("REDIS_HOST", "redis"))
-    port = int(_get_env_with_root_fallback("REMOTE_QUOTE_REDIS_PORT", os.getenv("REDIS_PORT", "6379")) or "6379")
+    host = _get_env_with_root_fallback(
+        "REMOTE_QUOTE_REDIS_HOST", os.getenv("REDIS_HOST", "redis")
+    )
+    port = int(
+        _get_env_with_root_fallback(
+            "REMOTE_QUOTE_REDIS_PORT", os.getenv("REDIS_PORT", "6379")
+        )
+        or "6379"
+    )
     password = _get_env_with_root_fallback("REMOTE_QUOTE_REDIS_PASSWORD", "") or None
     client = redis_lib.Redis(
         host=host,
@@ -150,13 +160,11 @@ def _get_stream_series_redis_client():
     )
     return client, host, port
 
-
 def _resolve_probe_symbols() -> list[str]:
     # 优先使用 Prefix 格式符合项目标准 (AGENTS.md)
     raw = str(os.getenv("PREFLIGHT_STREAM_SYMBOLS", "SZ000001,SH600000")).strip()
     symbols = [item.strip() for item in raw.split(",") if item.strip()]
     return symbols or ["SZ000001", "SH600000"]
-
 
 def _parse_bridge_report_ts(report: dict[str, Any]) -> float | None:
     candidates = (
@@ -182,14 +190,13 @@ def _parse_bridge_report_ts(report: dict[str, Any]) -> float | None:
                 ts = float(text_raw)
                 return ts / 1000.0 if ts > 1e12 else ts
             except Exception:
-                pass
+                logger.debug("ignored exception", exc_info=True)
             try:
                 iso = text_raw.replace("Z", "+00:00")
                 return datetime.fromisoformat(iso).timestamp()
             except Exception:
                 continue
     return None
-
 
 def _previous_trading_day(today: date) -> date:
     try:
@@ -205,21 +212,34 @@ def _previous_trading_day(today: date) -> date:
             candidate -= timedelta(days=1)
         return candidate
 
-
-async def _query_market_data_readiness(db: AsyncSession, expected_trade_date: date) -> dict[str, Any]:
-    feature_cols_count_row = (await db.execute(text("""
+async def _query_market_data_readiness(
+    db: AsyncSession, expected_trade_date: date
+) -> dict[str, Any]:
+    feature_cols_count_row = (
+        (
+            await db.execute(
+                text("""
                 SELECT COUNT(*) AS cnt
                 FROM information_schema.columns
                 WHERE table_schema = 'public'
                   AND table_name = 'market_data_daily'
                   AND column_name ~ '^feature_[0-9]+$'
-                """))).mappings().first()
+                """)
+            )
+        )
+        .mappings()
+        .first()
+    )
     feature_cols_count = int((feature_cols_count_row or {}).get("cnt") or 0)
     has_48_feature_cols = feature_cols_count >= 48
 
-    dim48_condition = "jsonb_typeof(features) = 'array' AND jsonb_array_length(features) = 48"
+    dim48_condition = (
+        "jsonb_typeof(features) = 'array' AND jsonb_array_length(features) = 48"
+    )
     if has_48_feature_cols:
-        dim48_columns_condition = " AND ".join([f"feature_{i} IS NOT NULL" for i in range(48)])
+        dim48_columns_condition = " AND ".join(
+            [f"feature_{i} IS NOT NULL" for i in range(48)]
+        )
         dim48_condition = f"(({dim48_condition}) OR ({dim48_columns_condition}))"
 
     row = (
@@ -260,10 +280,13 @@ async def _query_market_data_readiness(db: AsyncSession, expected_trade_date: da
         "detail": detail,
     }
 
-
-def _check_inference_model_exists(production_dir: Path | None = None) -> tuple[bool, str]:
+def _check_inference_model_exists(
+    production_dir: Path | None = None,
+) -> tuple[bool, str]:
     """检查推理模型文件是否存在，不查询数据库。"""
-    production_dir = production_dir or Path(os.getenv("MODELS_PRODUCTION", "/app/models/production/model_qlib"))
+    production_dir = production_dir or Path(
+        os.getenv("MODELS_PRODUCTION", "/app/models/production/model_qlib")
+    )
     if not production_dir.exists() or not production_dir.is_dir():
         return False, f"推理模型目录不存在: {production_dir}"
     try:
@@ -275,8 +298,10 @@ def _check_inference_model_exists(production_dir: Path | None = None) -> tuple[b
             f"推理模型目录缺少可识别模型文件: {production_dir}; "
             "expected_patterns=model.lgb/model.pkl/model.joblib/model.bin/model.txt/*.lgb/*.pkl/*.joblib/*.bin"
         )
-    return True, f"推理模型已存在 (model_dir={production_dir}, matched={', '.join(artifacts[:3])})"
-
+    return (
+        True,
+        f"推理模型已存在 (model_dir={production_dir}, matched={', '.join(artifacts[:3])})",
+    )
 
 def _build_model_context_hint(model_context: dict[str, Any]) -> str:
     hint = (
@@ -289,17 +314,17 @@ def _build_model_context_hint(model_context: dict[str, Any]) -> str:
         hint = f"{hint}, resolve_error={model_context.get('resolve_error')}"
     return hint
 
-
 def _summarize_hosted_status(hosted_status: dict[str, Any]) -> str:
     latest_run_id = str(hosted_status.get("latest_run_id") or "").strip() or "-"
-    prediction_trade_date = str(hosted_status.get("prediction_trade_date") or "").strip() or "-"
+    prediction_trade_date = (
+        str(hosted_status.get("prediction_trade_date") or "").strip() or "-"
+    )
     reason_code = str(hosted_status.get("reason_code") or "").strip() or "-"
     message = str(hosted_status.get("message") or "").strip() or "-"
     return (
         f"hosted_status(reason={reason_code}, latest_run_id={latest_run_id}, "
         f"prediction_trade_date={prediction_trade_date}, message={message})"
     )
-
 
 async def _check_simulation_model_ready(
     *,
@@ -318,7 +343,9 @@ async def _check_simulation_model_ready(
         return True, f"{model_detail}; {model_context_hint}"
 
     try:
-        from backend.services.trade.services.manual_execution_service import manual_execution_service
+        from backend.services.trade.services.manual_execution_service import (
+            manual_execution_service,
+        )
 
         hosted_status = await manual_execution_service.get_default_model_hosted_status(
             tenant_id=tenant_id,
@@ -326,8 +353,7 @@ async def _check_simulation_model_ready(
         )
     except Exception as exc:
         return False, (
-            f"{model_detail}; {model_context_hint}; "
-            f"hosted_status_error={exc}"
+            f"{model_detail}; {model_context_hint}; hosted_status_error={exc}"
         )
 
     if bool(hosted_status.get("available")):
@@ -341,12 +367,13 @@ async def _check_simulation_model_ready(
         f"{_summarize_hosted_status(hosted_status)}"
     )
 
-
 def _check_stream_series_freshness(redis_client) -> tuple[bool, str]:
     stream_symbols = _resolve_probe_symbols()
     series_threshold_sec = int(os.getenv("PREFLIGHT_SERIES_STALE_THRESHOLD_SEC", "180"))
     try:
-        stream_redis, stream_redis_host, stream_redis_port = _get_stream_series_redis_client()
+        stream_redis, stream_redis_host, stream_redis_port = (
+            _get_stream_series_redis_client()
+        )
         # 物理连接测试
         try:
             stream_redis.ping()
@@ -365,34 +392,41 @@ def _check_stream_series_freshness(redis_client) -> tuple[bool, str]:
             elif len(symbol) == 8 and symbol[:2].isalpha():
                 alt_symbol = f"{symbol[2:]}.{symbol[:2].upper()}"
 
-            test_symbols = sorted(list(set([symbol, alt_symbol])))
+            test_symbols = sorted({symbol, alt_symbol})
             candidates = []
             for s in test_symbols:
-                candidates.extend([f"market:series:{s}", f"market:snapshot:{s}", f"stock:{s}"])
-            
+                candidates.extend(
+                    [f"market:series:{s}", f"market:snapshot:{s}", f"stock:{s}"]
+                )
+
             for key in candidates:
                 ktype = str(stream_redis.type(key) or "none").lower()
-                if ktype == "none": continue
+                if ktype == "none":
+                    continue
 
                 score = None
                 if ktype == "zset":
                     latest = stream_redis.zrevrange(key, 0, 0, withscores=True)
-                    if latest: _, score = latest[0]
+                    if latest:
+                        _, score = latest[0]
                 elif ktype == "hash":
                     score_raw = stream_redis.hget(key, "timestamp")
                     if score_raw:
                         try:
                             score = float(score_raw)
                         except (TypeError, ValueError) as _e:
-                            logger.debug(
-                                "stream series timestamp unparseable: %s", _e
-                            )
+                            logger.debug("stream series timestamp unparseable: %s", _e)
 
                 if score is not None:
                     latest_age_sec = max(0, int(time.time() - float(score)))
                     ok = latest_age_sec <= series_threshold_sec
                     if ok:
-                        return True, "实时行情连接正常" if is_trading else "非交易时段 (行情连接正常)"
+                        return (
+                            True,
+                            "实时行情连接正常"
+                            if is_trading
+                            else "非交易时段 (行情连接正常)",
+                        )
                     if not is_trading:
                         return True, f"非交易时段 (最近行情距今 {latest_age_sec}s)"
                     else:
@@ -402,39 +436,46 @@ def _check_stream_series_freshness(redis_client) -> tuple[bool, str]:
         discovery_patterns = ["stock:*", "market:series:*"]
         for pattern in discovery_patterns:
             _, found_keys = stream_redis.scan(0, match=pattern, count=50)
-            if not found_keys: continue
+            if not found_keys:
+                continue
             for key in found_keys[:3]:
                 ktype = str(stream_redis.type(key) or "none").lower()
                 score = None
                 if ktype == "zset":
                     latest = stream_redis.zrevrange(key, 0, 0, withscores=True)
-                    if latest: _, score = latest[0]
+                    if latest:
+                        _, score = latest[0]
                 elif ktype == "hash":
                     score_raw = stream_redis.hget(key, "timestamp")
                     if score_raw:
                         try:
                             score = float(score_raw)
                         except (TypeError, ValueError) as _e:
-                            logger.debug(
-                                "stream series timestamp unparseable: %s", _e
-                            )
-                
+                            logger.debug("stream series timestamp unparseable: %s", _e)
+
                 if score is not None:
                     latest_age_sec = max(0, int(time.time() - float(score)))
                     if latest_age_sec <= series_threshold_sec:
-                        return True, "实时行情自动发现成功" if is_trading else "非交易时段 (行情自动发现)"
+                        return (
+                            True,
+                            "实时行情自动发现成功"
+                            if is_trading
+                            else "非交易时段 (行情自动发现)",
+                        )
                     if not is_trading:
-                        return True, f"非交易时段 (自动发现最近行情距今 {latest_age_sec}s)"
+                        return (
+                            True,
+                            f"非交易时段 (自动发现最近行情距今 {latest_age_sec}s)",
+                        )
 
         # 第三阶段：连接正常但未获取到数据
         if not is_trading:
             return True, "非交易时间 (Redis已连接，待行情启动)"
-        
+
         return False, "未获取到实时行情数据，请确认行情推送已启动"
 
     except Exception as exc:
         return False, f"行情链路探测异常: {exc}"
-
 
 def _parse_snapshot_at(snapshot: dict[str, Any]) -> float | None:
     raw = snapshot.get("snapshot_at") or snapshot.get("updated_at")
@@ -455,7 +496,7 @@ def _parse_snapshot_at(snapshot: dict[str, Any]) -> float | None:
             ts = float(text_raw)
             return ts / 1000.0 if ts > 1e12 else ts
         except Exception:
-            pass
+            logger.debug("ignored exception", exc_info=True)
         try:
             parsed = datetime.fromisoformat(text_raw.replace("Z", "+00:00"))
         except Exception:
@@ -464,7 +505,6 @@ def _parse_snapshot_at(snapshot: dict[str, Any]) -> float | None:
             parsed = parsed.replace(tzinfo=timezone.utc)
         return parsed.timestamp()
     return None
-
 
 def _build_user_id_candidates(user_id: str) -> list[str]:
     raw = str(user_id or "").strip()
@@ -476,9 +516,8 @@ def _build_user_id_candidates(user_id: str) -> list[str]:
         if numeric not in candidates:
             candidates.append(numeric)
     except Exception:
-        pass
+        logger.debug("ignored exception", exc_info=True)
     return candidates
-
 
 async def _check_user_hosting_permission(
     db: AsyncSession,
@@ -506,14 +545,18 @@ async def _check_user_hosting_permission(
         """
     ).bindparams(bindparam("user_ids", expanding=True))
     row = (
-        await db.execute(
-            stmt,
-            {
-                "tenant_id": tenant_id,
-                "user_ids": user_id_candidates,
-            },
+        (
+            await db.execute(
+                stmt,
+                {
+                    "tenant_id": tenant_id,
+                    "user_ids": user_id_candidates,
+                },
+            )
         )
-    ).mappings().first()
+        .mappings()
+        .first()
+    )
 
     if not row:
         return False, "未检测到有效订阅，当前仅 Pro 版用户可托管"
@@ -531,17 +574,25 @@ async def _check_user_hosting_permission(
         return True, f"用户权限通过（plan={plan_name}/{plan_code}）"
     return False, f"当前订阅为 {plan_name}（{plan_code}），仅 Pro 版用户可托管"
 
+async def _check_qmt_agent_online(
+    db: AsyncSession, redis_client, tenant_id: str, user_id: str
+) -> tuple[bool, str]:
+    from backend.services.trade.routers.real_trading_utils import (
+        _fetch_latest_real_account_snapshot,
+    )
 
-async def _check_qmt_agent_online(db: AsyncSession, redis_client, tenant_id: str, user_id: str) -> tuple[bool, str]:
-    from backend.services.trade.routers.real_trading_utils import _fetch_latest_real_account_snapshot
-
-    account_snapshot = await _fetch_latest_real_account_snapshot(db, tenant_id=tenant_id, user_id=user_id)
+    account_snapshot = await _fetch_latest_real_account_snapshot(
+        db, tenant_id=tenant_id, user_id=user_id
+    )
     heartbeat_key, heartbeat_raw = pick_first_matching_key(
         redis_client.get,
         trade_agent_heartbeat_key_candidates(tenant_id, user_id),
     )
     if not account_snapshot:
-        return False, "未检测到 PostgreSQL 实盘账户快照，请先启动 QMT Agent 并等待上报落库"
+        return (
+            False,
+            "未检测到 PostgreSQL 实盘账户快照，请先启动 QMT Agent 并等待上报落库",
+        )
     if not heartbeat_raw:
         return False, (
             f"未检测到 QMT Agent 心跳上报({trade_agent_heartbeat_key_candidates(tenant_id, user_id)[0]})"
@@ -562,15 +613,21 @@ async def _check_qmt_agent_online(db: AsyncSession, redis_client, tenant_id: str
 
     account_age_sec = max(0, int(time.time() - account_ts))
     heartbeat_age_sec = max(0, int(time.time() - heartbeat_ts))
-    account_threshold_sec = int(os.getenv("QMT_AGENT_ACCOUNT_STALE_THRESHOLD_SEC", "120"))
-    heartbeat_threshold_sec = int(os.getenv("QMT_AGENT_HEARTBEAT_STALE_THRESHOLD_SEC", "60"))
-    passed = account_age_sec <= account_threshold_sec and heartbeat_age_sec <= heartbeat_threshold_sec
+    account_threshold_sec = int(
+        os.getenv("QMT_AGENT_ACCOUNT_STALE_THRESHOLD_SEC", "120")
+    )
+    heartbeat_threshold_sec = int(
+        os.getenv("QMT_AGENT_HEARTBEAT_STALE_THRESHOLD_SEC", "60")
+    )
+    passed = (
+        account_age_sec <= account_threshold_sec
+        and heartbeat_age_sec <= heartbeat_threshold_sec
+    )
     detail = (
         f"account_age_sec={account_age_sec}/{account_threshold_sec}, "
         f"heartbeat_age_sec={heartbeat_age_sec}/{heartbeat_threshold_sec}"
     )
     return passed, detail
-
 
 def _is_trading_session_now() -> bool:
     """检查当前是否处于 A 股交易时段（09:15-11:30, 13:00-15:00）"""
@@ -578,15 +635,16 @@ def _is_trading_session_now() -> bool:
     # 周六周日直接返回 False
     if now.weekday() >= 5:
         return False
-    
+
     # 尝试确认是否为交易日
     try:
         import exchange_calendars as xcals
+
         calendar = xcals.get_calendar("XSHG")
         if not calendar.is_session(now.date()):
             return False
     except Exception:
-        pass
+        logger.debug("ignored exception", exc_info=True)
 
     # 检查具体时间段
     curr = now.time()
@@ -596,9 +654,8 @@ def _is_trading_session_now() -> bool:
     # 13:00 - 15:00
     if curr >= time_obj(13, 0) and curr <= time_obj(15, 0):
         return True
-    
-    return False
 
+    return False
 
 async def run_trading_readiness_precheck(
     db: AsyncSession,
@@ -614,16 +671,30 @@ async def run_trading_readiness_precheck(
 
     checks: list[dict[str, Any]] = []
 
-    expected_trade_date = _previous_trading_day(date.today())
-    model_context = await _resolve_user_model_context(tenant_id=tenant_id, user_id=user_id)
+    _previous_trading_day(date.today())
+    model_context = await _resolve_user_model_context(
+        tenant_id=tenant_id, user_id=user_id
+    )
     production_dir = model_context.get("model_dir")
     if not isinstance(production_dir, Path):
-        production_dir = Path(str(production_dir or os.getenv("MODELS_PRODUCTION", "/app/models/production/model_qlib")))
+        production_dir = Path(
+            str(
+                production_dir
+                or os.getenv("MODELS_PRODUCTION", "/app/models/production/model_qlib")
+            )
+        )
     model_context_hint = _build_model_context_hint(model_context)
 
     try:
         redis_ok = bool(redis_client.ping())
-        checks.append(_build_check("redis", "Redis", redis_ok, "Redis 已连接" if redis_ok else "Redis 不可达"))
+        checks.append(
+            _build_check(
+                "redis",
+                "Redis",
+                redis_ok,
+                "Redis 已连接" if redis_ok else "Redis 不可达",
+            )
+        )
     except Exception as exc:
         checks.append(_build_check("redis", "Redis", False, f"Redis 自检失败: {exc}"))
 
@@ -656,9 +727,13 @@ async def run_trading_readiness_precheck(
     # 模拟盘不限制订阅资格
     if normalized_mode == "SIMULATION":
         permission_ok = True
-        permission_detail = f"[SIMULATION] 自动放行订阅门禁; 原始检测结果: {permission_detail}"
+        permission_detail = (
+            f"[SIMULATION] 自动放行订阅门禁; 原始检测结果: {permission_detail}"
+        )
 
-    checks.append(_build_check("user_permission", "用户权限", permission_ok, permission_detail))
+    checks.append(
+        _build_check("user_permission", "用户权限", permission_ok, permission_detail)
+    )
 
     signal_stream_publish_enabled = str(
         os.getenv("ENABLE_SIGNAL_STREAM_PUBLISH", "false")
@@ -739,7 +814,7 @@ async def run_trading_readiness_precheck(
 
         try:
             stream_ok, stream_detail = _check_stream_series_freshness(redis_client)
-            is_trading = _is_trading_session_now()
+            _is_trading_session_now()
             # 模拟盘逻辑：非交易时间不因为行情不新鲜而阻断；交易时间必须打开行情检测。
             if not stream_ok:
                 stream_detail = f"[SIMULATION] 行情数据不新鲜（阻断）: {stream_detail}"
@@ -752,12 +827,12 @@ async def run_trading_readiness_precheck(
                 )
             )
         except Exception as exc:
-            is_trading = _is_trading_session_now()
+            _is_trading_session_now()
             checks.append(
                 _build_check(
                     "realtime_market_ready",
                     "实时行情服务已就绪",
-                    False, # 探针异常直接阻断
+                    False,  # 探针异常直接阻断
                     f"[SIMULATION] 行情探针异常（阻断）: {exc}",
                 )
             )
@@ -811,7 +886,9 @@ async def run_trading_readiness_precheck(
     # 容器编排就绪度检测 (支持 Docker 或 K8s)
     orchestration_ready = bool(k8s_manager.api and k8s_manager.core_api)
     orchestration_label = (
-        "容器编排服务 (Docker) 与执行镜像已就绪" if k8s_manager.mode == "docker" else "Kubernetes 服务与执行镜像已就绪"
+        "容器编排服务 (Docker) 与执行镜像已就绪"
+        if k8s_manager.mode == "docker"
+        else "Kubernetes 服务与执行镜像已就绪"
     )
 
     checks.append(
@@ -833,12 +910,18 @@ async def run_trading_readiness_precheck(
             "realtime_market_ready",
             "实时行情服务已就绪",
             stream_ok,
-            (f"已就绪: {stream_detail}" if stream_ok else f"行情不新鲜: {stream_detail}"),
+            (
+                f"已就绪: {stream_detail}"
+                if stream_ok
+                else f"行情不新鲜: {stream_detail}"
+            ),
         )
     )
 
     if normalized_mode == "REAL":
-        qmt_ok, qmt_detail = await _check_qmt_agent_online(db, redis_client, tenant_id, user_id)
+        qmt_ok, qmt_detail = await _check_qmt_agent_online(
+            db, redis_client, tenant_id, user_id
+        )
         checks.append(
             _build_check(
                 "qmt_agent_online",

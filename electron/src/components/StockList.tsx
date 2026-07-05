@@ -272,7 +272,8 @@ export const StockList: React.FC<StockListProps> = ({
         )}
       </Space>
 
-      {/* 数据表格 */}
+      {/* 数据表格（T2.5：移动端横向滚动） */}
+      <div className="qm-table-scroll">
       <Table
         columns={columns}
         dataSource={sortedQuotes}
@@ -287,6 +288,7 @@ export const StockList: React.FC<StockListProps> = ({
         loading={loading}
         size="small"
       />
+      </div>
     </div>
   );
 };

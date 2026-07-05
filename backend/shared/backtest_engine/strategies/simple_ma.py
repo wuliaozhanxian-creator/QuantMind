@@ -2,12 +2,11 @@
 简单移动平均策略示例
 """
 
-from typing import Any, Dict
+from typing import Any
 
 import numpy as np
 
 from .base import BaseStrategy
-
 
 class SimpleMAStrategy(BaseStrategy):
     """

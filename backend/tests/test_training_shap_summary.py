@@ -47,17 +47,30 @@ def test_compute_shap_summary_completed(tmp_path: Path) -> None:
     out_file = tmp_path / "shap_summary.csv"
     info = module._compute_shap_summary(
         model=_DummyBooster(),
-        split_frames={"valid": _sample_split_df(), "test": pd.DataFrame(), "train": pd.DataFrame()},
+        split_frames={
+            "valid": _sample_split_df(),
+            "test": pd.DataFrame(),
+            "train": pd.DataFrame(),
+        },
         features=["f1", "f2"],
         fill_values={"f1": 0.0, "f2": 0.0},
-        explain_cfg={"enable_shap": True, "shap_split": "valid", "shap_sample_rows": 30000},
+        explain_cfg={
+            "enable_shap": True,
+            "shap_split": "valid",
+            "shap_sample_rows": 30000,
+        },
         out_path=out_file,
     )
     assert info["status"] == "completed"
     assert info["split"] == "valid"
     assert out_file.exists()
     summary = pd.read_csv(out_file)
-    assert list(summary.columns) == ["feature", "mean_abs_shap", "mean_shap", "positive_ratio"]
+    assert list(summary.columns) == [
+        "feature",
+        "mean_abs_shap",
+        "mean_shap",
+        "positive_ratio",
+    ]
     assert set(summary["feature"].tolist()) == {"f1", "f2"}
 
 
@@ -66,10 +79,18 @@ def test_compute_shap_summary_disabled(tmp_path: Path) -> None:
     out_file = tmp_path / "shap_summary.csv"
     info = module._compute_shap_summary(
         model=_DummyBooster(),
-        split_frames={"valid": _sample_split_df(), "test": pd.DataFrame(), "train": pd.DataFrame()},
+        split_frames={
+            "valid": _sample_split_df(),
+            "test": pd.DataFrame(),
+            "train": pd.DataFrame(),
+        },
         features=["f1", "f2"],
         fill_values={"f1": 0.0, "f2": 0.0},
-        explain_cfg={"enable_shap": False, "shap_split": "valid", "shap_sample_rows": 30000},
+        explain_cfg={
+            "enable_shap": False,
+            "shap_split": "valid",
+            "shap_sample_rows": 30000,
+        },
         out_path=out_file,
     )
     assert info["status"] == "disabled"
@@ -81,10 +102,18 @@ def test_compute_shap_summary_failed_non_blocking(tmp_path: Path) -> None:
     out_file = tmp_path / "shap_summary.csv"
     info = module._compute_shap_summary(
         model=_DummyBooster(raise_error=True),
-        split_frames={"valid": _sample_split_df(), "test": pd.DataFrame(), "train": pd.DataFrame()},
+        split_frames={
+            "valid": _sample_split_df(),
+            "test": pd.DataFrame(),
+            "train": pd.DataFrame(),
+        },
         features=["f1", "f2"],
         fill_values={"f1": 0.0, "f2": 0.0},
-        explain_cfg={"enable_shap": True, "shap_split": "valid", "shap_sample_rows": 30000},
+        explain_cfg={
+            "enable_shap": True,
+            "shap_split": "valid",
+            "shap_sample_rows": 30000,
+        },
         out_path=out_file,
     )
     assert info["status"] == "failed"

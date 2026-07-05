@@ -18,10 +18,8 @@ from urllib.parse import quote_plus
 
 from sqlalchemy import create_engine, text
 
-
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
 
 def _build_sync_db_url() -> str:
     db_url = os.getenv("DATABASE_URL", "").strip()
@@ -39,7 +37,6 @@ def _build_sync_db_url() -> str:
     db_name = os.getenv("DB_NAME", "quantmind")
     return f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{db_name}"
 
-
 def _guess_exchange(code: str) -> str:
     c = str(code or "").strip()
     if c.startswith(("000", "001", "002", "003", "300")):
@@ -50,12 +47,10 @@ def _guess_exchange(code: str) -> str:
         return "BJ"
     return "SZ"
 
-
 def _normalize_symbol(code: str, exchange: str) -> str:
     c = str(code or "").strip()
     ex = str(exchange or "").strip().upper() or _guess_exchange(c)
     return f"{c}.{ex}"
-
 
 def build_items(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     items: List[Dict[str, Any]] = []
@@ -79,7 +74,6 @@ def build_items(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         )
     return items
 
-
 def _table_exists(conn, table_name: str) -> bool:
     row = conn.execute(
         text("""
@@ -91,7 +85,6 @@ def _table_exists(conn, table_name: str) -> bool:
         {"table": table_name},
     ).fetchone()
     return bool(row)
-
 
 def main() -> None:
     output_path = os.path.abspath(os.getenv("STOCK_INDEX_JSON_PATH", "data/stocks/stocks_index.json"))
@@ -145,7 +138,6 @@ def main() -> None:
             ensure_ascii=False,
         )
     )
-
 
 if __name__ == "__main__":
     main()

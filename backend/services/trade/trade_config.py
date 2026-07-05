@@ -8,7 +8,6 @@ from typing import Optional
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-
 class Settings(BaseSettings):
     """Trading Service settings"""
 
@@ -173,6 +172,5 @@ class Settings(BaseSettings):
     COMMISSION_RATE_SELL: float = float(
         os.getenv("COMMISSION_RATE_SELL", "0.0013")
     )  # 0.03%+0.1%+0.001%
-
 
 settings = Settings()

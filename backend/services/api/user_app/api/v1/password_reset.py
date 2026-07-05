@@ -36,7 +36,9 @@ class ResponseModel(BaseModel):
 
 
 @router.post("/reset-request", response_model=ResponseModel)
-async def request_password_reset(request_data: PasswordResetRequest, db=Depends(get_db)):
+async def request_password_reset(
+    request_data: PasswordResetRequest, db=Depends(get_db)
+):
     """
     请求密码重置
 
@@ -45,7 +47,9 @@ async def request_password_reset(request_data: PasswordResetRequest, db=Depends(
     """
     reset_service = PasswordResetService(db)
 
-    await reset_service.request_password_reset(request_data.email, request_data.tenant_id)
+    await reset_service.request_password_reset(
+        request_data.email, request_data.tenant_id
+    )
 
     return {
         "code": 200,
@@ -55,7 +59,9 @@ async def request_password_reset(request_data: PasswordResetRequest, db=Depends(
 
 
 @router.post("/reset-confirm", response_model=ResponseModel)
-async def confirm_password_reset(confirm_data: PasswordResetConfirm, db=Depends(get_db)):
+async def confirm_password_reset(
+    confirm_data: PasswordResetConfirm, db=Depends(get_db)
+):
     """
     确认密码重置
 

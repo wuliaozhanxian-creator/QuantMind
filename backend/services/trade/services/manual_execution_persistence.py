@@ -3,13 +3,11 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
-
+from typing import Any, Optional
 
 from sqlalchemy import text
 
 from backend.shared.database_manager_v2 import get_session
-
 
 class ManualExecutionPersistence:
     """实盘页手动执行任务持久化。"""
@@ -122,8 +120,12 @@ class ManualExecutionPersistence:
                 result[key] = result[key].isoformat()
         if result.get("prediction_trade_date") is not None:
             result["prediction_trade_date"] = str(result["prediction_trade_date"])
-        result["request_json"] = ManualExecutionPersistence._parse_json_field(result.get("request_json"))
-        result["result_json"] = ManualExecutionPersistence._parse_json_field(result.get("result_json"))
+        result["request_json"] = ManualExecutionPersistence._parse_json_field(
+            result.get("request_json")
+        )
+        result["result_json"] = ManualExecutionPersistence._parse_json_field(
+            result.get("result_json")
+        )
         result["trigger_context_json"] = ManualExecutionPersistence._parse_json_field(
             result.get("trigger_context_json")
         )
@@ -231,9 +233,10 @@ class ManualExecutionPersistence:
     async def claim_next_queued_task(self) -> dict[str, Any] | None:
         async with get_session() as session:
             row = (
-                await session.execute(
-                    text(
-                        """
+                (
+                    await session.execute(
+                        text(
+                            """
                         WITH picked AS (
                           SELECT task_id
                           FROM trade_manual_execution_tasks
@@ -250,9 +253,12 @@ class ManualExecutionPersistence:
                         WHERE t.task_id = picked.task_id
                         RETURNING t.*
                         """
+                        )
                     )
                 )
-            ).mappings().first()
+                .mappings()
+                .first()
+            )
         return self._row_to_task(dict(row)) if row else None
 
     async def get_active_manual_task(
@@ -264,9 +270,10 @@ class ManualExecutionPersistence:
     ) -> dict[str, Any] | None:
         async with get_session(read_only=True) as session:
             row = (
-                await session.execute(
-                    text(
-                        """
+                (
+                    await session.execute(
+                        text(
+                            """
                         SELECT *
                         FROM trade_manual_execution_tasks
                         WHERE tenant_id = :tenant_id
@@ -277,14 +284,17 @@ class ManualExecutionPersistence:
                         ORDER BY created_at ASC
                         LIMIT 1
                         """
-                    ),
-                    {
-                        "tenant_id": tenant_id,
-                        "user_id": user_id,
-                        "trading_mode": trading_mode,
-                    },
+                        ),
+                        {
+                            "tenant_id": tenant_id,
+                            "user_id": user_id,
+                            "trading_mode": trading_mode,
+                        },
+                    )
                 )
-            ).mappings().first()
+                .mappings()
+                .first()
+            )
         return self._row_to_task(dict(row)) if row else None
 
     async def has_completed_predecessor(self, task: dict[str, Any]) -> bool:
@@ -376,16 +386,21 @@ class ManualExecutionPersistence:
                     "failed_count": failed_count,
                     "progress": progress,
                     "updated_at": updated_at or datetime.now(timezone.utc),
-                    "result_json": json.dumps(result_payload, ensure_ascii=False) if result_payload is not None else None,
+                    "result_json": json.dumps(result_payload, ensure_ascii=False)
+                    if result_payload is not None
+                    else None,
                 },
             )
 
-    async def get_task(self, task_id: str, *, user_id: str, tenant_id: str) -> dict[str, Any] | None:
+    async def get_task(
+        self, task_id: str, *, user_id: str, tenant_id: str
+    ) -> dict[str, Any] | None:
         async with get_session(read_only=True) as session:
             row = (
-                await session.execute(
-                    text(
-                        """
+                (
+                    await session.execute(
+                        text(
+                            """
                         SELECT *
                         FROM trade_manual_execution_tasks
                         WHERE task_id = :task_id
@@ -393,27 +408,38 @@ class ManualExecutionPersistence:
                           AND tenant_id = :tenant_id
                         LIMIT 1
                         """
-                    ),
-                    {"task_id": task_id, "user_id": user_id, "tenant_id": tenant_id},
+                        ),
+                        {
+                            "task_id": task_id,
+                            "user_id": user_id,
+                            "tenant_id": tenant_id,
+                        },
+                    )
                 )
-            ).mappings().first()
+                .mappings()
+                .first()
+            )
         return self._row_to_task(dict(row)) if row else None
 
     async def get_task_any(self, task_id: str) -> dict[str, Any] | None:
         async with get_session(read_only=True) as session:
             row = (
-                await session.execute(
-                    text(
-                        """
+                (
+                    await session.execute(
+                        text(
+                            """
                         SELECT *
                         FROM trade_manual_execution_tasks
                         WHERE task_id = :task_id
                         LIMIT 1
                         """
-                    ),
-                    {"task_id": task_id},
+                        ),
+                        {"task_id": task_id},
+                    )
                 )
-            ).mappings().first()
+                .mappings()
+                .first()
+            )
         return self._row_to_task(dict(row)) if row else None
 
     async def list_tasks(
@@ -446,19 +472,23 @@ class ManualExecutionPersistence:
             params["parent_runtime_id"] = normalized_parent_runtime_id
         async with get_session(read_only=True) as session:
             rows = (
-                await session.execute(
-                    text(
-                        f"""
+                (
+                    await session.execute(
+                        text(
+                            f"""
                         SELECT *
                         FROM trade_manual_execution_tasks
                         WHERE {" AND ".join(conditions)}
                         ORDER BY created_at DESC
                         LIMIT :limit
                         """
-                    ),
-                    params,
+                        ),
+                        params,
+                    )
                 )
-            ).mappings().all()
+                .mappings()
+                .all()
+            )
         return [self._row_to_task(dict(row)) for row in rows]
 
     async def clear_tasks(
@@ -480,6 +510,5 @@ class ManualExecutionPersistence:
             )
             await session.commit()
             return result.rowcount
-
 
 manual_execution_persistence = ManualExecutionPersistence()

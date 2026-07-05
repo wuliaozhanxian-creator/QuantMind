@@ -286,7 +286,7 @@ async def start_trading(
             except Exception:
                 raise HTTPException(
                     status_code=400, detail="execution_config 不是合法 JSON"
-                )
+                ) from None
             if not isinstance(user_exec_cfg, dict):
                 raise HTTPException(
                     status_code=400, detail="execution_config 必须是对象"
@@ -299,7 +299,7 @@ async def start_trading(
             except Exception:
                 raise HTTPException(
                     status_code=400, detail="live_trade_config 不是合法 JSON"
-                )
+                ) from None
             if not isinstance(user_live_cfg, dict):
                 raise HTTPException(
                     status_code=400, detail="live_trade_config 必须是对象"
@@ -374,7 +374,7 @@ async def start_trading(
             is_native_cfg = _is_native_strategy_config_without_on_tick(code_str)
 
             try:
-                sandbox_run_id = sandbox_manager.submit_strategy(
+                sandbox_manager.submit_strategy(
                     tenant_id=resolved_tenant_id,
                     user_id=resolved_user_id,
                     strategy_id=strategy_id or strategy_name,
@@ -386,7 +386,9 @@ async def start_trading(
                     f"[Sim] 用户 {resolved_user_id} 启动了沙箱模拟盘 {strategy_name} -> PID Task"
                 )
             except Exception as e:
-                raise HTTPException(status_code=500, detail=f"沙箱启动失败: {str(e)}")
+                raise HTTPException(
+                    status_code=500, detail=f"沙箱启动失败: {str(e)}"
+                ) from e
 
             # 兼容原生 STRATEGY_CONFIG 策略（通常不定义 on_tick）：
             # 启动后立即触发一次自动托管任务，避免“运行中但无信号产出”的假活跃状态。
@@ -397,8 +399,12 @@ async def start_trading(
                     strategy_id=str(strategy_id or ""),
                     live_trade_config=live_config,
                 )
-                bootstrap_task_id = str(bootstrap_plan.get("task_id") or "").strip() or None
-                bootstrap_lock_key = str(bootstrap_plan.get("lock_key") or "").strip() or None
+                bootstrap_task_id = (
+                    str(bootstrap_plan.get("task_id") or "").strip() or None
+                )
+                bootstrap_lock_key = (
+                    str(bootstrap_plan.get("lock_key") or "").strip() or None
+                )
                 bootstrap_lock_acquired = False
 
                 if bootstrap_task_id and bootstrap_lock_key and redis.client:
@@ -421,7 +427,11 @@ async def start_trading(
                             exc_info=True,
                         )
 
-                if bootstrap_task_id and bootstrap_lock_key and not bootstrap_lock_acquired:
+                if (
+                    bootstrap_task_id
+                    and bootstrap_lock_key
+                    and not bootstrap_lock_acquired
+                ):
                     hosted_bootstrap = {
                         "task_id": bootstrap_task_id,
                         "status": "duplicate_skipped",
@@ -436,20 +446,28 @@ async def start_trading(
                     )
                 else:
                     try:
-                        hosted_bootstrap = await manual_execution_service.create_hosted_task(
-                            tenant_id=resolved_tenant_id,
-                            user_id=resolved_user_id,
-                            strategy_id=str(strategy_id or ""),
-                            trading_mode="SIMULATION",
-                            execution_config=exec_config,
-                            live_trade_config=live_config,
-                            trigger_context=dict(bootstrap_plan.get("trigger_context") or {}),
-                            parent_runtime_id=run_id,
-                            note="auto bootstrap from simulation start",
-                            task_id=bootstrap_task_id,
+                        hosted_bootstrap = (
+                            await manual_execution_service.create_hosted_task(
+                                tenant_id=resolved_tenant_id,
+                                user_id=resolved_user_id,
+                                strategy_id=str(strategy_id or ""),
+                                trading_mode="SIMULATION",
+                                execution_config=exec_config,
+                                live_trade_config=live_config,
+                                trigger_context=dict(
+                                    bootstrap_plan.get("trigger_context") or {}
+                                ),
+                                parent_runtime_id=run_id,
+                                note="auto bootstrap from simulation start",
+                                task_id=bootstrap_task_id,
+                            )
                         )
                     except Exception:
-                        if bootstrap_lock_acquired and bootstrap_lock_key and redis.client:
+                        if (
+                            bootstrap_lock_acquired
+                            and bootstrap_lock_key
+                            and redis.client
+                        ):
                             try:
                                 redis.client.delete(bootstrap_lock_key)
                             except Exception:
@@ -539,7 +557,7 @@ async def start_trading(
             level="error",
             action_url="/trading",
         )
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/stop")
@@ -609,7 +627,7 @@ async def stop_trading(
                 portfolio.updated_at = datetime.utcnow()
                 await db.commit()
                 logger.info(
-                    f"Updated portfolio %d run_status: %s -> stopped",
+                    "Updated portfolio %d run_status: %s -> stopped",
                     portfolio.id,
                     old_status,
                 )
@@ -650,7 +668,7 @@ async def stop_trading(
                 level="error",
                 action_url="/trading",
             )
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/status")
@@ -769,7 +787,7 @@ async def get_status(
                         "description": strat["description"],
                     }
             except Exception:
-                pass
+                logger.debug("ignored exception", exc_info=True)
 
     latest_signal_run_id, signal_source_status = await _build_signal_source_status(
         redis.client,
@@ -1040,7 +1058,7 @@ async def get_orders(
         raise
     except Exception as e:
         logger.error(f"Failed to fetch orders: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/history")
@@ -1072,4 +1090,4 @@ async def get_trade_history(
         raise
     except Exception as e:
         logger.error(f"Failed to fetch trades: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e

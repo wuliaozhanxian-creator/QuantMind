@@ -15,12 +15,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.services.trade.simulation.models.account import SimulationAccount
 from backend.services.trade.simulation.models.position_lot import SimulationPositionLot
 
-
 @dataclass
 class ProjectionSnapshot:
     account: SimulationAccount | None
     positions: dict[str, dict[str, float]]
-
 
 class SimulationProjectionService:
     def __init__(self, db: AsyncSession):
@@ -48,9 +46,7 @@ class SimulationProjectionService:
         if snapshot_dt.tzinfo is not None:
             snapshot_dt = snapshot_dt.astimezone().replace(tzinfo=None)
         long_market_value = float(getattr(account, "long_market_value", 0.0) or 0.0)
-        short_market_value = float(
-            getattr(account, "short_market_value", 0.0) or 0.0
-        )
+        short_market_value = float(getattr(account, "short_market_value", 0.0) or 0.0)
         if positions:
             long_market_value, short_market_value, market_value = (
                 SimulationProjectionService.summarize_position_market_value(positions)
@@ -74,7 +70,9 @@ class SimulationProjectionService:
             "total_asset": total_asset,
             "equity": total_asset,
             "liabilities": float(getattr(account, "liabilities", 0.0) or 0.0),
-            "maintenance_margin_ratio": float(getattr(account, "maintenance_margin_ratio", 0.0) or 0.0),
+            "maintenance_margin_ratio": float(
+                getattr(account, "maintenance_margin_ratio", 0.0) or 0.0
+            ),
             "initial_equity": initial_equity,
             "day_open_equity": initial_equity,
             "month_open_equity": initial_equity,
@@ -153,18 +151,14 @@ class SimulationProjectionService:
             return {}
 
         symbols = sorted(
-            {
-                str(lot.symbol).strip().upper()
-                for lot in lots
-                if str(lot.symbol).strip()
-            }
+            {str(lot.symbol).strip().upper() for lot in lots if str(lot.symbol).strip()}
         )
         price_pairs = await asyncio.gather(
             *[latest_price_loader(symbol) for symbol in symbols],
             return_exceptions=True,
         )
         price_map: dict[str, float] = {}
-        for symbol, value in zip(symbols, price_pairs):
+        for symbol, value in zip(symbols, price_pairs, strict=False):
             price_map[symbol] = float(value) if isinstance(value, (int, float)) else 0.0
 
         grouped: dict[tuple[str, str], dict[str, float]] = {}
@@ -202,11 +196,7 @@ class SimulationProjectionService:
             total_cost = float(bucket["cost_amount"] or 0.0)
             cost_price = total_cost / qty if qty > 0 else 0.0
             market_value = round(price * qty, 2) if price > 0 else 0.0
-            key = (
-                normalized_symbol
-                if side == "long"
-                else f"{normalized_symbol}:short"
-            )
+            key = normalized_symbol if side == "long" else f"{normalized_symbol}:short"
             positions[key] = {
                 "symbol": normalized_symbol,
                 "volume": qty,
@@ -235,15 +225,12 @@ class SimulationProjectionService:
         account_id = self.build_account_id(tenant_id, user_id)
         normalized_symbol = str(symbol or "").strip().upper()
         normalized_side = str(position_side or "long").strip().lower()
-        stmt = (
-            select(SimulationPositionLot)
-            .where(
-                SimulationPositionLot.account_id == account_id,
-                SimulationPositionLot.symbol == normalized_symbol,
-                SimulationPositionLot.position_side == normalized_side,
-                SimulationPositionLot.status == "open",
-                SimulationPositionLot.quantity_remaining > 0,
-            )
+        stmt = select(SimulationPositionLot).where(
+            SimulationPositionLot.account_id == account_id,
+            SimulationPositionLot.symbol == normalized_symbol,
+            SimulationPositionLot.position_side == normalized_side,
+            SimulationPositionLot.status == "open",
+            SimulationPositionLot.quantity_remaining > 0,
         )
         lots = list((await self.db.execute(stmt)).scalars().all())
         if not lots:

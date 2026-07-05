@@ -89,7 +89,9 @@ class TestEngineConfigConsistency:
             for line in content.splitlines()
             if line.strip() and not line.strip().startswith("#")
         )
-        assert not has_database_url, "backend/services/engine/.env 存在重复 DATABASE_URL，请统一使用根目录 .env"
+        assert not has_database_url, (
+            "backend/services/engine/.env 存在重复 DATABASE_URL，请统一使用根目录 .env"
+        )
 
     def test_engine_env_should_not_define_redis_connection(self):
         """
@@ -107,7 +109,9 @@ class TestEngineConfigConsistency:
             for line in content.splitlines()
             if line.strip() and not line.strip().startswith("#")
         )
-        assert not has_redis_keys, "backend/services/engine/.env 存在重复 Redis 连接配置，请统一使用根目录 .env"
+        assert not has_redis_keys, (
+            "backend/services/engine/.env 存在重复 Redis 连接配置，请统一使用根目录 .env"
+        )
 
     def test_engine_env_should_not_define_qlib_provider_config(self):
         """
@@ -125,9 +129,9 @@ class TestEngineConfigConsistency:
             for line in content.splitlines()
             if line.strip() and not line.strip().startswith("#")
         )
-        assert (
-            not has_qlib_provider_keys
-        ), "backend/services/engine/.env 存在重复 Qlib Provider 配置，请统一使用根目录 .env"
+        assert not has_qlib_provider_keys, (
+            "backend/services/engine/.env 存在重复 Qlib Provider 配置，请统一使用根目录 .env"
+        )
 
     def test_model_qlib_class_declaration_should_match_model_file(self):
         """
@@ -138,7 +142,9 @@ class TestEngineConfigConsistency:
         workflow_path = model_dir / "workflow_config.yaml"
         metadata_path = model_dir / "metadata.json"
 
-        if not (model_path.exists() and workflow_path.exists() and metadata_path.exists()):
+        if not (
+            model_path.exists() and workflow_path.exists() and metadata_path.exists()
+        ):
             pytest.skip("model_qlib 产物不完整，跳过一致性检查")
 
         import json
@@ -158,7 +164,9 @@ class TestEngineConfigConsistency:
             metadata = json.load(f) or {}
 
         task_model = (workflow.get("task") or {}).get("model") or {}
-        declared_workflow_cls = f"{task_model.get('module_path')}.{task_model.get('class')}"
+        declared_workflow_cls = (
+            f"{task_model.get('module_path')}.{task_model.get('class')}"
+        )
         declared_metadata_cls = metadata.get("resolved_class")
         actual_cls = f"{type(model).__module__}.{type(model).__name__}"
 

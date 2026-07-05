@@ -1,13 +1,11 @@
 """Qlib 回测请求和响应 Schema"""
 
 from datetime import datetime
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-
 GRID_SEARCH_MAX_COMBINATIONS = 100
-
 
 def count_param_values(param_min: float, param_max: float, param_step: float) -> int:
     """计算参数范围内的取值数量，避免浮点数精度问题"""
@@ -16,17 +14,21 @@ def count_param_values(param_min: float, param_max: float, param_step: float) ->
     # 使用 round 避免浮点数误差，例如 (0.3-0.1)/0.1 = 1.9999999
     return int(round((param_max - param_min) / param_step)) + 1
 
-
 class BaseStrategyParams(BaseModel):
     """Base Qlib 策略参数"""
+
     model_config = ConfigDict(extra="ignore")
 
     topk: int = Field(50, description="选股数量", ge=5, le=200)
     short_topk: int = Field(50, description="做空选股数量", ge=0, le=200)
     n_drop: int = Field(10, description="每期调仓数量", ge=0, le=200)
     signal: str = Field("<PRED>", description="信号列名或文件路径")
-    exclude_st: bool = Field(False, description="是否在策略侧显式剔除 ST 股票（默认关闭）")
-    f_is_st_not: int | None = Field(None, description="基本面对齐字段：1 表示剔除 ST，0 表示不启用")
+    exclude_st: bool = Field(
+        False, description="是否在策略侧显式剔除 ST 股票（默认关闭）"
+    )
+    f_is_st_not: int | None = Field(
+        None, description="基本面对齐字段：1 表示剔除 ST，0 表示不启用"
+    )
     long_exposure: float = Field(1.0, description="多头敞口", ge=0.0, le=3.0)
     short_exposure: float = Field(1.0, description="空头敞口", ge=0.0, le=3.0)
     rebalance_days: int = Field(3, description="调仓周期(天)", ge=1, le=60)
@@ -58,12 +60,20 @@ class StopLossParams(BaseStrategyParams):
     take_profit: float = Field(0.15, description="止盈线", ge=0.01, le=1.0)
 
 class RiskGuardTopkParams(BaseStrategyParams):
-    industry_cap_ratio: float = Field(0.3, description="单行业持仓上限占比", ge=0.1, le=0.6)
+    industry_cap_ratio: float = Field(
+        0.3, description="单行业持仓上限占比", ge=0.1, le=0.6
+    )
     listed_days_min: int = Field(120, description="上市天数下限", ge=20, le=500)
-    turnover_rate_min: float = Field(0.5, description="换手率下限（%）", ge=0.0, le=10.0)
-    turnover_rate_max: float = Field(15.0, description="换手率上限（%）", ge=1.0, le=80.0)
+    turnover_rate_min: float = Field(
+        0.5, description="换手率下限（%）", ge=0.0, le=10.0
+    )
+    turnover_rate_max: float = Field(
+        15.0, description="换手率上限（%）", ge=1.0, le=80.0
+    )
     beta_20_max: float = Field(1.8, description="20日 Beta 上限", ge=0.5, le=3.0)
-    float_mv_min: float = Field(500_000_000, description="流通市值下限（元）", ge=100_000_000, le=10_000_000_000)
+    float_mv_min: float = Field(
+        500_000_000, description="流通市值下限（元）", ge=100_000_000, le=10_000_000_000
+    )
 
 class DeepTimeSeriesParams(BaseStrategyParams):
     pass
@@ -80,8 +90,6 @@ class CustomStrategyParams(BaseStrategyParams):
     market: str = Field("all", description="基准权重市场代码")
     topk_sectors: int = Field(5, description="行业轮动选择行业数量", ge=2, le=15)
     lookback_days: int = Field(20, description="回看周期", ge=5, le=252)
-
-
 
 class QlibBacktestRequest(BaseModel):
     """Qlib 回测请求"""
@@ -101,7 +109,12 @@ class QlibBacktestRequest(BaseModel):
                     data["strategy_params"] = WeightStrategyParams(**params)
                 elif strat_type == "VolatilityWeighted":
                     data["strategy_params"] = VolatilityWeightedParams(**params)
-                elif strat_type in ("long_short_topk", "value_growth", "alpha_cross_section", "score_weighted"):
+                elif strat_type in (
+                    "long_short_topk",
+                    "value_growth",
+                    "alpha_cross_section",
+                    "score_weighted",
+                ):
                     data["strategy_params"] = WeightStrategyParams(**params)
                 elif strat_type == "StopLoss":
                     data["strategy_params"] = StopLossParams(**params)
@@ -121,7 +134,9 @@ class QlibBacktestRequest(BaseModel):
         description="策略类型 (如 TopkDropout, standard_topk, deep_time_series 等)",
     )
 
-    strategy_params: Any = Field(default_factory=CustomStrategyParams, description="策略参数")
+    strategy_params: Any = Field(
+        default_factory=CustomStrategyParams, description="策略参数"
+    )
     strategy_content: str | None = Field(
         None,
         description="策略代码（仅用于 CustomStrategy 模式）",
@@ -208,14 +223,12 @@ class QlibBacktestRequest(BaseModel):
         description="历史来源标记：manual=普通回测，optimization=参数优化子任务",
     )
 
-
 class QlibPortfolioMetrics(BaseModel):
     """Qlib Portfolio 指标"""
 
     final_value: float | None = None
     account: float | None = None
     position_value: float | None = None
-
 
 class RebalanceInstruction(BaseModel):
     """调仓指令建议"""
@@ -226,7 +239,6 @@ class RebalanceInstruction(BaseModel):
     target_weight: float
     weight_diff: float
     estimated_amount: float | None = None
-
 
 class QlibBacktestResult(BaseModel):
     """Qlib 回测结果"""
@@ -278,7 +290,6 @@ class QlibBacktestResult(BaseModel):
     error_message: str | None = None
     full_error: str | None = None
 
-
 class HealthCheckResponse(BaseModel):
     """Qlib 健康检查响应"""
 
@@ -291,7 +302,6 @@ class HealthCheckResponse(BaseModel):
     redis_ok: bool = Field(False, description="Redis 连通性")
     error: str | None = Field(None, description="异常信息")
 
-
 class OptimizationTaskResponse(BaseModel):
     """异步优化任务提交响应"""
 
@@ -299,7 +309,6 @@ class OptimizationTaskResponse(BaseModel):
     task_id: str
     status: str = "pending"
     created_at: datetime = Field(default_factory=datetime.now)
-
 
 class OptimizationParamRange(BaseModel):
     """优化参数搜索区间"""
@@ -309,13 +318,11 @@ class OptimizationParamRange(BaseModel):
     max: float
     step: float = Field(..., gt=0)
 
-
 class OptimizationTaskResult(BaseModel):
     """单次参数组合回测结果"""
 
     params: dict[str, float]
     metrics: QlibBacktestResult
-
 
 class QlibOptimizationRequest(BaseModel):
     """网格参数优化请求"""
@@ -344,7 +351,6 @@ class QlibOptimizationRequest(BaseModel):
 
         return self
 
-
 class QlibOptimizationResult(BaseModel):
     """网格参数优化结果"""
 
@@ -353,7 +359,6 @@ class QlibOptimizationResult(BaseModel):
     all_results: list[OptimizationTaskResult]
     target_metric: str
     execution_time: float
-
 
 class OptimizationProgressInfo(BaseModel):
     """优化任务运行中的进度信息"""
@@ -368,7 +373,6 @@ class OptimizationProgressInfo(BaseModel):
     current_params: dict[str, Any] | None = None
     best_params: dict[str, Any] | None = None
     best_metric_value: float | None = None
-
 
 class OptimizationHistoryItem(BaseModel):
     """优化历史摘要"""
@@ -393,7 +397,6 @@ class OptimizationHistoryItem(BaseModel):
     error_message: str | None = None
     can_apply: bool = False
 
-
 class OptimizationHistoryDetail(OptimizationHistoryItem):
     """优化历史详情"""
 
@@ -402,7 +405,6 @@ class OptimizationHistoryDetail(OptimizationHistoryItem):
     result_summary: dict[str, Any] = Field(default_factory=dict)
     all_results: list[dict[str, Any]] = Field(default_factory=list)
 
-
 class GeneticHistoryRecord(BaseModel):
     """遗传算法代际统计"""
 
@@ -410,7 +412,6 @@ class GeneticHistoryRecord(BaseModel):
     max_fitness: float
     avg_fitness: float
     std_fitness: float
-
 
 class QlibGeneticOptimizationRequest(BaseModel):
     """遗传算法优化请求"""
@@ -426,7 +427,6 @@ class QlibGeneticOptimizationRequest(BaseModel):
     tournament_size: int = Field(3, ge=2, le=32)
     max_parallel: int = Field(4, ge=1, le=32)
 
-
 class QlibGeneticOptimizationResult(BaseModel):
     """遗传算法优化结果"""
 
@@ -436,14 +436,12 @@ class QlibGeneticOptimizationResult(BaseModel):
     history: list[GeneticHistoryRecord]
     execution_time: float
 
-
 class QlibAIFixRequest(BaseModel):
     """Qlib AI 策略修复请求"""
 
     backtest_id: str = Field(..., description="相关联的回测ID")
     error_message: str | None = Field(None, description="简短错误信息")
     full_error: str | None = Field(None, description="完整堆栈跟踪")
-
 
 class QlibAIFixResponse(BaseModel):
     """Qlib AI 策略修复响应"""

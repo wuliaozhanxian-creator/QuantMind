@@ -27,19 +27,15 @@ _INDEX_CACHE_MAX_ENTRIES = 4
 _INDEX_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _INDEX_LOCK = asyncio.Lock()
 
-
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
 
 def _normalize_symbol(symbol: str) -> str:
     return StockCodeUtil.to_prefix(symbol)
 
-
 def _symbol_to_exchange(symbol: str) -> str:
     normalized = _normalize_symbol(symbol)
     return normalized[:2] if len(normalized) >= 8 else ""
-
 
 def _symbol_to_code(symbol: str) -> str:
     normalized = _normalize_symbol(symbol)
@@ -47,7 +43,6 @@ def _symbol_to_code(symbol: str) -> str:
     if "." in suffix:
         return suffix.split(".", 1)[0]
     return normalized
-
 
 def _cache_get(key: str) -> dict[str, Any] | None:
     now = time.monotonic()
@@ -59,18 +54,18 @@ def _cache_get(key: str) -> dict[str, Any] | None:
         return None
     return cached[1]
 
-
 def _cache_set(key: str, payload: dict[str, Any]) -> None:
     _INDEX_CACHE[key] = (time.monotonic(), payload)
     if len(_INDEX_CACHE) > _INDEX_CACHE_MAX_ENTRIES:
         oldest_key = min(_INDEX_CACHE.items(), key=lambda kv: kv[1][0])[0]
         _INDEX_CACHE.pop(oldest_key, None)
 
-
 async def _load_stock_index_payload() -> dict[str, Any]:
     async with _INDEX_LOCK:
         async with get_session(read_only=True) as session:
-            latest_trade_date = await session.scalar(text("SELECT MAX(trade_date) FROM stock_daily_latest"))
+            latest_trade_date = await session.scalar(
+                text("SELECT MAX(trade_date) FROM stock_daily_latest")
+            )
             if latest_trade_date is None:
                 raise FileNotFoundError("stock_daily_latest")
 
@@ -113,14 +108,19 @@ async def _load_stock_index_payload() -> dict[str, Any]:
 
     items = [items_map[key] for key in sorted(items_map.keys())]
     payload = {
-        "trade_date": latest_trade_date.isoformat() if hasattr(latest_trade_date, "isoformat") else str(latest_trade_date),
+        "trade_date": latest_trade_date.isoformat()
+        if hasattr(latest_trade_date, "isoformat")
+        else str(latest_trade_date),
         "items": items,
         "loaded_count": len(items),
     }
     _cache_set(cache_key, payload)
-    logger.info("已从 stock_daily_latest 加载策略股票索引: trade_date=%s count=%s", payload["trade_date"], len(items))
+    logger.info(
+        "已从 stock_daily_latest 加载策略股票索引: trade_date=%s count=%s",
+        payload["trade_date"],
+        len(items),
+    )
     return payload
-
 
 async def _search_stock_index(keyword: str, limit: int) -> list[dict[str, Any]]:
     payload = await _load_stock_index_payload()
@@ -151,7 +151,6 @@ async def _search_stock_index(keyword: str, limit: int) -> list[dict[str, Any]]:
             break
     return (starts + contains)[:limit]
 
-
 @router.get("/search")
 async def search_stocks(
     q: str = Query(..., description="搜索关键词"),
@@ -177,7 +176,6 @@ async def search_stocks(
         "source": "stock_daily_latest",
     }
 
-
 @router.get("/search/status")
 async def search_status():
     try:
@@ -190,7 +188,6 @@ async def search_status():
         "index": payload,
     }
 
-
 @router.get("/index")
 async def get_stock_index():
     """返回完整股票索引，供策略向导与回测组件统一读取。"""
@@ -198,7 +195,9 @@ async def get_stock_index():
         payload = await _load_stock_index_payload()
     except FileNotFoundError as exc:
         logger.error("stock_daily_latest 不可用: %s", exc)
-        raise HTTPException(status_code=503, detail="股票索引未就绪，请先完成 stock_daily_latest 同步。") from exc
+        raise HTTPException(
+            status_code=503, detail="股票索引未就绪，请先完成 stock_daily_latest 同步。"
+        ) from exc
     except Exception as exc:
         logger.error("获取策略股票索引失败: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail=f"获取股票索引失败: {exc}") from exc

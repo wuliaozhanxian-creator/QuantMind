@@ -1,6 +1,10 @@
 import pytest
 
-from backend.services.trade.simulation.models.order import OrderSide, OrderType, SimOrder
+from backend.services.trade.simulation.models.order import (
+    OrderSide,
+    OrderType,
+    SimOrder,
+)
 from backend.services.trade.simulation.services.execution_engine import (
     MarketSnapshot,
     SimulationExecutionEngine,
@@ -34,14 +38,24 @@ def _make_order(side: OrderSide) -> SimOrder:
 
 
 def test_limit_price_detection_ignores_non_price_flags():
-    assert SimulationExecutionEngine._is_price_near(price=10.0, limit_price=1.0) is False
-    assert SimulationExecutionEngine._is_price_near(price=10.0, limit_price=2.0) is False
+    assert (
+        SimulationExecutionEngine._is_price_near(price=10.0, limit_price=1.0) is False
+    )
+    assert (
+        SimulationExecutionEngine._is_price_near(price=10.0, limit_price=2.0) is False
+    )
 
 
 def test_limit_price_detection_uses_nearby_limit_price():
-    assert SimulationExecutionEngine._is_price_near(price=10.0, limit_price=10.0) is True
-    assert SimulationExecutionEngine._is_price_near(price=10.0, limit_price=10.01) is True
-    assert SimulationExecutionEngine._is_price_near(price=10.0, limit_price=10.2) is False
+    assert (
+        SimulationExecutionEngine._is_price_near(price=10.0, limit_price=10.0) is True
+    )
+    assert (
+        SimulationExecutionEngine._is_price_near(price=10.0, limit_price=10.01) is True
+    )
+    assert (
+        SimulationExecutionEngine._is_price_near(price=10.0, limit_price=10.2) is False
+    )
 
 
 @pytest.mark.asyncio

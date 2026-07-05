@@ -1,10 +1,9 @@
 """Symbol schemas"""
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
-
 
 class SymbolBase(BaseModel):
     """交易标的基础模型"""
@@ -16,10 +15,8 @@ class SymbolBase(BaseModel):
     sector: str | None = Field(None, description="行业板块")
     is_active: bool = Field(True, description="是否活跃")
 
-
 class SymbolCreate(SymbolBase):
     """创建交易标的"""
-
 
 class SymbolResponse(SymbolBase):
     """交易标的响应"""
@@ -28,7 +25,6 @@ class SymbolResponse(SymbolBase):
 
     created_at: datetime
     updated_at: datetime
-
 
 class SymbolListResponse(BaseModel):
     """交易标的列表响应"""

@@ -8,14 +8,13 @@ Updated: 2025-11-12 - 集成消息队列
 import asyncio
 import logging
 import time
-from typing import Any, Dict, Optional, Set
+from typing import Any, Optional
 
 from fastapi import WebSocket
 
 from .message_queue import MessagePriority, message_queue
 
 logger = logging.getLogger(__name__)
-
 
 class ConnectionManager:
     """WebSocket连接管理器
@@ -109,7 +108,9 @@ class ConnectionManager:
         logger.info(f"客户端断开连接: {connection_id}")
         logger.info(f"当前活跃连接数: {len(self.active_connections)}")
 
-    async def close_connection(self, connection_id: str, code: int = 1000, reason: str = "") -> None:
+    async def close_connection(
+        self, connection_id: str, code: int = 1000, reason: str = ""
+    ) -> None:
         websocket = self.active_connections.get(connection_id)
         if websocket is not None:
             try:
@@ -163,7 +164,9 @@ class ConnectionManager:
             await self.disconnect(connection_id)
             return False
 
-    async def broadcast(self, message: dict[str, Any], exclude: set[str] | None = None) -> int:
+    async def broadcast(
+        self, message: dict[str, Any], exclude: set[str] | None = None
+    ) -> int:
         """
         广播消息给所有连接
 
@@ -308,7 +311,10 @@ class ConnectionManager:
         return {
             "active_connections": len(self.active_connections),
             "total_topics": len(self.subscriptions),
-            "subscriptions": {topic: len(subscribers) for topic, subscribers in self.subscriptions.items()},
+            "subscriptions": {
+                topic: len(subscribers)
+                for topic, subscribers in self.subscriptions.items()
+            },
             "queue_stats": message_queue.get_stats(),
         }
 
@@ -331,7 +337,7 @@ class ConnectionManager:
             try:
                 await self.queue_processor_task
             except asyncio.CancelledError:
-                pass
+                pass  # noqa: BLE001 - asyncio 任务取消信号，预期静默处理
 
         logger.info("消息队列处理器已停止")
 
@@ -365,7 +371,9 @@ class ConnectionManager:
                         # 重试逻辑
                         if queued_msg.retry_count < 3:
                             queued_msg.retry_count += 1
-                            await message_queue.enqueue(connection_id, message, queued_msg.priority)
+                            await message_queue.enqueue(
+                                connection_id, message, queued_msg.priority
+                            )
                         else:
                             # 超过重试次数，断开连接
                             await self.disconnect(connection_id)
@@ -375,7 +383,6 @@ class ConnectionManager:
             except Exception as e:
                 logger.error(f"处理消息队列错误: {e}")
                 await asyncio.sleep(0.1)
-
 
 # 全局连接管理器实例
 manager = ConnectionManager()

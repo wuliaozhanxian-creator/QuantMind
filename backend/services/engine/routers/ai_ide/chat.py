@@ -3,7 +3,7 @@ import json
 import time
 import logging
 import httpx
-from typing import List, Optional, Dict, Any
+from typing import Optional, Any
 from collections.abc import AsyncGenerator
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -20,7 +20,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # --- Core Logic (Ported from AI-IDE Agent) ---
-
 
 class KnowledgeBase:
     """缓存 TTL 5 分钟，过期后自动重新加载文档。"""
@@ -68,7 +67,6 @@ class KnowledgeBase:
         self._cached_context = summary
         self._cached_at = now
         return summary
-
 
 class QuantAgent:
     def __init__(self, api_key: str, base_url: str, model: str, project_root: str):
@@ -336,9 +334,7 @@ def get_strategy_config():
                             IndexError,
                             TypeError,
                         ) as parse_exc:
-                            logger.debug(
-                                "Skipping malformed SSE line: %s", parse_exc
-                            )
+                            logger.debug("Skipping malformed SSE line: %s", parse_exc)
                             continue
 
     def _format_user_prompt(self, user_input: str, context: dict) -> str:
@@ -372,14 +368,11 @@ def get_strategy_config():
 
         return prompt
 
-
 # --- API Router Logic ---
-
 
 class ChatMessage(BaseModel):
     role: str
     content: str
-
 
 class ChatRequest(BaseModel):
     message: str
@@ -389,7 +382,6 @@ class ChatRequest(BaseModel):
     file_path: str | None = None
     history: list[ChatMessage] | None = []
     extra_context: dict[str, Any] | None = None
-
 
 @router.post("/chat")
 async def chat_completions(request: Request, item: ChatRequest):
@@ -413,10 +405,11 @@ async def chat_completions(request: Request, item: ChatRequest):
         user_id = user_context.get("user_id")
         try:
             from sqlalchemy import text
+
             async with get_session(read_only=True) as session:
                 result = await session.execute(
                     text("SELECT api_key FROM user_profiles WHERE user_id = :user_id"),
-                    {"user_id": user_id}
+                    {"user_id": user_id},
                 )
                 row = result.fetchone()
                 if row and row[0]:
@@ -466,7 +459,6 @@ async def chat_completions(request: Request, item: ChatRequest):
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
-
 
 @router.post("/stop")
 async def stop_chat():

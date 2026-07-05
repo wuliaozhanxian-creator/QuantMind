@@ -7,7 +7,7 @@ import asyncio
 import logging
 import os
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import httpx
 
@@ -19,9 +19,7 @@ from backend.services.api.user_app.middleware.auth import require_admin
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-
 # ---------- Schemas (内联定义，避免额外文件) ----------
-
 
 class ApiResponse(BaseModel):
     success: bool
@@ -29,14 +27,18 @@ class ApiResponse(BaseModel):
     message: str
     data: dict[str, Any] | None = None
 
-
 CORE_SERVICE_HEALTH_URLS = {
     "api": os.getenv("ADMIN_DASHBOARD_API_HEALTH_URL", "http://127.0.0.1:8000/health"),
-    "trade": os.getenv("ADMIN_DASHBOARD_TRADE_HEALTH_URL", "http://127.0.0.1:8002/health"),
-    "engine": os.getenv("ADMIN_DASHBOARD_ENGINE_HEALTH_URL", "http://127.0.0.1:8001/health"),
-    "stream": os.getenv("ADMIN_DASHBOARD_STREAM_HEALTH_URL", "http://127.0.0.1:8003/health"),
+    "trade": os.getenv(
+        "ADMIN_DASHBOARD_TRADE_HEALTH_URL", "http://127.0.0.1:8002/health"
+    ),
+    "engine": os.getenv(
+        "ADMIN_DASHBOARD_ENGINE_HEALTH_URL", "http://127.0.0.1:8001/health"
+    ),
+    "stream": os.getenv(
+        "ADMIN_DASHBOARD_STREAM_HEALTH_URL", "http://127.0.0.1:8003/health"
+    ),
 }
-
 
 def _build_system_metrics(
     health_score: int,
@@ -44,7 +46,11 @@ def _build_system_metrics(
     services: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """构造系统指标，基于真实健康检查结果。"""
-    overall_status = "healthy" if services and all(service.get("status") == "healthy" for service in services) else "degraded"
+    overall_status = (
+        "healthy"
+        if services and all(service.get("status") == "healthy" for service in services)
+        else "degraded"
+    )
     if not services:
         overall_status = "degraded"
 
@@ -54,7 +60,6 @@ def _build_system_metrics(
         "status": overall_status,
         "services": services,
     }
-
 
 async def _fetch_service_health(
     client: httpx.AsyncClient,
@@ -78,7 +83,9 @@ async def _fetch_service_health(
             "details": payload,
         }
     except Exception as exc:
-        logger.warning("Admin dashboard health probe failed for %s: %s", service_name, exc)
+        logger.warning(
+            "Admin dashboard health probe failed for %s: %s", service_name, exc
+        )
         return {
             "service": service_name,
             "url": health_url,
@@ -87,7 +94,6 @@ async def _fetch_service_health(
             "healthy": False,
             "error": str(exc),
         }
-
 
 async def _collect_system_health() -> tuple[int, list[dict[str, Any]]]:
     """聚合核心服务健康状态为一个 0-100 分值。"""
@@ -105,9 +111,10 @@ async def _collect_system_health() -> tuple[int, list[dict[str, Any]]]:
         ]
         services = await asyncio.gather(*probes)
 
-    score = round(sum(service.get("score", 0) for service in services) / max(len(services), 1))
+    score = round(
+        sum(service.get("score", 0) for service in services) / max(len(services), 1)
+    )
     return score, services
-
 
 def _get_uptime_days(request: Request) -> int | None:
     started_at = getattr(request.app.state, "started_at", None)
@@ -117,12 +124,12 @@ def _get_uptime_days(request: Request) -> int | None:
     if started_at.tzinfo is None:
         started_at = started_at.replace(tzinfo=timezone.utc)
 
-    elapsed_days = int((datetime.now(timezone.utc) - started_at).total_seconds() // 86400)
+    elapsed_days = int(
+        (datetime.now(timezone.utc) - started_at).total_seconds() // 86400
+    )
     return max(elapsed_days, 0)
 
-
 # ---------- Endpoints ----------
-
 
 @router.get("/metrics", response_model=ApiResponse)
 async def get_dashboard_metrics(
@@ -148,7 +155,7 @@ async def get_dashboard_metrics(
             try:
                 await session.rollback()
             except Exception:
-                pass
+                logger.debug("ignored exception", exc_info=True)
             return {}
 
     try:
@@ -157,7 +164,7 @@ async def get_dashboard_metrics(
             user_row = await _safe_fetch_one(
                 session,
                 """
-                SELECT 
+                SELECT
                     COUNT(*) as total,
                     COUNT(*) FILTER (WHERE is_active = true AND is_deleted = false) as active,
                     COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE) as new_today
@@ -169,7 +176,7 @@ async def get_dashboard_metrics(
             strategy_row = await _safe_fetch_one(
                 session,
                 """
-                SELECT 
+                SELECT
                     COUNT(*) as total,
                     COUNT(*) FILTER (WHERE status = 'ACTIVE') as live
                 FROM strategies
@@ -180,8 +187,8 @@ async def get_dashboard_metrics(
             backtest_row = await _safe_fetch_one(
                 session,
                 """
-                SELECT COUNT(*) as backtesting 
-                FROM qlib_backtest_runs 
+                SELECT COUNT(*) as backtesting
+                FROM qlib_backtest_runs
                 WHERE status IN ('running', 'pending')
             """,
             )
@@ -190,7 +197,7 @@ async def get_dashboard_metrics(
             content_row = await _safe_fetch_one(
                 session,
                 """
-                SELECT 
+                SELECT
                     (SELECT COUNT(*) FROM community_posts) as posts,
                     (SELECT COUNT(*) FROM community_comments) as comments
             """,
@@ -235,7 +242,6 @@ async def get_dashboard_metrics(
             },
         )
 
-
 @router.get("/market-sources", response_model=ApiResponse)
 async def get_market_sources_status(
     current_user: dict = Depends(require_admin),
@@ -262,17 +268,25 @@ async def get_market_sources_status(
     # PostgreSQL 检测
     try:
         async with get_market_session() as session:
-            res = await session.execute(text("SELECT MAX(trade_date) FROM stock_daily_latest"))
+            res = await session.execute(
+                text("SELECT MAX(trade_date) FROM stock_daily_latest")
+            )
             max_date = res.scalar()
 
             if max_date:
                 res_count = await session.execute(
-                    text("SELECT COUNT(*) FROM stock_daily_latest WHERE trade_date = :d"),
-                    {"d": max_date}
+                    text(
+                        "SELECT COUNT(*) FROM stock_daily_latest WHERE trade_date = :d"
+                    ),
+                    {"d": max_date},
                 )
                 row_count = res_count.scalar() or 0
                 online_status["postgresql"]["status"] = "healthy"
-                online_status["latest_date"] = max_date.isoformat() if hasattr(max_date, 'isoformat') else str(max_date)
+                online_status["latest_date"] = (
+                    max_date.isoformat()
+                    if hasattr(max_date, "isoformat")
+                    else str(max_date)
+                )
                 online_status["row_count"] = row_count
             else:
                 online_status["postgresql"]["status"] = "empty"
@@ -311,7 +325,9 @@ async def get_market_sources_status(
     pg_ok = online_status["postgresql"]["status"] == "healthy"
     redis_ok = online_status["redis"]["status"] == "healthy"
     if pg_ok and redis_ok:
-        online_status["status"] = "healthy" if online_status["row_count"] > 4000 else "degraded"
+        online_status["status"] = (
+            "healthy" if online_status["row_count"] > 4000 else "degraded"
+        )
     elif pg_ok or redis_ok:
         online_status["status"] = "degraded"
     else:
@@ -333,17 +349,25 @@ async def get_market_sources_status(
         engine = create_async_engine(remote_db_url, pool_pre_ping=True)
         async with engine.connect() as conn:
             # 检测 feature_snapshots 表
-            res = await conn.execute(text("SELECT MAX(trade_date) FROM feature_snapshots"))
+            res = await conn.execute(
+                text("SELECT MAX(trade_date) FROM feature_snapshots")
+            )
             max_date = res.scalar()
 
             if max_date:
                 res_count = await conn.execute(
-                    text("SELECT COUNT(*) FROM feature_snapshots WHERE trade_date = :d"),
-                    {"d": max_date}
+                    text(
+                        "SELECT COUNT(*) FROM feature_snapshots WHERE trade_date = :d"
+                    ),
+                    {"d": max_date},
                 )
                 row_count = res_count.scalar() or 0
                 offline_status["feature_snapshots"]["status"] = "healthy"
-                offline_status["feature_snapshots"]["latest_date"] = max_date.isoformat() if hasattr(max_date, 'isoformat') else str(max_date)
+                offline_status["feature_snapshots"]["latest_date"] = (
+                    max_date.isoformat()
+                    if hasattr(max_date, "isoformat")
+                    else str(max_date)
+                )
                 offline_status["feature_snapshots"]["row_count"] = row_count
             else:
                 offline_status["feature_snapshots"]["status"] = "empty"
@@ -365,4 +389,3 @@ async def get_market_sources_status(
     }
 
     return ApiResponse(success=True, code=200, message="获取成功", data=data)
-

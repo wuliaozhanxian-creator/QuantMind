@@ -3,10 +3,9 @@ Risk Rule Schemas
 """
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
-
 
 class RiskRuleBase(BaseModel):
     """Base risk rule schema"""
@@ -19,12 +18,10 @@ class RiskRuleBase(BaseModel):
     user_ids: list[int] | None = None
     priority: int = Field(0, ge=0, le=100)
 
-
 class RiskRuleCreate(RiskRuleBase):
     """Create risk rule schema"""
 
     is_active: bool = True
-
 
 class RiskRuleUpdate(BaseModel):
     """Update risk rule schema"""
@@ -37,7 +34,6 @@ class RiskRuleUpdate(BaseModel):
     applies_to_all: bool | None = None
     user_ids: list[int] | None = None
     priority: int | None = Field(None, ge=0, le=100)
-
 
 class RiskRuleResponse(RiskRuleBase):
     """Risk rule response schema"""

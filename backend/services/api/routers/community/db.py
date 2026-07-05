@@ -10,7 +10,14 @@ from backend.services.api.community_app.models import (
 from backend.shared.database_manager_v2 import get_session as get_shared_session
 
 # Re-exporting for compatibility with existing code
-__all__ = ["PostRecord", "CommentRecord", "InteractionRecord", "get_session", "to_dict_post", "to_dict_comment"]
+__all__ = [
+    "PostRecord",
+    "CommentRecord",
+    "InteractionRecord",
+    "get_session",
+    "to_dict_post",
+    "to_dict_comment",
+]
 
 
 async def get_session(read_only: bool = False):

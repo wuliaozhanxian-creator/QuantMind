@@ -1,32 +1,35 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 from .internal_strategy_utils import *
-from backend.services.trade.services.internal_strategy_dispatcher import dispatch_internal_strategy_order
-from backend.services.trade.services.manual_execution_service import manual_execution_service
+from backend.services.trade.services.internal_strategy_dispatcher import (
+    dispatch_internal_strategy_order,
+)
+from backend.services.trade.services.manual_execution_service import (
+    manual_execution_service,
+)
 
 router = APIRouter(tags=["Internal Strategy Gateway"])
 logger = logging.getLogger(__name__)
-
 
 class HostedExecutionCreateRequest(BaseModel):
     task_id: str | None = None
     strategy_id: str
     run_id: str | None = None
     trading_mode: str = "REAL"
-    execution_config: Dict[str, Any] | None = None
-    live_trade_config: Dict[str, Any] | None = None
-    signals: List[Dict[str, Any]] = Field(default_factory=list)
-    trigger_context: Dict[str, Any] | None = None
+    execution_config: dict[str, Any] | None = None
+    live_trade_config: dict[str, Any] | None = None
+    signals: list[dict[str, Any]] = Field(default_factory=list)
+    trigger_context: dict[str, Any] | None = None
     parent_runtime_id: str | None = None
     note: str | None = None
 
 @router.post("/heartbeat", dependencies=[Depends(verify_internal_call)])
 async def strategy_heartbeat(
-    payload: Dict[str, Any],
+    payload: dict[str, Any],
     x_user_id: str = Header(...),
-    x_tenant_id: Optional[str] = Header(None),
+    x_tenant_id: str | None = Header(None),
     redis: RedisClient = Depends(get_redis),
 ):
     """
@@ -52,10 +55,11 @@ async def strategy_heartbeat(
 
     return {"status": "ok"}
 
-
 @router.get("/sync-account", dependencies=[Depends(verify_internal_call)])
 async def sync_account_state(
-    x_user_id: str = Header(...), x_tenant_id: Optional[str] = Header(None), db=Depends(get_db)
+    x_user_id: str = Header(...),
+    x_tenant_id: str | None = Header(None),
+    db=Depends(get_db),
 ):
     """
     供策略 Pod 启动时初始化：获取真实的资金和持仓
@@ -70,7 +74,7 @@ async def sync_account_state(
                     Portfolio.tenant_id == tenant_id,
                     Portfolio.user_id == str(user_id),
                     Portfolio.status == "active",
-                    Portfolio.is_deleted == False,
+                    not Portfolio.is_deleted,
                 )
             )
             .order_by(Portfolio.updated_at.desc())
@@ -111,20 +115,20 @@ async def sync_account_state(
             "user_id": user_id,
             "portfolio_id": portfolio.id,
             "cash": float(portfolio.available_cash or 0),
-            "market_value": float(portfolio.total_value or 0) - float(portfolio.available_cash or 0),
+            "market_value": float(portfolio.total_value or 0)
+            - float(portfolio.available_cash or 0),
             "total_asset": float(portfolio.total_value or 0),
             "positions": positions,
         }
     except Exception as e:
         logger.error(f"Failed to sync account: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @router.post("/order", dependencies=[Depends(verify_internal_call)])
 async def strategy_order(
-    order_data: Dict[str, Any],
+    order_data: dict[str, Any],
     x_user_id: str = Header(...),
-    x_tenant_id: Optional[str] = Header(None),
+    x_tenant_id: str | None = Header(None),
     redis: RedisClient = Depends(get_redis),
     db=Depends(get_db),
 ):
@@ -137,12 +141,11 @@ async def strategy_order(
         db=db,
     )
 
-
 @router.post("/hosted-executions", dependencies=[Depends(verify_internal_call)])
 async def create_hosted_execution(
     payload: HostedExecutionCreateRequest,
     x_user_id: str = Header(...),
-    x_tenant_id: Optional[str] = Header(None),
+    x_tenant_id: str | None = Header(None),
 ):
     result = await manual_execution_service.create_hosted_task(
         tenant_id=(x_tenant_id or "default"),

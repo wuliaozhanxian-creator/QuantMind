@@ -22,7 +22,10 @@ from backend.shared.database_manager_v2 import get_session
 from backend.services.trade.simulation.services.ledger_service import (
     SimulationLedgerService,
 )
-from backend.shared.trade_account_cache import write_json_cache, write_trade_account_cache
+from backend.shared.trade_account_cache import (
+    write_json_cache,
+    write_trade_account_cache,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +60,9 @@ async def _scan_and_settle() -> int:
                             SimulationAccount.status == "active"
                         )
                     )
-                ).scalars().all()
+                )
+                .scalars()
+                .all()
             )
             for account in accounts:
                 try:
@@ -91,11 +96,20 @@ async def _scan_and_settle() -> int:
                         continue
 
                     account.cash = float(account.cash or 0.0) - interest_charge
-                    account.available_cash = float(account.available_cash or 0.0) - interest_charge
-                    account.total_asset = float(account.total_asset or 0.0) - interest_charge
-                    account.equity = float(account.equity or account.total_asset or 0.0) - interest_charge
+                    account.available_cash = (
+                        float(account.available_cash or 0.0) - interest_charge
+                    )
+                    account.total_asset = (
+                        float(account.total_asset or 0.0) - interest_charge
+                    )
+                    account.equity = (
+                        float(account.equity or account.total_asset or 0.0)
+                        - interest_charge
+                    )
                     if float(account.liabilities or 0.0) > 0:
-                        account.maintenance_margin_ratio = float(account.equity or 0.0) / float(account.liabilities or 1.0)
+                        account.maintenance_margin_ratio = float(
+                            account.equity or 0.0
+                        ) / float(account.liabilities or 1.0)
                     account.last_projected_at = now.replace(tzinfo=None)
 
                     session.add(
@@ -122,11 +136,15 @@ async def _scan_and_settle() -> int:
                             "frozen_cash": float(account.frozen_cash or 0.0),
                             "market_value": float(account.long_market_value or 0.0)
                             - float(account.short_market_value or 0.0),
-                            "short_market_value": float(account.short_market_value or 0.0),
+                            "short_market_value": float(
+                                account.short_market_value or 0.0
+                            ),
                             "total_asset": float(account.total_asset or 0.0),
                             "liabilities": float(account.liabilities or 0.0),
                             "equity": float(account.equity or 0.0),
-                            "maintenance_margin_ratio": float(account.maintenance_margin_ratio or 0.0),
+                            "maintenance_margin_ratio": float(
+                                account.maintenance_margin_ratio or 0.0
+                            ),
                             "last_interest_date": now.date().isoformat(),
                             "last_interest_amount": round(float(interest_charge), 6),
                             "reprojected_from": "simulation_accounts",

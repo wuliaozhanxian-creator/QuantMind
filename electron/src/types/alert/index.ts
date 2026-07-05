@@ -49,7 +49,7 @@ export interface Notification {
   timestamp: number;
   read: boolean;
   dismissed: boolean;
-  data?: Record<string, any>;
+  data?: Record<string, unknown>;
 }
 
 export interface NotificationConfig {

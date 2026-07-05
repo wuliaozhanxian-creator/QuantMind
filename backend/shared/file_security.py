@@ -7,7 +7,7 @@ import io
 import os
 import re
 import zipfile
-from typing import Any, Dict, List
+from typing import Any
 
 import magic
 from loguru import logger
@@ -28,7 +28,6 @@ try:
 except ImportError:
     YARA_AVAILABLE = False
     logger.warning("yara-python未安装，高级恶意文件检测功能将不可用")
-
 
 class FileSecurityValidator:
     """文件安全验证器"""
@@ -105,7 +104,7 @@ class FileSecurityValidator:
             filename: 文件名
 
         Returns:
-            Dict: 验证结果
+            dict: 验证结果
         """
         result = {
             "valid": True,
@@ -165,7 +164,7 @@ class FileSecurityValidator:
             filename: 文件名
 
         Returns:
-            Dict: 验证结果
+            dict: 验证结果
         """
         result = {
             "valid": True,
@@ -200,7 +199,9 @@ class FileSecurityValidator:
             # 检查文件类型是否匹配
             if result["expected_type"] and detected_mime:
                 if not detected_mime.startswith(result["expected_type"].split("/")[0]):
-                    result["warnings"].append(f"文件类型不匹配: 期望 {result['expected_type']}, 检测到 {detected_mime}")
+                    result["warnings"].append(
+                        f"文件类型不匹配: 期望 {result['expected_type']}, 检测到 {detected_mime}"
+                    )
 
             # 检查文件头签名
             self._check_file_signatures(file_data, result)
@@ -252,7 +253,10 @@ class FileSecurityValidator:
                         result["errors"].extend(filename_validation["errors"])
 
                     # 检查压缩比例
-                    if info.compress_size > 0 and info.file_size / info.compress_size > 100:
+                    if (
+                        info.compress_size > 0
+                        and info.file_size / info.compress_size > 100
+                    ):
                         result["warnings"].append(f"文件 {info.filename} 压缩比异常")
 
         except Exception as e:
@@ -290,7 +294,7 @@ class FileSecurityValidator:
             filename: 文件名
 
         Returns:
-            Dict: 扫描结果
+            dict: 扫描结果
         """
         result = {
             "scanned": False,
@@ -371,7 +375,9 @@ class FileSecurityValidator:
             result["scanned"] = True
             result["engine"] = "basic"
 
-    def validate_file_content(self, file_data: bytes, category: str = "general") -> dict[str, Any]:
+    def validate_file_content(
+        self, file_data: bytes, category: str = "general"
+    ) -> dict[str, Any]:
         """
         验证文件内容安全性
 
@@ -380,7 +386,7 @@ class FileSecurityValidator:
             category: 文件类别
 
         Returns:
-            Dict: 验证结果
+            dict: 验证结果
         """
         result = {
             "valid": True,
@@ -427,7 +433,8 @@ class FileSecurityValidator:
                     "height": img.height,
                     "format": img.format,
                     "mode": img.mode,
-                    "has_transparency": img.mode in ("RGBA", "LA") or "transparency" in img.info,
+                    "has_transparency": img.mode in ("RGBA", "LA")
+                    or "transparency" in img.info,
                 }
             )
 
@@ -460,7 +467,9 @@ class FileSecurityValidator:
             "system(",
         ]
 
-        found_keywords = [kw for kw in dangerous_keywords if kw.lower() in content.lower()]
+        found_keywords = [
+            kw for kw in dangerous_keywords if kw.lower() in content.lower()
+        ]
         if found_keywords:
             result["warnings"].append(f"文档包含可疑内容: {', '.join(found_keywords)}")
 
@@ -471,16 +480,24 @@ class FileSecurityValidator:
                 zip_file = io.BytesIO(file_data)
                 with zipfile.ZipFile(zip_file, "r") as zip_ref:
                     result["metadata"]["file_count"] = len(zip_ref.filelist)
-                    result["metadata"]["total_size"] = sum(info.file_size for info in zip_ref.filelist)
+                    result["metadata"]["total_size"] = sum(
+                        info.file_size for info in zip_ref.filelist
+                    )
 
                     # 检查压缩比
-                    total_compressed = sum(info.compress_size for info in zip_ref.filelist)
-                    total_uncompressed = sum(info.file_size for info in zip_ref.filelist)
+                    total_compressed = sum(
+                        info.compress_size for info in zip_ref.filelist
+                    )
+                    total_uncompressed = sum(
+                        info.file_size for info in zip_ref.filelist
+                    )
 
                     if total_uncompressed > 0:
                         ratio = total_compressed / total_uncompressed
                         if ratio < 0.01:  # 压缩比过高
-                            result["warnings"].append("压缩包压缩比异常，可能包含恶意内容")
+                            result["warnings"].append(
+                                "压缩包压缩比异常，可能包含恶意内容"
+                            )
 
             except Exception as e:
                 result["errors"].append(f"压缩包验证失败: {str(e)}")
@@ -526,7 +543,9 @@ class FileSecurityValidator:
 
         return entropy
 
-    def comprehensive_validation(self, file_data: bytes, filename: str, category: str = "general") -> dict[str, Any]:
+    def comprehensive_validation(
+        self, file_data: bytes, filename: str, category: str = "general"
+    ) -> dict[str, Any]:
         """
         综合文件安全验证
 
@@ -536,7 +555,7 @@ class FileSecurityValidator:
             category: 文件类别
 
         Returns:
-            Dict: 综合验证结果
+            dict: 综合验证结果
         """
         result = {
             "valid": True,
@@ -568,7 +587,12 @@ class FileSecurityValidator:
         result["malware_scan"] = self.scan_for_malware(file_data, filename)
         if result["malware_scan"]["malware_detected"]:
             result["valid"] = False
-            result["errors"].extend([f"检测到恶意软件: {threat}" for threat in result["malware_scan"]["threats"]])
+            result["errors"].extend(
+                [
+                    f"检测到恶意软件: {threat}"
+                    for threat in result["malware_scan"]["threats"]
+                ]
+            )
 
         # 5. 生成建议
         result["recommendations"] = self._generate_recommendations(result)
@@ -605,17 +629,16 @@ class FileSecurityValidator:
 
         return recommendations
 
-
 # 创建全局文件安全验证器实例
 file_security_validator = FileSecurityValidator()
-
 
 def get_file_security_validator() -> FileSecurityValidator:
     """获取文件安全验证器实例"""
     return file_security_validator
 
-
-def validate_file_security(file_data: bytes, filename: str, category: str = "general") -> dict[str, Any]:
+def validate_file_security(
+    file_data: bytes, filename: str, category: str = "general"
+) -> dict[str, Any]:
     """便捷函数：验证文件安全性"""
     validator = get_file_security_validator()
     return validator.comprehensive_validation(file_data, filename, category)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from functools import partial
-from typing import Any, Dict, List
+from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import desc, func, select
@@ -26,13 +26,16 @@ router = APIRouter()
 PAGE_QUERY = Query(1, ge=1)
 PAGE_SIZE_QUERY = Query(20, alias="pageSize", ge=1, le=100)
 
-
-async def compute_hot_users(session: AsyncSession, tenant_id: str, *, limit: int = 5) -> list[dict[str, Any]]:
+async def compute_hot_users(
+    session: AsyncSession, tenant_id: str, *, limit: int = 5
+) -> list[dict[str, Any]]:
     now = datetime.now()
     win = now - timedelta(days=7)
     prev = win - timedelta(days=7)
 
-    score_expr = func.sum(PostRecord.likes * 2 + PostRecord.comments * 1 + 5).label("score")
+    score_expr = func.sum(PostRecord.likes * 2 + PostRecord.comments * 1 + 5).label(
+        "score"
+    )
     s7 = (
         select(PostRecord.author_id, score_expr)
         .where(PostRecord.tenant_id == tenant_id, PostRecord.created_at >= win)
@@ -77,8 +80,9 @@ async def compute_hot_users(session: AsyncSession, tenant_id: str, *, limit: int
         )
     return out
 
-
-async def compute_hot_topics(session: AsyncSession, tenant_id: str, *, limit: int = 5) -> list[dict[str, Any]]:
+async def compute_hot_topics(
+    session: AsyncSession, tenant_id: str, *, limit: int = 5
+) -> list[dict[str, Any]]:
     stmt = (
         select(PostRecord.category, func.count().label("cnt"))
         .where(PostRecord.tenant_id == tenant_id)
@@ -88,7 +92,6 @@ async def compute_hot_topics(session: AsyncSession, tenant_id: str, *, limit: in
     )
     rows = (await session.execute(stmt)).all()
     return [{"name": str(cat or ""), "count": int(cnt)} for (cat, cnt) in rows]
-
 
 @router.get("/hot-users")
 async def hot_users(
@@ -103,7 +106,6 @@ async def hot_users(
     """
     return await compute_hot_users(session, principal.tenant_id, limit=limit)
 
-
 @router.get("/hot-topics")
 async def hot_topics(
     limit: int = Query(5, ge=1, le=20),
@@ -116,7 +118,6 @@ async def hot_topics(
     返回结构对齐前端：[{name, count}]
     """
     return await compute_hot_topics(session, principal.tenant_id, limit=limit)
-
 
 @router.get("/search")
 async def search_posts(
@@ -134,12 +135,18 @@ async def search_posts(
     ilike = f"%{q}%"
     base = select(PostRecord).where(PostRecord.tenant_id == tenant_id)
     if q:
-        base = base.where(PostRecord.title.ilike(ilike) | PostRecord.content.ilike(ilike))
+        base = base.where(
+            PostRecord.title.ilike(ilike) | PostRecord.content.ilike(ilike)
+        )
 
     count_stmt = select(func.count()).select_from(base.subquery())
     total = (await session.execute(count_stmt)).scalar_one() or 0
 
-    stmt = base.order_by(desc(PostRecord.created_at)).offset((page - 1) * page_size).limit(page_size)
+    stmt = (
+        base.order_by(desc(PostRecord.created_at))
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
     items = (await session.execute(stmt)).scalars().all()
 
     # Fetch interactions for the current user

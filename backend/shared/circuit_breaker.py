@@ -11,11 +11,10 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
-
 
 class CircuitState(Enum):
     """熔断器状态."""
@@ -23,7 +22,6 @@ class CircuitState(Enum):
     CLOSED = "closed"  # 正常
     OPEN = "open"  # 熔断
     HALF_OPEN = "half_open"  # 半开
-
 
 class ErrorType(Enum):
     """错误类型."""
@@ -35,7 +33,6 @@ class ErrorType(Enum):
     CLIENT_ERROR = "client_error"  # 客户端错误
     UNKNOWN = "unknown"  # 未知错误
 
-
 @dataclass
 class CircuitBreakerConfig:
     """熔断器配置."""
@@ -44,7 +41,6 @@ class CircuitBreakerConfig:
     success_threshold: int = 2  # 成功阈值（半开状态）
     timeout: int = 60  # 熔断超时（秒）
     half_open_max_calls: int = 3  # 半开状态最大调用数
-
 
 @dataclass
 class RetryConfig:
@@ -55,7 +51,6 @@ class RetryConfig:
     max_delay: float = 60.0  # 最大延迟（秒）
     exponential_base: float = 2.0  # 指数退避基数
     jitter: bool = True  # 是否添加抖动
-
 
 class CircuitBreaker:
     """熔断器.
@@ -197,12 +192,16 @@ class CircuitBreaker:
             old_state = self._state
             self._state = new_state
             self._stats["state_changes"] += 1
-            logger.info(f"熔断器 {self.name} 状态变更: {old_state.value} -> {new_state.value}")
+            logger.info(
+                f"熔断器 {self.name} 状态变更: {old_state.value} -> {new_state.value}"
+            )
 
     def get_stats(self) -> dict[str, Any]:
         """获取统计信息."""
         success_rate = (
-            self._stats["successful_calls"] / self._stats["total_calls"] if self._stats["total_calls"] > 0 else 0.0
+            self._stats["successful_calls"] / self._stats["total_calls"]
+            if self._stats["total_calls"] > 0
+            else 0.0
         )
 
         return {
@@ -220,7 +219,6 @@ class CircuitBreaker:
             self._success_count = 0
             self._half_open_calls = 0
             logger.info(f"熔断器 {self.name} 已重置")
-
 
 class RetryStrategy:
     """重试策略.
@@ -262,7 +260,11 @@ class RetryStrategy:
             return ErrorType.TIMEOUT
         elif "rate limit" in error_str or "429" in error_str:
             return ErrorType.RATE_LIMIT
-        elif "network" in error_str or "connection" in error_str or "temporary" in error_str:
+        elif (
+            "network" in error_str
+            or "connection" in error_str
+            or "temporary" in error_str
+        ):
             return ErrorType.NETWORK
         elif "500" in error_str or "502" in error_str or "503" in error_str:
             return ErrorType.SERVER_ERROR
@@ -363,7 +365,10 @@ class RetryStrategy:
                     delay = self.calculate_delay(attempt - 1)
                     self._stats["total_delay"] += delay
 
-                    logger.info(f"重试 {attempt}/{self.config.max_attempts}: " f"延迟{delay:.2f}秒, 错误: {e}")
+                    logger.info(
+                        f"重试 {attempt}/{self.config.max_attempts}: "
+                        f"延迟{delay:.2f}秒, 错误: {e}"
+                    )
 
                     await asyncio.sleep(delay)
                 else:
@@ -385,7 +390,6 @@ class RetryStrategy:
             **self._stats,
             "average_delay": avg_delay,
         }
-
 
 class FallbackStrategy:
     """降级策略.
@@ -470,7 +474,6 @@ class FallbackStrategy:
         """获取统计信息."""
         return self._stats.copy()
 
-
 class ResilientClient:
     """弹性客户端.
 
@@ -526,7 +529,9 @@ class ResilientClient:
             return await self.retry_strategy.execute_with_retry(call_with_breaker)
 
         # 降级
-        return await self.fallback_strategy.execute_with_fallback(protected_func, fallback_key, default_value)
+        return await self.fallback_strategy.execute_with_fallback(
+            protected_func, fallback_key, default_value
+        )
 
     def register_fallback(self, key: str, fallback: Callable):
         """注册fallback."""
@@ -540,10 +545,8 @@ class ResilientClient:
             "fallback": self.fallback_strategy.get_stats(),
         }
 
-
 # 全局弹性客户端管理
 _global_clients: dict[str, ResilientClient] = {}
-
 
 def get_resilient_client(
     name: str,

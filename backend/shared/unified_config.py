@@ -21,12 +21,11 @@ import sys
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 # 添加项目根目录到路径
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
-
 
 class Environment(Enum):
     """环境类型枚举"""
@@ -35,7 +34,6 @@ class Environment(Enum):
     TESTING = "testing"
     STAGING = "staging"
     PRODUCTION = "production"
-
 
 @dataclass
 class DatabaseConfig:
@@ -46,7 +44,6 @@ class DatabaseConfig:
     max_overflow: int = 10
     pool_timeout: int = 30
     pool_recycle: int = 1800
-
 
 @dataclass
 class APIConfig:
@@ -72,7 +69,9 @@ class APIConfig:
     debug: bool = True
 
     # CORS配置
-    cors_origins: list[str] = field(default_factory=lambda: ["http://localhost:3000", "http://localhost:3001"])
+    cors_origins: list[str] = field(
+        default_factory=lambda: ["http://localhost:3000", "http://localhost:3001"]
+    )
 
     # 第三方API密钥
     akshare_api_key: str = ""
@@ -91,7 +90,6 @@ class APIConfig:
         """Backward-compatible alias for legacy callers."""
         return self.api_service_port
 
-
 @dataclass
 class SecurityConfig:
     """安全配置"""
@@ -101,10 +99,11 @@ class SecurityConfig:
     access_token_expire_minutes: int = 60
 
     # JWT配置
-    jwt_secret: str = field(default_factory=lambda: os.getenv("JWT_SECRET", os.getenv("JWT_SECRET_KEY", "")))
+    jwt_secret: str = field(
+        default_factory=lambda: os.getenv("JWT_SECRET", os.getenv("JWT_SECRET_KEY", ""))
+    )
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 30
-
 
 @dataclass
 class LoggingConfig:
@@ -118,7 +117,6 @@ class LoggingConfig:
     # 日志格式
     format: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
-
 @dataclass
 class MonitoringConfig:
     """监控配置"""
@@ -131,7 +129,6 @@ class MonitoringConfig:
 
     # 健康检查
     health_check_interval: int = 30  # 秒
-
 
 class UnifiedConfigManager:
     """统一配置管理器"""
@@ -201,11 +198,15 @@ class UnifiedConfigManager:
     def _init_api_config(self) -> APIConfig:
         """初始化API配置"""
         # 解析CORS origins
-        cors_origins_str = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:3001")
+        cors_origins_str = os.getenv(
+            "CORS_ORIGINS", "http://localhost:3000,http://localhost:3001"
+        )
         cors_origins = [origin.strip() for origin in cors_origins_str.split(",")]
 
         return APIConfig(
-            api_service_port=int(os.getenv("API_SERVICE_PORT", os.getenv("API_GATEWAY_PORT", "8000"))),
+            api_service_port=int(
+                os.getenv("API_SERVICE_PORT", os.getenv("API_GATEWAY_PORT", "8000"))
+            ),
             user_service_port=int(os.getenv("USER_SERVICE_PORT", "8002")),
             ai_strategy_port=int(os.getenv("AI_STRATEGY_PORT", "8008")),
             backtest_port=int(os.getenv("BACKTEST_PORT", "8003")),
@@ -230,7 +231,9 @@ class UnifiedConfigManager:
         return SecurityConfig(
             secret_key=os.getenv("SECRET_KEY", ""),
             algorithm=os.getenv("ALGORITHM", "HS256"),
-            access_token_expire_minutes=int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60")),
+            access_token_expire_minutes=int(
+                os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60")
+            ),
             jwt_secret=os.getenv("JWT_SECRET", os.getenv("JWT_SECRET_KEY", "")),
             jwt_algorithm=os.getenv("JWT_ALGORITHM", "HS256"),
             jwt_expire_minutes=int(os.getenv("JWT_EXPIRE_MINUTES", "30")),
@@ -250,7 +253,10 @@ class UnifiedConfigManager:
         return MonitoringConfig(
             enable_metrics=os.getenv("ENABLE_METRICS", "true").lower() == "true",
             enable_tracing=os.getenv("ENABLE_TRACING", "false").lower() == "true",
-            enable_performance_monitoring=os.getenv("ENABLE_PERFORMANCE_MONITORING", "true").lower() == "true",
+            enable_performance_monitoring=os.getenv(
+                "ENABLE_PERFORMANCE_MONITORING", "true"
+            ).lower()
+            == "true",
             health_check_interval=int(os.getenv("HEALTH_CHECK_INTERVAL", "30")),
         )
 
@@ -351,33 +357,31 @@ class UnifiedConfigManager:
                 elif isinstance(value, dict):
                     result[key] = sanitize_dict(value)
                 elif isinstance(value, list):
-                    result[key] = [sanitize_dict(item) if isinstance(item, dict) else item for item in value]
+                    result[key] = [
+                        sanitize_dict(item) if isinstance(item, dict) else item
+                        for item in value
+                    ]
                 else:
                     result[key] = value
             return result
 
         return sanitize_dict(config)
 
-
 # 全局配置实例
 config_manager = UnifiedConfigManager()
-
 
 # 提供便捷访问
 def get_config() -> UnifiedConfigManager:
     """获取全局配置管理器实例"""
     return config_manager
 
-
 def get_database_url(db_type: str | None = None) -> str:
     """获取数据库URL"""
     return config_manager.get_database_url(db_type)
 
-
 def get_service_config(service_name: str) -> dict[str, Any]:
     """获取服务配置"""
     return config_manager.get_service_config(service_name)
-
 
 if __name__ == "__main__":
     # 测试配置管理器

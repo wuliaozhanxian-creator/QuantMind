@@ -1,6 +1,15 @@
 /**
- * WebSocket客户端 - Week 9 Day 1
- * 提供完整的WebSocket连接管理、重连、心跳、消息队列功能
+ * 统一 WebSocket 客户端 (T2.2)
+ *
+ * 作为 QuantMind 前端的唯一底层 WebSocket 抽象，向上提供：
+ * - 指数退避重连（1s/2s/4s/8s/16s/32s，最大 60s，无最大次数上限）
+ * - 心跳超时检测（30s 未收到 pong → 主动断开并重连）
+ * - 订阅去重（同一 channel 仅发送一次 subscribe）
+ * - 统一错误回调（onError / offError）
+ *
+ * 其它历史实现（utils/websocket.ts、features/quantbot/services/websocketService.ts、
+ * services/qlib/qlibBacktestService.ts 内部 WebSocketManager）均以此类为底层，
+ * 或在 T2.2 中被标记为 deprecated 别名/待迁移。
  */
 
 export enum ConnectionState {
@@ -14,9 +23,17 @@ export enum ConnectionState {
 export interface WebSocketClientConfig {
   url: string;
   reconnect?: boolean;
+  /** 基础重连延迟（首次退避起点），默认 1000ms */
   reconnectDelay?: number;
+  /** 重连最大延迟上限，默认 60000ms */
+  maxReconnectDelay?: number;
+  /** 最大重连次数，默认 Infinity（无限重连） */
   maxReconnectAttempts?: number;
+  /** 心跳发送间隔，默认 30000ms */
   heartbeatInterval?: number;
+  /** 心跳超时阈值，默认 30000ms（超过该时长未收到 pong 即判定超时） */
+  heartbeatTimeout?: number;
+  /** 连接超时，默认 10000ms */
   timeout?: number;
   debug?: boolean;
 }
@@ -29,6 +46,7 @@ export interface WebSocketEvent {
 
 export type EventCallback = (data: unknown) => void;
 export type StateCallback = (state: ConnectionState) => void;
+export type ErrorCallback = (error: Error, context?: string) => void;
 
 export class WebSocketClient {
   private ws: WebSocket | null = null;
@@ -36,18 +54,27 @@ export class WebSocketClient {
   private state: ConnectionState = ConnectionState.DISCONNECTED;
   private reconnectAttempts = 0;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
-  private lastHeartbeat: number = 0;
+  private heartbeatTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastHeartbeatAck = 0;
   private messageQueue: Array<{ type: string; data: unknown }> = [];
   private eventHandlers = new Map<string, Set<EventCallback>>();
   private stateHandlers = new Set<StateCallback>();
+  private errorHandlers = new Set<ErrorCallback>();
+  /** channel -> 回调集合；同一 channel 只发送一次 subscribe */
   private subscriptions = new Map<string, Set<EventCallback>>();
+  /** 已发送 subscribe 的 channel 集合，避免重复发送 */
+  private subscribedChannels = new Set<string>();
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private manualDisconnect = false;
 
   constructor(config: WebSocketClientConfig) {
     this.config = {
       reconnect: true,
       reconnectDelay: 1000,
-      maxReconnectAttempts: 5,
+      maxReconnectDelay: 60000,
+      maxReconnectAttempts: Number.POSITIVE_INFINITY,
       heartbeatInterval: 30000,
+      heartbeatTimeout: 30000,
       timeout: 10000,
       debug: false,
       ...config
@@ -55,13 +82,15 @@ export class WebSocketClient {
   }
 
   /**
-   * 连接WebSocket服务器
+   * 连接 WebSocket 服务器
    */
   async connect(): Promise<void> {
     if (this.state === ConnectionState.CONNECTED || this.state === ConnectionState.CONNECTING) {
       this.log('Already connected or connecting');
       return;
     }
+
+    this.manualDisconnect = false;
 
     return new Promise((resolve, reject) => {
       this.setState(ConnectionState.CONNECTING);
@@ -73,7 +102,9 @@ export class WebSocketClient {
         const timeout = setTimeout(() => {
           if (this.state === ConnectionState.CONNECTING) {
             this.ws?.close();
-            reject(new Error('Connection timeout'));
+            const err = new Error('Connection timeout');
+            this.emitError(err, 'connect-timeout');
+            reject(err);
           }
         }, this.config.timeout);
 
@@ -82,8 +113,10 @@ export class WebSocketClient {
           this.log('Connected successfully');
           this.setState(ConnectionState.CONNECTED);
           this.reconnectAttempts = 0;
+          this.lastHeartbeatAck = Date.now();
           this.startHeartbeat();
           this.flushMessageQueue();
+          this.resubscribeAll();
           resolve();
         };
 
@@ -95,24 +128,36 @@ export class WebSocketClient {
           clearTimeout(timeout);
           this.log(`Connection closed: ${event.code} ${event.reason}`);
           this.stopHeartbeat();
+          this.ws = null;
 
-          if (event.code !== 1000 && this.config.reconnect && this.reconnectAttempts < this.config.maxReconnectAttempts) {
+          if (this.manualDisconnect) {
+            this.setState(ConnectionState.DISCONNECTED);
+            return;
+          }
+
+          if (this.config.reconnect && this.reconnectAttempts < this.config.maxReconnectAttempts) {
             this.attemptReconnect();
           } else {
             this.setState(ConnectionState.DISCONNECTED);
           }
         };
 
-        this.ws.onerror = (error) => {
+        this.ws.onerror = () => {
           clearTimeout(timeout);
-          this.log('Connection error:', error);
-          reject(error);
+          const err = new Error('WebSocket error');
+          this.log('Connection error');
+          this.emitError(err, 'ws-onerror');
+          if (this.state === ConnectionState.CONNECTING) {
+            reject(err);
+          }
         };
 
       } catch (error) {
         this.log('Failed to create WebSocket:', error);
         this.setState(ConnectionState.FAILED);
-        reject(error);
+        const err = error instanceof Error ? error : new Error(String(error));
+        this.emitError(err, 'connect-create');
+        reject(err);
       }
     });
   }
@@ -121,11 +166,17 @@ export class WebSocketClient {
    * 断开连接
    */
   disconnect(): void {
+    this.manualDisconnect = true;
     this.config.reconnect = false;
     this.stopHeartbeat();
+    this.clearReconnectTimer();
 
     if (this.ws) {
-      this.ws.close(1000, 'Client disconnect');
+      try {
+        this.ws.close(1000, 'Client disconnect');
+      } catch (e) {
+        // ignore
+      }
       this.ws = null;
     }
 
@@ -150,6 +201,8 @@ export class WebSocketClient {
         return true;
       } catch (error) {
         this.log('Failed to send message:', error);
+        const err = error instanceof Error ? error : new Error(String(error));
+        this.emitError(err, 'send');
         this.messageQueue.push(message);
         return false;
       }
@@ -185,20 +238,23 @@ export class WebSocketClient {
   }
 
   /**
-   * 订阅频道
+   * 订阅频道（去重：同一 channel 仅发送一次 subscribe）
    */
   subscribe(channel: string, callback: EventCallback): string {
     const subscriptionId = `${channel}_${Date.now()}_${Math.random()}`;
 
     if (!this.subscriptions.has(channel)) {
       this.subscriptions.set(channel, new Set());
-      // 发送订阅请求
+    }
+    this.subscriptions.get(channel)!.add(callback);
+
+    // 仅在尚未订阅时发送 subscribe，避免重复请求
+    if (!this.subscribedChannels.has(channel)) {
+      this.subscribedChannels.add(channel);
       this.send('subscribe', { channel });
     }
 
-    this.subscriptions.get(channel)!.add(callback);
     this.log(`Subscribed to channel: ${channel}`);
-
     return subscriptionId;
   }
 
@@ -208,7 +264,9 @@ export class WebSocketClient {
   unsubscribe(channel: string): void {
     if (this.subscriptions.has(channel)) {
       this.subscriptions.delete(channel);
-      // 发送取消订阅请求
+    }
+    if (this.subscribedChannels.has(channel)) {
+      this.subscribedChannels.delete(channel);
       this.send('unsubscribe', { channel });
       this.log(`Unsubscribed from channel: ${channel}`);
     }
@@ -229,6 +287,28 @@ export class WebSocketClient {
   }
 
   /**
+   * 统一错误回调（T2.2）
+   */
+  onError(callback: ErrorCallback): void {
+    this.errorHandlers.add(callback);
+  }
+
+  offError(callback: ErrorCallback): void {
+    this.errorHandlers.delete(callback);
+  }
+
+  private emitError(error: Error, context?: string): void {
+    this.log('Emit error:', context, error.message);
+    this.errorHandlers.forEach(handler => {
+      try {
+        handler(error, context);
+      } catch (e) {
+        this.log('Error in error handler:', e);
+      }
+    });
+  }
+
+  /**
    * 获取当前状态
    */
   getState(): ConnectionState {
@@ -246,7 +326,7 @@ export class WebSocketClient {
       maxReconnectAttempts: this.config.maxReconnectAttempts,
       queuedMessages: this.messageQueue.length,
       subscriptions: Array.from(this.subscriptions.keys()),
-      lastHeartbeat: this.lastHeartbeat,
+      lastHeartbeat: this.lastHeartbeatAck,
       isConnected: this.state === ConnectionState.CONNECTED
     };
   }
@@ -263,7 +343,8 @@ export class WebSocketClient {
 
       // 处理心跳响应
       if (type === 'heartbeat' || type === 'pong') {
-        this.lastHeartbeat = Date.now();
+        this.lastHeartbeatAck = Date.now();
+        this.clearHeartbeatTimeout();
         return;
       }
 
@@ -275,6 +356,8 @@ export class WebSocketClient {
             handler(payload);
           } catch (error) {
             this.log('Error in event handler:', error);
+            const err = error instanceof Error ? error : new Error(String(error));
+            this.emitError(err, 'event-handler');
           }
         });
       }
@@ -287,36 +370,51 @@ export class WebSocketClient {
             handler(payload);
           } catch (error) {
             this.log('Error in channel handler:', error);
+            const err = error instanceof Error ? error : new Error(String(error));
+            this.emitError(err, 'channel-handler');
           }
         });
       }
 
     } catch (error) {
       this.log('Failed to parse message:', error);
+      const err = error instanceof Error ? error : new Error(String(error));
+      this.emitError(err, 'message-parse');
     }
   }
 
   /**
-   * 尝试重连
+   * 指数退避重连（1s/2s/4s/8s/16s/32s，最大 60s）
    */
   private attemptReconnect(): void {
     this.reconnectAttempts++;
     this.setState(ConnectionState.RECONNECTING);
 
+    const exp = Math.pow(2, this.reconnectAttempts - 1);
     const delay = Math.min(
-      this.config.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1),
-      30000 // 最大30秒
+      this.config.reconnectDelay * exp,
+      this.config.maxReconnectDelay
     );
 
-    this.log(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.config.maxReconnectAttempts})`);
+    this.log(
+      `Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.config.maxReconnectAttempts})`
+    );
 
-    setTimeout(async () => {
+    this.clearReconnectTimer();
+    this.reconnectTimer = setTimeout(async () => {
+      this.reconnectTimer = null;
       try {
+        // 重新允许连接
+        this.config.reconnect = true;
         await this.connect();
       } catch (error) {
         this.log('Reconnection failed:', error);
+        const err = error instanceof Error ? error : new Error(String(error));
+        this.emitError(err, 'reconnect');
 
-        if (this.reconnectAttempts >= this.config.maxReconnectAttempts) {
+        if (this.reconnectAttempts < this.config.maxReconnectAttempts) {
+          this.attemptReconnect();
+        } else {
           this.log('Max reconnection attempts reached');
           this.setState(ConnectionState.FAILED);
         }
@@ -324,25 +422,50 @@ export class WebSocketClient {
     }, delay);
   }
 
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
+
   /**
-   * 开始心跳
+   * 开始心跳（30s 发送 + 30s 超时检测）
    */
   private startHeartbeat(): void {
     this.stopHeartbeat();
-    this.lastHeartbeat = Date.now();
+    this.lastHeartbeatAck = Date.now();
 
     this.heartbeatTimer = setInterval(() => {
       if (this.state === ConnectionState.CONNECTED) {
         this.send('heartbeat', { ping: true });
+        // 同时也发送 ping（兼容后端 ws_core 协议）
+        this.send('ping', { ping: true });
 
-        // 检查心跳超时
-        const timeSinceLastHeartbeat = Date.now() - this.lastHeartbeat;
-        if (timeSinceLastHeartbeat > this.config.heartbeatInterval * 2) {
-          this.log('Heartbeat timeout, reconnecting...');
-          this.ws?.close();
-        }
+        // 设置本次心跳超时检测
+        this.clearHeartbeatTimeout();
+        this.heartbeatTimeoutTimer = setTimeout(() => {
+          const elapsed = Date.now() - this.lastHeartbeatAck;
+          if (elapsed > this.config.heartbeatTimeout) {
+            this.log(`Heartbeat timeout (${elapsed}ms without ack), reconnecting...`);
+            const err = new Error(`Heartbeat timeout after ${elapsed}ms`);
+            this.emitError(err, 'heartbeat-timeout');
+            try {
+              this.ws?.close();
+            } catch (e) {
+              // ignore
+            }
+          }
+        }, this.config.heartbeatTimeout);
       }
     }, this.config.heartbeatInterval);
+  }
+
+  private clearHeartbeatTimeout(): void {
+    if (this.heartbeatTimeoutTimer) {
+      clearTimeout(this.heartbeatTimeoutTimer);
+      this.heartbeatTimeoutTimer = null;
+    }
   }
 
   /**
@@ -353,6 +476,7 @@ export class WebSocketClient {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
     }
+    this.clearHeartbeatTimeout();
   }
 
   /**
@@ -372,6 +496,17 @@ export class WebSocketClient {
   }
 
   /**
+   * 重连后重新订阅所有 channel
+   */
+  private resubscribeAll(): void {
+    if (this.subscribedChannels.size === 0) return;
+    this.log(`Resubscribing ${this.subscribedChannels.size} channels`);
+    this.subscribedChannels.forEach(channel => {
+      this.send('subscribe', { channel });
+    });
+  }
+
+  /**
    * 设置连接状态
    */
   private setState(state: ConnectionState): void {
@@ -385,6 +520,8 @@ export class WebSocketClient {
           handler(state);
         } catch (error) {
           this.log('Error in state handler:', error);
+          const err = error instanceof Error ? error : new Error(String(error));
+          this.emitError(err, 'state-handler');
         }
       });
     }

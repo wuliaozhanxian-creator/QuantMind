@@ -7,7 +7,16 @@
 import os
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, Float, Index, Integer, String, Text, create_engine
+from sqlalchemy import (
+    Column,
+    DateTime,
+    Float,
+    Index,
+    Integer,
+    String,
+    Text,
+    create_engine,
+)
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import declarative_base, sessionmaker
 
@@ -20,9 +29,13 @@ if not _DB_URL_RAW:
 DATABASE_URL = _DB_URL_RAW
 SYNC_DATABASE_URL = DATABASE_URL
 if SYNC_DATABASE_URL.startswith("postgresql+asyncpg://"):
-    SYNC_DATABASE_URL = SYNC_DATABASE_URL.replace("postgresql+asyncpg://", "postgresql+psycopg2://", 1)
+    SYNC_DATABASE_URL = SYNC_DATABASE_URL.replace(
+        "postgresql+asyncpg://", "postgresql+psycopg2://", 1
+    )
 elif SYNC_DATABASE_URL.startswith("postgresql://"):
-    SYNC_DATABASE_URL = SYNC_DATABASE_URL.replace("postgresql://", "postgresql+psycopg2://", 1)
+    SYNC_DATABASE_URL = SYNC_DATABASE_URL.replace(
+        "postgresql://", "postgresql+psycopg2://", 1
+    )
 engine = create_engine(SYNC_DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -36,7 +49,9 @@ class StockBasicInfo(Base):
     stock_code = Column(String(20), nullable=False, index=True, comment="股票代码")
     stock_name = Column(String(200), nullable=False, comment="股票名称")
     exchange = Column(String(20), nullable=True, index=True, comment="交易所")
-    market = Column(String(20), nullable=True, index=True, comment="市场类型 (A股/港股/美股)")
+    market = Column(
+        String(20), nullable=True, index=True, comment="市场类型 (A股/港股/美股)"
+    )
     industry = Column(String(200), nullable=True, comment="行业")
     sector = Column(String(200), nullable=True, comment="板块")
     market_cap = Column(Float, nullable=True, comment="市值")
@@ -70,7 +85,9 @@ class StockBasicInfo(Base):
 
     list_date = Column(DateTime, nullable=True, comment="上市日期")
     created_at = Column(DateTime, default=datetime.now, comment="创建时间")
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment="更新时间")
+    updated_at = Column(
+        DateTime, default=datetime.now, onupdate=datetime.now, comment="更新时间"
+    )
 
     def to_dict(self):
         """转换为字典"""
@@ -143,7 +160,11 @@ class StockRealTimeData(Base):
     @hybrid_property
     def change_amount(self):
         # 如果 quotes 没存，可以计算
-        return (self.current_price - self.pre_close) if self.current_price and self.pre_close else 0.0
+        return (
+            (self.current_price - self.pre_close)
+            if self.current_price and self.pre_close
+            else 0.0
+        )
 
     @hybrid_property
     def change_pct(self):
@@ -191,7 +212,9 @@ class StockIndustryInfo(Base):
     sector_code = Column(String(50), nullable=True, comment="板块代码")
     concept_tags = Column(Text, nullable=True, comment="概念标签")
     created_at = Column(DateTime, default=datetime.now, comment="创建时间")
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment="更新时间")
+    updated_at = Column(
+        DateTime, default=datetime.now, onupdate=datetime.now, comment="更新时间"
+    )
 
     def to_dict(self):
         """转换为字典"""

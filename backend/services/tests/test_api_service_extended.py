@@ -33,7 +33,10 @@ class TestAPIExtendedIntegration:
         }
 
         async def _mock_get(self, url, *args, **kwargs):
-            payload = {"status": "healthy", "service": url.rsplit("/", 1)[0].split("//", 1)[-1]}
+            payload = {
+                "status": "healthy",
+                "service": url.rsplit("/", 1)[0].split("//", 1)[-1],
+            }
             return httpx.Response(200, json=payload, request=httpx.Request("GET", url))
 
         with patch("httpx.AsyncClient.get", _mock_get):
@@ -77,7 +80,9 @@ class TestAPIExtendedIntegration:
         """验证选股查询路由集成"""
         # Mock StockSearchService
         mock_results = [{"symbol": "000001.SZ", "name": "平安银行"}]
-        with patch("backend.services.api.stock_query_app.routes.StockSearchService") as MockSearch:
+        with patch(
+            "backend.services.api.stock_query_app.routes.StockSearchService"
+        ) as MockSearch:
             instance = MockSearch.return_value
             instance.search_stocks = AsyncMock(return_value=mock_results)
 
@@ -90,7 +95,9 @@ class TestAPIExtendedIntegration:
     def test_stock_detail_integration(self, client):
         """验证股票详情路由集成"""
         mock_info = {"symbol": "000001.SZ", "name": "平安银行", "price": 10.5}
-        with patch("backend.services.api.stock_query_app.routes.StockQueryService") as MockQuery:
+        with patch(
+            "backend.services.api.stock_query_app.routes.StockQueryService"
+        ) as MockQuery:
             instance = MockQuery.return_value
             instance.get_stock_info = AsyncMock(return_value=mock_info)
 
@@ -143,8 +150,12 @@ class TestAPIExtendedIntegration:
                             {
                                 "model_id": "alpha158",
                                 "run_count": 2,
-                                "latest_prediction_trade_date": datetime(2026, 4, 27, tzinfo=timezone.utc).date(),
-                                "last_updated_at": datetime(2026, 4, 30, 10, 0, tzinfo=timezone.utc),
+                                "latest_prediction_trade_date": datetime(
+                                    2026, 4, 27, tzinfo=timezone.utc
+                                ).date(),
+                                "last_updated_at": datetime(
+                                    2026, 4, 30, 10, 0, tzinfo=timezone.utc
+                                ),
                             }
                         ]
                     )
@@ -154,12 +165,18 @@ class TestAPIExtendedIntegration:
                             {
                                 "run_id": "run_demo",
                                 "model_id": "alpha158",
-                                "inference_date": datetime(2026, 4, 24, tzinfo=timezone.utc).date(),
-                                "prediction_trade_date": datetime(2026, 4, 27, tzinfo=timezone.utc).date(),
+                                "inference_date": datetime(
+                                    2026, 4, 24, tzinfo=timezone.utc
+                                ).date(),
+                                "prediction_trade_date": datetime(
+                                    2026, 4, 27, tzinfo=timezone.utc
+                                ).date(),
                                 "universe_label": "沪深全市场 · 生产批次",
                                 "stock_count": 3,
                                 "avg_score": 0.71,
-                                "last_updated_at": datetime(2026, 4, 30, 10, 0, tzinfo=timezone.utc),
+                                "last_updated_at": datetime(
+                                    2026, 4, 30, 10, 0, tzinfo=timezone.utc
+                                ),
                             }
                         ]
                     )
@@ -171,7 +188,9 @@ class TestAPIExtendedIntegration:
                                 "avg_score": 0.71,
                                 "high_confidence_count": 1,
                                 "strong_count": 1,
-                                "last_updated_at": datetime(2026, 4, 30, 10, 0, tzinfo=timezone.utc),
+                                "last_updated_at": datetime(
+                                    2026, 4, 30, 10, 0, tzinfo=timezone.utc
+                                ),
                             }
                         ]
                     )
@@ -207,7 +226,9 @@ class TestAPIExtendedIntegration:
                             "return_1d": 0.0236,
                             "return_3d": 0.0512,
                             "thesis_summary": "适合作为投研观察样本",
-                            "updated_at": datetime(2026, 4, 30, 10, 0, tzinfo=timezone.utc),
+                            "updated_at": datetime(
+                                2026, 4, 30, 10, 0, tzinfo=timezone.utc
+                            ),
                         }
                     ]
                 )
@@ -248,7 +269,10 @@ class TestAPIExtendedIntegration:
                 assert payload["pagination"]["total"] == 3
                 assert payload["pagination"]["hasMore"] is True
                 assert "LEAD(sdl.close, 1)" in session_ref["value"].overview_sql
-                assert "sdl_run.trade_date = snap.data_trade_date" in session_ref["value"].overview_sql
+                assert (
+                    "sdl_run.trade_date = snap.data_trade_date"
+                    in session_ref["value"].overview_sql
+                )
             finally:
                 app.dependency_overrides.clear()
 
@@ -274,10 +298,21 @@ class TestAPIExtendedIntegration:
             "is_admin": False,
         }
 
-        with patch("backend.services.api.routers.model_training._load_feature_catalog_from_db", AsyncMock(return_value=None)):
+        with patch(
+            "backend.services.api.routers.model_training._load_feature_catalog_from_db",
+            AsyncMock(return_value=None),
+        ):
             with patch(
                 "backend.services.api.routers.model_training._load_feature_catalog_from_file",
-                MagicMock(return_value={"version_id": "v1", "version_name": "v1", "feature_count": 1, "categories": [], "source": "file"}),
+                MagicMock(
+                    return_value={
+                        "version_id": "v1",
+                        "version_name": "v1",
+                        "feature_count": 1,
+                        "categories": [],
+                        "source": "file",
+                    }
+                ),
             ):
                 with patch(
                     "backend.services.api.routers.model_training._enrich_feature_catalog_with_data_coverage",
@@ -304,14 +339,32 @@ class TestAPIExtendedIntegration:
 
         with patch(
             "backend.services.api.routers.model_training.submit_training_job",
-            AsyncMock(return_value={"runId": "r1", "status": "pending", "payload": {"foo": "bar"}}),
+            AsyncMock(
+                return_value={
+                    "runId": "r1",
+                    "status": "pending",
+                    "payload": {"foo": "bar"},
+                }
+            ),
         ):
             with patch(
                 "backend.services.api.routers.model_training.get_training_run_for_owner",
-                AsyncMock(return_value={"runId": "r1", "status": "running", "progress": 30, "logs": "", "result": {}, "isCompleted": False}),
+                AsyncMock(
+                    return_value={
+                        "runId": "r1",
+                        "status": "running",
+                        "progress": 30,
+                        "logs": "",
+                        "result": {},
+                        "isCompleted": False,
+                    }
+                ),
             ):
                 try:
-                    response = client.post("/api/v1/models/run-training", json={"features": [], "lgb_params": {}})
+                    response = client.post(
+                        "/api/v1/models/run-training",
+                        json={"features": [], "lgb_params": {}},
+                    )
                     assert response.status_code == 200
                     assert response.json()["runId"] == "r1"
 
@@ -334,10 +387,15 @@ class TestAPIExtendedIntegration:
 
         with patch(
             "backend.services.api.routers.admin.admin_training.submit_training_job",
-            AsyncMock(return_value={"runId": "admin_r1", "status": "pending", "payload": {}}),
+            AsyncMock(
+                return_value={"runId": "admin_r1", "status": "pending", "payload": {}}
+            ),
         ):
             try:
-                response = client.post("/api/v1/admin/models/run-training", json={"features": [], "lgb_params": {}})
+                response = client.post(
+                    "/api/v1/admin/models/run-training",
+                    json={"features": [], "lgb_params": {}},
+                )
                 assert response.status_code == 200
                 assert response.json()["runId"] == "admin_r1"
             finally:

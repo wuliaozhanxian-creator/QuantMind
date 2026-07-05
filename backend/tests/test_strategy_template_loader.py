@@ -39,7 +39,15 @@ def template_dir(tmp_path: Path):
                 "description": "单元测试用策略",
                 "category": "basic",
                 "difficulty": "beginner",
-                "params": [{"name": "topk", "description": "选股数量", "default": 20, "min": 5, "max": 100}],
+                "params": [
+                    {
+                        "name": "topk",
+                        "description": "选股数量",
+                        "default": 20,
+                        "min": 5,
+                        "max": 100,
+                    }
+                ],
                 "execution_defaults": {},
                 "live_defaults": {},
                 "live_config_tips": [],
@@ -63,7 +71,13 @@ def template_dir(tmp_path: Path):
                 "category": "risk_control",
                 "difficulty": "beginner",
                 "params": [
-                    {"name": "stop_loss", "description": "止损阈值", "default": -0.08, "min": -0.3, "max": -0.01}
+                    {
+                        "name": "stop_loss",
+                        "description": "止损阈值",
+                        "default": -0.08,
+                        "min": -0.3,
+                        "max": -0.01,
+                    }
                 ],
                 "execution_defaults": {},
                 "live_defaults": {},
@@ -279,14 +293,18 @@ class TestProductionTemplatesDir:
         templates = loader.load()
 
         # 应至少加载到 9 个内置模板
-        assert len(templates) >= 9, f"expected >= 9 templates in strategy_templates/, got {len(templates)}"
+        assert len(templates) >= 9, (
+            f"expected >= 9 templates in strategy_templates/, got {len(templates)}"
+        )
 
         # 每个模板的核心字段都应有值
         for t in templates:
             assert t.id, f"模板 id 为空: {t}"
             assert t.name, f"模板 name 为空: {t.id}"
             assert t.code.strip(), f"模板代码为空: {t.id}"
-            assert t.category in ("basic", "advanced", "risk_control"), f"模板 category 非法: {t.id} → {t.category}"
+            assert t.category in ("basic", "advanced", "risk_control"), (
+                f"模板 category 非法: {t.id} → {t.category}"
+            )
             assert t.difficulty in (
                 "beginner",
                 "intermediate",

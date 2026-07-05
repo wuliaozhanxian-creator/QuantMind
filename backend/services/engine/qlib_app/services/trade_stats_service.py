@@ -25,7 +25,9 @@ from backend.services.engine.qlib_app.services.trade_metrics_utils import (
     calculate_profit_loss_days_ratio,
     summarize_trade_matching,
 )
-from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
+from backend.services.engine.qlib_app.utils.structured_logger import (
+    StructuredTaskLogger,
+)
 
 logger = logging.getLogger(__name__)
 task_logger = StructuredTaskLogger(logger, "TradeStatsService")
@@ -38,7 +40,9 @@ class TradeStatsService:
         self._persistence = BacktestPersistence()
         task_logger.info("init", "TradeStatsService initialized")
 
-    async def analyze(self, backtest_id: str, user_id: str, tenant_id: str = "default") -> TradeStatsResponse:
+    async def analyze(
+        self, backtest_id: str, user_id: str, tenant_id: str = "default"
+    ) -> TradeStatsResponse:
         try:
             result = await self._persistence.get_result(
                 backtest_id,
@@ -72,7 +76,12 @@ class TradeStatsService:
 
             adv = getattr(result, "advanced_stats", None)
             if adv and isinstance(adv, dict) and "pnl_distribution" in adv:
-                task_logger.info("precomputed", "使用预计算的交易统计指标", backtest_id=backtest_id, tenant_id=tenant_id)
+                task_logger.info(
+                    "precomputed",
+                    "使用预计算的交易统计指标",
+                    backtest_id=backtest_id,
+                    tenant_id=tenant_id,
+                )
                 hydrated_metrics = self._hydrate_precomputed_metrics(
                     result=result,
                     adv=adv,
@@ -81,12 +90,23 @@ class TradeStatsService:
                 )
                 return TradeStatsResponse(
                     metrics=self._build_metrics(hydrated_metrics),
-                    pnl_distribution=self._coerce_histogram(adv.get("pnl_distribution")),
-                    holding_days_distribution=self._coerce_histogram(adv.get("holding_days_distribution")),
-                    trade_frequency_series=self._coerce_time_series(adv.get("trade_frequency_series")),
+                    pnl_distribution=self._coerce_histogram(
+                        adv.get("pnl_distribution")
+                    ),
+                    holding_days_distribution=self._coerce_histogram(
+                        adv.get("holding_days_distribution")
+                    ),
+                    trade_frequency_series=self._coerce_time_series(
+                        adv.get("trade_frequency_series")
+                    ),
                 )
 
-            task_logger.info("recompute", "未找到预计算指标，开始实时计算", backtest_id=backtest_id, tenant_id=tenant_id)
+            task_logger.info(
+                "recompute",
+                "未找到预计算指标，开始实时计算",
+                backtest_id=backtest_id,
+                tenant_id=tenant_id,
+            )
             return self._build_recomputed_response(
                 backtest_id=backtest_id,
                 returns=returns,
@@ -95,7 +115,13 @@ class TradeStatsService:
                 real_trade_metrics=real_trade_metrics,
             )
         except Exception as exc:
-            task_logger.exception("failed", "交易统计分析失败", backtest_id=backtest_id, tenant_id=tenant_id, error=str(exc))
+            task_logger.exception(
+                "failed",
+                "交易统计分析失败",
+                backtest_id=backtest_id,
+                tenant_id=tenant_id,
+                error=str(exc),
+            )
             raise
 
     def _build_recomputed_response(
@@ -108,23 +134,40 @@ class TradeStatsService:
         real_trade_metrics: dict[str, float | int | str],
     ) -> TradeStatsResponse:
         if trade_events:
-            task_logger.info("use_trades", "使用真实交易记录", backtest_id=backtest_id, count=len(trade_events))
-            trades = self._build_trades_frame(trade_events, returns, backtest_id=backtest_id, allow_mock=False)
+            task_logger.info(
+                "use_trades",
+                "使用真实交易记录",
+                backtest_id=backtest_id,
+                count=len(trade_events),
+            )
+            trades = self._build_trades_frame(
+                trade_events, returns, backtest_id=backtest_id, allow_mock=False
+            )
         else:
-            task_logger.info("mock_trades", "未找到真实交易记录，使用收益率曲线推导模拟数据", backtest_id=backtest_id)
-            trades = self._build_trades_frame(None, returns, backtest_id=backtest_id, allow_mock=True)
+            task_logger.info(
+                "mock_trades",
+                "未找到真实交易记录，使用收益率曲线推导模拟数据",
+                backtest_id=backtest_id,
+            )
+            trades = self._build_trades_frame(
+                None, returns, backtest_id=backtest_id, allow_mock=True
+            )
 
         if trades.empty and closed_trades.empty:
             raise ValueError(f"交易数据不存在或为空: backtest_id={backtest_id}")
 
         holding_days_series = self._resolve_holding_days_series(closed_trades, trades)
-        pnl_hist = self._build_histogram(self._resolve_pnl_series_for_histogram(closed_trades), bins=20)
+        pnl_hist = self._build_histogram(
+            self._resolve_pnl_series_for_histogram(closed_trades), bins=20
+        )
         holding_hist = self._build_holding_period_histogram(holding_days_series)
         freq_series = self._build_trade_frequency_series(closed_trades, returns.index)
 
         payload = dict(real_trade_metrics)
         payload["avg_holding_days"] = (
-            float(holding_days_series.mean()) if not holding_days_series.empty else float(real_trade_metrics.get("avg_holding_days", 0.0))
+            float(holding_days_series.mean())
+            if not holding_days_series.empty
+            else float(real_trade_metrics.get("avg_holding_days", 0.0))
         )
 
         return TradeStatsResponse(
@@ -144,23 +187,34 @@ class TradeStatsService:
     ) -> dict[str, float | int | str]:
         payload = dict(real_trade_metrics)
 
-        profit_loss_days_ratio = self._to_finite_float(adv.get("profit_loss_days_ratio"))
+        profit_loss_days_ratio = self._to_finite_float(
+            adv.get("profit_loss_days_ratio")
+        )
         avg_holding_days = self._to_finite_float(adv.get("avg_holding_days"))
         trade_frequency = self._to_finite_float(adv.get("trade_frequency"))
 
         trades = pd.DataFrame()
         if avg_holding_days is None:
-            trades = self._build_trades_frame(getattr(result, "trades", None), returns, backtest_id=str(getattr(result, "backtest_id", "")), allow_mock=False)
+            trades = self._build_trades_frame(
+                getattr(result, "trades", None),
+                returns,
+                backtest_id=str(getattr(result, "backtest_id", "")),
+                allow_mock=False,
+            )
 
         if profit_loss_days_ratio is None:
             profit_loss_days_ratio = calculate_profit_loss_days_ratio(returns)
 
         if avg_holding_days is None:
-            summary_holding = self._to_finite_float(getattr(result, "avg_holding_period", None))
+            summary_holding = self._to_finite_float(
+                getattr(result, "avg_holding_period", None)
+            )
             if summary_holding is not None:
                 avg_holding_days = summary_holding
             elif not trades.empty:
-                avg_holding_days = float(self._resolve_holding_days_series(pd.DataFrame(), trades).mean())
+                avg_holding_days = float(
+                    self._resolve_holding_days_series(pd.DataFrame(), trades).mean()
+                )
             else:
                 avg_holding_days = float(payload.get("avg_holding_days", 0.0))
 
@@ -176,12 +230,16 @@ class TradeStatsService:
                 "profit_loss_days_ratio": float(profit_loss_days_ratio),
                 "avg_holding_days": float(avg_holding_days),
                 "trade_frequency": float(trade_frequency),
-                "total_trades": int(payload.get("total_trades", int(result.total_trades or 0))),
+                "total_trades": int(
+                    payload.get("total_trades", int(result.total_trades or 0))
+                ),
             }
         )
         return payload
 
-    def _build_metrics(self, payload: dict[str, float | int | str]) -> TradeStatsMetrics:
+    def _build_metrics(
+        self, payload: dict[str, float | int | str]
+    ) -> TradeStatsMetrics:
         return TradeStatsMetrics(
             win_rate=float(payload.get("win_rate", 0.0)),
             profit_loss_ratio=float(payload.get("profit_loss_ratio", 0.0)),
@@ -221,7 +279,9 @@ class TradeStatsService:
             return self._generate_mock_trades_from_returns(returns, backtest_id)
         return pd.DataFrame()
 
-    def _normalize_trade_dates(self, trades: pd.DataFrame, returns: pd.Series) -> pd.DataFrame:
+    def _normalize_trade_dates(
+        self, trades: pd.DataFrame, returns: pd.Series
+    ) -> pd.DataFrame:
         normalized = trades.copy()
         if "trade_date" not in normalized.columns:
             if "date" in normalized.columns:
@@ -234,13 +294,21 @@ class TradeStatsService:
                 normalized["trade_date"] = pd.Timestamp.now().normalize()
             else:
                 fallback_dates = returns.index
-                normalized["trade_date"] = [fallback_dates[i % len(fallback_dates)] for i in range(len(normalized))]
+                normalized["trade_date"] = [
+                    fallback_dates[i % len(fallback_dates)]
+                    for i in range(len(normalized))
+                ]
 
-        normalized["trade_date"] = pd.to_datetime(normalized["trade_date"], errors="coerce")
+        normalized["trade_date"] = pd.to_datetime(
+            normalized["trade_date"], errors="coerce"
+        )
         if normalized["trade_date"].isna().all():
             if not returns.empty:
                 fallback_dates = returns.index
-                normalized["trade_date"] = [fallback_dates[i % len(fallback_dates)] for i in range(len(normalized))]
+                normalized["trade_date"] = [
+                    fallback_dates[i % len(fallback_dates)]
+                    for i in range(len(normalized))
+                ]
             else:
                 normalized["trade_date"] = pd.Timestamp.now().normalize()
         else:
@@ -262,7 +330,9 @@ class TradeStatsService:
 
         if isinstance(trade_frequency_series, dict):
             values = trade_frequency_series.get("values") or []
-            numeric_values = [float(v) for v in values if self._to_finite_float(v) is not None]
+            numeric_values = [
+                float(v) for v in values if self._to_finite_float(v) is not None
+            ]
             if numeric_values:
                 return float(sum(numeric_values) / len(numeric_values))
 
@@ -279,7 +349,9 @@ class TradeStatsService:
         except Exception:
             return None
 
-    def _resolve_pnl_series_for_histogram(self, closed_trades: pd.DataFrame) -> pd.Series:
+    def _resolve_pnl_series_for_histogram(
+        self, closed_trades: pd.DataFrame
+    ) -> pd.Series:
         if closed_trades.empty or "return_pct" not in closed_trades.columns:
             return pd.Series([0.0], dtype=float)
         returns = pd.to_numeric(closed_trades["return_pct"], errors="coerce")
@@ -288,7 +360,9 @@ class TradeStatsService:
             return pd.Series([0.0], dtype=float)
         return returns
 
-    def _resolve_holding_days_series(self, closed_trades: pd.DataFrame, trades: pd.DataFrame) -> pd.Series:
+    def _resolve_holding_days_series(
+        self, closed_trades: pd.DataFrame, trades: pd.DataFrame
+    ) -> pd.Series:
         if not closed_trades.empty and "holding_days" in closed_trades.columns:
             holding = pd.to_numeric(closed_trades["holding_days"], errors="coerce")
             holding = holding.replace([np.inf, -np.inf], np.nan).dropna()
@@ -311,7 +385,9 @@ class TradeStatsService:
         df.set_index("date", inplace=True)
         return df["value"].pct_change().fillna(0)
 
-    def _generate_mock_trades_from_returns(self, returns: pd.Series, backtest_id: str) -> pd.DataFrame:
+    def _generate_mock_trades_from_returns(
+        self, returns: pd.Series, backtest_id: str
+    ) -> pd.DataFrame:
         if returns.empty:
             return pd.DataFrame()
 
@@ -324,13 +400,17 @@ class TradeStatsService:
         if total_trades == 0:
             return pd.DataFrame()
 
-        trade_days = np.random.choice(significant_days, size=total_trades, replace=False)
+        trade_days = np.random.choice(
+            significant_days, size=total_trades, replace=False
+        )
         trade_days = pd.to_datetime(sorted(trade_days))
         real_pnl = returns.loc[trade_days].values
         pnl = real_pnl * np.random.uniform(0.8, 1.2, size=total_trades)
         holding_days = np.random.randint(1, 11, size=total_trades)
 
-        return pd.DataFrame({"trade_date": trade_days, "pnl": pnl, "holding_days": holding_days})
+        return pd.DataFrame(
+            {"trade_date": trade_days, "pnl": pnl, "holding_days": holding_days}
+        )
 
     def _build_histogram(self, series: pd.Series, bins: int) -> HistogramData:
         clean = pd.to_numeric(series, errors="coerce")
@@ -351,7 +431,9 @@ class TradeStatsService:
         counts, _ = np.histogram(clipped, bins=bin_edges)
         return HistogramData(bins=bin_edges, counts=counts.tolist())
 
-    def _build_trade_frequency_series(self, closed_trades: pd.DataFrame, dates: pd.Index) -> TimeSeriesData:
+    def _build_trade_frequency_series(
+        self, closed_trades: pd.DataFrame, dates: pd.Index
+    ) -> TimeSeriesData:
         if not closed_trades.empty:
             series = build_trade_frequency_series_from_closed_trades(closed_trades)
             if series["dates"]:
@@ -363,7 +445,12 @@ class TradeStatsService:
         if len(dates) == 0:
             return TimeSeriesData(dates=[], values=[])
 
-        labels = sorted({pd.Timestamp(value).to_period("M").to_timestamp().strftime("%Y-%m-%d") for value in dates})
+        labels = sorted(
+            {
+                pd.Timestamp(value).to_period("M").to_timestamp().strftime("%Y-%m-%d")
+                for value in dates
+            }
+        )
         return TimeSeriesData(dates=labels, values=[0.0 for _ in labels])
 
     def _coerce_histogram(self, raw) -> HistogramData:

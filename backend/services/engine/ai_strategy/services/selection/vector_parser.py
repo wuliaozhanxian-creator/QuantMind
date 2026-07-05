@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 
 import numpy as np
 
@@ -63,7 +63,6 @@ STRATEGY_PROTOTYPES = {
     ],
 }
 
-
 class StrategyVectorParser:
     """基于 DashScope embedding 的策略语义解析器"""
 
@@ -123,9 +122,7 @@ class StrategyVectorParser:
                     best_category = category
         return best_category, max_sim
 
-
 _vector_parser: Optional["StrategyVectorParser"] = None
-
 
 async def get_strategy_vector_parser() -> "StrategyVectorParser":
     global _vector_parser

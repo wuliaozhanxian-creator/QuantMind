@@ -20,7 +20,6 @@ DEFAULT_PREFERENCES = {
     "portfolio_updates": True,
 }
 
-
 async def get_user_notification_preferences(
     session: AsyncSession,
     user_id: str,
@@ -52,7 +51,6 @@ async def get_user_notification_preferences(
         )
 
     return DEFAULT_PREFERENCES.copy()
-
 
 async def should_send_notification(
     session: AsyncSession,
@@ -95,7 +93,6 @@ async def should_send_notification(
             e,
         )
         return True
-
 
 def should_send_notification_sync(
     user_id: str,

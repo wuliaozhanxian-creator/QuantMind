@@ -6,7 +6,7 @@ import logging
 import secrets
 import time
 from datetime import datetime, timedelta
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import bcrypt
 from fastapi import Depends, HTTPException, Request
@@ -14,7 +14,6 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import jwt
 
 logger = logging.getLogger(__name__)
-
 
 class SecurityService:
     """安全服务类"""
@@ -51,9 +50,9 @@ class SecurityService:
             payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
             return payload
         except jwt.ExpiredSignatureError:
-            raise HTTPException(status_code=401, detail="Token expired")
+            raise HTTPException(status_code=401, detail="Token expired") from None
         except jwt.InvalidTokenError:
-            raise HTTPException(status_code=401, detail="Invalid token")
+            raise HTTPException(status_code=401, detail="Invalid token") from None
 
     def generate_api_key(self, user_id: str, permissions: list = None) -> str:
         """生成API密钥"""
@@ -61,11 +60,12 @@ class SecurityService:
         # 这里应该将密钥存储到数据库
         return key
 
-    async def verify_token(self, credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer())):
+    async def verify_token(
+        self, credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer())
+    ):
         """验证Token的依赖函数"""
         token = credentials.credentials
         return self.verify_jwt_token(token)
-
 
 class RateLimiter:
     """请求限流器"""
@@ -82,7 +82,11 @@ class RateLimiter:
 
         # 清理过期的请求记录
         if client_id in self.requests:
-            self.requests[client_id] = [req_time for req_time in self.requests[client_id] if req_time > window_start]
+            self.requests[client_id] = [
+                req_time
+                for req_time in self.requests[client_id]
+                if req_time > window_start
+            ]
         else:
             self.requests[client_id] = []
 
@@ -101,7 +105,6 @@ class RateLimiter:
         if forwarded_for:
             return forwarded_for.split(",")[0].strip()
         return request.client.host
-
 
 class XSSProtection:
     """XSS防护"""
@@ -128,7 +131,6 @@ class XSSProtection:
 
         pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
         return bool(re.match(pattern, email))
-
 
 class AuditLogger:
     """审计日志"""
@@ -174,7 +176,6 @@ class AuditLogger:
         """保存审计日志到数据库"""
         # 这里应该实现数据库存储逻辑
 
-
 class SecurityMiddleware:
     """安全中间件"""
 
@@ -197,7 +198,9 @@ class SecurityMiddleware:
         response.headers["X-Content-Type-Options"] = "nosnif"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"
-        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["Strict-Transport-Security"] = (
+            "max-age=31536000; includeSubDomains"
+        )
         response.headers["Content-Security-Policy"] = "default-src 'self'"
 
         return response

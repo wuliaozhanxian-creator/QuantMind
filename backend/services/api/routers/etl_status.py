@@ -38,15 +38,13 @@ router = APIRouter(prefix="/api/etl", tags=["ETL-Monitoring"])
 # 进程内调度器单例（懒加载；API 服务通常不常驻调度器，但 run 端点需要它）
 _scheduler_instance = None
 
-
 def _get_scheduler():
     global _scheduler_instance
     if _scheduler_instance is None:
         _scheduler_instance = build_default_scheduler()
     return _scheduler_instance
 
-
-def _safe_load_json(path) -> Optional[dict[str, Any]]:
+def _safe_load_json(path) -> dict[str, Any] | None:
     """安全加载 JSON 文件，失败返回 None"""
     try:
         from pathlib import Path
@@ -60,7 +58,6 @@ def _safe_load_json(path) -> Optional[dict[str, Any]]:
     except Exception as exc:
         logger.warning("加载 ETL 状态文件失败 %s: %s", path, exc)
         return None
-
 
 # ============================================================
 # 综合状态端点
@@ -125,12 +122,13 @@ async def etl_status():
         "alignment_anomalies_summary": {
             "total": len(anomalies),
             "errors": len(error_anomalies),
-            "status": "critical" if error_anomalies else ("warning" if anomalies else "ok"),
+            "status": "critical"
+            if error_anomalies
+            else ("warning" if anomalies else "ok"),
         },
         "recent_alerts": alerts[:10],
         "recent_alerts_count": len(alerts),
     }
-
 
 # ============================================================
 # 任务列表端点
@@ -160,7 +158,9 @@ async def etl_tasks():
                 "recent_history": history[:5],
                 "run_count": len(history),
                 "last_status": last_run.get("status") if last_run else None,
-                "last_duration_seconds": last_run.get("duration_seconds") if last_run else None,
+                "last_duration_seconds": last_run.get("duration_seconds")
+                if last_run
+                else None,
             }
         )
 
@@ -169,7 +169,6 @@ async def etl_tasks():
         "total": len(result),
         "scheduler_running": snap.get("scheduler_running", False),
     }
-
 
 # ============================================================
 # 数据缺口端点
@@ -183,7 +182,6 @@ async def etl_data_gaps():
         "report": data_gaps,
         "updated_at": monitor_snap.get("updated_at"),
     }
-
 
 # ============================================================
 # 对齐异常端点
@@ -199,15 +197,14 @@ async def etl_anomalies():
         "updated_at": monitor_snap.get("updated_at"),
     }
 
-
 # ============================================================
 # 告警列表端点
 # ============================================================
 @router.get("/alerts")
 async def etl_alerts(
     limit: int = Query(50, ge=1, le=500, description="返回告警数量上限"),
-    category: Optional[str] = Query(None, description="按类别过滤"),
-    level: Optional[str] = Query(None, description="按级别过滤"),
+    category: str | None = Query(None, description="按类别过滤"),
+    level: str | None = Query(None, description="按级别过滤"),
 ):
     """返回最近告警列表"""
     monitor_snap = get_monitor_state_store().snapshot()
@@ -224,7 +221,6 @@ async def etl_alerts(
         "total": len(filtered),
         "total_all": len(alerts),
     }
-
 
 # ============================================================
 # 手动触发任务端点
@@ -268,7 +264,6 @@ async def etl_run_task(task_name: str):
         "error": record.error,
         "output": (record.output or "")[-2000:] if record.output else None,
     }
-
 
 @router.post("/run-all")
 async def etl_run_all():

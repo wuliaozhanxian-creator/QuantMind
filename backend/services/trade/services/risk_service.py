@@ -3,7 +3,7 @@ Risk Service - Risk control business logic
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,7 +16,6 @@ from backend.services.trade.trade_config import settings
 from backend.shared.margin_stock_pool import get_margin_stock_pool_service
 
 logger = logging.getLogger(__name__)
-
 
 class RiskService:
     """Risk control service"""
@@ -33,7 +32,9 @@ class RiskService:
 
     @staticmethod
     def _parse_whitelist(raw: str) -> set[str]:
-        return {item.strip() for item in str(raw or "").split(",") if item and item.strip()}
+        return {
+            item.strip() for item in str(raw or "").split(",") if item and item.strip()
+        }
 
     @staticmethod
     def _resolve_board_min_lot(symbol: str) -> tuple[str, int]:
@@ -47,9 +48,13 @@ class RiskService:
             return "BJ", max(1, int(getattr(settings, "MIN_LOT_BJ_BOARD", 100)))
         return "MAIN", max(1, int(getattr(settings, "MIN_LOT_MAIN_BOARD", 100)))
 
-    async def _load_trade_account_snapshot(self, tenant_id: str, user_id: int) -> dict[str, Any]:
+    async def _load_trade_account_snapshot(
+        self, tenant_id: str, user_id: int
+    ) -> dict[str, Any]:
         try:
-            from backend.services.trade.routers.real_trading_utils import _fetch_latest_real_account_snapshot
+            from backend.services.trade.routers.real_trading_utils import (
+                _fetch_latest_real_account_snapshot,
+            )
 
             snapshot = await _fetch_latest_real_account_snapshot(
                 self.db,
@@ -94,10 +99,14 @@ class RiskService:
 
     async def get_rule_by_name(self, rule_name: str) -> RiskRule | None:
         """Get risk rule by name"""
-        result = await self.db.execute(select(RiskRule).where(RiskRule.rule_name == rule_name))
+        result = await self.db.execute(
+            select(RiskRule).where(RiskRule.rule_name == rule_name)
+        )
         return result.scalar_one_or_none()
 
-    async def update_rule(self, rule_id: int, update_data: RiskRuleUpdate) -> RiskRule | None:
+    async def update_rule(
+        self, rule_id: int, update_data: RiskRuleUpdate
+    ) -> RiskRule | None:
         """Update risk rule"""
         rule = await self.get_rule(rule_id)
         if not rule:
@@ -148,7 +157,7 @@ class RiskService:
         return True
 
     async def list_rules(self, active_only: bool = True) -> list[RiskRule]:
-        """List all risk rules"""
+        """list all risk rules"""
         conditions = []
         if active_only:
             conditions.append(RiskRule.is_active)
@@ -187,9 +196,17 @@ class RiskService:
 
         violations = []
         is_margin_trade = bool(getattr(order, "is_margin_trade", False))
-        trade_action_value = self._normalize_trade_action_value(getattr(order, "trade_action", None))
+        trade_action_value = self._normalize_trade_action_value(
+            getattr(order, "trade_action", None)
+        )
         is_sell_to_open = trade_action_value == "sell_to_open"
-        trading_mode_value = str(getattr(getattr(order, "trading_mode", None), "value", getattr(order, "trading_mode", "")))
+        trading_mode_value = str(
+            getattr(
+                getattr(order, "trading_mode", None),
+                "value",
+                getattr(order, "trading_mode", ""),
+            )
+        )
         is_real_mode = trading_mode_value.upper() == "REAL"
         qty = int(float(getattr(order, "quantity", 0) or 0))
 
@@ -221,8 +238,12 @@ class RiskService:
 
         if is_margin_trade and is_sell_to_open:
             if is_real_mode:
-                long_short_enabled = bool(getattr(settings, "ENABLE_LONG_SHORT_REAL", False))
-                whitelist_users = self._parse_whitelist(getattr(settings, "LONG_SHORT_WHITELIST_USERS", ""))
+                long_short_enabled = bool(
+                    getattr(settings, "ENABLE_LONG_SHORT_REAL", False)
+                )
+                whitelist_users = self._parse_whitelist(
+                    getattr(settings, "LONG_SHORT_WHITELIST_USERS", "")
+                )
                 if (not long_short_enabled) or (str(user_id) not in whitelist_users):
                     violations.append(
                         {
@@ -248,7 +269,9 @@ class RiskService:
                     }
                 )
 
-            margin_required = float(order.order_value or 0.0) * float(settings.MARGIN_SHORT_MARGIN_RATE)
+            margin_required = float(order.order_value or 0.0) * float(
+                settings.MARGIN_SHORT_MARGIN_RATE
+            )
             # A 股融券占用的是担保物额度(总资产)，而非直接消耗可用现金
             # 但为了简化，这里依赖后续的 short_exposure 来控制总敞口
             if portfolio_value > 0 and margin_required > portfolio_value:
@@ -256,7 +279,8 @@ class RiskService:
                     {
                         "rule": "margin_requirement",
                         "message": (
-                            f"可用担保物不足: required {margin_required:.2f}, " f"portfolio_value {portfolio_value:.2f}"
+                            f"可用担保物不足: required {margin_required:.2f}, "
+                            f"portfolio_value {portfolio_value:.2f}"
                         ),
                     }
                 )
@@ -268,12 +292,16 @@ class RiskService:
                     violations.append(
                         {
                             "rule": "max_short_exposure",
-                            "message": (f"空头仓位占比 {short_exposure:.1%} 超过最大值 {max_short_exposure:.1%}"),
+                            "message": (
+                                f"空头仓位占比 {short_exposure:.1%} 超过最大值 {max_short_exposure:.1%}"
+                            ),
                         }
                     )
 
             if bool(getattr(settings, "SHORT_ADMISSION_STRICT", True)) and is_real_mode:
-                account_snapshot = await self._load_trade_account_snapshot(order.tenant_id, user_id)
+                account_snapshot = await self._load_trade_account_snapshot(
+                    order.tenant_id, user_id
+                )
                 credit_enabled = bool(account_snapshot.get("credit_enabled", False))
                 if not credit_enabled:
                     violations.append(
@@ -282,7 +310,9 @@ class RiskService:
                             "message": "CREDIT_ACCOUNT_UNAVAILABLE: 信用账户状态不可用或未上报",
                         }
                     )
-                shortable_symbols_count = int(account_snapshot.get("shortable_symbols_count") or 0)
+                shortable_symbols_count = int(
+                    account_snapshot.get("shortable_symbols_count") or 0
+                )
                 if shortable_symbols_count <= 0:
                     violations.append(
                         {
@@ -396,7 +426,9 @@ class RiskService:
         返回与 ``check_order_risk`` 同结构的 ``{"passed": bool, "violations": list}``，
         便于上层 ``TradingEngine.check_order_risk`` 无缝替换。
         """
-        from backend.services.trade.services.risk_audit_service import risk_audit_service
+        from backend.services.trade.services.risk_audit_service import (
+            risk_audit_service,
+        )
         from backend.services.trade.services.risk_control import (
             RiskControlEngine,
             RiskRuleLoader,
@@ -425,7 +457,9 @@ class RiskService:
         # 3. 构造 account / context
         account = {
             "portfolio_value": float(portfolio_value or 0.0),
-            "available_cash": float(available_cash if available_cash is not None else -1.0),
+            "available_cash": float(
+                available_cash if available_cash is not None else -1.0
+            ),
             "available_position": float(
                 available_position if available_position is not None else -1.0
             ),

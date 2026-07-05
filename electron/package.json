@@ -23,6 +23,7 @@
     "clean": "node scripts/clean.js",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --ext .ts,.tsx",
+    "lint:any": "eslint src --ext .ts,.tsx --no-eslintrc -c .eslintrc.any.cjs",
     "lint:changed": "node scripts/lint-changed.js",
     "lint:phase": "node scripts/lint-phase.js",
     "lint:phase1": "node scripts/lint-phase.js --phase=1",

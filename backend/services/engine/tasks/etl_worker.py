@@ -2,7 +2,7 @@ import logging
 import re
 from datetime import date as date_cls
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import pandas as pd
 from sqlalchemy import inspect, select, text
@@ -13,11 +13,19 @@ from backend.services.engine.models.market_data import MarketDataDaily
 logger = logging.getLogger(__name__)
 
 # 系统保留列，不作为特征列返回
-_SYSTEM_COLUMNS = {"trade_date", "date", "symbol", "stock_name", "industry", "province", "updated_at", "features"}
+_SYSTEM_COLUMNS = {
+    "trade_date",
+    "date",
+    "symbol",
+    "stock_name",
+    "industry",
+    "province",
+    "updated_at",
+    "features",
+}
 
 # SQL 注入防护：合法列名正则（仅允许字母数字下划线，防止动态列名注入）
 _VALID_COLUMN_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
-
 
 class ETLWorker:
     def __init__(self, db_session: Session):
@@ -70,7 +78,9 @@ class ETLWorker:
         if feature_cols:
             try:
                 # SQL 注入防护：校验动态列名格式，仅允许字母数字下划线
-                invalid_cols = [c for c in feature_cols if not _VALID_COLUMN_RE.match(c)]
+                invalid_cols = [
+                    c for c in feature_cols if not _VALID_COLUMN_RE.match(c)
+                ]
                 if invalid_cols:
                     raise ValueError(f"非法列名（含注入风险）: {invalid_cols}")
                 cols_sql = ", ".join(f'"{c}"' for c in feature_cols)
@@ -79,7 +89,9 @@ class ETLWorker:
                     FROM stock_daily_latest
                     WHERE trade_date = :trade_date
                     """)
-                rows = self.db.execute(stmt, {"trade_date": trade_date}).mappings().all()
+                rows = (
+                    self.db.execute(stmt, {"trade_date": trade_date}).mappings().all()
+                )
             except Exception as e:
                 # 兼容旧表结构（仅 features JSONB）
                 logger.warning(f"Fallback to legacy market_data_daily schema: {e}")
@@ -99,7 +111,9 @@ class ETLWorker:
             record: dict[str, Any] = {"symbol": symbol}
 
             # 优先读取具名列
-            named_values = {c: row.get(c) for c in feature_cols if row.get(c) is not None}
+            named_values = {
+                c: row.get(c) for c in feature_cols if row.get(c) is not None
+            }
             if named_values:
                 record.update(named_values)
             else:
@@ -107,9 +121,13 @@ class ETLWorker:
                 features = row.get("features")
                 if isinstance(features, list) and features:
                     try:
-                        record.update({f"feature_{i}": float(v) for i, v in enumerate(features)})
+                        record.update(
+                            {f"feature_{i}": float(v) for i, v in enumerate(features)}
+                        )
                     except Exception:
-                        logger.error(f"Invalid feature format for {symbol}: cannot parse JSONB features")
+                        logger.error(
+                            f"Invalid feature format for {symbol}: cannot parse JSONB features"
+                        )
                         continue
                 else:
                     logger.warning(f"No usable features for {symbol}, skipping")

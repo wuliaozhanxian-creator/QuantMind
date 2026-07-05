@@ -81,14 +81,18 @@ async def start_execution(request: StartRequest):
 
     if not full_path:
         # 最后尝试模糊搜索 (处理某些编码或路径深度问题)
-        logger.warning(f"File not found in primary paths: {request.filename}. Attempting search...")
-        for root, dirs, files in os.walk(project_root):
+        logger.warning(
+            f"File not found in primary paths: {request.filename}. Attempting search..."
+        )
+        for root, _dirs, files in os.walk(project_root):
             if request.filename in files:
                 full_path = os.path.join(root, request.filename)
                 break
 
     if not full_path:
-        raise HTTPException(status_code=404, detail=f"File not found: {request.filename}")
+        raise HTTPException(
+            status_code=404, detail=f"File not found: {request.filename}"
+        )
 
     job_id = str(uuid.uuid4())
     jobs[job_id] = {"status": "running", "queue": asyncio.Queue()}
@@ -126,7 +130,7 @@ async def run_tmp_execution(request: RunTmpRequest):
         return {"job_id": job_id, "status": "started"}
     except Exception as exc:
         logger.exception("run-tmp failed: %s", exc)
-        raise HTTPException(status_code=500, detail=f"run-tmp failed: {exc}")
+        raise HTTPException(status_code=500, detail=f"run-tmp failed: {exc}") from exc
 
 
 @router.post("/stop/{job_id}")
@@ -150,7 +154,7 @@ async def stop_execution(job_id: str):
             return {"status": "stopped"}
         except Exception as e:
             logger.error(f"Failed to stop process {job_id}: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail=str(e)) from e
 
     return {"status": "already_stopped"}
 
@@ -182,7 +186,11 @@ async def get_logs_stream(job_id: str):
 
                 for line in lines:
                     # 1. 识别错误
-                    if "Traceback" in line or "Error:" in line or line.startswith("  File"):
+                    if (
+                        "Traceback" in line
+                        or "Error:" in line
+                        or line.startswith("  File")
+                    ):
                         yield f"data: [ERROR] {line}\n"
                     else:
                         yield f"data: {line}\n"
@@ -294,7 +302,11 @@ async def check_syntax(item: RunTmpRequest):
         return {
             "valid": True,
             "is_qlib": is_qlib,
-            "message": ("Valid Qlib Strategy" if is_qlib else "Valid Python Code (Not Qlib Format)"),
+            "message": (
+                "Valid Qlib Strategy"
+                if is_qlib
+                else "Valid Python Code (Not Qlib Format)"
+            ),
         }
 
     except SyntaxError as e:

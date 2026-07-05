@@ -3,7 +3,7 @@ import logging
 import random
 import statistics
 import time
-from typing import Any, Dict, List
+from typing import Any
 
 from backend.services.engine.qlib_app.schemas.backtest import (
     GeneticHistoryRecord,
@@ -23,7 +23,6 @@ from backend.services.engine.qlib_app.utils.structured_logger import (
 
 logger = logging.getLogger(__name__)
 task_logger = StructuredTaskLogger(logger, "GeneticOptimizationService")
-
 
 class GeneticOptimizationService:
     """遗传算法参数优化服务"""
@@ -362,7 +361,9 @@ class GeneticOptimizationService:
             下一代种群
         """
         # 1. 精英保留 - 保留最优的 elite_count 个个体
-        valid_pop = [(p, s) for p, s in zip(population, scores) if s is not None]
+        valid_pop = [
+            (p, s) for p, s in zip(population, scores, strict=False) if s is not None
+        ]
         if not valid_pop:
             # 如果没有有效个体，返回原种群
             task_logger.warning(

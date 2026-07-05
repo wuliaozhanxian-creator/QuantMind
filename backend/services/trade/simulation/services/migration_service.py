@@ -11,12 +11,16 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.trade.simulation.models.account import SimulationAccount
-from backend.services.trade.simulation.models.account_daily import SimulationAccountDaily
+from backend.services.trade.simulation.models.account_daily import (
+    SimulationAccountDaily,
+)
 from backend.services.trade.simulation.models.cash_ledger import SimulationCashLedger
 from backend.services.trade.simulation.models.fill import SimulationFill
 from backend.services.trade.simulation.models.order import SimOrder
 from backend.services.trade.simulation.models.order_v2 import SimulationOrderV2
-from backend.services.trade.simulation.models.position_daily import SimulationPositionDaily
+from backend.services.trade.simulation.models.position_daily import (
+    SimulationPositionDaily,
+)
 from backend.services.trade.simulation.models.position_lot import SimulationPositionLot
 from backend.services.trade.simulation.models.trade import SimTrade
 from backend.services.trade.simulation.services.ledger_service import (
@@ -52,7 +56,9 @@ class SimulationMigrationService:
     ) -> SimulationMigrationResult:
         account_id = self.ledger_service.build_account_id(tenant_id, user_id)
         if reset_existing:
-            await self._reset_new_ledger(account_id=account_id, tenant_id=tenant_id, user_id=user_id)
+            await self._reset_new_ledger(
+                account_id=account_id, tenant_id=tenant_id, user_id=user_id
+            )
 
         trades = list(
             (
@@ -67,7 +73,9 @@ class SimulationMigrationService:
                         SimTrade.id.asc(),
                     )
                 )
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
 
         account_snapshot: dict[str, object] = {
@@ -88,7 +96,9 @@ class SimulationMigrationService:
         replayed = 0
         skipped_short = 0
         for trade in trades:
-            side_value = getattr(getattr(trade, "side", None), "value", getattr(trade, "side", ""))
+            side_value = getattr(
+                getattr(trade, "side", None), "value", getattr(trade, "side", "")
+            )
             before_snapshot = dict(account_snapshot)
             order_stub = SimpleNamespace(
                 tenant_id=trade.tenant_id,
@@ -102,7 +112,10 @@ class SimulationMigrationService:
                 trade=trade,
                 account_snapshot=before_snapshot,
             )
-            if str(getattr(trade, "position_side", "long") or "long").strip().lower() == "short":
+            if (
+                str(getattr(trade, "position_side", "long") or "long").strip().lower()
+                == "short"
+            ):
                 skipped_short += 1
             await self.ledger_service.record_trade(
                 order=order_stub,
@@ -195,7 +208,9 @@ class SimulationMigrationService:
                     )
                     .order_by(SimOrder.created_at.asc(), SimOrder.id.asc())
                 )
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
         created_orders = 0
         for order in legacy_orders:
@@ -206,21 +221,34 @@ class SimulationMigrationService:
                     order_id=order.order_id,
                     tenant_id=tenant_id,
                     user_id=normalized_user_id,
-                    strategy_id=str(order.strategy_id) if order.strategy_id is not None else None,
-                    account_id=self.ledger_service.build_account_id(tenant_id, normalized_user_id),
+                    strategy_id=str(order.strategy_id)
+                    if order.strategy_id is not None
+                    else None,
+                    account_id=self.ledger_service.build_account_id(
+                        tenant_id, normalized_user_id
+                    ),
                     portfolio_id=int(order.portfolio_id or 0),
                     legacy_order_id=order.id,
                     symbol=order.symbol,
                     side=str(getattr(order.side, "value", order.side) or "").lower(),
                     position_side=str(order.position_side or "long").lower(),
                     trade_action=order.trade_action,
-                    order_type=str(getattr(order.order_type, "value", order.order_type) or "").lower(),
+                    order_type=str(
+                        getattr(order.order_type, "value", order.order_type) or ""
+                    ).lower(),
                     quantity=float(order.quantity or 0.0),
                     price=float(order.price) if order.price is not None else None,
                     trigger_source="legacy_replay",
-                    status=str(getattr(order.status, "value", order.status) or "pending").lower(),
-                    rejected_reason=order.remarks if str(getattr(order.status, "value", order.status) or "").lower() == "rejected" else None,
-                    trading_session_date=(order.submitted_at.date() if order.submitted_at else None),
+                    status=str(
+                        getattr(order.status, "value", order.status) or "pending"
+                    ).lower(),
+                    rejected_reason=order.remarks
+                    if str(getattr(order.status, "value", order.status) or "").lower()
+                    == "rejected"
+                    else None,
+                    trading_session_date=(
+                        order.submitted_at.date() if order.submitted_at else None
+                    ),
                     submitted_at=order.submitted_at,
                 )
             )
@@ -237,7 +265,9 @@ class SimulationMigrationService:
                     )
                     .order_by(SimTrade.executed_at.asc(), SimTrade.id.asc())
                 )
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
         created_fills = 0
         for trade in legacy_trades:
@@ -251,8 +281,12 @@ class SimulationMigrationService:
                     legacy_trade_id=trade.id,
                     tenant_id=tenant_id,
                     user_id=normalized_user_id,
-                    account_id=self.ledger_service.build_account_id(tenant_id, normalized_user_id),
-                    strategy_id=str(legacy_order.strategy_id) if legacy_order and legacy_order.strategy_id is not None else None,
+                    account_id=self.ledger_service.build_account_id(
+                        tenant_id, normalized_user_id
+                    ),
+                    strategy_id=str(legacy_order.strategy_id)
+                    if legacy_order and legacy_order.strategy_id is not None
+                    else None,
                     portfolio_id=int(trade.portfolio_id or 0),
                     symbol=trade.symbol,
                     side=str(getattr(trade.side, "value", trade.side) or "").lower(),

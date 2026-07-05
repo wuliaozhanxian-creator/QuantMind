@@ -15,7 +15,6 @@ from backend.services.trade.models.order import (
     TradingMode,
 )
 
-
 class TradeResponse(BaseModel):
     """Trade response schema"""
 
@@ -51,11 +50,11 @@ class TradeResponse(BaseModel):
             aware_value = value
         else:
             from datetime import timedelta
+
             shanghai_tz = timezone(timedelta(hours=8))
             aware_value = value.replace(tzinfo=shanghai_tz)
-            
-        return aware_value.astimezone(timezone.utc).isoformat()
 
+        return aware_value.astimezone(timezone.utc).isoformat()
 
 class TradeListQuery(BaseModel):
     """Trade list query"""

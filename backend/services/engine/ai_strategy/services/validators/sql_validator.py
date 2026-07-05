@@ -5,7 +5,6 @@ SQL安全验证模块
 
 import logging
 import re
-from typing import List, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -143,7 +142,9 @@ def validate_sql(sql: str, allow_star: bool = True) -> tuple[bool, str]:
 
     # 4. 验证没有多语句（防止';'分隔的多个SQL）
     # 排除LIMIT子句后的分号
-    sql_without_limit = re.sub(r"LIMIT\s+\d+\s*;?\s*$", "", sql_upper, flags=re.IGNORECASE)
+    sql_without_limit = re.sub(
+        r"LIMIT\s+\d+\s*;?\s*$", "", sql_upper, flags=re.IGNORECASE
+    )
     if ";" in sql_without_limit:
         return False, "不允许执行多条SQL语句"
 

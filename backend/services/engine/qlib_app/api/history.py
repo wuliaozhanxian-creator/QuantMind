@@ -2,7 +2,7 @@
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
@@ -18,21 +18,25 @@ from backend.services.engine.qlib_app.api.strategy_name import (
     _resolve_strategy_display_name,
 )
 from backend.services.engine.qlib_app.schemas.backtest import QlibBacktestResult
+
 router = APIRouter(tags=["qlib"])
 
 logger = logging.getLogger(__name__)
-
 
 @router.get("/results/{backtest_id}", response_model=QlibBacktestResult)
 async def get_backtest_result(
     request: Request,
     backtest_id: str,
-    tenant_id: str | None = Query(None, description="租户ID（已废弃，自动使用认证身份）"),
+    tenant_id: str | None = Query(
+        None, description="租户ID（已废弃，自动使用认证身份）"
+    ),
     exclude_trades: bool = Query(False, description="是否排除交易流水数据以加速返回"),
     service: Any = Depends(get_qlib_service),
 ) -> QlibBacktestResult:
     """获取回测结果"""
-    auth_user_id, auth_tenant_id = _identity_from_request(request, provided_tenant_id=tenant_id)
+    auth_user_id, auth_tenant_id = _identity_from_request(
+        request, provided_tenant_id=tenant_id
+    )
     result = await service.get_result(
         backtest_id,
         tenant_id=auth_tenant_id,
@@ -56,16 +60,19 @@ async def get_backtest_result(
 
     return JSONResponse(content=content)
 
-
 @router.get("/results/{backtest_id}/trades")
 async def get_backtest_trades(
     request: Request,
     backtest_id: str,
-    tenant_id: str | None = Query(None, description="租户ID（已废弃，自动使用认证身份）"),
+    tenant_id: str | None = Query(
+        None, description="租户ID（已废弃，自动使用认证身份）"
+    ),
     service: Any = Depends(get_qlib_service),
 ) -> dict[str, Any]:
     """独立获取回测成交流水，用于前端按需懒加载以提高响应速度"""
-    auth_user_id, auth_tenant_id = _identity_from_request(request, provided_tenant_id=tenant_id)
+    auth_user_id, auth_tenant_id = _identity_from_request(
+        request, provided_tenant_id=tenant_id
+    )
     result = await service.get_result(
         backtest_id,
         tenant_id=auth_tenant_id,
@@ -89,13 +96,16 @@ async def get_backtest_trades(
         }
     )
 
-
 @router.get("/history/{user_id}")
 async def get_backtest_history(
     request: Request,
     user_id: str,
-    tenant_id: str | None = Query(None, description="租户ID（已废弃，自动使用认证身份）"),
-    include_optimization: bool = Query(False, description="是否包含参数优化产生的子回测记录"),
+    tenant_id: str | None = Query(
+        None, description="租户ID（已废弃，自动使用认证身份）"
+    ),
+    include_optimization: bool = Query(
+        False, description="是否包含参数优化产生的子回测记录"
+    ),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(10, ge=1, le=100, description="每页数量"),
     sort_by: str = Query("created_at", description="排序字段"),
@@ -110,7 +120,9 @@ async def get_backtest_history(
         provided_user_id=user_id,
         provided_tenant_id=tenant_id,
     )
-    results = await service.list_history(auth_user_id, auth_tenant_id, limit=max(page * page_size * 5, 200))
+    results = await service.list_history(
+        auth_user_id, auth_tenant_id, limit=max(page * page_size * 5, 200)
+    )
 
     def _field(item: Any, key: str, default: Any = None) -> Any:
         if isinstance(item, dict):
@@ -128,7 +140,9 @@ async def get_backtest_history(
 
     if not include_optimization:
         results = [r for r in results if _history_source(r) != "optimization"]
-        results = await _filter_optimization_sub_backtests(results, user_id=auth_user_id, tenant_id=auth_tenant_id)
+        results = await _filter_optimization_sub_backtests(
+            results, user_id=auth_user_id, tenant_id=auth_tenant_id
+        )
         results = _filter_legacy_optimization_clusters(results)
 
     if status:
@@ -139,6 +153,7 @@ async def get_backtest_history(
 
     reverse = sort_order == "desc"
     if sort_by == "created_at":
+
         def _safe_sort_key(x):
             val = _field(x, "created_at", None)
             if val is None:
@@ -155,6 +170,7 @@ async def get_backtest_history(
                 return parsed
             except Exception:
                 return datetime.min.replace(tzinfo=timezone.utc)
+
         results.sort(key=_safe_sort_key, reverse=reverse)
     elif sort_by in ["total_return", "sharpe_ratio", "max_drawdown"]:
         results.sort(key=lambda x: _field(x, sort_by, 0.0), reverse=reverse)
@@ -178,7 +194,9 @@ async def get_backtest_history(
         display_name = _resolve_strategy_display_name(payload)
         if display_name:
             payload["strategy_display_name"] = display_name
-            normalized_strategy_name = _normalize_strategy_key(payload.get("strategy_name"))
+            normalized_strategy_name = _normalize_strategy_key(
+                payload.get("strategy_name")
+            )
             if normalized_strategy_name and normalized_strategy_name.lower() in {
                 "topkdropout",
                 "weightstrategy",
@@ -194,13 +212,14 @@ async def get_backtest_history(
         "backtests": normalized_backtests,
     }
 
-
 @router.delete("/results/{backtest_id}")
 async def delete_backtest(
     request: Request,
     backtest_id: str,
     user_id: str | None = Query(None, description="用户ID（已废弃，自动使用认证身份）"),
-    tenant_id: str | None = Query(None, description="租户ID（已废弃，自动使用认证身份）"),
+    tenant_id: str | None = Query(
+        None, description="租户ID（已废弃，自动使用认证身份）"
+    ),
     service: Any = Depends(get_qlib_service),
 ) -> dict[str, str]:
     """删除回测记录"""
@@ -214,14 +233,15 @@ async def delete_backtest(
         raise HTTPException(status_code=404, detail="回测记录不存在或无权删除")
     return {"message": "删除成功", "backtest_id": backtest_id}
 
-
 @router.get("/compare/{id1}/{id2}")
 async def compare_backtests(
     request: Request,
     id1: str,
     id2: str,
     user_id: str | None = Query(None, description="用户ID（已废弃，自动使用认证身份）"),
-    tenant_id: str | None = Query(None, description="租户ID（已废弃，自动使用认证身份）"),
+    tenant_id: str | None = Query(
+        None, description="租户ID（已废弃，自动使用认证身份）"
+    ),
     service: Any = Depends(get_qlib_service),
 ) -> dict[str, Any]:
     """对比两个回测结果"""
@@ -234,20 +254,23 @@ async def compare_backtests(
         result = await service.compare_backtests(id1, id2, auth_user_id, auth_tenant_id)
         return result
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"对比失败: {str(e)}")
-
+        raise HTTPException(status_code=500, detail=f"对比失败: {str(e)}") from e
 
 @router.get("/backtest/{backtest_id}/status")
 async def get_backtest_status(
     request: Request,
     backtest_id: str,
-    tenant_id: str | None = Query(None, description="租户ID（已废弃，自动使用认证身份）"),
+    tenant_id: str | None = Query(
+        None, description="租户ID（已废弃，自动使用认证身份）"
+    ),
     service: Any = Depends(get_qlib_service),
 ) -> dict[str, Any]:
     """获取回测状态"""
-    auth_user_id, auth_tenant_id = _identity_from_request(request, provided_tenant_id=tenant_id)
+    auth_user_id, auth_tenant_id = _identity_from_request(
+        request, provided_tenant_id=tenant_id
+    )
     status = await service.get_status(
         backtest_id,
         tenant_id=auth_tenant_id,

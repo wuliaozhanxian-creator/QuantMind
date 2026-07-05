@@ -10,7 +10,9 @@ import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
-from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
+from backend.services.engine.qlib_app.utils.structured_logger import (
+    StructuredTaskLogger,
+)
 
 task_logger = StructuredTaskLogger(logger, "QlibUtils")
 
@@ -20,22 +22,26 @@ def apply_qlib_loose_patches():
         import qlib.utils.resam as resam
         from qlib.data import D
         from qlib.utils.time import Freq
-        
+
         # 1. 禁用 get_higher_eq_freq_feature 的 1min 回退逻辑
         # 原逻辑在失败时会强行试 1min，导致没有分钟数据时崩溃
-        original_get_higher = resam.get_higher_eq_freq_feature
         def patched_get_higher(instruments, fields, start_time, end_time, freq):
             try:
                 return D.features(instruments, fields, start_time, end_time, freq=freq)
             except Exception as e:
-                logger.warning(f"Qlib Patch: get_higher_eq_freq_feature failed for {freq}, skipping 1min fallback. Error: {e}")
+                logger.warning(
+                    f"Qlib Patch: get_higher_eq_freq_feature failed for {freq}, skipping 1min fallback. Error: {e}"
+                )
                 import pandas as pd
+
                 return pd.DataFrame(), None
+
         resam.get_higher_eq_freq_feature = patched_get_higher
 
         # 2. 软化 Freq 校验
         # 允许某些非标准格式在日线回测中不直接崩溃
         original_freq_parse = Freq.parse
+
         @classmethod
         def patched_freq_parse(cls, freq):
             try:
@@ -43,10 +49,13 @@ def apply_qlib_loose_patches():
             except Exception:
                 if freq in [None, "", "day", "daily"]:
                     return 1, "day"
-                logger.warning(f"Qlib Patch: Unsupported freq '{freq}' detected, defaulting to 'day'")
+                logger.warning(
+                    f"Qlib Patch: Unsupported freq '{freq}' detected, defaulting to 'day'"
+                )
                 return 1, "day"
+
         Freq.parse = patched_freq_parse
-        
+
         logger.info("✅ Qlib 宽松逻辑补丁已注入 (已禁用 1min 回退并软化频率校验)")
     except Exception as e:
         logger.error(f"❌ 注入 Qlib 补丁失败: {e}")
@@ -54,15 +63,17 @@ def apply_qlib_loose_patches():
 # 立即执行补丁
 apply_qlib_loose_patches()
 
-
 def _disabled_benchmark_series(start_time: Any = None) -> pd.Series:
     """构造一个“空影响”的基准序列，避免 qlib 在 benchmark=None 时回退到默认 SH000300。"""
     try:
-        ts = pd.Timestamp(start_time).normalize() if start_time is not None else pd.Timestamp("1970-01-01")
+        ts = (
+            pd.Timestamp(start_time).normalize()
+            if start_time is not None
+            else pd.Timestamp("1970-01-01")
+        )
     except Exception:
         ts = pd.Timestamp("1970-01-01")
     return pd.Series([0.0], index=pd.DatetimeIndex([ts]))
-
 
 def env_bool(name: str, default: bool = False) -> bool:
     value = os.getenv(name)
@@ -70,15 +81,12 @@ def env_bool(name: str, default: bool = False) -> bool:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
-
 def is_bj_instrument(code: str) -> bool:
     code_str = str(code or "").upper()
     return code_str.startswith("BJ")
 
-
 def exclude_bj_instruments(codes: list[str]) -> list[str]:
     return [c for c in codes if not is_bj_instrument(c)]
-
 
 @contextmanager
 def np_patch():
@@ -134,7 +142,6 @@ def np_patch():
             else:
                 sys.modules[mod] = old_val
 
-
 def safe_backtest(*args, **kwargs):
     """
     兼容性封装的 qlib backtest 函数。
@@ -172,7 +179,9 @@ def safe_backtest(*args, **kwargs):
         current_benchmark = kwargs.get("benchmark")
         if current_benchmark is not None:
             retry_kwargs = dict(kwargs)
-            retry_kwargs["benchmark"] = _disabled_benchmark_series(kwargs.get("start_time"))
+            retry_kwargs["benchmark"] = _disabled_benchmark_series(
+                kwargs.get("start_time")
+            )
             try:
                 task_logger.warning(
                     "safe_backtest_retry_without_benchmark",
@@ -216,14 +225,14 @@ def safe_backtest(*args, **kwargs):
                 )
                 return q_backtest(*args, **retry_kwargs)
 
-        task_logger.error("safe_backtest_failed", "safe_backtest 执行失败", error=str(e))
+        task_logger.error(
+            "safe_backtest_failed", "safe_backtest 执行失败", error=str(e)
+        )
         raise
-
 
 def _is_missing_benchmark_error(message: str) -> bool:
     msg = str(message or "").lower()
     return "benchmark" in msg and "does not exist" in msg
-
 
 def _iter_benchmark_aliases(benchmark: Any) -> list[str]:
     code = str(benchmark or "").strip().upper()
@@ -255,16 +264,21 @@ def _iter_benchmark_aliases(benchmark: Any) -> list[str]:
             deduped.append(item)
     return deduped
 
-
 def resolve_qlib_backend(allow_mock: bool = None) -> tuple[Any, Any, Any, str]:
     """Resolve Qlib backend (real or mock)"""
-    use_mock = env_bool("ENGINE_ALLOW_MOCK_QLIB", False) if allow_mock is None else allow_mock
+    use_mock = (
+        env_bool("ENGINE_ALLOW_MOCK_QLIB", False) if allow_mock is None else allow_mock
+    )
     try:
         qlib_mod = importlib.import_module("qlib")
         # 优先使用包装后的 backtest
         backtest_fn = safe_backtest
         d_obj = importlib.import_module("qlib.data").D
-        task_logger.info("backend_resolved", "使用真实 qlib 模块 (通过 safe_backtest 封装)", backend="real")
+        task_logger.info(
+            "backend_resolved",
+            "使用真实 qlib 模块 (通过 safe_backtest 封装)",
+            backend="real",
+        )
         return qlib_mod, backtest_fn, d_obj, "real"
     except Exception as real_err:
         if not use_mock:
@@ -273,12 +287,17 @@ def resolve_qlib_backend(allow_mock: bool = None) -> tuple[Any, Any, Any, str]:
                 "真实 qlib 不可用且 ENGINE_ALLOW_MOCK_QLIB=false，拒绝回退到 mock",
                 error=str(real_err),
             )
-            raise ImportError("真实 qlib 不可用且 ENGINE_ALLOW_MOCK_QLIB=false，已禁用 mock 回退") from real_err
+            raise ImportError(
+                "真实 qlib 不可用且 ENGINE_ALLOW_MOCK_QLIB=false，已禁用 mock 回退"
+            ) from real_err
 
         mock_mod = importlib.import_module("backend.services.engine.qlib_mock")
-        task_logger.warning("backend_fallback_mock", "真实 qlib 不可用，已启用 mock qlib", backend="mock")
+        task_logger.warning(
+            "backend_fallback_mock",
+            "真实 qlib 不可用，已启用 mock qlib",
+            backend="mock",
+        )
         return mock_mod, mock_mod.backtest, mock_mod.D, "mock"
-
 
 # Global instance for easy import
 # 强制加载真实的 qlib，不再静默捕获 ImportError

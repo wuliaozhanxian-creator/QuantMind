@@ -7,7 +7,7 @@ AI策略生成服务模块
 import json
 import logging
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import httpx
 
@@ -18,7 +18,6 @@ from ..core import (
 )
 
 logger = logging.getLogger(__name__)
-
 
 class StrategyService:
     """AI策略生成服务"""
@@ -71,7 +70,9 @@ class StrategyService:
             raise ValueError("描述不能为空")
 
         if not self.is_available():
-            raise RuntimeError(f"AI Service ({self.model}) 未配置可用的 API Key，请配置真实模型服务后再试")
+            raise RuntimeError(
+                f"AI Service ({self.model}) 未配置可用的 API Key，请配置真实模型服务后再试"
+            )
 
         # 记录策略生成请求
         logger.info(
@@ -108,9 +109,11 @@ class StrategyService:
                     "model": self.model,
                 },
             )
-            raise RuntimeError(f"策略生成失败: {str(e)}")
+            raise RuntimeError(f"策略生成失败: {str(e)}") from e
 
-    async def generate_strategy_direct(self, prompt: str, user_id: str = "desktop-user") -> str:
+    async def generate_strategy_direct(
+        self, prompt: str, user_id: str = "desktop-user"
+    ) -> str:
         """
         直接通过 Prompt 生成/修复代码
 
@@ -257,7 +260,9 @@ class StrategyService:
         finally:
             yield "data: [DONE]\n\n"
 
-    def _build_strategy_prompt(self, description: str, market: str, risk_level: str) -> str:
+    def _build_strategy_prompt(
+        self, description: str, market: str, risk_level: str
+    ) -> str:
         """构建策略生成提示词"""
         return f"""请基于以下描述生成 QuantMind + Qlib 可运行的量化交易策略:
 
@@ -304,7 +309,9 @@ class StrategyService:
 
 请确保代码可直接用于 QuantMind 的 Qlib 回测链路。"""
 
-    async def _call_ai_api(self, prompt: str, user_id: str, system_prompt: str | None = None) -> str:
+    async def _call_ai_api(
+        self, prompt: str, user_id: str, system_prompt: str | None = None
+    ) -> str:
         """调用AI API"""
         if system_prompt is None:
             system_prompt = "你是一个专业的量化交易专家。请返回JSON格式的策略代码，包含完整的交易逻辑。代码中使用简体中文注释，确保注释清晰易懂。"
@@ -340,7 +347,9 @@ class StrategyService:
                     "model": self.model,
                 },
             )
-            raise Exception(f"AI API错误: {response.status_code} - {response.text[:200]}")
+            raise Exception(
+                f"AI API错误: {response.status_code} - {response.text[:200]}"
+            )
 
         data = response.json()
         content = data["choices"][0]["message"]["content"]
@@ -356,7 +365,9 @@ class StrategyService:
 
         return content
 
-    def _parse_strategy_response(self, content: str, description: str, user_id: str) -> dict[str, Any]:
+    def _parse_strategy_response(
+        self, content: str, description: str, user_id: str
+    ) -> dict[str, Any]:
         """解析策略生成响应"""
         # 尝试解析JSON响应
         result = extract_json_from_content(content)
@@ -431,10 +442,8 @@ class StrategyService:
         """关闭客户端连接"""
         await self.client.aclose()
 
-
 # 全局策略服务实例
 _strategy_service: StrategyService | None = None
-
 
 def get_strategy_service() -> StrategyService:
     """获取全局策略服务实例"""
@@ -452,7 +461,6 @@ def get_strategy_service() -> StrategyService:
             model=qwen_config["model"],
         )
     return _strategy_service
-
 
 async def close_strategy_service():
     """关闭全局策略服务"""

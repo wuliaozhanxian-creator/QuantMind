@@ -5,14 +5,17 @@ import logging
 import os
 from collections import defaultdict
 from functools import lru_cache
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
 from qlib.backtest.decision import Order, OrderDir, TradeDecisionWO
 
 # Import base strategies
-from qlib.contrib.strategy.signal_strategy import TopkDropoutStrategy, WeightStrategyBase
+from qlib.contrib.strategy.signal_strategy import (
+    TopkDropoutStrategy,
+    WeightStrategyBase,
+)
 
 # 引入数据接口
 from backend.services.engine.qlib_app.utils.qlib_utils import D
@@ -30,10 +33,11 @@ from backend.services.engine.qlib_app.services.market_state_service import (
     MarketStateService,
 )
 from backend.shared.fundamental_aligner import fundamental_aligner
-from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
+from backend.services.engine.qlib_app.utils.structured_logger import (
+    StructuredTaskLogger,
+)
 
 logger = logging.getLogger(__name__)
-
 
 # ---------------------------------------------------------------------------
 # 两融标的池加载（模块级缓存，仅加载一次）
@@ -43,7 +47,6 @@ logger = logging.getLogger(__name__)
 
 _MARGIN_POOL_CACHE: dict[str, list[tuple[pd.Timestamp, pd.Timestamp]]] | None = None
 
-
 def _find_margin_txt() -> str | None:
     """在多个候选路径中寻找 margin.txt，返回首个存在的绝对路径。"""
     candidates: list[str] = []
@@ -51,11 +54,12 @@ def _find_margin_txt() -> str | None:
     # 1. Qlib provider_uri（运行时已知最精确）
     try:
         from qlib.config import C
+
         uri = C.get("provider_uri", None)
         if uri:
             candidates.append(os.path.join(str(uri), "instruments", "margin.txt"))
     except Exception:
-        pass
+        logger.debug("ignored exception", exc_info=True)
 
     # 2. 常见相对于项目根目录的路径（与 backtest_service.py 保持一致）
     try:
@@ -70,7 +74,7 @@ def _find_margin_txt() -> str | None:
                 candidates.insert(0, marker)
                 break
     except Exception:
-        pass
+        logger.debug("ignored exception", exc_info=True)
 
     # 3. 环境变量覆盖
     env_path = os.environ.get("QLIB_MARGIN_TXT")
@@ -81,7 +85,6 @@ def _find_margin_txt() -> str | None:
         if path and os.path.exists(path):
             return path
     return None
-
 
 def _load_margin_pool() -> dict[str, list[tuple[pd.Timestamp, pd.Timestamp]]]:
     """加载两融标的池，返回 {stock_id: [(start, end), ...]} 映射。"""
@@ -105,7 +108,11 @@ def _load_margin_pool() -> dict[str, list[tuple[pd.Timestamp, pd.Timestamp]]]:
                 parts = line.strip().split("\t")
                 if len(parts) < 3:
                     continue
-                sid, start_str, end_str = parts[0].strip(), parts[1].strip(), parts[2].strip()
+                sid, start_str, end_str = (
+                    parts[0].strip(),
+                    parts[1].strip(),
+                    parts[2].strip(),
+                )
                 try:
                     start = pd.Timestamp(start_str)
                     end = pd.Timestamp(end_str)
@@ -116,12 +123,13 @@ def _load_margin_pool() -> dict[str, list[tuple[pd.Timestamp, pd.Timestamp]]]:
             "margin_pool_loaded", "已加载两融标的池", stock_count=len(pool), path=path
         )
     except Exception as e:
-        StructuredTaskLogger(logger, "margin-pool").error("margin_pool_load_failed", "加载 margin.txt 失败", error=e)
+        StructuredTaskLogger(logger, "margin-pool").error(
+            "margin_pool_load_failed", "加载 margin.txt 失败", error=e
+        )
         pool = {}
 
     _MARGIN_POOL_CACHE = pool
     return _MARGIN_POOL_CACHE
-
 
 def get_margin_eligible_set(trade_date: pd.Timestamp) -> set[str] | None:
     """
@@ -139,7 +147,6 @@ def get_margin_eligible_set(trade_date: pd.Timestamp) -> set[str] | None:
                 eligible.add(sid)
                 break
     return eligible
-
 
 def _safe_generate_trade_decision(
     strategy: Any,
@@ -169,8 +176,9 @@ def _safe_generate_trade_decision(
             return TradeDecisionWO([], strategy)
         raise
 
-
-class RedisTopkStrategy(DynamicRiskMixin, FundamentalFilterMixin, TopkDropoutStrategy, RedisLoggerMixin):
+class RedisTopkStrategy(
+    DynamicRiskMixin, FundamentalFilterMixin, TopkDropoutStrategy, RedisLoggerMixin
+):
     """
     Simple TopK Strategy
     """
@@ -228,7 +236,9 @@ class RedisTopkStrategy(DynamicRiskMixin, FundamentalFilterMixin, TopkDropoutStr
         if self.rebalance_days > 1:
             try:
                 # 统一使用 safe 方法获取
-                from backend.services.engine.qlib_app.utils.recording_strategy import RedisRecordingStrategy
+                from backend.services.engine.qlib_app.utils.recording_strategy import (
+                    RedisRecordingStrategy,
+                )
 
                 trade_step = RedisRecordingStrategy._get_trade_step_safe(self) or 0
                 if trade_step % self.rebalance_days != 0:
@@ -237,8 +247,13 @@ class RedisTopkStrategy(DynamicRiskMixin, FundamentalFilterMixin, TopkDropoutStr
                 StructuredTaskLogger(
                     logger,
                     "redis-topk-strategy",
-                    {"backtest_id": getattr(self, "backtest_id", None), "rebalance_days": self.rebalance_days},
-                ).warning("rebalance_check_failed", "Error checking rebalance_days", error=e)
+                    {
+                        "backtest_id": getattr(self, "backtest_id", None),
+                        "rebalance_days": self.rebalance_days,
+                    },
+                ).warning(
+                    "rebalance_check_failed", "Error checking rebalance_days", error=e
+                )
 
         return _safe_generate_trade_decision(
             self,
@@ -251,8 +266,9 @@ class RedisTopkStrategy(DynamicRiskMixin, FundamentalFilterMixin, TopkDropoutStr
         self.log_progress()
         self.log_executed_trades(execute_result)
 
-
-class RedisRiskGuardTopkStrategy(DynamicRiskMixin, FundamentalFilterMixin, TopkDropoutStrategy, RedisLoggerMixin):
+class RedisRiskGuardTopkStrategy(
+    DynamicRiskMixin, FundamentalFilterMixin, TopkDropoutStrategy, RedisLoggerMixin
+):
     """
     风控增强 TopK 策略。
 
@@ -352,7 +368,7 @@ class RedisRiskGuardTopkStrategy(DynamicRiskMixin, FundamentalFilterMixin, TopkD
             try:
                 snapshot = snapshot.set_index("symbol", drop=False)
             except Exception:
-                pass
+                logger.debug("ignored exception", exc_info=True)
         return snapshot
 
     def _infer_market_state(self, trade_date: pd.Timestamp) -> str:
@@ -366,7 +382,9 @@ class RedisRiskGuardTopkStrategy(DynamicRiskMixin, FundamentalFilterMixin, TopkD
             return cached
 
         try:
-            start_date = (trade_date - pd.Timedelta(days=max(self.market_state_window * 3, 45))).strftime("%Y-%m-%d")
+            start_date = (
+                trade_date - pd.Timedelta(days=max(self.market_state_window * 3, 45))
+            ).strftime("%Y-%m-%d")
             end_date = trade_date.strftime("%Y-%m-%d")
             service = MarketStateService()
             series = service.build_market_state_series(
@@ -388,7 +406,11 @@ class RedisRiskGuardTopkStrategy(DynamicRiskMixin, FundamentalFilterMixin, TopkD
                 logger,
                 "redis-risk-guard-topk",
                 {"backtest_id": getattr(self, "backtest_id", None)},
-            ).warning("market_state_fallback_failed", "大盘状态推导失败，回退中性仓位", error=str(exc))
+            ).warning(
+                "market_state_fallback_failed",
+                "大盘状态推导失败，回退中性仓位",
+                error=str(exc),
+            )
             state = "neutral"
 
         state = str(state or "neutral")
@@ -404,11 +426,23 @@ class RedisRiskGuardTopkStrategy(DynamicRiskMixin, FundamentalFilterMixin, TopkD
         4. 回退到父类默认仓位。
         """
         trade_date = self._get_trade_date()
-        if trade_date is not None and not self.market_state_series and self.default_risk_degree is None:
+        if (
+            trade_date is not None
+            and not self.market_state_series
+            and self.default_risk_degree is None
+        ):
             state = self._infer_market_state(trade_date)
-            position_map = self.position_by_state if isinstance(self.position_by_state, dict) else DEFAULT_POSITION_BY_STATE
+            position_map = (
+                self.position_by_state
+                if isinstance(self.position_by_state, dict)
+                else DEFAULT_POSITION_BY_STATE
+            )
             mapped = position_map.get(state, position_map.get("neutral", 0.7))
-            base = float(self.strategy_total_position) if self.strategy_total_position is not None else 1.0
+            base = (
+                float(self.strategy_total_position)
+                if self.strategy_total_position is not None
+                else 1.0
+            )
             return self._clamp(min(float(mapped) * base, self.max_leverage))
         return super().get_risk_degree(*args, **kwargs)
 
@@ -460,7 +494,9 @@ class RedisRiskGuardTopkStrategy(DynamicRiskMixin, FundamentalFilterMixin, TopkD
 
         if self.rebalance_days > 1:
             try:
-                from backend.services.engine.qlib_app.utils.recording_strategy import RedisRecordingStrategy
+                from backend.services.engine.qlib_app.utils.recording_strategy import (
+                    RedisRecordingStrategy,
+                )
 
                 trade_step = RedisRecordingStrategy._get_trade_step_safe(self) or 0
                 if trade_step % self.rebalance_days != 0:
@@ -469,13 +505,22 @@ class RedisRiskGuardTopkStrategy(DynamicRiskMixin, FundamentalFilterMixin, TopkD
                 StructuredTaskLogger(
                     logger,
                     "redis-risk-guard-topk",
-                    {"backtest_id": getattr(self, "backtest_id", None), "rebalance_days": self.rebalance_days},
-                ).warning("rebalance_check_failed", "Error checking rebalance_days", error=e)
+                    {
+                        "backtest_id": getattr(self, "backtest_id", None),
+                        "rebalance_days": self.rebalance_days,
+                    },
+                ).warning(
+                    "rebalance_check_failed", "Error checking rebalance_days", error=e
+                )
 
         trade_step = self.trade_calendar.get_trade_step()
         trade_start_time, trade_end_time = self.trade_calendar.get_step_time(trade_step)
-        pred_start_time, pred_end_time = self.trade_calendar.get_step_time(trade_step, shift=1)
-        pred_score = self.signal.get_signal(start_time=pred_start_time, end_time=pred_end_time)
+        pred_start_time, pred_end_time = self.trade_calendar.get_step_time(
+            trade_step, shift=1
+        )
+        pred_score = self.signal.get_signal(
+            start_time=pred_start_time, end_time=pred_end_time
+        )
         if isinstance(pred_score, pd.DataFrame):
             pred_score = pred_score.iloc[:, 0]
         if pred_score is None:
@@ -487,12 +532,15 @@ class RedisRiskGuardTopkStrategy(DynamicRiskMixin, FundamentalFilterMixin, TopkD
                 return TradeDecisionWO([], self)
 
         if self.only_tradable:
+
             def get_first_n(li, n, reverse=False):
                 cur_n = 0
                 res = []
                 for si in reversed(li) if reverse else li:
                     if self.trade_exchange.is_stock_tradable(
-                        stock_id=si, start_time=trade_start_time, end_time=trade_end_time
+                        stock_id=si,
+                        start_time=trade_start_time,
+                        end_time=trade_end_time,
                     ):
                         res.append(si)
                         cur_n += 1
@@ -508,10 +556,13 @@ class RedisRiskGuardTopkStrategy(DynamicRiskMixin, FundamentalFilterMixin, TopkD
                     si
                     for si in li
                     if self.trade_exchange.is_stock_tradable(
-                        stock_id=si, start_time=trade_start_time, end_time=trade_end_time
+                        stock_id=si,
+                        start_time=trade_start_time,
+                        end_time=trade_end_time,
                     )
                 ]
         else:
+
             def get_first_n(li, n):
                 return list(li)[:n]
 
@@ -547,7 +598,11 @@ class RedisRiskGuardTopkStrategy(DynamicRiskMixin, FundamentalFilterMixin, TopkD
         desired_buy_count = max(0, self.n_drop + self.topk - len(last))
 
         if self.method_buy == "top":
-            base_candidates = pred_score[~pred_score.index.isin(last)].sort_values(ascending=False).index.tolist()
+            base_candidates = (
+                pred_score[~pred_score.index.isin(last)]
+                .sort_values(ascending=False)
+                .index.tolist()
+            )
             today = self._apply_industry_cap(
                 base_candidates,
                 current_industry_counts,
@@ -555,10 +610,18 @@ class RedisRiskGuardTopkStrategy(DynamicRiskMixin, FundamentalFilterMixin, TopkD
                 desired_buy_count,
             )
         elif self.method_buy == "random":
-            topk_candi = get_first_n(pred_score.sort_values(ascending=False).index, self.topk)
+            topk_candi = get_first_n(
+                pred_score.sort_values(ascending=False).index, self.topk
+            )
             candi = list(filter(lambda x: x not in last, topk_candi))
             try:
-                sampled = list(np.random.choice(candi, min(len(candi), max(desired_buy_count, len(candi))), replace=False))
+                sampled = list(
+                    np.random.choice(
+                        candi,
+                        min(len(candi), max(desired_buy_count, len(candi))),
+                        replace=False,
+                    )
+                )
             except ValueError:
                 sampled = candi
             today = self._apply_industry_cap(
@@ -568,20 +631,28 @@ class RedisRiskGuardTopkStrategy(DynamicRiskMixin, FundamentalFilterMixin, TopkD
                 desired_buy_count,
             )
         else:
-            raise NotImplementedError(f"This type of input is not supported")
+            raise NotImplementedError("This type of input is not supported")
 
-        comb = pred_score.reindex(last.union(pd.Index(today))).sort_values(ascending=False).index
+        comb = (
+            pred_score.reindex(last.union(pd.Index(today)))
+            .sort_values(ascending=False)
+            .index
+        )
 
         if self.method_sell == "bottom":
             sell = last[last.isin(get_last_n(comb, self.n_drop))]
         elif self.method_sell == "random":
             candi = filter_stock(last)
             try:
-                sell = pd.Index(np.random.choice(candi, self.n_drop, replace=False) if len(last) else [])
+                sell = pd.Index(
+                    np.random.choice(candi, self.n_drop, replace=False)
+                    if len(last)
+                    else []
+                )
             except ValueError:
                 sell = candi
         else:
-            raise NotImplementedError(f"This type of input is not supported")
+            raise NotImplementedError("This type of input is not supported")
 
         buy = today[: max(0, len(sell) + self.topk - len(last))]
         for code in current_stock_list:
@@ -594,7 +665,10 @@ class RedisRiskGuardTopkStrategy(DynamicRiskMixin, FundamentalFilterMixin, TopkD
                 continue
             if code in sell:
                 time_per_step = self.trade_calendar.get_freq()
-                if current_temp.get_stock_count(code, bar=time_per_step) < self.hold_thresh:
+                if (
+                    current_temp.get_stock_count(code, bar=time_per_step)
+                    < self.hold_thresh
+                ):
                     continue
                 sell_amount = current_temp.get_stock_amount(code=code)
                 sell_order = Order(
@@ -621,11 +695,18 @@ class RedisRiskGuardTopkStrategy(DynamicRiskMixin, FundamentalFilterMixin, TopkD
             ):
                 continue
             buy_price = self.trade_exchange.get_deal_price(
-                stock_id=code, start_time=trade_start_time, end_time=trade_end_time, direction=OrderDir.BUY
+                stock_id=code,
+                start_time=trade_start_time,
+                end_time=trade_end_time,
+                direction=OrderDir.BUY,
             )
             buy_amount = value / buy_price
-            factor = self.trade_exchange.get_factor(stock_id=code, start_time=trade_start_time, end_time=trade_end_time)
-            buy_amount = self.trade_exchange.round_amount_by_trade_unit(buy_amount, factor)
+            factor = self.trade_exchange.get_factor(
+                stock_id=code, start_time=trade_start_time, end_time=trade_end_time
+            )
+            buy_amount = self.trade_exchange.round_amount_by_trade_unit(
+                buy_amount, factor
+            )
             buy_order = Order(
                 stock_id=code,
                 amount=buy_amount,
@@ -639,7 +720,6 @@ class RedisRiskGuardTopkStrategy(DynamicRiskMixin, FundamentalFilterMixin, TopkD
     def post_exe_step(self, execute_result=None):
         self.log_progress()
         self.log_executed_trades(execute_result)
-
 
 class RedisAdvancedAlphaStrategy(RedisTopkStrategy):
     """
@@ -657,10 +737,16 @@ class RedisAdvancedAlphaStrategy(RedisTopkStrategy):
         StructuredTaskLogger(
             logger,
             "redis-advanced-alpha-strategy",
-            {"backtest_id": getattr(self, "backtest_id", None), "max_weight": self.max_weight, "min_score": self.min_score},
+            {
+                "backtest_id": getattr(self, "backtest_id", None),
+                "max_weight": self.max_weight,
+                "min_score": self.min_score,
+            },
         ).info("init", "RedisAdvancedAlphaStrategy initialized")
 
-    def generate_target_weight_position(self, score, current=None, trade_exchange=None, *args, **kwargs):
+    def generate_target_weight_position(
+        self, score, current=None, trade_exchange=None, *args, **kwargs
+    ):
         # 1. 前置过滤
         if score is None or score.empty:
             return {}
@@ -679,14 +765,18 @@ class RedisAdvancedAlphaStrategy(RedisTopkStrategy):
 
         # 2. 调用父类的选股逻辑 (TopK-Dropout)
         # 该逻辑会结合 current 持仓计算出本次应持有的股票集合（等权形式）
-        base_weights = super().generate_target_weight_position(score, current, trade_exchange, *args, **kwargs)
+        base_weights = super().generate_target_weight_position(
+            score, current, trade_exchange, *args, **kwargs
+        )
         if not base_weights:
             return {}
 
         # 3. 选股后的“分数权重”分配
         selected_sids = list(base_weights.keys())
         # 注意：selected_sids 中可能包含由于 Dropout 保留但当前无分数的标的，需稳健处理
-        sub_score = score.reindex(selected_sids).fillna(score.min() if not score.empty else 0.0)
+        sub_score = score.reindex(selected_sids).fillna(
+            score.min() if not score.empty else 0.0
+        )
 
         # 计算原始权重
         total_score = sub_score.sum()
@@ -707,7 +797,9 @@ class RedisAdvancedAlphaStrategy(RedisTopkStrategy):
                 remaining_sum = weights_series[~over].sum()
                 if remaining_sum > 1e-9:
                     weights_series.loc[~over] = (
-                        weights_series[~over] * (1.0 - weights_series[over].sum()) / remaining_sum
+                        weights_series[~over]
+                        * (1.0 - weights_series[over].sum())
+                        / remaining_sum
                     )
                 else:
                     # 如果剩下全溢出了，只好强行截断后归一化
@@ -717,8 +809,9 @@ class RedisAdvancedAlphaStrategy(RedisTopkStrategy):
 
         return weights
 
-
-class RedisLongShortTopkStrategy(DynamicRiskMixin, WeightStrategyBase, RedisLoggerMixin):
+class RedisLongShortTopkStrategy(
+    DynamicRiskMixin, WeightStrategyBase, RedisLoggerMixin
+):
     """
     原生多空 TopK 策略。
 
@@ -744,7 +837,9 @@ class RedisLongShortTopkStrategy(DynamicRiskMixin, WeightStrategyBase, RedisLogg
         self.min_score = float(min_score) if min_score is not None else 0.0
         self.max_weight = float(max_weight) if max_weight is not None else 1.0
         self.long_exposure = float(long_exposure) if long_exposure is not None else 1.0
-        self.short_exposure = float(short_exposure) if short_exposure is not None else 1.0
+        self.short_exposure = (
+            float(short_exposure) if short_exposure is not None else 1.0
+        )
         self.rebalance_days = int(kwargs.pop("rebalance_days", 1))
 
         self.init_redis(kwargs)
@@ -797,21 +892,29 @@ class RedisLongShortTopkStrategy(DynamicRiskMixin, WeightStrategyBase, RedisLogg
                     logger,
                     "redis-long-short-topk",
                     {"backtest_id": getattr(self, "backtest_id", None)},
-                ).warning("margin_pool_error", "获取两融标的池异常，空头侧不受限", error=e)
+                ).warning(
+                    "margin_pool_error", "获取两融标的池异常，空头侧不受限", error=e
+                )
 
         for sid in score.index:
             try:
                 if exchange.check_stock_suspended(sid, t_start, t_end):
                     skipped_trade += 1
                     continue
-                if direction == Order.BUY and exchange.check_stock_limit(sid, t_start, t_end, direction=direction):
+                if direction == Order.BUY and exchange.check_stock_limit(
+                    sid, t_start, t_end, direction=direction
+                ):
                     skipped_trade += 1
                     continue
             except Exception:
-                pass
+                logger.debug("ignored exception", exc_info=True)
 
             # 空头侧：必须是当日可融券标的
-            if direction == Order.SELL and margin_set is not None and sid not in margin_set:
+            if (
+                direction == Order.SELL
+                and margin_set is not None
+                and sid not in margin_set
+            ):
                 skipped_margin += 1
                 continue
 
@@ -843,7 +946,9 @@ class RedisLongShortTopkStrategy(DynamicRiskMixin, WeightStrategyBase, RedisLogg
             )
         return score.loc[filtered_index]
 
-    def _build_side_weights(self, scores: pd.Series, target_exposure: float) -> pd.Series:
+    def _build_side_weights(
+        self, scores: pd.Series, target_exposure: float
+    ) -> pd.Series:
         if scores is None or scores.empty or target_exposure <= 0:
             return pd.Series(dtype=float)
 
@@ -875,13 +980,18 @@ class RedisLongShortTopkStrategy(DynamicRiskMixin, WeightStrategyBase, RedisLogg
 
         return weights[weights > 0]
 
-    def generate_target_weight_position(self, score, current=None, trade_exchange=None, *args, **kwargs):
+    def generate_target_weight_position(
+        self, score, current=None, trade_exchange=None, *args, **kwargs
+    ):
         if hasattr(self, "check_account_stop_loss") and self.check_account_stop_loss():
             StructuredTaskLogger(
                 logger,
                 "redis-long-short-topk",
                 {"backtest_id": getattr(self, "backtest_id", None)},
-            ).info("account_stop_loss", "Account stop-loss triggered. Target position is empty.")
+            ).info(
+                "account_stop_loss",
+                "Account stop-loss triggered. Target position is empty.",
+            )
             return {}
 
         if current is None and args:
@@ -914,8 +1024,12 @@ class RedisLongShortTopkStrategy(DynamicRiskMixin, WeightStrategyBase, RedisLogg
         exchange = trade_exchange or getattr(self, "trade_exchange", None)
         t_start = kwargs.get("trade_start_time") or kwargs.get("t_start")
         t_end = kwargs.get("trade_end_time") or kwargs.get("t_end") or t_start
-        long_scores = self._filter_tradeable_scores(long_scores, exchange, t_start, t_end, Order.BUY, "多头")
-        short_scores = self._filter_tradeable_scores(short_scores, exchange, t_start, t_end, Order.SELL, "空头")
+        long_scores = self._filter_tradeable_scores(
+            long_scores, exchange, t_start, t_end, Order.BUY, "多头"
+        )
+        short_scores = self._filter_tradeable_scores(
+            short_scores, exchange, t_start, t_end, Order.SELL, "空头"
+        )
 
         # --- 融资融券动态授信额度 ---
         # 1. 获取当前净值
@@ -923,12 +1037,16 @@ class RedisLongShortTopkStrategy(DynamicRiskMixin, WeightStrategyBase, RedisLogg
         try:
             tp = getattr(self, "trade_position", None)
             if tp is not None:
-                pos_obj = tp.get_current_position() if hasattr(tp, "get_current_position") else tp
+                pos_obj = (
+                    tp.get_current_position()
+                    if hasattr(tp, "get_current_position")
+                    else tp
+                )
                 val = float(pos_obj.calculate_value())
                 if val > 0:
                     current_equity = val
         except Exception:
-            pass
+            logger.debug("ignored exception", exc_info=True)
 
         # 记录初始本金（首次调用时）
         if current_equity is not None:
@@ -1033,8 +1151,9 @@ class RedisLongShortTopkStrategy(DynamicRiskMixin, WeightStrategyBase, RedisLogg
         self.log_progress()
         self.log_executed_trades(execute_result)
 
-
-class RedisSectorRotationStrategy(DynamicRiskMixin, TopkDropoutStrategy, RedisLoggerMixin):
+class RedisSectorRotationStrategy(
+    DynamicRiskMixin, TopkDropoutStrategy, RedisLoggerMixin
+):
     """
     行业轮动策略 (Sector Rotation)
     逻辑：
@@ -1124,9 +1243,13 @@ class RedisSectorRotationStrategy(DynamicRiskMixin, TopkDropoutStrategy, RedisLo
             # 1. 获取全市场行业数据 (假设字段名为 'industry' 或 'sector')
             # 注意：实际字段名取决于数据源 (Alpha360/Alpha158 通常不含行业，需额外数据)
             # 这里做一个容错：如果取不到行业，返回 None，策略退化为普通 TopK
-            instruments = D.instruments("csi300")  # 默认用 CSI300 样本计算行业动量  # noqa: F841
+            instruments = D.instruments(  # noqa: F841 - 容错占位，行业动量退化时未使用
+                "csi300"
+            )  # 默认用 CSI300 样本计算行业动量
             end_time = trade_date.strftime("%Y-%m-%d")  # noqa: F841
-            start_time = (trade_date - pd.Timedelta(days=self.lookback_days * 2)).strftime("%Y-%m-%d")  # noqa: F841
+            start_time = (  # noqa: F841 - 容错占位
+                trade_date - pd.Timedelta(days=self.lookback_days * 2)
+            ).strftime("%Y-%m-%d")
 
             # 尝试获取行业分类 (CSSws1 是申万一级行业常用名)
             # 如果没有，尝试 'industry'
@@ -1138,7 +1261,6 @@ class RedisSectorRotationStrategy(DynamicRiskMixin, TopkDropoutStrategy, RedisLo
             return None
         except Exception:
             return None
-
 
 class RedisStopLossStrategy(DynamicRiskMixin, TopkDropoutStrategy, RedisLoggerMixin):
     """
@@ -1160,11 +1282,23 @@ class RedisStopLossStrategy(DynamicRiskMixin, TopkDropoutStrategy, RedisLoggerMi
             kwargs.pop(k, None)
         # 安全兜底：移除所有 Qlib BaseStrategy 不认识的剩余参数，避免意外传递
         for k in list(kwargs.keys()):
-            if k not in ("topk", "n_drop", "method_sell", "method_buy",
-                         "hold_thresh", "only_tradable", "forbid_all_trade_at_limit",
-                         "signal", "model", "dataset", "risk_degree",
-                         "trade_exchange", "level_infra", "common_infra",
-                         "outer_trade_decision"):
+            if k not in (
+                "topk",
+                "n_drop",
+                "method_sell",
+                "method_buy",
+                "hold_thresh",
+                "only_tradable",
+                "forbid_all_trade_at_limit",
+                "signal",
+                "model",
+                "dataset",
+                "risk_degree",
+                "trade_exchange",
+                "level_infra",
+                "common_infra",
+                "outer_trade_decision",
+            ):
                 logger.warning("stripping unexpected kwarg: %s", k)
                 kwargs.pop(k, None)
         # 全局规则：选股时剔除涨停/跌停/停牌股
@@ -1233,10 +1367,14 @@ class RedisStopLossStrategy(DynamicRiskMixin, TopkDropoutStrategy, RedisLoggerMi
                         try:
                             # 查找该股票的最新价格
                             # 安全获取：先看该股票是否在 dataframe index level 0
-                            if stock not in current_prices.index.get_level_values("instrument"):
+                            if stock not in current_prices.index.get_level_values(
+                                "instrument"
+                            ):
                                 continue
 
-                            price = current_prices.xs(stock, level="instrument")["$close"].iloc[-1]
+                            price = current_prices.xs(stock, level="instrument")[
+                                "$close"
+                            ].iloc[-1]
                             cost = self.holding_cost.get(stock)
 
                             if cost and cost > 0:
@@ -1245,7 +1383,11 @@ class RedisStopLossStrategy(DynamicRiskMixin, TopkDropoutStrategy, RedisLoggerMi
                                     StructuredTaskLogger(
                                         logger,
                                         "redis-stop-loss",
-                                        {"backtest_id": getattr(self, "backtest_id", None)},
+                                        {
+                                            "backtest_id": getattr(
+                                                self, "backtest_id", None
+                                            )
+                                        },
                                     ).info(
                                         "stop_loss_triggered",
                                         "Stop loss triggered",
@@ -1261,7 +1403,11 @@ class RedisStopLossStrategy(DynamicRiskMixin, TopkDropoutStrategy, RedisLoggerMi
                                     StructuredTaskLogger(
                                         logger,
                                         "redis-stop-loss",
-                                        {"backtest_id": getattr(self, "backtest_id", None)},
+                                        {
+                                            "backtest_id": getattr(
+                                                self, "backtest_id", None
+                                            )
+                                        },
                                     ).info(
                                         "take_profit_triggered",
                                         "Take profit triggered",
@@ -1312,7 +1458,10 @@ class RedisStopLossStrategy(DynamicRiskMixin, TopkDropoutStrategy, RedisLoggerMi
 
             for stock in force_sell_stocks:
                 # 检查 new_orders 里是否已经有该股票的卖单
-                has_sell = any(str(o.stock_id) == stock and o.direction == OrderDir.SELL for o in new_orders)
+                has_sell = any(
+                    str(o.stock_id) == stock and o.direction == OrderDir.SELL
+                    for o in new_orders
+                )
                 if not has_sell:
                     # 构造全卖单
                     # 需要知道持仓数量
@@ -1340,7 +1489,6 @@ class RedisStopLossStrategy(DynamicRiskMixin, TopkDropoutStrategy, RedisLoggerMi
         self.log_progress()
         self.log_executed_trades(execute_result)
 
-
 class RedisVolatilityWeightedStrategy(RedisWeightStrategy):
     """
     波动率加权 TopK 策略 (Volatility-Weighted Top-K)
@@ -1366,7 +1514,12 @@ class RedisVolatilityWeightedStrategy(RedisWeightStrategy):
             logger,
             "redis-volatility-weighted",
             {"backtest_id": getattr(self, "backtest_id", None)},
-        ).info("init", "Initializing VolatilityWeighted", rebalance_days=r_days, vol_lookback=self.vol_lookback)
+        ).info(
+            "init",
+            "Initializing VolatilityWeighted",
+            rebalance_days=r_days,
+            vol_lookback=self.vol_lookback,
+        )
 
         # 调用 RedisWeightStrategy 的初始化，它会处理 rebalance_days, redis 等
         super().__init__(*args, **kwargs)
@@ -1385,7 +1538,12 @@ class RedisVolatilityWeightedStrategy(RedisWeightStrategy):
             logger,
             "redis-volatility-weighted",
             {"backtest_id": getattr(self, "backtest_id", None)},
-        ).info("rebalance", "Rebalancing", step=current_step, rebalance_days=self.rebalance_days)
+        ).info(
+            "rebalance",
+            "Rebalancing",
+            step=current_step,
+            rebalance_days=self.rebalance_days,
+        )
         return self._safe_generate_trade_decision(execute_result)
 
     def _estimate_volatility(self, stocks: list[str], ref_date) -> pd.Series:
@@ -1407,10 +1565,16 @@ class RedisVolatilityWeightedStrategy(RedisWeightStrategy):
                 logger,
                 "redis-volatility-weighted",
                 {"backtest_id": getattr(self, "backtest_id", None)},
-            ).warning("volatility_estimation_failed", "Volatility estimation failed, falling back to equal weights", error=exc)
+            ).warning(
+                "volatility_estimation_failed",
+                "Volatility estimation failed, falling back to equal weights",
+                error=exc,
+            )
             return pd.Series(1.0, index=stocks)
 
-    def generate_target_weight_position(self, score, current=None, trade_exchange=None, **kwargs):
+    def generate_target_weight_position(
+        self, score, current=None, trade_exchange=None, **kwargs
+    ):
         """
         覆写目标权重计算逻辑。
         注意：RedisWeightStrategy.generate_target_weight_position 已经在上层做了涨停/停牌过滤。
@@ -1461,13 +1625,14 @@ class RedisVolatilityWeightedStrategy(RedisWeightStrategy):
         ).info(
             "weights_built",
             "波动率权重构建完成",
-            trade_date=trade_start_time.date() if hasattr(trade_start_time, "date") else trade_start_time,
+            trade_date=trade_start_time.date()
+            if hasattr(trade_start_time, "date")
+            else trade_start_time,
             stock_count=len(weights),
             min_weight=f"{weights.min() * 100:.2f}%",
             max_weight=f"{weights.max() * 100:.2f}%",
         )
         return weights.to_dict()
-
 
 class RedisFullAlphaStrategy(RedisWeightStrategy):
     """
@@ -1488,13 +1653,18 @@ class RedisFullAlphaStrategy(RedisWeightStrategy):
         self.max_weight = float(kwargs.get("max_weight", 0.05))
         super().__init__(*args, **kwargs)
 
-    def generate_target_weight_position(self, score, current=None, trade_exchange=None, *args, **kwargs):
+    def generate_target_weight_position(
+        self, score, current=None, trade_exchange=None, *args, **kwargs
+    ):
         if self.check_account_stop_loss():
             StructuredTaskLogger(
                 logger,
                 "redis-full-alpha",
                 {"backtest_id": getattr(self, "backtest_id", None)},
-            ).info("account_stop_loss", "Account stop-loss triggered. Target position is empty.")
+            ).info(
+                "account_stop_loss",
+                "Account stop-loss triggered. Target position is empty.",
+            )
             return {}
 
         if current is None and args:
@@ -1526,7 +1696,9 @@ class RedisFullAlphaStrategy(RedisWeightStrategy):
                     if exchange.check_stock_suspended(sid, t_start, t_end):
                         skipped_untradable += 1
                         continue
-                    if exchange.check_stock_limit(sid, t_start, t_end, direction=Order.BUY):
+                    if exchange.check_stock_limit(
+                        sid, t_start, t_end, direction=Order.BUY
+                    ):
                         skipped_untradable += 1
                         continue
                 except Exception:
@@ -1541,8 +1713,15 @@ class RedisFullAlphaStrategy(RedisWeightStrategy):
                         logger,
                         "redis-full-alpha",
                         {"backtest_id": getattr(self, "backtest_id", None)},
-                    ).warning("trade_exchange_missing", "trade_exchange 未注入，跳过涨停/停牌过滤")
-            selected_symbols = list(ranked_scores.index[: self.topk]) if self.topk > 0 else list(ranked_scores.index)
+                    ).warning(
+                        "trade_exchange_missing",
+                        "trade_exchange 未注入，跳过涨停/停牌过滤",
+                    )
+            selected_symbols = (
+                list(ranked_scores.index[: self.topk])
+                if self.topk > 0
+                else list(ranked_scores.index)
+            )
 
         if not selected_symbols:
             return {}

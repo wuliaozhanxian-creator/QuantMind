@@ -12,7 +12,7 @@
 """
 
 import logging
-from typing import Any, Dict
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
@@ -53,7 +53,9 @@ from backend.services.engine.qlib_app.services.style_attribution_service import 
 from backend.services.engine.qlib_app.services.trade_stats_service import (
     TradeStatsService,
 )
-from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
+from backend.services.engine.qlib_app.utils.structured_logger import (
+    StructuredTaskLogger,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +69,6 @@ benchmark_service = BenchmarkService()
 position_service = PositionService()
 factor_analysis_service = FactorAnalysisService()
 
-
 @router.get("/health")
 async def health_check() -> dict[str, Any]:
     """健康检查"""
@@ -76,7 +77,6 @@ async def health_check() -> dict[str, Any]:
         "service": "advanced_analysis",
         "version": "1.0.0",
     }
-
 
 @router.post("/basic-risk", response_model=BasicRiskResponse)
 async def analyze_basic_risk(request: BasicRiskRequest) -> BasicRiskResponse:
@@ -93,7 +93,11 @@ async def analyze_basic_risk(request: BasicRiskRequest) -> BasicRiskResponse:
         task_log = StructuredTaskLogger(
             logger,
             "analysis-api",
-            {"endpoint": "basic-risk", "backtest_id": request.backtest_id, "tenant_id": request.tenant_id},
+            {
+                "endpoint": "basic-risk",
+                "backtest_id": request.backtest_id,
+                "tenant_id": request.tenant_id,
+            },
         )
         task_log.info("request", "基础风险分析")
 
@@ -103,24 +107,33 @@ async def analyze_basic_risk(request: BasicRiskRequest) -> BasicRiskResponse:
             tenant_id=request.tenant_id,
         )
 
-        task_log.info("complete", "分析完成", sharpe=f"{result.metrics.sharpe_ratio:.2f}")
+        task_log.info(
+            "complete", "分析完成", sharpe=f"{result.metrics.sharpe_ratio:.2f}"
+        )
         return result
 
     except ValueError as e:
         StructuredTaskLogger(
             logger,
             "analysis-api",
-            {"endpoint": "basic-risk", "backtest_id": request.backtest_id, "tenant_id": request.tenant_id},
+            {
+                "endpoint": "basic-risk",
+                "backtest_id": request.backtest_id,
+                "tenant_id": request.tenant_id,
+            },
         ).error("invalid_request", "参数错误", error=e)
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         StructuredTaskLogger(
             logger,
             "analysis-api",
-            {"endpoint": "basic-risk", "backtest_id": request.backtest_id, "tenant_id": request.tenant_id},
+            {
+                "endpoint": "basic-risk",
+                "backtest_id": request.backtest_id,
+                "tenant_id": request.tenant_id,
+            },
         ).exception("failed", "分析失败", error=e)
-        raise HTTPException(status_code=500, detail=f"分析失败: {str(e)}")
-
+        raise HTTPException(status_code=500, detail=f"分析失败: {str(e)}") from e
 
 @router.post("/performance", response_model=PerformanceResponse)
 async def analyze_performance(
@@ -138,7 +151,11 @@ async def analyze_performance(
         task_log = StructuredTaskLogger(
             logger,
             "analysis-api",
-            {"endpoint": "performance", "backtest_id": request.backtest_id, "tenant_id": request.tenant_id},
+            {
+                "endpoint": "performance",
+                "backtest_id": request.backtest_id,
+                "tenant_id": request.tenant_id,
+            },
         )
         task_log.info("request", "绩效分析")
 
@@ -149,24 +166,33 @@ async def analyze_performance(
             rolling_window=request.rolling_window or 30,
         )
 
-        task_log.info("complete", "分析完成", yearly_return=f"{result.yearly_return:.2%}")
+        task_log.info(
+            "complete", "分析完成", yearly_return=f"{result.yearly_return:.2%}"
+        )
         return result
 
     except ValueError as e:
         StructuredTaskLogger(
             logger,
             "analysis-api",
-            {"endpoint": "performance", "backtest_id": request.backtest_id, "tenant_id": request.tenant_id},
+            {
+                "endpoint": "performance",
+                "backtest_id": request.backtest_id,
+                "tenant_id": request.tenant_id,
+            },
         ).error("invalid_request", "参数错误", error=e)
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         StructuredTaskLogger(
             logger,
             "analysis-api",
-            {"endpoint": "performance", "backtest_id": request.backtest_id, "tenant_id": request.tenant_id},
+            {
+                "endpoint": "performance",
+                "backtest_id": request.backtest_id,
+                "tenant_id": request.tenant_id,
+            },
         ).exception("failed", "分析失败", error=e)
-        raise HTTPException(status_code=500, detail=f"分析失败: {str(e)}")
-
+        raise HTTPException(status_code=500, detail=f"分析失败: {str(e)}") from e
 
 @router.post("/trade-stats", response_model=TradeStatsResponse)
 async def analyze_trade_stats(
@@ -177,7 +203,11 @@ async def analyze_trade_stats(
         StructuredTaskLogger(
             logger,
             "analysis-api",
-            {"endpoint": "trade-stats", "backtest_id": request.backtest_id, "tenant_id": request.tenant_id},
+            {
+                "endpoint": "trade-stats",
+                "backtest_id": request.backtest_id,
+                "tenant_id": request.tenant_id,
+            },
         ).info("request", "交易统计分析")
         result = await trade_stats_service.analyze(
             backtest_id=request.backtest_id,
@@ -189,17 +219,24 @@ async def analyze_trade_stats(
         StructuredTaskLogger(
             logger,
             "analysis-api",
-            {"endpoint": "trade-stats", "backtest_id": request.backtest_id, "tenant_id": request.tenant_id},
+            {
+                "endpoint": "trade-stats",
+                "backtest_id": request.backtest_id,
+                "tenant_id": request.tenant_id,
+            },
         ).error("invalid_request", "参数错误", error=e)
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         StructuredTaskLogger(
             logger,
             "analysis-api",
-            {"endpoint": "trade-stats", "backtest_id": request.backtest_id, "tenant_id": request.tenant_id},
+            {
+                "endpoint": "trade-stats",
+                "backtest_id": request.backtest_id,
+                "tenant_id": request.tenant_id,
+            },
         ).exception("failed", "分析失败", error=e)
-        raise HTTPException(status_code=500, detail=f"分析失败: {str(e)}")
-
+        raise HTTPException(status_code=500, detail=f"分析失败: {str(e)}") from e
 
 @router.post("/benchmark", response_model=BenchmarkComparisonResponse)
 async def analyze_benchmark(
@@ -235,7 +272,7 @@ async def analyze_benchmark(
                 "benchmark_id": request.benchmark_id,
             },
         ).error("invalid_request", "参数错误", error=e)
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         StructuredTaskLogger(
             logger,
@@ -247,8 +284,7 @@ async def analyze_benchmark(
                 "benchmark_id": request.benchmark_id,
             },
         ).exception("failed", "分析失败", error=e)
-        raise HTTPException(status_code=500, detail=f"分析失败: {str(e)}")
-
+        raise HTTPException(status_code=500, detail=f"分析失败: {str(e)}") from e
 
 @router.post("/position", response_model=PositionAnalysisResponse)
 async def analyze_position(
@@ -259,7 +295,11 @@ async def analyze_position(
         StructuredTaskLogger(
             logger,
             "analysis-api",
-            {"endpoint": "position", "backtest_id": request.backtest_id, "tenant_id": request.tenant_id},
+            {
+                "endpoint": "position",
+                "backtest_id": request.backtest_id,
+                "tenant_id": request.tenant_id,
+            },
         ).info("request", "持仓分析")
         result = await position_service.analyze(
             backtest_id=request.backtest_id,
@@ -271,17 +311,24 @@ async def analyze_position(
         StructuredTaskLogger(
             logger,
             "analysis-api",
-            {"endpoint": "position", "backtest_id": request.backtest_id, "tenant_id": request.tenant_id},
+            {
+                "endpoint": "position",
+                "backtest_id": request.backtest_id,
+                "tenant_id": request.tenant_id,
+            },
         ).error("invalid_request", "参数错误", error=e)
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         StructuredTaskLogger(
             logger,
             "analysis-api",
-            {"endpoint": "position", "backtest_id": request.backtest_id, "tenant_id": request.tenant_id},
+            {
+                "endpoint": "position",
+                "backtest_id": request.backtest_id,
+                "tenant_id": request.tenant_id,
+            },
         ).exception("failed", "分析失败", error=e)
-        raise HTTPException(status_code=500, detail=f"分析失败: {str(e)}")
-
+        raise HTTPException(status_code=500, detail=f"分析失败: {str(e)}") from e
 
 @router.post("/factor-analysis", response_model=FactorAnalysisResponse)
 async def analyze_factors(
@@ -300,7 +347,11 @@ async def analyze_factors(
         StructuredTaskLogger(
             logger,
             "analysis-api",
-            {"endpoint": "factor-analysis", "backtest_id": request.backtest_id, "tenant_id": request.tenant_id},
+            {
+                "endpoint": "factor-analysis",
+                "backtest_id": request.backtest_id,
+                "tenant_id": request.tenant_id,
+            },
         ).info("request", "因子分析")
 
         from backend.services.engine.qlib_app.services.backtest_persistence import (
@@ -311,7 +362,7 @@ async def analyze_factors(
         result = await persistence.get_result(
             request.backtest_id,
             tenant_id=request.tenant_id,
-            include_fields=["factor_metrics", "stratified_returns", "backtest_id"]
+            include_fields=["factor_metrics", "stratified_returns", "backtest_id"],
         )
 
         if not result:
@@ -344,17 +395,24 @@ async def analyze_factors(
         StructuredTaskLogger(
             logger,
             "analysis-api",
-            {"endpoint": "factor-analysis", "backtest_id": request.backtest_id, "tenant_id": request.tenant_id},
+            {
+                "endpoint": "factor-analysis",
+                "backtest_id": request.backtest_id,
+                "tenant_id": request.tenant_id,
+            },
         ).error("invalid_request", "参数错误", error=e)
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         StructuredTaskLogger(
             logger,
             "analysis-api",
-            {"endpoint": "factor-analysis", "backtest_id": request.backtest_id, "tenant_id": request.tenant_id},
+            {
+                "endpoint": "factor-analysis",
+                "backtest_id": request.backtest_id,
+                "tenant_id": request.tenant_id,
+            },
         ).exception("failed", "因子分析失败", error=e)
-        raise HTTPException(status_code=500, detail=f"因子分析失败: {str(e)}")
-
+        raise HTTPException(status_code=500, detail=f"因子分析失败: {str(e)}") from e
 
 @router.post("/style-attribution", response_model=StyleAttributionResponse)
 async def analyze_style_attribution(
@@ -388,7 +446,7 @@ async def analyze_style_attribution(
         result = await persistence.get_result(
             request.backtest_id,
             tenant_id=request.tenant_id,
-            include_fields=["style_attribution", "positions", "config", "backtest_id"]
+            include_fields=["style_attribution", "positions", "config", "backtest_id"],
         )
 
         if not result:
@@ -468,7 +526,7 @@ async def analyze_style_attribution(
                 "benchmark": request.benchmark,
             },
         ).error("invalid_request", "参数错误", error=e)
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         StructuredTaskLogger(
             logger,
@@ -480,4 +538,6 @@ async def analyze_style_attribution(
                 "benchmark": request.benchmark,
             },
         ).exception("failed", "风格归因分析失败", error=e)
-        raise HTTPException(status_code=500, detail=f"风格归因分析失败: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"风格归因分析失败: {str(e)}"
+        ) from e

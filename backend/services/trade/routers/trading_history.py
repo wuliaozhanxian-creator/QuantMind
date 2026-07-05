@@ -3,7 +3,7 @@ Trade API Routes
 """
 
 import logging
-from typing import List, Optional
+from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -19,13 +19,13 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-
 def _require_int_user_id(raw_user_id: str) -> int:
     try:
         return int(raw_user_id)
     except (TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="Invalid user_id in token")
-
+        raise HTTPException(
+            status_code=400, detail="Invalid user_id in token"
+        ) from None
 
 @router.get("/{trade_id}", response_model=TradeResponse)
 async def get_trade(
@@ -37,13 +37,16 @@ async def get_trade(
     """Get trade by ID"""
     user_id = _require_int_user_id(auth.user_id)
     trade_service = TradeService(db, redis)
-    trade = await trade_service.get_trade(trade_id, tenant_id=auth.tenant_id, user_id=user_id)
+    trade = await trade_service.get_trade(
+        trade_id, tenant_id=auth.tenant_id, user_id=user_id
+    )
 
     if not trade:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Trade {trade_id} not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Trade {trade_id} not found"
+        )
 
     return trade
-
 
 @router.get("/", response_model=list[TradeResponse])
 async def list_trades(
@@ -57,7 +60,7 @@ async def list_trades(
     db: AsyncSession = Depends(get_db),
     redis: RedisClient = Depends(get_redis),
 ):
-    """List trades with filters"""
+    """list trades with filters"""
     user_id = _require_int_user_id(auth.user_id)
     normalized_trading_mode = None
     if trading_mode is not None:
@@ -85,7 +88,6 @@ async def list_trades(
 
     return trades
 
-
 @router.get("/order/{order_id}", response_model=list[TradeResponse])
 async def get_trades_by_order(
     order_id: UUID,
@@ -100,7 +102,6 @@ async def get_trades_by_order(
 
     return trades
 
-
 @router.get("/stats/summary")
 async def get_trade_statistics(
     portfolio_id: int = None,
@@ -111,7 +112,7 @@ async def get_trade_statistics(
 ):
     """Get trade statistics"""
     user_id = _require_int_user_id(auth.user_id)
-    
+
     normalized_trading_mode = None
     if trading_mode is not None:
         try:
@@ -121,7 +122,9 @@ async def get_trade_statistics(
             pass
 
     trade_service = TradeService(db, redis)
-    stats = await trade_service.get_trade_statistics(auth.tenant_id, user_id, portfolio_id, normalized_trading_mode)
+    stats = await trade_service.get_trade_statistics(
+        auth.tenant_id, user_id, portfolio_id, normalized_trading_mode
+    )
     logger.info(
         "trade stats ready: tenant_id=%s user_id=%s portfolio_id=%s total_trades=%s daily_points=%s",
         auth.tenant_id,

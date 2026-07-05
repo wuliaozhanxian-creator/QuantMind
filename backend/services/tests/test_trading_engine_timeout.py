@@ -64,8 +64,13 @@ async def test_execute_via_broker_timeout_marks_waiting_for_bridge_ack(monkeypat
         return target_order
 
     monkeypatch.setattr(engine, "_get_stock_broker", lambda _mode: _TimeoutBroker())
-    monkeypatch.setattr(engine.order_service, "transition_order_status", _capture_transition)
-    monkeypatch.setattr("backend.services.trade.services.trading_engine._safe_schedule_notification", lambda _coro: None)
+    monkeypatch.setattr(
+        engine.order_service, "transition_order_status", _capture_transition
+    )
+    monkeypatch.setattr(
+        "backend.services.trade.services.trading_engine._safe_schedule_notification",
+        lambda _coro: None,
+    )
     monkeypatch.setattr(
         "backend.services.trade.services.trading_engine.publish_notification_async",
         lambda **_kwargs: object(),

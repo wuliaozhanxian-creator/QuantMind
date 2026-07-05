@@ -3,7 +3,7 @@ Portfolio API Routes
 """
 
 import logging
-from typing import List, Optional
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -23,13 +23,13 @@ from backend.services.trade.portfolio.schemas import (
 from backend.services.trade.portfolio.services import PortfolioService
 from backend.services.trade.portfolio.utils.limiter import limiter
 
-
 async def get_current_user_id(auth: AuthContext = Depends(get_auth_context)) -> int:
     try:
         return int(auth.user_id)
     except (TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="Invalid user_id in token")
-
+        raise HTTPException(
+            status_code=400, detail="Invalid user_id in token"
+        ) from None
 
 async def get_current_tenant_id(
     auth: AuthContext = Depends(get_auth_context),
@@ -37,17 +37,13 @@ async def get_current_tenant_id(
     tenant_id = str(auth.tenant_id or "").strip()
     return tenant_id or "default"
 
-
 security = HTTPBearer()
-
 
 def get_token(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
     return credentials.credentials
 
-
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Portfolios"])
-
 
 @router.post(
     "",
@@ -73,11 +69,10 @@ async def create_portfolio(
         portfolio = await PortfolioService.create_portfolio(db, data)
         return portfolio
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Failed to create portfolio: {e}")
-        raise HTTPException(status_code=500, detail="创建失败")
-
+        raise HTTPException(status_code=500, detail="创建失败") from e
 
 @router.get(
     "",
@@ -117,7 +112,7 @@ async def list_portfolios(
                 and_(
                     Portfolio.tenant_id == tenant_id,
                     Portfolio.user_id == user_id,
-                    Portfolio.is_deleted == False,
+                    not Portfolio.is_deleted,
                 )
             )
         )
@@ -146,8 +141,7 @@ async def list_portfolios(
         return summaries
     except Exception as e:
         logger.error(f"Failed to list portfolios: {e}")
-        raise HTTPException(status_code=500, detail="查询失败")
-
+        raise HTTPException(status_code=500, detail="查询失败") from e
 
 @router.get(
     "/distribution",
@@ -178,10 +172,10 @@ async def get_all_portfolios_distribution(
                 )
             )
         )
-        
+
         if trading_mode:
             stmt = stmt.where(Portfolio.trading_mode == trading_mode.upper())
-            
+
         result = await db.execute(stmt)
         positions = result.scalars().all()
         logger.info(
@@ -203,7 +197,9 @@ async def get_all_portfolios_distribution(
                 sector = (
                     "Tech"
                     if "IT" in (p.symbol_name or "")
-                    else "Finance" if "Bank" in (p.symbol_name or "") else "Other"
+                    else "Finance"
+                    if "Bank" in (p.symbol_name or "")
+                    else "Other"
                 )
                 val = float(p.market_value)
                 sectors[sector] = sectors.get(sector, 0.0) + (val / total_market_value)
@@ -231,14 +227,16 @@ async def get_all_portfolios_distribution(
         logger.error(f"Failed to get distribution: {e}")
         return {"data": {"sectors": {}, "assets": {}}}
 
-
 @router.get(
     "/performance",
     summary="获取全量业绩曲线",
     description="汇总当前用户所有投资组合的每日收益率。",
 )
 async def get_all_portfolios_performance(
-    type: str = Query("daily_return", description="数据类型: daily_return (收益率), daily_pnl (盈亏金额)"),
+    type: str = Query(
+        "daily_return",
+        description="数据类型: daily_return (收益率), daily_pnl (盈亏金额)",
+    ),
     trading_mode: str | None = Query(None, description="交易模式过滤: REAL/SIMULATION"),
     tenant_id: str = Depends(get_current_tenant_id),
     user_id: int = Depends(get_current_user_id),
@@ -259,7 +257,7 @@ async def get_all_portfolios_performance(
                 Portfolio.user_id == user_id,
             )
         )
-        
+
         if trading_mode:
             stmt = stmt.where(Portfolio.trading_mode == trading_mode.upper())
 
@@ -299,13 +297,14 @@ async def get_all_portfolios_performance(
             "data": {
                 "daily_returns": [round(v, 4) for v in daily_data.values()],
                 "dates": list(daily_data.keys()),
-                "total_return": (round(sum(daily_data.values()), 4) if daily_data else 0.0),
+                "total_return": (
+                    round(sum(daily_data.values()), 4) if daily_data else 0.0
+                ),
             }
         }
     except Exception as e:
         logger.error(f"Failed to get performance: {e}")
         return {"data": {"daily_returns": [], "total_return": 0}}
-
 
 @router.get(
     "/{portfolio_id}",
@@ -324,7 +323,9 @@ async def get_portfolio(
 ):
     """查询投资组合详情"""
     try:
-        portfolio = await PortfolioService.get_portfolio(db, portfolio_id, user_id, tenant_id=tenant_id)
+        portfolio = await PortfolioService.get_portfolio(
+            db, portfolio_id, user_id, tenant_id=tenant_id
+        )
         if not portfolio:
             raise HTTPException(status_code=404, detail="投资组合不存在")
         return portfolio
@@ -332,8 +333,7 @@ async def get_portfolio(
         raise
     except Exception as e:
         logger.error(f"Failed to get portfolio: {e}")
-        raise HTTPException(status_code=500, detail="查询失败")
-
+        raise HTTPException(status_code=500, detail="查询失败") from e
 
 @router.put(
     "/{portfolio_id}",
@@ -353,14 +353,15 @@ async def update_portfolio(
 ):
     """更新投资组合"""
     try:
-        portfolio = await PortfolioService.update_portfolio(db, portfolio_id, tenant_id, user_id, data)
+        portfolio = await PortfolioService.update_portfolio(
+            db, portfolio_id, tenant_id, user_id, data
+        )
         return portfolio
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Failed to update portfolio: {e}")
-        raise HTTPException(status_code=500, detail="更新失败")
-
+        raise HTTPException(status_code=500, detail="更新失败") from e
 
 @router.delete(
     "/{portfolio_id}",
@@ -382,11 +383,10 @@ async def delete_portfolio(
         await PortfolioService.delete_portfolio(db, portfolio_id, tenant_id, user_id)
         return MessageResponse(message="删除成功")
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Failed to delete portfolio: {e}")
-        raise HTTPException(status_code=500, detail="删除失败")
-
+        raise HTTPException(status_code=500, detail="删除失败") from e
 
 @router.post(
     "/{portfolio_id}/calculate",
@@ -405,7 +405,9 @@ async def calculate_portfolio_metrics(
 ):
     """计算投资组合指标"""
     try:
-        portfolio = await PortfolioService.get_portfolio(db, portfolio_id, user_id, tenant_id=tenant_id)
+        portfolio = await PortfolioService.get_portfolio(
+            db, portfolio_id, user_id, tenant_id=tenant_id
+        )
         if not portfolio:
             raise HTTPException(status_code=404, detail="投资组合不存在")
 
@@ -415,8 +417,7 @@ async def calculate_portfolio_metrics(
         raise
     except Exception as e:
         logger.error(f"Failed to calculate portfolio: {e}")
-        raise HTTPException(status_code=500, detail="计算失败")
-
+        raise HTTPException(status_code=500, detail="计算失败") from e
 
 @router.post(
     "/{portfolio_id}/snapshot",
@@ -436,7 +437,9 @@ async def create_portfolio_snapshot(
 ):
     """创建投资组合快照"""
     try:
-        portfolio = await PortfolioService.get_portfolio(db, portfolio_id, user_id, tenant_id=tenant_id)
+        portfolio = await PortfolioService.get_portfolio(
+            db, portfolio_id, user_id, tenant_id=tenant_id
+        )
         if not portfolio:
             raise HTTPException(status_code=404, detail="投资组合不存在")
 
@@ -446,8 +449,7 @@ async def create_portfolio_snapshot(
         raise
     except Exception as e:
         logger.error(f"Failed to create snapshot: {e}")
-        raise HTTPException(status_code=500, detail="创建快照失败")
-
+        raise HTTPException(status_code=500, detail="创建快照失败") from e
 
 @router.get(
     "/{portfolio_id}/snapshots",
@@ -471,7 +473,9 @@ async def list_portfolio_snapshots(
 
         from backend.services.trade.portfolio.models import PortfolioSnapshot
 
-        portfolio = await PortfolioService.get_portfolio(db, portfolio_id, user_id, tenant_id=tenant_id)
+        portfolio = await PortfolioService.get_portfolio(
+            db, portfolio_id, user_id, tenant_id=tenant_id
+        )
         if not portfolio:
             raise HTTPException(status_code=404, detail="投资组合不存在")
 
@@ -488,6 +492,7 @@ async def list_portfolio_snapshots(
         return snapshots
     except HTTPException:
         raise
+
 @router.post(
     "/{portfolio_id}/settlement",
     response_model=SnapshotResponse,
@@ -506,7 +511,9 @@ async def trigger_portfolio_settlement(
 ):
     """手动触发结算快照"""
     try:
-        portfolio = await PortfolioService.get_portfolio(db, portfolio_id, user_id, tenant_id=tenant_id)
+        portfolio = await PortfolioService.get_portfolio(
+            db, portfolio_id, user_id, tenant_id=tenant_id
+        )
         if not portfolio:
             raise HTTPException(status_code=404, detail="投资组合不存在")
 
@@ -515,18 +522,18 @@ async def trigger_portfolio_settlement(
 
         # 2. 触发结算快照 (is_settlement=True)
         # 注意：create_snapshot 内部会自动根据 is_settlement 更新 portfolio.yesterday_total_value
-        snapshot = await PortfolioService.create_snapshot(db, portfolio, is_settlement=True)
+        snapshot = await PortfolioService.create_snapshot(
+            db, portfolio, is_settlement=True
+        )
         await db.commit()
         return snapshot
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to trigger manual settlement: {e}")
-        raise HTTPException(status_code=500, detail="强制结算失败")
-
+        raise HTTPException(status_code=500, detail="强制结算失败") from e
 
 # ==================== 实盘交易管理端点 ====================
-
 
 @router.post(
     "/{portfolio_id}/bind-strategy",
@@ -546,14 +553,15 @@ async def bind_strategy(
 ):
     """绑定策略到组合"""
     try:
-        portfolio = await PortfolioService.bind_strategy(db, portfolio_id, data.strategy_id, tenant_id, user_id, token)
+        portfolio = await PortfolioService.bind_strategy(
+            db, portfolio_id, data.strategy_id, tenant_id, user_id, token
+        )
         return portfolio
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to bind strategy: {e}")
-        raise HTTPException(status_code=500, detail="绑定策略失败")
-
+        raise HTTPException(status_code=500, detail="绑定策略失败") from e
 
 @router.post(
     "/{portfolio_id}/start-trading",
@@ -572,14 +580,15 @@ async def start_real_trading(
 ):
     """启动实盘交易"""
     try:
-        portfolio = await PortfolioService.start_real_trading(db, portfolio_id, tenant_id, user_id, token)
+        portfolio = await PortfolioService.start_real_trading(
+            db, portfolio_id, tenant_id, user_id, token
+        )
         return portfolio
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to start real trading: {e}")
-        raise HTTPException(status_code=500, detail="启动实盘失败")
-
+        raise HTTPException(status_code=500, detail="启动实盘失败") from e
 
 @router.post(
     "/{portfolio_id}/stop-trading",
@@ -597,14 +606,15 @@ async def stop_real_trading(
 ):
     """停止实盘交易"""
     try:
-        portfolio = await PortfolioService.stop_real_trading(db, portfolio_id, tenant_id, user_id)
+        portfolio = await PortfolioService.stop_real_trading(
+            db, portfolio_id, tenant_id, user_id
+        )
         return portfolio
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to stop real trading: {e}")
-        raise HTTPException(status_code=500, detail="停止实盘失败")
-
+        raise HTTPException(status_code=500, detail="停止实盘失败") from e
 
 @router.post(
     "/{portfolio_id}/sync-status",
@@ -622,7 +632,9 @@ async def sync_trading_status(
 ):
     """同步实盘运行状态"""
     try:
-        portfolio = await PortfolioService.sync_status(db, portfolio_id, tenant_id, user_id)
+        portfolio = await PortfolioService.sync_status(
+            db, portfolio_id, tenant_id, user_id
+        )
         if not portfolio:
             raise HTTPException(status_code=404, detail="组合不存在")
         return portfolio
@@ -630,8 +642,7 @@ async def sync_trading_status(
         raise
     except Exception as e:
         logger.error(f"Failed to sync trading status: {e}")
-        raise HTTPException(status_code=500, detail="同步状态失败")
-
+        raise HTTPException(status_code=500, detail="同步状态失败") from e
 
 @router.get("/{portfolio_id}/performance")
 async def get_performance_metrics(
@@ -646,7 +657,9 @@ async def get_performance_metrics(
     from backend.services.trade.portfolio.models import PortfolioSnapshot
     from backend.services.trade.portfolio.utils.risk_metrics import compute_risk_metrics
 
-    portfolio = await PortfolioService.get_portfolio(db, portfolio_id, user_id, tenant_id=tenant_id)
+    portfolio = await PortfolioService.get_portfolio(
+        db, portfolio_id, user_id, tenant_id=tenant_id
+    )
     if not portfolio:
         raise HTTPException(status_code=404, detail="组合不存在")
 
@@ -682,7 +695,6 @@ async def get_performance_metrics(
         "sortino_ratio": metrics.sortino_ratio,
     }
 
-
 @router.get("/{portfolio_id}/attribution")
 async def get_attribution(
     portfolio_id: int = Path(..., description="组合ID"),
@@ -697,7 +709,9 @@ async def get_attribution(
         AttributionService,
     )
 
-    portfolio = await PortfolioService.get_portfolio(db, portfolio_id, user_id, tenant_id=tenant_id)
+    portfolio = await PortfolioService.get_portfolio(
+        db, portfolio_id, user_id, tenant_id=tenant_id
+    )
     if not portfolio:
         raise HTTPException(status_code=404, detail="组合不存在")
 

@@ -10,12 +10,16 @@ from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.trade.simulation.models.account import SimulationAccount
-from backend.services.trade.simulation.models.account_daily import SimulationAccountDaily
+from backend.services.trade.simulation.models.account_daily import (
+    SimulationAccountDaily,
+)
 from backend.services.trade.simulation.models.cash_ledger import SimulationCashLedger
 from backend.services.trade.simulation.models.fill import SimulationFill
 from backend.services.trade.simulation.models.order import SimOrder
 from backend.services.trade.simulation.models.order_v2 import SimulationOrderV2
-from backend.services.trade.simulation.models.position_daily import SimulationPositionDaily
+from backend.services.trade.simulation.models.position_daily import (
+    SimulationPositionDaily,
+)
 from backend.services.trade.simulation.models.position_lot import SimulationPositionLot
 from backend.services.trade.simulation.models.trade import SimTrade
 from backend.services.trade.simulation.services.projection_service import (
@@ -46,7 +50,10 @@ class SimulationSeedService:
         except (TypeError, ValueError):
             legacy_user_id = 0
         long_market_value = round(
-            sum(float(item.get("quantity") or 0.0) * float(item.get("price") or 0.0) for item in positions),
+            sum(
+                float(item.get("quantity") or 0.0) * float(item.get("price") or 0.0)
+                for item in positions
+            ),
             2,
         )
         total_asset = round(float(initial_equity or 0.0), 2)

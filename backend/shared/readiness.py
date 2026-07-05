@@ -27,7 +27,6 @@ logger = logging.getLogger(__name__)
 # 探测超时硬约束：2 秒
 PROBE_TIMEOUT_SECONDS: float = 2.0
 
-
 async def probe_async(
     name: str,
     factory: Callable[[], Awaitable[Any]],
@@ -50,7 +49,6 @@ async def probe_async(
         logger.warning("readiness probe '%s' failed: %s", name, exc)
         return "fail"
 
-
 async def probe_sync(
     name: str,
     func: Callable[[], Any],
@@ -72,7 +70,6 @@ async def probe_sync(
     except Exception as exc:  # noqa: BLE001 - 探测失败需兜底为 fail
         logger.warning("readiness probe '%s' failed: %s", name, exc)
         return "fail"
-
 
 def build_readiness_response(checks: dict[str, str]) -> JSONResponse:
     """根据探测结果构建标准化 ``/readiness`` 响应。

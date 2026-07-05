@@ -11,7 +11,7 @@ Version: 1.0.0
 import logging
 import os
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from sqlalchemy import desc
 
@@ -22,7 +22,6 @@ logger = logging.getLogger(__name__)
 
 # stream 服务地址（可通过环境变量覆盖）
 STREAM_BASE_URL = os.getenv("STREAM_SERVICE_URL", "http://localhost:8003")
-
 
 class DataAggregator:
     """数据整合器
@@ -58,7 +57,9 @@ class DataAggregator:
             # 3. 排序
             # 注意: 复杂排序可能需要 Join StockRealTimeData，这里先简化处理
             if parsed_query.sort_by:
-                query = self._apply_sorting(query, parsed_query.sort_by, parsed_query.sort_order)
+                query = self._apply_sorting(
+                    query, parsed_query.sort_by, parsed_query.sort_order
+                )
 
             # 4. 获取总数
             total = query.count()
@@ -74,7 +75,9 @@ class DataAggregator:
             self._enrich_realtime_data(session, results)
 
             # 7. 构建条件描述
-            condition_descs = self._build_condition_descriptions(parsed_query.conditions)
+            condition_descs = self._build_condition_descriptions(
+                parsed_query.conditions
+            )
 
             execution_time = (datetime.now() - start_time).total_seconds()
 
@@ -114,9 +117,13 @@ class DataAggregator:
             elif cond.type == "industry":
                 if cond.categories:
                     if cond.mode == "include":
-                        query = query.filter(StockBasicInfo.industry.in_(cond.categories))
+                        query = query.filter(
+                            StockBasicInfo.industry.in_(cond.categories)
+                        )
                     elif cond.mode == "exclude":
-                        query = query.filter(StockBasicInfo.industry.notin_(cond.categories))
+                        query = query.filter(
+                            StockBasicInfo.industry.notin_(cond.categories)
+                        )
 
             # 市值筛选 (market_cap 单位: 亿元 -> DB可能是万元或元，假设DB是万元，需统一)
             # local_models.py 注释: market_cap comment="市值" (未说明单位，假设万元)
@@ -126,9 +133,13 @@ class DataAggregator:
                 # 1亿 = 10000万
                 idx_factor = 10000
                 if cond.min_value:
-                    query = query.filter(StockBasicInfo.market_cap >= cond.min_value * idx_factor)
+                    query = query.filter(
+                        StockBasicInfo.market_cap >= cond.min_value * idx_factor
+                    )
                 if cond.max_value:
-                    query = query.filter(StockBasicInfo.market_cap <= cond.max_value * idx_factor)
+                    query = query.filter(
+                        StockBasicInfo.market_cap <= cond.max_value * idx_factor
+                    )
 
             # 价格筛选
             elif cond.type == "price_range":
@@ -148,7 +159,9 @@ class DataAggregator:
             # local_models.py StockBasicInfo 没有 PE/PB
             # 这里暂时不支持复杂关联筛选，提示用户 TODO
             elif cond.type in ["pe_ratio", "pb_ratio"]:
-                logger.warning(f"暂不支持 DB 筛选 {cond.type} (字段不在 StockBasicInfo 表中)")
+                logger.warning(
+                    f"暂不支持 DB 筛选 {cond.type} (字段不在 StockBasicInfo 表中)"
+                )
 
         return query
 
@@ -214,7 +227,7 @@ class DataAggregator:
                         if resp.status_code == 200:
                             quotes[code] = resp.json()
                     except Exception:
-                        pass  # 单支失败不影响其他
+                        logger.debug("ignored exception", exc_info=True)
             return quotes
         except ImportError:
             logger.debug("httpx 未安装，跳过 stream 行情补充")
@@ -223,14 +236,18 @@ class DataAggregator:
             logger.debug("stream 行情服务不可用，降级到本地 DB: %s", e)
             return {}
 
-    def _find_condition(self, conditions: list[ScreenCondition], cond_type: str) -> ScreenCondition | None:
+    def _find_condition(
+        self, conditions: list[ScreenCondition], cond_type: str
+    ) -> ScreenCondition | None:
         """查找指定类型的条件"""
         for cond in conditions:
             if cond.type == cond_type:
                 return cond
         return None
 
-    def _build_condition_descriptions(self, conditions: list[ScreenCondition]) -> list[str]:
+    def _build_condition_descriptions(
+        self, conditions: list[ScreenCondition]
+    ) -> list[str]:
         """构建条件描述"""
         descriptions = []
 

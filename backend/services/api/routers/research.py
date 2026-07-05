@@ -34,12 +34,19 @@ _format_candidate_record = _research_service._format_candidate_record  # noqa: S
 
 
 async def _do_get_overview(  # noqa: SLF001
-    tid: str, uid: str, model_id: str | None, run_id: str | None, limit: int, offset: int
+    tid: str,
+    uid: str,
+    model_id: str | None,
+    run_id: str | None,
+    limit: int,
+    offset: int,
 ):
     original_get_session = _research_service.get_session
     _research_service.get_session = get_session
     try:
-        return await _research_service._do_get_overview(tid, uid, model_id, run_id, limit, offset)  # noqa: SLF001
+        return await _research_service._do_get_overview(
+            tid, uid, model_id, run_id, limit, offset
+        )  # noqa: SLF001
     finally:
         _research_service.get_session = original_get_session
 
@@ -51,7 +58,9 @@ async def get_available_models(current_user: dict = Depends(get_current_user)):
 
 
 @router.get("/runs")
-async def get_inference_runs(model_id: str, current_user: dict = Depends(get_current_user)):
+async def get_inference_runs(
+    model_id: str, current_user: dict = Depends(get_current_user)
+):
     tid, uid = str(current_user["tenant_id"]), str(current_user["user_id"])
     return await get_inference_runs_service(tid, uid, model_id)
 
@@ -65,7 +74,9 @@ async def get_research_overview(
     current_user: dict = Depends(get_current_user),
 ):
     tid, uid = str(current_user["tenant_id"]), str(current_user["user_id"])
-    return await get_research_overview_service(tid, uid, model_id, run_id, limit, offset)
+    return await get_research_overview_service(
+        tid, uid, model_id, run_id, limit, offset
+    )
 
 
 @router.get("/universe")
@@ -90,13 +101,21 @@ async def get_user_watchlist(
 
 
 @router.post("/watchlist/{symbol}")
-async def add_to_watchlist(symbol: str, req: WatchlistAddRequest, current_user: dict = Depends(get_current_user)):
+async def add_to_watchlist(
+    symbol: str,
+    req: WatchlistAddRequest,
+    current_user: dict = Depends(get_current_user),
+):
     tid, uid = str(current_user["tenant_id"]), str(current_user["user_id"])
-    return await add_to_watchlist_service(tid, uid, symbol, req.run_id, req.stock_name, req.features_snapshot)
+    return await add_to_watchlist_service(
+        tid, uid, symbol, req.run_id, req.stock_name, req.features_snapshot
+    )
 
 
 @router.delete("/watchlist/{symbol}")
-async def remove_from_watchlist(symbol: str, current_user: dict = Depends(get_current_user)):
+async def remove_from_watchlist(
+    symbol: str, current_user: dict = Depends(get_current_user)
+):
     tid, uid = str(current_user["tenant_id"]), str(current_user["user_id"])
     return await remove_from_watchlist_service(tid, uid, symbol)
 
@@ -113,7 +132,9 @@ async def get_user_research_pool(
 
 
 @router.post("/pool/{symbol}")
-async def add_to_research_pool(symbol: str, req: PoolAddRequest, current_user: dict = Depends(get_current_user)):
+async def add_to_research_pool(
+    symbol: str, req: PoolAddRequest, current_user: dict = Depends(get_current_user)
+):
     tid, uid = str(current_user["tenant_id"]), str(current_user["user_id"])
     return await add_to_research_pool_service(
         tid,
@@ -129,7 +150,9 @@ async def add_to_research_pool(symbol: str, req: PoolAddRequest, current_user: d
 
 
 @router.delete("/pool/{symbol}")
-async def remove_from_research_pool(symbol: str, current_user: dict = Depends(get_current_user)):
+async def remove_from_research_pool(
+    symbol: str, current_user: dict = Depends(get_current_user)
+):
     tid, uid = str(current_user["tenant_id"]), str(current_user["user_id"])
     return await remove_from_research_pool_service(tid, uid, symbol)
 
@@ -137,7 +160,9 @@ async def remove_from_research_pool(symbol: str, current_user: dict = Depends(ge
 @router.post("/symbols/features")
 async def get_symbols_features(
     req: SymbolsFeaturesRequest,
-    lite: bool = Query(False, description="轻量模式：仅查询 stock_daily_latest 最新交易日核心字段"),
+    lite: bool = Query(
+        False, description="轻量模式：仅查询 stock_daily_latest 最新交易日核心字段"
+    ),
     current_user: dict = Depends(get_current_user),
 ):
     tid, uid = str(current_user["tenant_id"]), str(current_user["user_id"])
@@ -145,6 +170,8 @@ async def get_symbols_features(
 
 
 @router.get("/kline/{symbol}")
-async def get_stock_kline(symbol: str, days: int = Query(60), current_user: dict = Depends(get_current_user)):
+async def get_stock_kline(
+    symbol: str, days: int = Query(60), current_user: dict = Depends(get_current_user)
+):
     _ = current_user
     return await get_stock_kline_service(symbol, days)

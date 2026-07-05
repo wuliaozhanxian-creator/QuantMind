@@ -25,7 +25,12 @@ class ModelRecord(Base):
     user_id = Column(String(64), nullable=False, index=True, comment="归属用户ID")
     name = Column(String(128), nullable=False, index=True)
     description = Column(Text, nullable=True)
-    source_type = Column(String(32), nullable=False, default="ai_model", comment="ai_model, hybrid, external")
+    source_type = Column(
+        String(32),
+        nullable=False,
+        default="ai_model",
+        comment="ai_model, hybrid, external",
+    )
     start_date = Column(DateTime, nullable=True, comment="模型数据开始日期")
     end_date = Column(DateTime, nullable=True, comment="模型数据结束日期")
     config = Column(JSON, nullable=True, comment="配置参数")
@@ -33,7 +38,9 @@ class ModelRecord(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    files = relationship("DataFileRecord", back_populates="model", cascade="all, delete-orphan")
+    files = relationship(
+        "DataFileRecord", back_populates="model", cascade="all, delete-orphan"
+    )
 
 
 class DataFileRecord(Base):
@@ -46,7 +53,9 @@ class DataFileRecord(Base):
     data_source_id = Column(Integer, ForeignKey("admin_models.id", ondelete="CASCADE"))
     filename = Column(String(255), nullable=False)
     file_size = Column(Integer, nullable=True)
-    status = Column(String(32), default="uploaded", comment="uploaded, processing, ready, error")
+    status = Column(
+        String(32), default="uploaded", comment="uploaded, processing, ready, error"
+    )
     meta = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 

@@ -123,7 +123,9 @@ class TestSQLValidator:
 
     def test_reject_sql_length_limit(self):
         """测试SQL长度限制"""
-        sql = "SELECT * FROM stock_daily_latest WHERE " + " AND ".join([f"col{i} > 0" for i in range(2000)])
+        sql = "SELECT * FROM stock_daily_latest WHERE " + " AND ".join(
+            [f"col{i} > 0" for i in range(2000)]
+        )
         is_valid, msg = validate_sql(sql)
         assert is_valid is False
         assert "长度" in msg

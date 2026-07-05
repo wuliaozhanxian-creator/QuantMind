@@ -20,6 +20,7 @@ exit code：
     1  = 致命错误（模型/元数据损坏）
     2  = 该日期无可用数据（触发 alpha158 兜底）
 """
+
 from __future__ import annotations
 
 import argparse
@@ -72,14 +73,16 @@ def filter_untradable_rows(df: pd.DataFrame) -> pd.DataFrame:
 
     # 过滤B股：SH9xxxxx（上海B股）和 SZ2xxxxx（深圳B股）
     if "symbol" in filtered.columns:
-        is_b_share = (
-            filtered["symbol"].str.match(r"^SH9\d{5}$", na=False)
-            | filtered["symbol"].str.match(r"^SZ2\d{5}$", na=False)
-        )
+        is_b_share = filtered["symbol"].str.match(r"^SH9\d{5}$", na=False) | filtered[
+            "symbol"
+        ].str.match(r"^SZ2\d{5}$", na=False)
         b_count = int(is_b_share.sum())
         if b_count:
-            logger.info("过滤B股记录(非A股): removed=%d, symbols=%s",
-                        b_count, sorted(filtered.loc[is_b_share, "symbol"].unique())[:10])
+            logger.info(
+                "过滤B股记录(非A股): removed=%d, symbols=%s",
+                b_count,
+                sorted(filtered.loc[is_b_share, "symbol"].unique())[:10],
+            )
             removed += b_count
             filtered = filtered.loc[~is_b_share].copy()
 
@@ -106,25 +109,36 @@ def _safe_fill_value(value: object) -> float:
 # 1. 参数解析
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 def parse_args():
     p = argparse.ArgumentParser(description="parquet 推理脚本")
-    p.add_argument("--date", "-d", type=str,
-                   default=os.getenv("TRADE_DATE", ""),
-                   help="推理基准日期 YYYY-MM-DD")
-    p.add_argument("--output", "-o", type=str, required=True,
-                   help="输出 JSON 文件路径")
-    p.add_argument("--model-dir", type=str,
-                   default=os.getenv("MODEL_DIR", str(Path(__file__).parent)),
-                   help="模型目录（含 metadata.json + model.lgb）")
-    p.add_argument("--data-dir", type=str,
-                   default=os.getenv("MODEL_TRAINING_DATA_DIR", _DEFAULT_DATA_DIR),
-                   help="训练数据 parquet 目录")
+    p.add_argument(
+        "--date",
+        "-d",
+        type=str,
+        default=os.getenv("TRADE_DATE", ""),
+        help="推理基准日期 YYYY-MM-DD",
+    )
+    p.add_argument("--output", "-o", type=str, required=True, help="输出 JSON 文件路径")
+    p.add_argument(
+        "--model-dir",
+        type=str,
+        default=os.getenv("MODEL_DIR", str(Path(__file__).parent)),
+        help="模型目录（含 metadata.json + model.lgb）",
+    )
+    p.add_argument(
+        "--data-dir",
+        type=str,
+        default=os.getenv("MODEL_TRAINING_DATA_DIR", _DEFAULT_DATA_DIR),
+        help="训练数据 parquet 目录",
+    )
     return p.parse_args()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 2. 元数据加载
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def load_metadata(model_dir: Path) -> dict:
     meta_path = model_dir / "metadata.json"
@@ -138,6 +152,7 @@ def load_metadata(model_dir: Path) -> dict:
 # ═══════════════════════════════════════════════════════════════════════════
 # 3. 模型加载
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def load_model(model_dir: Path, meta: dict) -> lgb.Booster:
     model_file = meta.get("model_file", "model.lgb")
@@ -156,6 +171,7 @@ def load_model(model_dir: Path, meta: dict) -> lgb.Booster:
 # ═══════════════════════════════════════════════════════════════════════════
 # 4. 数据加载
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def load_date_data(trade_date: str, data_dir: Path, meta: dict) -> pd.DataFrame | None:
     """加载指定日期的特征数据。返回 None 表示该日期无数据（exit 2）。"""
@@ -181,6 +197,7 @@ def load_date_data(trade_date: str, data_dir: Path, meta: dict) -> pd.DataFrame 
     day_df["symbol"] = day_df["symbol"].str.replace(r"^(SH|SZ|BJ)", "", regex=True)
     # 确保6位数字
     day_df = day_df[day_df["symbol"].str.match(r"^\d{6}$")]
+
     # 重新加上统一前缀
     def _add_prefix(code):
         if code.startswith(("6", "9")):
@@ -190,6 +207,7 @@ def load_date_data(trade_date: str, data_dir: Path, meta: dict) -> pd.DataFrame 
         elif code.startswith(("4", "8")):
             return "BJ" + code
         return code
+
     day_df["symbol"] = day_df["symbol"].apply(_add_prefix)
 
     logger.info("symbol归一化完成,%d 条记录", len(day_df))
@@ -207,10 +225,11 @@ def load_date_data(trade_date: str, data_dir: Path, meta: dict) -> pd.DataFrame 
 # 5. 特征预处理
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 def preprocess(df: pd.DataFrame, meta: dict) -> tuple[pd.DataFrame, list[str]]:
     """按 metadata.json 中的 feature_columns/fill_values 预处理，返回 (X_df, symbols)。"""
     feature_cols = meta.get("feature_columns") or meta.get("features", [])
-    fill_values  = meta.get("fill_values", {})
+    fill_values = meta.get("fill_values", {})
 
     # 1. 缺失列补 0.0 (对应 Z-Score 的均值)
     missing = [c for c in feature_cols if c not in df.columns]
@@ -247,6 +266,7 @@ def preprocess(df: pd.DataFrame, meta: dict) -> tuple[pd.DataFrame, list[str]]:
 # 6. 主流程
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 def main():
     args = parse_args()
 
@@ -256,8 +276,8 @@ def main():
         sys.exit(1)
 
     model_dir = Path(args.model_dir)
-    data_dir  = Path(args.data_dir)
-    out_path  = Path(args.output)
+    data_dir = Path(args.data_dir)
+    out_path = Path(args.output)
 
     logger.info("=== parquet 推理脚本 ===")
     logger.info("  model_dir : %s", model_dir)
@@ -266,9 +286,11 @@ def main():
     logger.info("  output    : %s", out_path)
 
     # 1. 元数据
-    meta  = load_metadata(model_dir)
+    meta = load_metadata(model_dir)
     logger.info("  run_id    : %s", meta.get("run_id", "unknown"))
-    logger.info("  features  : %d", len(meta.get("feature_columns") or meta.get("features", [])))
+    logger.info(
+        "  features  : %d", len(meta.get("feature_columns") or meta.get("features", []))
+    )
 
     # 2. 加载数据（日期不存在 → exit 2 触发兜底）
     day_df = load_date_data(trade_date, data_dir, meta)
@@ -301,7 +323,7 @@ def main():
     # 6. 输出 JSON
     signals = [
         {"symbol": sym, "score": float(score)}
-        for sym, score in zip(symbols, scores)
+        for sym, score in zip(symbols, scores, strict=False)
         if not (isinstance(score, float) and (score != score))  # 过滤 NaN
     ]
 

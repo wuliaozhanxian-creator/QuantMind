@@ -271,6 +271,8 @@ def main():
 
     # 5. 推理
     best_iter = meta.get("best_iteration")
+    if best_iter is not None:
+        best_iter = int(float(best_iter))
     scores = model.predict(X_df.values.astype(np.float32), num_iteration=best_iter)
 
     logger.info("推理完成，生成 %d 条信号", len(scores))

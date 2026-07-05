@@ -157,9 +157,13 @@ def performance_decorator(threshold: float = 1.0):
             duration = time.time() - start_time
 
             if duration > threshold:
-                logger.warning(f"慢函数: {func.__name__} " f"执行时间: {duration:.3f}s " f"(阈值: {threshold}s)")
+                logger.warning(
+                    f"慢函数: {func.__name__} "
+                    f"执行时间: {duration:.3f}s "
+                    f"(阈值: {threshold}s)"
+                )
             else:
-                logger.debug(f"函数 {func.__name__} " f"执行时间: {duration:.3f}s")
+                logger.debug(f"函数 {func.__name__} 执行时间: {duration:.3f}s")
 
             return result
 

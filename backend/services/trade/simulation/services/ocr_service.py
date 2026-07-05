@@ -3,7 +3,7 @@ import json
 import logging
 import re
 import os
-from typing import Any, Dict, List
+from typing import Any
 
 from openai import OpenAI
 from backend.services.trade.trade_config import settings
@@ -18,20 +18,24 @@ class SimulationOCRService:
 
     def __init__(self):
         # We assume DASHSCOPE_API_KEY is available in environment or settings
-        api_key = getattr(settings, "DASHSCOPE_API_KEY", None) or os.getenv("DASHSCOPE_API_KEY")
+        api_key = getattr(settings, "DASHSCOPE_API_KEY", None) or os.getenv(
+            "DASHSCOPE_API_KEY"
+        )
         if not api_key:
-            logger.warning("DASHSCOPE_API_KEY not found. OCR functionality will be disabled.")
+            logger.warning(
+                "DASHSCOPE_API_KEY not found. OCR functionality will be disabled."
+            )
             self.client = None
         else:
             self.client = OpenAI(
                 api_key=api_key,
                 base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
             )
-        
-        self.model_name = "qwen-vl-max" # Or qwen-vl-max for better performance
+
+        self.model_name = "qwen-vl-max"  # Or qwen-vl-max for better performance
         self.stock_index = self._load_stock_index()
 
-    def _load_stock_index(self) -> Dict[str, str]:
+    def _load_stock_index(self) -> dict[str, str]:
         """加载股票索引，建立 名称 -> 代码 的映射"""
         try:
             # 尝试多个可能的路径
@@ -40,15 +44,15 @@ class SimulationOCRService:
             base_dir = os.path.dirname(os.path.abspath(__file__))
             for _ in range(5):
                 base_dir = os.path.dirname(base_dir)
-            
+
             paths = [
                 os.path.join(base_dir, "data/stocks/stocks_index.json"),
                 "data/stocks/stocks_index.json",
-                "../data/stocks/stocks_index.json"
+                "../data/stocks/stocks_index.json",
             ]
             for path in paths:
                 if os.path.exists(path):
-                    with open(path, "r", encoding="utf-8") as f:
+                    with open(path, encoding="utf-8") as f:
                         data = json.load(f)
                         items = data.get("items", [])
                         # 建立映射：去空格后的名称 -> 标准代码 (Prefix)
@@ -65,7 +69,7 @@ class SimulationOCRService:
             logger.error(f"Failed to load stocks_index.json: {e}")
         return {}
 
-    async def analyze_images(self, image_data_list: List[bytes]) -> Dict[str, Any]:
+    async def analyze_images(self, image_data_list: list[bytes]) -> dict[str, Any]:
         """
         Analyze a list of images and extract stock holding information.
         """
@@ -74,13 +78,13 @@ class SimulationOCRService:
 
         all_holdings = []
         all_cash = []
-        
+
         # (moved up in logic, will wrap the loop)
-        
+
         for image_bytes in image_data_list:
             try:
                 base64_image = base64.b64encode(image_bytes).decode("utf-8")
-                
+
                 prompt = (
                     "你是一个专业的金融数据提取助手。请从图片中提取股票持仓信息和资金状态。\n"
                     "要求：\n"
@@ -113,19 +117,23 @@ class SimulationOCRService:
                         },
                     ],
                 )
-                
+
                 content = completion.choices[0].message.content
                 logger.debug(f"Qwen-VL response: {content}")
-                
+
                 # Extract JSON from potential markdown markers
                 json_str = content
                 if "```json" in content:
-                    json_str = re.search(r"```json\s*(.*?)\s*```", content, re.DOTALL).group(1)
+                    json_str = re.search(
+                        r"```json\s*(.*?)\s*```", content, re.DOTALL
+                    ).group(1)
                 elif "```" in content:
-                    json_str = re.search(r"```\s*(.*?)\s*```", content, re.DOTALL).group(1)
-                
+                    json_str = re.search(
+                        r"```\s*(.*?)\s*```", content, re.DOTALL
+                    ).group(1)
+
                 data = json.loads(json_str)
-                
+
                 # Extract available cash (take the max or latest if multiple images)
                 if data.get("available_cash") is not None:
                     cash_val = float(data["available_cash"])
@@ -138,35 +146,39 @@ class SimulationOCRService:
                         name = str(item.get("name", "")).strip()
                         if not name:
                             continue
-                            
+
                         # 通过名称索引匹配代码
                         clean_name = name.replace(" ", "")
                         symbol = self.stock_index.get(clean_name)
-                        
+
                         # 模糊匹配策略：如果带 ST 的没匹配上，尝试去掉 ST 前缀再找
                         if not symbol:
                             # 移除常见前缀再试
-                            fallback_name = re.sub(r'^(\*?ST|S|N|C|U)', '', clean_name)
+                            fallback_name = re.sub(r"^(\*?ST|S|N|C|U)", "", clean_name)
                             if fallback_name != clean_name:
                                 # 遍历索引寻找包含该后缀的
                                 for idx_name, idx_sym in self.stock_index.items():
                                     if fallback_name in idx_name:
                                         symbol = idx_sym
                                         break
-                        
+
                         if not symbol:
-                            logger.warning(f"Could not find symbol for stock name: {name}")
-                            
-                        all_holdings.append({
-                            "symbol": symbol,
-                            "name": name,
-                            "quantity": float(item.get("quantity") or 0)
-                        })
-                
+                            logger.warning(
+                                f"Could not find symbol for stock name: {name}"
+                            )
+
+                        all_holdings.append(
+                            {
+                                "symbol": symbol,
+                                "name": name,
+                                "quantity": float(item.get("quantity") or 0),
+                            }
+                        )
+
             except Exception as e:
                 logger.error(f"Failed to analyze holding image: {e}", exc_info=True)
                 # Continue with next image instead of failing entirely
-                
+
         # Deduplicate and merge quantities for same symbol
         merged = {}
         for r in all_holdings:
@@ -175,9 +187,8 @@ class SimulationOCRService:
                 merged[sym]["quantity"] += r["quantity"]
             else:
                 merged[sym] = r
-                
+
         return {
             "holdings": list(merged.values()),
-            "available_cash": max(all_cash) if all_cash else None
+            "available_cash": max(all_cash) if all_cash else None,
         }
-

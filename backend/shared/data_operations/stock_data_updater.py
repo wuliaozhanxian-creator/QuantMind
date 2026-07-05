@@ -5,10 +5,9 @@
 """
 
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from .base import DatabaseDataOperation
-
 
 class StockDataUpdater(DatabaseDataOperation):
     """
@@ -61,7 +60,9 @@ class StockDataUpdater(DatabaseDataOperation):
             "error": "StockDataUpdater is deprecated (mock data). Use fetch_history.py instead.",
         }
 
-    def _update_basic_stock_info(self, symbols: list[str] | None = None) -> dict[str, Any]:
+    def _update_basic_stock_info(
+        self, symbols: list[str] | None = None
+    ) -> dict[str, Any]:
         """
         更新股票基础信息
 
@@ -148,7 +149,9 @@ class StockDataUpdater(DatabaseDataOperation):
 
             for i in range(0, len(target_symbols), batch_size):
                 batch_symbols = target_symbols[i : i + batch_size]
-                batch_data = self._fetch_historical_data_batch(batch_symbols, start_date, end_date)
+                batch_data = self._fetch_historical_data_batch(
+                    batch_symbols, start_date, end_date
+                )
 
                 records_inserted = self._save_historical_data_to_db(batch_data)
                 total_records += records_inserted
@@ -206,7 +209,9 @@ class StockDataUpdater(DatabaseDataOperation):
         symbols = ["000001", "000002", "600519", "600036"]
         return self._fetch_stock_info_batch(symbols)
 
-    def _fetch_historical_data_batch(self, symbols: list[str], start_date: str, end_date: str) -> list[dict[str, Any]]:
+    def _fetch_historical_data_batch(
+        self, symbols: list[str], start_date: str, end_date: str
+    ) -> list[dict[str, Any]]:
         """
         批量获取历史数据
 
@@ -291,7 +296,6 @@ class StockDataUpdater(DatabaseDataOperation):
         )
         return len(historical_data)
 
-
 # 便捷函数
 def update_stock_data(
     update_type: str = "all",
@@ -320,7 +324,6 @@ def update_stock_data(
         start_date=start_date,
         end_date=end_date,
     )
-
 
 if __name__ == "__main__":
     # 示例用法

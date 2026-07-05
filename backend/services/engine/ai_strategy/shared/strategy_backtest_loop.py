@@ -5,11 +5,10 @@ import math
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 from collections.abc import Callable
 
 from .ai_providers import StrategyRequest
-
 
 class LoopStage(str, Enum):
     generation = "generation"
@@ -18,14 +17,12 @@ class LoopStage(str, Enum):
     completed = "completed"
     failed = "failed"
 
-
 @dataclass
 class LoopConfig:
     max_iterations: int = 10
     backtest_period: str = "2y"
     initial_capital: float = 100000
     risk_tolerance: str = "medium"
-
 
 @dataclass
 class StrategyResponse:
@@ -35,11 +32,9 @@ class StrategyResponse:
     def to_dict(self) -> dict[str, Any]:
         return {"code": self.code, "notes": self.notes}
 
-
 @dataclass
 class BacktestResult:
     performance_metrics: dict[str, float] = field(default_factory=dict)
-
 
 @dataclass
 class LoopIteration:
@@ -52,7 +47,6 @@ class LoopIteration:
     execution_time: float
     errors: list[str] = field(default_factory=list)
 
-
 @dataclass
 class LoopRunResult:
     success: bool
@@ -61,7 +55,6 @@ class LoopRunResult:
     learning_insights: dict[str, Any]
     total_time: float
     all_iterations: list[LoopIteration]
-
 
 class StrategyBacktestLoop:
     def __init__(self, config: LoopConfig):
@@ -80,7 +73,9 @@ class StrategyBacktestLoop:
 
         total = max(1, int(self.config.max_iterations))
         prompt_factor = min(1.5, max(0.5, len(strategy_request.prompt) / 120.0))
-        symbols = strategy_request.target_assets or market_data.get("symbols") or ["SZ000001"]
+        symbols = (
+            strategy_request.target_assets or market_data.get("symbols") or ["SZ000001"]
+        )
 
         for i in range(1, total + 1):
             iter_start = time.perf_counter()
@@ -88,7 +83,9 @@ class StrategyBacktestLoop:
                 progress_callback(i, LoopStage.generation, (i - 1) / total, last_score)
 
             code = (
-                "def signal(ctx):\n" f"    # iter={i}, assets={','.join(symbols[:5])}\n" "    return {'weight': 1.0}\n"
+                "def signal(ctx):\n"
+                f"    # iter={i}, assets={','.join(symbols[:5])}\n"
+                "    return {'weight': 1.0}\n"
             )
             strategy = StrategyResponse(
                 code=code,
@@ -104,7 +101,10 @@ class StrategyBacktestLoop:
                 0.0,
                 min(
                     1.0,
-                    0.45 + 0.5 * (i / total) + 0.08 * math.sin(i) + 0.05 * (prompt_factor - 1.0),
+                    0.45
+                    + 0.5 * (i / total)
+                    + 0.08 * math.sin(i)
+                    + 0.05 * (prompt_factor - 1.0),
                 ),
             )
             annual_return = round(0.06 + 0.22 * score, 6)
@@ -138,7 +138,9 @@ class StrategyBacktestLoop:
                 best = item
 
         if progress_callback:
-            progress_callback(total, LoopStage.completed, 1.0, best.performance_score if best else 0.0)
+            progress_callback(
+                total, LoopStage.completed, 1.0, best.performance_score if best else 0.0
+            )
 
         elapsed = round(time.perf_counter() - started_at, 6)
         return LoopRunResult(

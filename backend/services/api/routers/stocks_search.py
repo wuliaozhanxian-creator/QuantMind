@@ -30,10 +30,8 @@ _INDEX_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _INDEX_LOCK = asyncio.Lock()
 _MONEY_UNIT_TO_YI = 1.0 / 100000000.0
 
-
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
 
 @dataclass
 class StockIndexItem:
@@ -46,7 +44,9 @@ class StockIndexItem:
     price: float = 0.0
 
     def searchable_text(self) -> str:
-        return " ".join([self.symbol.lower(), self.code.lower(), self.name.lower()]).strip()
+        return " ".join(
+            [self.symbol.lower(), self.code.lower(), self.name.lower()]
+        ).strip()
 
     def to_result(self) -> dict[str, Any]:
         return {
@@ -61,21 +61,17 @@ class StockIndexItem:
             "closePrice": self.price,
         }
 
-
 def _normalize_symbol(symbol: str) -> str:
     return StockCodeUtil.to_prefix(symbol)
-
 
 def _symbol_to_exchange(symbol: str) -> str:
     normalized = _normalize_symbol(symbol)
     return normalized[:2] if len(normalized) >= 8 else ""
 
-
 def _symbol_to_code(symbol: str) -> str:
     normalized = _normalize_symbol(symbol)
     suffix = StockCodeUtil.to_suffix(normalized)
     return suffix.split(".", 1)[0] if "." in suffix else normalized
-
 
 def _cache_get(key: str) -> dict[str, Any] | None:
     now = asyncio.get_event_loop().time()
@@ -87,17 +83,17 @@ def _cache_get(key: str) -> dict[str, Any] | None:
         return None
     return cached[1]
 
-
 def _cache_set(key: str, payload: dict[str, Any]) -> None:
     _INDEX_CACHE[key] = (asyncio.get_event_loop().time(), payload)
     if len(_INDEX_CACHE) > _INDEX_CACHE_MAX_ENTRIES:
         oldest_key = min(_INDEX_CACHE.items(), key=lambda kv: kv[1][0])[0]
         _INDEX_CACHE.pop(oldest_key, None)
 
-
 async def _load_stock_index_payload() -> dict[str, Any]:
     async with get_session(read_only=True) as session:
-        latest_trade_date = await session.scalar(text("SELECT MAX(trade_date) FROM stock_daily_latest"))
+        latest_trade_date = await session.scalar(
+            text("SELECT MAX(trade_date) FROM stock_daily_latest")
+        )
         if latest_trade_date is None:
             raise FileNotFoundError("stock_daily_latest")
 
@@ -106,21 +102,41 @@ async def _load_stock_index_payload() -> dict[str, Any]:
         if cached is not None:
             return cached
 
-        columns_res = await session.execute(text("SELECT * FROM stock_daily_latest LIMIT 0"))
+        columns_res = await session.execute(
+            text("SELECT * FROM stock_daily_latest LIMIT 0")
+        )
         columns = {str(name).lower() for name in columns_res.keys()}
-        name_col = "stock_name" if "stock_name" in columns else ("name" if "name" in columns else None)
-        market_cap_col = "total_mv" if "total_mv" in columns else ("market_cap" if "market_cap" in columns else None)
-        pe_col = "pe_ttm" if "pe_ttm" in columns else ("pe" if "pe" in columns else None)
+        name_col = (
+            "stock_name"
+            if "stock_name" in columns
+            else ("name" if "name" in columns else None)
+        )
+        market_cap_col = (
+            "total_mv"
+            if "total_mv" in columns
+            else ("market_cap" if "market_cap" in columns else None)
+        )
+        pe_col = (
+            "pe_ttm" if "pe_ttm" in columns else ("pe" if "pe" in columns else None)
+        )
         close_col = "close" if "close" in columns else None
         adj_factor_col = "adj_factor" if "adj_factor" in columns else None
 
         select_fields = [
             "symbol",
-            f"COALESCE({name_col}, '') AS stock_name" if name_col else "'' AS stock_name",
-            f"COALESCE({market_cap_col}, 0) AS market_cap_raw" if market_cap_col else "0 AS market_cap_raw",
+            f"COALESCE({name_col}, '') AS stock_name"
+            if name_col
+            else "'' AS stock_name",
+            f"COALESCE({market_cap_col}, 0) AS market_cap_raw"
+            if market_cap_col
+            else "0 AS market_cap_raw",
             f"COALESCE({pe_col}, 0) AS pe" if pe_col else "0 AS pe",
-            f"COALESCE({close_col}, 0) AS close_price" if close_col else "0 AS close_price",
-            f"COALESCE({adj_factor_col}, 1) AS adj_factor" if adj_factor_col else "1 AS adj_factor",
+            f"COALESCE({close_col}, 0) AS close_price"
+            if close_col
+            else "0 AS close_price",
+            f"COALESCE({adj_factor_col}, 1) AS adj_factor"
+            if adj_factor_col
+            else "1 AS adj_factor",
         ]
 
         result = await session.execute(
@@ -157,22 +173,31 @@ async def _load_stock_index_payload() -> dict[str, Any]:
                 code=code,
                 exchange=exchange,
                 name=name,
-                market_cap=round(market_cap_raw * _MONEY_UNIT_TO_YI, 2) if market_cap_raw else 0.0,
+                market_cap=round(market_cap_raw * _MONEY_UNIT_TO_YI, 2)
+                if market_cap_raw
+                else 0.0,
                 pe=round(pe, 2) if pe else 0.0,
-                price=round(close_price_raw / adj_factor, 2) if close_price_raw else 0.0,
+                price=round(close_price_raw / adj_factor, 2)
+                if close_price_raw
+                else 0.0,
             ),
         )
 
     items = [items_map[key] for key in sorted(items_map.keys())]
     payload = {
-        "trade_date": latest_trade_date.isoformat() if hasattr(latest_trade_date, "isoformat") else str(latest_trade_date),
+        "trade_date": latest_trade_date.isoformat()
+        if hasattr(latest_trade_date, "isoformat")
+        else str(latest_trade_date),
         "items": [item.to_result() for item in items],
         "loaded_count": len(items),
     }
     _cache_set(cache_key, payload)
-    logger.info("已从 stock_daily_latest 加载股票索引: trade_date=%s count=%s", payload["trade_date"], len(items))
+    logger.info(
+        "已从 stock_daily_latest 加载股票索引: trade_date=%s count=%s",
+        payload["trade_date"],
+        len(items),
+    )
     return payload
-
 
 async def _search_stock_index(keyword: str, limit: int) -> list[dict[str, Any]]:
     payload = await _load_stock_index_payload()
@@ -203,7 +228,6 @@ async def _search_stock_index(keyword: str, limit: int) -> list[dict[str, Any]]:
             break
     return (starts + contains)[:limit]
 
-
 @router.get("/search")
 async def search_stocks(
     q: str = Query(..., description="搜索关键词"),
@@ -229,7 +253,6 @@ async def search_stocks(
         "source": "stock_daily_latest",
     }
 
-
 @router.get("/search/status")
 async def search_status():
     try:
@@ -242,7 +265,6 @@ async def search_status():
         "index": payload,
     }
 
-
 @router.get("/index")
 async def get_stock_index():
     """返回完整股票索引，供前端独立打包后统一读取。"""
@@ -250,7 +272,9 @@ async def get_stock_index():
         payload = await _load_stock_index_payload()
     except FileNotFoundError as exc:
         logger.error("stock_daily_latest 不可用: %s", exc)
-        raise HTTPException(status_code=503, detail="股票索引未就绪，请先完成 stock_daily_latest 同步。") from exc
+        raise HTTPException(
+            status_code=503, detail="股票索引未就绪，请先完成 stock_daily_latest 同步。"
+        ) from exc
     except Exception as exc:
         logger.error("获取股票索引失败: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail=f"获取股票索引失败: {exc}") from exc

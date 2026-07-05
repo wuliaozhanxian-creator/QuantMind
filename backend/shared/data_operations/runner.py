@@ -9,7 +9,7 @@ import sys
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from .base import BaseDataOperation
 from .data_validator import DataValidator
@@ -19,7 +19,6 @@ from .stock_data_updater import StockDataUpdater
 sys.path.insert(0, "/app")
 sys.path.insert(0, "/app/shared")
 sys.path.insert(0, "/app/backend/shared")
-
 
 @dataclass
 class TaskConfig:
@@ -34,7 +33,6 @@ class TaskConfig:
     max_retries: int = 3
     timeout: int | None = None
 
-
 @dataclass
 class TaskResult:
     """任务结果数据类"""
@@ -46,7 +44,6 @@ class TaskResult:
     execution_time: float
     result: dict[str, Any]
     error: str | None = None
-
 
 class DataScriptRunner(BaseDataOperation):
     """
@@ -102,7 +99,9 @@ class DataScriptRunner(BaseDataOperation):
             return {
                 "success": summary["success_rate"] == 100.0,
                 "execution_summary": summary,
-                "task_results": {name: asdict(result) for name, result in self.task_results.items()},
+                "task_results": {
+                    name: asdict(result) for name, result in self.task_results.items()
+                },
                 "execution_order": self.execution_order,
             }
         except Exception as e:
@@ -113,7 +112,9 @@ class DataScriptRunner(BaseDataOperation):
             return {
                 "success": False,
                 "error": str(e),
-                "task_results": {name: asdict(result) for name, result in self.task_results.items()},
+                "task_results": {
+                    name: asdict(result) for name, result in self.task_results.items()
+                },
             }
 
     def _load_tasks_from_file(self, config_file: str) -> None:
@@ -296,18 +297,25 @@ class DataScriptRunner(BaseDataOperation):
     def _generate_execution_summary(self) -> dict[str, Any]:
         """生成执行摘要"""
         total_tasks = len(self.task_results)
-        successful_tasks = sum(1 for result in self.task_results.values() if result.success)
+        successful_tasks = sum(
+            1 for result in self.task_results.values() if result.success
+        )
         failed_tasks = total_tasks - successful_tasks
-        total_execution_time = sum(result.execution_time for result in self.task_results.values())
+        total_execution_time = sum(
+            result.execution_time for result in self.task_results.values()
+        )
         return {
             "total_tasks": total_tasks,
             "successful_tasks": successful_tasks,
             "failed_tasks": failed_tasks,
-            "success_rate": ((successful_tasks / total_tasks * 100) if total_tasks > 0 else 0),
+            "success_rate": (
+                (successful_tasks / total_tasks * 100) if total_tasks > 0 else 0
+            ),
             "total_execution_time": total_execution_time,
-            "average_execution_time": (total_execution_time / total_tasks if total_tasks > 0 else 0),
+            "average_execution_time": (
+                total_execution_time / total_tasks if total_tasks > 0 else 0
+            ),
         }
-
 
 # 便捷函数
 def run_data_scripts(
@@ -326,7 +334,6 @@ def run_data_scripts(
     """
     runner = DataScriptRunner(config)
     return runner.execute(tasks=tasks, parallel=parallel)
-
 
 def create_sample_config() -> dict[str, Any]:
     """创建示例配置"""
@@ -358,14 +365,15 @@ def create_sample_config() -> dict[str, Any]:
             {
                 "name": "validate_data_quality",
                 "operation_type": "data_validation",
-                "parameters": {"validation_types": ["completeness", "consistency", "quality"]},
+                "parameters": {
+                    "validation_types": ["completeness", "consistency", "quality"]
+                },
                 "enabled": True,
                 "depends_on": ["update_stock_historical_data"],
                 "max_retries": 1,
             },
         ]
     }
-
 
 if __name__ == "__main__":
     # 示例用法

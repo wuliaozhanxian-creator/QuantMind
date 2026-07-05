@@ -6,7 +6,7 @@ Audit Log Service
 import json
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from fastapi import Request
 from sqlalchemy import desc, select
@@ -15,7 +15,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.services.api.user_app.models.rbac import UserAuditLog
 
 logger = logging.getLogger(__name__)
-
 
 class AuditLogService:
     """审计日志服务"""
@@ -96,7 +95,10 @@ class AuditLogService:
             self.db.add(log_entry)
             await self.db.commit()
 
-            logger.info(f"📝 审计日志: user={user_id}, action={action}, " f"resource={resource}, success={success}")
+            logger.info(
+                f"📝 审计日志: user={user_id}, action={action}, "
+                f"resource={resource}, success={success}"
+            )
 
         except Exception as e:
             logger.error(f"❌ 记录审计日志失败: {e}")
@@ -197,7 +199,11 @@ class AuditLogService:
         resource: str | None = None,
     ) -> list[UserAuditLog]:
         """获取最近的日志"""
-        stmt = select(UserAuditLog).where(UserAuditLog.tenant_id == tenant_id).order_by(desc(UserAuditLog.created_at))
+        stmt = (
+            select(UserAuditLog)
+            .where(UserAuditLog.tenant_id == tenant_id)
+            .order_by(desc(UserAuditLog.created_at))
+        )
 
         if action:
             stmt = stmt.where(UserAuditLog.action == action)
@@ -295,7 +301,6 @@ class AuditLogService:
             "action_counts": action_counts,
             "resource_counts": resource_counts,
         }
-
 
 # 审计日志装饰器
 def audit_log(action: str, resource: str | None = None, description: str | None = None):

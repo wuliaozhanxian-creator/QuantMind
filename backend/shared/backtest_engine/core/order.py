@@ -6,7 +6,6 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-
 class OrderType(Enum):
     """订单类型"""
 
@@ -14,15 +13,13 @@ class OrderType(Enum):
     LIMIT = "limit"
     STOP = "stop"
 
-
 class OrderSide(Enum):
     """订单方向"""
 
     BUY = "buy"
     SELL = "sell"
-    SHORT_SELL = "short_sell"    # 融券开空
+    SHORT_SELL = "short_sell"  # 融券开空
     BUY_TO_COVER = "buy_to_cover"  # 买入平空
-
 
 class OrderStatus(Enum):
     """订单状态"""
@@ -31,7 +28,6 @@ class OrderStatus(Enum):
     FILLED = "filled"
     CANCELLED = "cancelled"
     REJECTED = "rejected"
-
 
 class Order:
     """订单类"""
@@ -61,7 +57,9 @@ class Order:
         self.order_type = order_type
         self.quantity = quantity
         self.price = price
-        self.order_id = order_id or f"{symbol}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        self.order_id = (
+            order_id or f"{symbol}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        )
 
         # 执行相关
         self.status = OrderStatus.PENDING

@@ -18,7 +18,9 @@ from backend.services.engine.qlib_app.schemas.analysis import (
 from backend.services.engine.qlib_app.services.backtest_persistence import (
     BacktestPersistence,
 )
-from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
+from backend.services.engine.qlib_app.utils.structured_logger import (
+    StructuredTaskLogger,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +33,14 @@ class BasicRiskService:
 
     def __init__(self, risk_free_rate: float | None = None):
         self._persistence = BacktestPersistence()
-        self.risk_free_rate = risk_free_rate if risk_free_rate is not None else self.DEFAULT_RISK_FREE_RATE
-        StructuredTaskLogger(logger, "basic-risk-service").info("init", "BasicRiskService initialized")
+        self.risk_free_rate = (
+            risk_free_rate
+            if risk_free_rate is not None
+            else self.DEFAULT_RISK_FREE_RATE
+        )
+        StructuredTaskLogger(logger, "basic-risk-service").info(
+            "init", "BasicRiskService initialized"
+        )
 
     @staticmethod
     def _finite_or_zero(value: float) -> float:
@@ -45,7 +53,9 @@ class BasicRiskService:
             return 0.0
         return v
 
-    async def analyze(self, backtest_id: str, user_id: str, tenant_id: str = "default") -> BasicRiskResponse:
+    async def analyze(
+        self, backtest_id: str, user_id: str, tenant_id: str = "default"
+    ) -> BasicRiskResponse:
         """
         执行基础风险分析
 
@@ -73,7 +83,9 @@ class BasicRiskService:
             qlib_metrics = self._calculate_qlib_metrics(returns)
 
             # 3. 补充计算指标
-            supplementary_metrics = self._calculate_supplementary_metrics(returns, qlib_metrics)
+            supplementary_metrics = self._calculate_supplementary_metrics(
+                returns, qlib_metrics
+            )
 
             # 4. 统计指标
             statistics = self._calculate_statistics(returns)
@@ -85,7 +97,9 @@ class BasicRiskService:
             histogram = self._generate_histogram(returns)
 
             # 7. 组装响应
-            metrics = BasicRiskMetrics(**qlib_metrics, **supplementary_metrics, **statistics)
+            metrics = BasicRiskMetrics(
+                **qlib_metrics, **supplementary_metrics, **statistics
+            )
 
             response = BasicRiskResponse(
                 metrics=metrics,
@@ -117,7 +131,9 @@ class BasicRiskService:
         """从数据库获取真实的回测收益数据"""
         # 优化：仅加载权益曲线和配置
         result = await self._persistence.get_result(
-            backtest_id, tenant_id=tenant_id, include_fields=["equity_curve", "config", "total_return"]
+            backtest_id,
+            tenant_id=tenant_id,
+            include_fields=["equity_curve", "config", "total_return"],
         )
         if not result or not result.equity_curve:
             StructuredTaskLogger(
@@ -138,7 +154,9 @@ class BasicRiskService:
                 logger,
                 "basic-risk-service",
                 {"backtest_id": backtest_id, "tenant_id": tenant_id},
-            ).warning("equity_invalid", "equity_curve 字段不完整", columns=list(df.columns))
+            ).warning(
+                "equity_invalid", "equity_curve 字段不完整", columns=list(df.columns)
+            )
             return None
 
         df["date"] = pd.to_datetime(df["date"])
@@ -201,13 +219,15 @@ class BasicRiskService:
         annual_freq = 252
 
         total_ret = (1 + returns).prod() - 1
-        
+
         if trading_days > 0:
             annualized_return = (1 + total_ret) ** (annual_freq / trading_days) - 1
         else:
             annualized_return = 0.0
 
-        volatility = returns.std(ddof=1) * np.sqrt(annual_freq) if len(returns) > 1 else 0.0
+        volatility = (
+            returns.std(ddof=1) * np.sqrt(annual_freq) if len(returns) > 1 else 0.0
+        )
         equity = (1 + returns).cumprod()
         drawdown = (equity / equity.cummax()) - 1
         max_drawdown = drawdown.min() if not drawdown.empty else 0.0
@@ -219,12 +239,14 @@ class BasicRiskService:
             # risk_analysis 正确输入为日收益序列
             qlib_result = risk_analysis(returns, freq="day")
 
-            StructuredTaskLogger(logger, "basic-risk-service").info("qlib_risk", "使用Qlib原生risk_analysis计算风险指标")
+            StructuredTaskLogger(logger, "basic-risk-service").info(
+                "qlib_risk", "使用Qlib原生risk_analysis计算风险指标"
+            )
 
             res_dict = qlib_result["risk"].to_dict()
 
             max_drawdown = res_dict.get("max_drawdown", max_drawdown)
-            
+
             # 使用原生结果中更精确的标准差，但统一用 252 交易日年化
             std = res_dict.get("std")
             if std is not None:
@@ -238,7 +260,11 @@ class BasicRiskService:
             }
 
         except (ImportError, Exception) as e:
-            StructuredTaskLogger(logger, "basic-risk-service").warning("qlib_risk_unavailable", "Qlib risk_analysis不可用，使用手动计算", error=e)
+            StructuredTaskLogger(logger, "basic-risk-service").warning(
+                "qlib_risk_unavailable",
+                "Qlib risk_analysis不可用，使用手动计算",
+                error=e,
+            )
 
             return {
                 "annualized_return": self._finite_or_zero(annualized_return),
@@ -247,7 +273,9 @@ class BasicRiskService:
                 "max_drawdown": self._finite_or_zero(max_drawdown),
             }
 
-    def _calculate_supplementary_metrics(self, returns: pd.Series, qlib_metrics: dict) -> dict:
+    def _calculate_supplementary_metrics(
+        self, returns: pd.Series, qlib_metrics: dict
+    ) -> dict:
         """计算补充指标（高级风险指标）"""
         clean_returns = pd.Series(returns).replace([np.inf, -np.inf], np.nan).dropna()
         if clean_returns.empty:
@@ -279,10 +307,12 @@ class BasicRiskService:
         daily_rf = self.risk_free_rate / annual_freq
         downside_diff = clean_returns[clean_returns < daily_rf] - daily_rf
         if len(downside_diff) > 1:
-            downside_deviation = np.sqrt((downside_diff ** 2).sum() / len(clean_returns))
+            downside_deviation = np.sqrt((downside_diff**2).sum() / len(clean_returns))
             annualized_downside_vol = downside_deviation * np.sqrt(annual_freq)
             if annualized_downside_vol > 0:
-                sortino_ratio = (annualized_return - self.risk_free_rate) / annualized_downside_vol
+                sortino_ratio = (
+                    annualized_return - self.risk_free_rate
+                ) / annualized_downside_vol
             else:
                 sortino_ratio = 0.0
         else:
@@ -338,7 +368,9 @@ class BasicRiskService:
 
     def _generate_series_data(self, returns: pd.Series) -> dict:
         """生成时间序列数据"""
-        clean_returns = pd.Series(returns).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+        clean_returns = (
+            pd.Series(returns).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+        )
 
         # 累计收益（复利口径）
         equity = (1 + clean_returns).cumprod()
@@ -353,9 +385,12 @@ class BasicRiskService:
         return {
             "daily_returns": TimeSeriesData(dates=dates, values=clean_returns.tolist()),
             "cumulative_returns": TimeSeriesData(
-                dates=dates, values=[self._finite_or_zero(v) for v in cumulative.tolist()]
+                dates=dates,
+                values=[self._finite_or_zero(v) for v in cumulative.tolist()],
             ),
-            "drawdown": TimeSeriesData(dates=dates, values=[self._finite_or_zero(v) for v in drawdown.tolist()]),
+            "drawdown": TimeSeriesData(
+                dates=dates, values=[self._finite_or_zero(v) for v in drawdown.tolist()]
+            ),
         }
 
     def _generate_histogram(self, returns: pd.Series, bins: int = 50) -> HistogramData:

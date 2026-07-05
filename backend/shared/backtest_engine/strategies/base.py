@@ -4,10 +4,9 @@
 
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
-
 
 class BaseStrategy(ABC):
     """
@@ -57,7 +56,9 @@ class BaseStrategy(ABC):
             order: 订单信息
         """
 
-    def buy(self, symbol: str, quantity: int, price: float | None = None, **kwargs) -> None:
+    def buy(
+        self, symbol: str, quantity: int, price: float | None = None, **kwargs
+    ) -> None:
         """买入"""
         if self.backtest_engine:
             from ..core.order import Order, OrderSide, OrderType
@@ -72,7 +73,9 @@ class BaseStrategy(ABC):
             )
             self.backtest_engine.place_order(order)
 
-    def sell(self, symbol: str, quantity: int, price: float | None = None, **kwargs) -> None:
+    def sell(
+        self, symbol: str, quantity: int, price: float | None = None, **kwargs
+    ) -> None:
         """卖出"""
         if self.backtest_engine:
             from ..core.order import Order, OrderSide, OrderType
@@ -87,7 +90,9 @@ class BaseStrategy(ABC):
             )
             self.backtest_engine.place_order(order)
 
-    def short_sell(self, symbol: str, quantity: int, price: float | None = None, **kwargs) -> None:
+    def short_sell(
+        self, symbol: str, quantity: int, price: float | None = None, **kwargs
+    ) -> None:
         """融券开空"""
         if self.backtest_engine:
             from ..core.order import Order, OrderSide, OrderType
@@ -102,7 +107,9 @@ class BaseStrategy(ABC):
             )
             self.backtest_engine.place_order(order)
 
-    def buy_to_cover(self, symbol: str, quantity: int, price: float | None = None, **kwargs) -> None:
+    def buy_to_cover(
+        self, symbol: str, quantity: int, price: float | None = None, **kwargs
+    ) -> None:
         """买入平空"""
         if self.backtest_engine:
             from ..core.order import Order, OrderSide, OrderType
@@ -123,7 +130,6 @@ class BaseStrategy(ABC):
             qty = self.backtest_engine.portfolio.get_position(symbol)
             return abs(qty) if qty < 0 else 0
         return 0
-
 
         """获取持仓"""
         if self.backtest_engine:

@@ -12,7 +12,9 @@ IMAGE_UPLOAD_FIELD = File(...)
 
 
 @router.post("/upload/image", response_model=UploadResponse)
-async def upload_image(file: UploadFile = IMAGE_UPLOAD_FIELD, principal: Principal = Depends(require_user)):
+async def upload_image(
+    file: UploadFile = IMAGE_UPLOAD_FIELD, principal: Principal = Depends(require_user)
+):
     """Upload an image (requires authentication)."""
     # Validate file type
     if not file.content_type or not file.content_type.startswith("image/"):
@@ -22,10 +24,14 @@ async def upload_image(file: UploadFile = IMAGE_UPLOAD_FIELD, principal: Princip
 
     # Use the shared file upload service
     try:
-        result = await file_upload_service.upload_file(file=file, user_id=user_id, category="image")
+        result = await file_upload_service.upload_file(
+            file=file, user_id=user_id, category="image"
+        )
 
         if result.get("code") != 0:
-            raise HTTPException(status_code=500, detail=result.get("message", "Upload failed"))
+            raise HTTPException(
+                status_code=500, detail=result.get("message", "Upload failed")
+            )
 
         data = result.get("data", {})
         return UploadResponse(
@@ -38,4 +44,6 @@ async def upload_image(file: UploadFile = IMAGE_UPLOAD_FIELD, principal: Princip
     except Exception as e:
         if isinstance(e, HTTPException):
             raise e
-        raise HTTPException(status_code=500, detail=f"Upload processing error: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Upload processing error: {str(e)}"
+        ) from e

@@ -6,10 +6,9 @@
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
-
 
 @dataclass
 class RiskConfig:
@@ -27,7 +26,9 @@ class RiskConfig:
 
     # 仓位管理
     min_position_size: float = 0.01  # 最小仓位比例
-    position_sizing_method: str = "fixed"  # 仓位计算方法: fixed, percent, kelly, volatility
+    position_sizing_method: str = (
+        "fixed"  # 仓位计算方法: fixed, percent, kelly, volatility
+    )
     max_positions: int = 10  # 最大持仓数量
 
     # 风险指标
@@ -38,7 +39,6 @@ class RiskConfig:
     # 其他
     rebalance_threshold: float = 0.05  # 再平衡阈值
     risk_free_rate: float = 0.02  # 无风险利率
-
 
 @dataclass
 class RiskAlert:
@@ -56,7 +56,6 @@ class RiskAlert:
     def __post_init__(self):
         if self.recommendations is None:
             self.recommendations = []
-
 
 class RiskManager:
     """风险管理器"""
@@ -110,7 +109,9 @@ class RiskManager:
 
         return True, requested_size, "仓位检查通过"
 
-    def check_portfolio_risk(self, portfolio_value: float, portfolio_returns: list[float]) -> dict[str, Any]:
+    def check_portfolio_risk(
+        self, portfolio_value: float, portfolio_returns: list[float]
+    ) -> dict[str, Any]:
         """
         检查投资组合整体风险
 
@@ -131,11 +132,17 @@ class RiskManager:
         # 计算风险指标
         volatility = np.std(returns_array, ddof=1) * np.sqrt(252)  # 年化波动率
         downside_returns = returns_array[returns_array < 0]
-        downside_volatility = np.std(downside_returns, ddof=1) * np.sqrt(252) if len(downside_returns) > 0 else 0
+        downside_volatility = (
+            np.std(downside_returns, ddof=1) * np.sqrt(252)
+            if len(downside_returns) > 0
+            else 0
+        )
 
         # VaR和CVaR
         var_95 = np.percentile(returns_array, 5)
-        cvar_95 = np.mean(returns_array[returns_array <= var_95]) if var_95 is not None else 0
+        cvar_95 = (
+            np.mean(returns_array[returns_array <= var_95]) if var_95 is not None else 0
+        )
 
         # 最大回撤
         cumulative = np.cumprod(1 + returns_array)
@@ -341,12 +348,18 @@ class RiskManager:
             }
 
         latest_metrics = self.risk_metrics_history[-1]
-        active_alerts = [alert for alert in self.alerts if (datetime.now() - alert.timestamp).days <= 1]
+        active_alerts = [
+            alert
+            for alert in self.alerts
+            if (datetime.now() - alert.timestamp).days <= 1
+        ]
 
         # 分析风险趋势
         risk_trend = "stable"
         if len(self.risk_metrics_history) >= 5:
-            recent_volatilities = [m["volatility"] for m in self.risk_metrics_history[-5:]]
+            recent_volatilities = [
+                m["volatility"] for m in self.risk_metrics_history[-5:]
+            ]
             if recent_volatilities[-1] > recent_volatilities[0] * 1.2:
                 risk_trend = "increasing"
             elif recent_volatilities[-1] < recent_volatilities[0] * 0.8:
@@ -376,7 +389,9 @@ class RiskManager:
         self.is_risk_limit_breached = False
         logger.info("风险管理器已重置")
 
-    def _assess_risk_level(self, volatility: float, max_drawdown: float, var_95: float) -> str:
+    def _assess_risk_level(
+        self, volatility: float, max_drawdown: float, var_95: float
+    ) -> str:
         """评估风险等级"""
         risk_score = 0
 

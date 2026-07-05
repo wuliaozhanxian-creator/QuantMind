@@ -34,7 +34,6 @@ from backend.shared.redis_sentinel_client import get_redis_sentinel_client
 
 logger = logging.getLogger(__name__)
 
-
 class LoginAttemptManager:
     """登录尝试管理器（防暴力破解）"""
 
@@ -99,7 +98,6 @@ class LoginAttemptManager:
             logger.warning(
                 "Login rate limit skipped because Redis is unavailable: %s", exc
             )
-
 
 class AuthService:
     """认证服务"""
@@ -225,7 +223,7 @@ class AuthService:
                 select(User).where(
                     User.user_id == user_id,
                     User.tenant_id == tenant_id,
-                    User.is_deleted == False,
+                    not User.is_deleted,
                 )
             )
             user = result.scalar_one_or_none()
@@ -498,6 +496,7 @@ class AuthService:
         # 为新用户自动注册系统模型
         try:
             from backend.shared.model_registry import model_registry_service
+
             await model_registry_service._ensure_system_default_record(
                 tenant_id=user_data.tenant_id, user_id=user_id
             )
@@ -549,7 +548,7 @@ class AuthService:
                         | (User.email == credentials.username)
                     )
                     .where(User.tenant_id == tenant_id)
-                    .where(User.is_deleted == False)
+                    .where(not User.is_deleted)
                 )
                 user = result.scalar_one_or_none()
 
@@ -623,7 +622,9 @@ class AuthService:
             logger.error(
                 f"Admin login blocked: ADMIN_SECURE_ENTRY_KEY 未配置，管理员入口已禁用 (ip={ip_address})"
             )
-            raise ValueError("管理员入口未配置安全密钥，请联系系统管理员配置 ADMIN_SECURE_ENTRY_KEY")
+            raise ValueError(
+                "管理员入口未配置安全密钥，请联系系统管理员配置 ADMIN_SECURE_ENTRY_KEY"
+            )
         if credentials.admin_key != expected_key:
             logger.warning(f"Admin login blocked: Invalid admin_key from {ip_address}")
             raise ValueError("入口验证失败")
@@ -634,7 +635,7 @@ class AuthService:
                 select(User)
                 .where(User.username == credentials.username)
                 .where(User.tenant_id == credentials.tenant_id)
-                .where(User.is_deleted == False)
+                .where(not User.is_deleted)
             )
             user = result.scalar_one_or_none()
 
@@ -694,7 +695,7 @@ class AuthService:
                 options={"verify_exp": True},
             )
         except JWTError:
-            raise ValueError("刷新令牌无效或已过期")
+            raise ValueError("刷新令牌无效或已过期") from None
 
         if payload.get("type") != "refresh":
             raise ValueError("刷新令牌类型错误")

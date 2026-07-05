@@ -70,10 +70,12 @@ class SimulationOrderSubmissionService:
     ) -> SimulationSubmissionOutcome:
         normalized_client_order_id = str(client_order_id or "").strip() or None
         if normalized_client_order_id:
-            existing_order = await self.order_service.get_projection_order_by_client_order_id(
-                tenant_id=tenant_id,
-                user_id=user_id,
-                client_order_id=normalized_client_order_id,
+            existing_order = (
+                await self.order_service.get_projection_order_by_client_order_id(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    client_order_id=normalized_client_order_id,
+                )
             )
             if existing_order is not None:
                 return await self._build_duplicate_outcome(existing_order)
@@ -183,9 +185,13 @@ class SimulationOrderSubmissionService:
                 await self.db.execute(
                     select(SimulationFill)
                     .where(SimulationFill.order_id == order.order_id)
-                    .order_by(SimulationFill.executed_at.desc(), SimulationFill.id.desc())
+                    .order_by(
+                        SimulationFill.executed_at.desc(), SimulationFill.id.desc()
+                    )
                 )
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
         latest_fill = fills[0] if fills else None
         status = str(order.status or "").lower()
@@ -202,7 +208,8 @@ class SimulationOrderSubmissionService:
                 message="duplicate client_order_id skipped",
             )
         return SimulationSubmissionOutcome(
-            success=status not in {
+            success=status
+            not in {
                 OrderStatus.REJECTED.value,
                 OrderStatus.CANCELLED.value,
                 OrderStatus.EXPIRED.value,
@@ -210,13 +217,24 @@ class SimulationOrderSubmissionService:
             order_id=str(order.order_id),
             trade_id=str(latest_fill.fill_id) if latest_fill is not None else None,
             client_order_id=order.client_order_id,
-            fill_price=round(float(latest_fill.fill_price or 0.0), 4) if latest_fill is not None else 0.0,
-            filled_quantity=float(latest_fill.fill_quantity or 0.0) if latest_fill is not None else 0.0,
-            commission=float(latest_fill.commission or 0.0) if latest_fill is not None else 0.0,
+            fill_price=round(float(latest_fill.fill_price or 0.0), 4)
+            if latest_fill is not None
+            else 0.0,
+            filled_quantity=float(latest_fill.fill_quantity or 0.0)
+            if latest_fill is not None
+            else 0.0,
+            commission=float(latest_fill.commission or 0.0)
+            if latest_fill is not None
+            else 0.0,
             price_source=latest_fill.price_source if latest_fill is not None else None,
             message=(
                 "duplicate client_order_id skipped"
-                if status in {OrderStatus.PENDING.value, OrderStatus.SUBMITTED.value, OrderStatus.FILLED.value}
+                if status
+                in {
+                    OrderStatus.PENDING.value,
+                    OrderStatus.SUBMITTED.value,
+                    OrderStatus.FILLED.value,
+                }
                 else str(
                     order.rejected_reason
                     or (

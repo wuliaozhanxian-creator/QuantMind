@@ -4,7 +4,6 @@ import asyncio
 import json
 import logging
 from datetime import datetime
-from typing import Dict, Set
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -138,7 +137,7 @@ async def send_heartbeat(websocket: WebSocket):
                 {"type": "heartbeat", "timestamp": datetime.now().timestamp()},
             )
     except asyncio.CancelledError:
-        pass
+        pass  # noqa: BLE001 - asyncio 任务取消信号，预期静默处理
 
 
 """

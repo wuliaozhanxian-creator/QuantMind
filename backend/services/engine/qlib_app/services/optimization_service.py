@@ -7,7 +7,7 @@ import asyncio
 import itertools
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 from collections.abc import Callable
 from uuid import uuid4
 
@@ -26,10 +26,8 @@ from backend.services.engine.qlib_app.utils.structured_logger import (
 
 logger = logging.getLogger(__name__)
 
-
 class OptimizationCancelledError(Exception):
     """优化任务被用户取消"""
-
 
 class OptimizationService:
     """参数优化服务"""
@@ -104,10 +102,10 @@ class OptimizationService:
             async with semaphore:
                 if await is_cancelled():
                     return None, {
-                        "params": dict(zip(param_names, combo)),
+                        "params": dict(zip(param_names, combo, strict=False)),
                         "cancelled": True,
                     }
-                params = dict(zip(param_names, combo))
+                params = dict(zip(param_names, combo, strict=False))
 
                 # 构造回测请求
                 task_req = request.base_request.copy(deep=True)

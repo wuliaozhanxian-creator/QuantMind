@@ -9,10 +9,9 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Optional, Union
 
 logger = logging.getLogger(__name__)
-
 
 class ModelType(Enum):
     """AI模型类型"""
@@ -29,7 +28,6 @@ class ModelType(Enum):
     LOCAL_MISTRAL = "mistral"
     CUSTOM = "custom"
 
-
 class StrategyType(Enum):
     """策略类型"""
 
@@ -40,7 +38,6 @@ class StrategyType(Enum):
     BREAKOUT = "breakout"
     CUSTOM = "custom"
 
-
 class ComplexityLevel(Enum):
     """策略复杂度"""
 
@@ -48,7 +45,6 @@ class ComplexityLevel(Enum):
     INTERMEDIATE = "intermediate"  # 中等策略，多指标组合
     ADVANCED = "advanced"  # 高级策略，机器学习/复杂逻辑
     EXPERT = "expert"  # 专家级策略，多因子/深度学习
-
 
 @dataclass
 class StrategyRequest:
@@ -80,7 +76,6 @@ class StrategyRequest:
             "context_data": self.context_data,
         }
 
-
 @dataclass
 class StrategyCode:
     """策略代码"""
@@ -90,7 +85,6 @@ class StrategyCode:
     dependencies: list[str] = field(default_factory=list)
     entry_point: str = "main"
     description: str | None = None
-
 
 @dataclass
 class StrategyParameter:
@@ -102,7 +96,6 @@ class StrategyParameter:
     range: dict[str, int | float] | None = None
     description: str | None = None
     optimization_hints: list[str] | None = None
-
 
 @dataclass
 class StrategyResponse:
@@ -161,7 +154,6 @@ class StrategyResponse:
             "token_usage": self.token_usage,
         }
 
-
 @dataclass
 class ModelConfig:
     """模型配置"""
@@ -175,7 +167,6 @@ class ModelConfig:
     timeout: int = 60
     retry_attempts: int = 3
     custom_params: dict[str, Any] = field(default_factory=dict)
-
 
 class BaseAIProvider(ABC):
     """AI Provider基础抽象类"""
@@ -269,11 +260,15 @@ QuantMind / Qlib 平台规范（必须遵守）：
 """
 
         if request.custom_requirements:
-            base_prompt += "\n自定义要求:\n" + "\n".join(f"- {req}" for req in request.custom_requirements)
+            base_prompt += "\n自定义要求:\n" + "\n".join(
+                f"- {req}" for req in request.custom_requirements
+            )
 
         return base_prompt.strip()
 
-    def _parse_strategy_response(self, raw_response: str, request: StrategyRequest) -> StrategyResponse:
+    def _parse_strategy_response(
+        self, raw_response: str, request: StrategyRequest
+    ) -> StrategyResponse:
         """解析AI响应为StrategyResponse对象"""
         # 这是一个基础实现，具体的Provider可以重写此方法
         return StrategyResponse(
@@ -281,12 +276,16 @@ QuantMind / Qlib 平台规范（必须遵守）：
             description="AI生成的交易策略",
             strategy_type=request.strategy_type or StrategyType.CUSTOM,
             complexity_level=request.complexity_level,
-            code=StrategyCode(language="python", code=raw_response, dependencies=["pandas", "numpy"]),
+            code=StrategyCode(
+                language="python", code=raw_response, dependencies=["pandas", "numpy"]
+            ),
             model_used=self.config.model_name,
         )
 
     def _log_messages(self, provider_name: str, messages: list[dict[str, str]]):
         """记录消息历史"""
-        formatted_messages = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
+        formatted_messages = "\n".join(
+            [f"{msg['role']}: {msg['content']}" for msg in messages]
+        )
         logger.debug(f"调用AI提供商: {provider_name}")
         logger.debug(f"消息历史: {formatted_messages}")

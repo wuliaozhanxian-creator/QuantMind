@@ -3,7 +3,7 @@
 import json
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
@@ -21,12 +21,13 @@ from backend.services.engine.qlib_app.services.trade_metrics_utils import (
 )
 from backend.services.engine.qlib_app.utils.benchmark_symbol import benchmark_candidates
 from backend.services.engine.qlib_app.utils.qlib_utils import D
-from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
+from backend.services.engine.qlib_app.utils.structured_logger import (
+    StructuredTaskLogger,
+)
 from backend.shared.redis_sentinel_client import get_redis_sentinel_client
 
 logger = logging.getLogger(__name__)
 task_logger = StructuredTaskLogger(logger, "RiskAnalyzer")
-
 
 class RiskAnalyzer:
     """Risk Analyzer for Qlib Backtest Results"""
@@ -73,7 +74,9 @@ class RiskAnalyzer:
         return float(qty_int)
 
     @classmethod
-    def _clamp_unreasonable_metric(cls, value: Any, *, abs_limit: float, metric_name: str) -> float | None:
+    def _clamp_unreasonable_metric(
+        cls, value: Any, *, abs_limit: float, metric_name: str
+    ) -> float | None:
         val = cls._to_finite_float(value)
         if val is None:
             return None
@@ -89,7 +92,9 @@ class RiskAnalyzer:
         return val
 
     @classmethod
-    def _load_factor_map(cls, symbol_date_pairs: list[tuple[str, str]]) -> dict[tuple[str, str], float]:
+    def _load_factor_map(
+        cls, symbol_date_pairs: list[tuple[str, str]]
+    ) -> dict[tuple[str, str], float]:
         factor_map: dict[tuple[str, str], float] = {}
         if not symbol_date_pairs:
             return factor_map
@@ -110,10 +115,16 @@ class RiskAnalyzer:
                 factor = cls._to_finite_float(row_val.get("$factor"))
                 if factor is None or factor <= 0:
                     continue
-                date_key = dt.strftime("%Y-%m-%d") if hasattr(dt, "strftime") else str(dt)[:10]
+                date_key = (
+                    dt.strftime("%Y-%m-%d") if hasattr(dt, "strftime") else str(dt)[:10]
+                )
                 factor_map[(str(instrument), date_key)] = factor
         except Exception as e:
-            task_logger.warning("load_factor_map_failed", "Failed to load factor map from qlib", error=str(e))
+            task_logger.warning(
+                "load_factor_map_failed",
+                "Failed to load factor map from qlib",
+                error=str(e),
+            )
         return factor_map
 
     @classmethod
@@ -144,11 +155,17 @@ class RiskAnalyzer:
             )
 
         price_val = cls._to_finite_float(trade.get("price", trade.get("adj_price")))
-        quantity_val = cls._to_finite_float(trade.get("quantity", trade.get("adj_quantity")))
+        quantity_val = cls._to_finite_float(
+            trade.get("quantity", trade.get("adj_quantity"))
+        )
         if price_val is None and quantity_val is None:
             return None
 
-        qty_key = cls._normalize_display_quantity(symbol_key, quantity_val) if quantity_val is not None else None
+        qty_key = (
+            cls._normalize_display_quantity(symbol_key, quantity_val)
+            if quantity_val is not None
+            else None
+        )
         return (
             "price_qty",
             date_key,
@@ -214,7 +231,9 @@ class RiskAnalyzer:
         return deduped
 
     @classmethod
-    def normalize_trades_for_display(cls, trades: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def normalize_trades_for_display(
+        cls, trades: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
         if not isinstance(trades, list) or not trades:
             return trades
 
@@ -257,20 +276,29 @@ class RiskAnalyzer:
             #   quantity 存的是 adj_quantity（复权单位），需要还原
             # 检测条件：quantity 非整数（复权单位特征）或 price 明显偏小（被错误除以 factor）
             quantity_is_integer_like = (
-                quantity is not None and np.isfinite(quantity) and abs(quantity - round(quantity)) <= 1e-6
+                quantity is not None
+                and np.isfinite(quantity)
+                and abs(quantity - round(quantity)) <= 1e-6
             )
             # 如果 quantity 不是整数且 adj_quantity 存在，说明可能是旧数据
             # 或者 price 存在但明显小于 adj_price（被错误除以 factor），也需要还原
             price_looks_adjusted = (
-                price is not None and adj_price is not None and factor_val is not None and factor_val > 0
-                and price < adj_price * 0.9  # price 明显小于 adj_price，说明被错误缩小了
+                price is not None
+                and adj_price is not None
+                and factor_val is not None
+                and factor_val > 0
+                and price
+                < adj_price * 0.9  # price 明显小于 adj_price，说明被错误缩小了
             )
             should_restore = (
                 factor_val is not None
                 and factor_val > 0
                 and adj_price is not None
                 and adj_quantity is not None
-                and ((quantity is None or not quantity_is_integer_like) or price_looks_adjusted)
+                and (
+                    (quantity is None or not quantity_is_integer_like)
+                    or price_looks_adjusted
+                )
             )
             if should_restore:
                 display_price = adj_price / factor_val
@@ -283,14 +311,18 @@ class RiskAnalyzer:
             row["quantity"] = cls._normalize_display_quantity(symbol, display_quantity)
             row["totalAmount"] = float(total_amount)
             row["adj_price"] = float(adj_price) if adj_price is not None else None
-            row["adj_quantity"] = float(adj_quantity) if adj_quantity is not None else None
+            row["adj_quantity"] = (
+                float(adj_quantity) if adj_quantity is not None else None
+            )
             row["factor"] = float(factor_val) if factor_val is not None else None
             normalized.append(row)
 
         return normalized
 
     @staticmethod
-    def _compute_benchmark_return(benchmark: str, start_date: str, end_date: str) -> float | None:
+    def _compute_benchmark_return(
+        benchmark: str, start_date: str, end_date: str
+    ) -> float | None:
         try:
             df = None
             for candidate in benchmark_candidates(benchmark):
@@ -319,7 +351,11 @@ class RiskAnalyzer:
                 metric_name="benchmark_return",
             )
         except Exception as exc:
-            task_logger.warning("compute_benchmark_return_failed", "Failed to compute benchmark return", error=str(exc))
+            task_logger.warning(
+                "compute_benchmark_return_failed",
+                "Failed to compute benchmark return",
+                error=str(exc),
+            )
             return None
 
     @classmethod
@@ -335,7 +371,9 @@ class RiskAnalyzer:
         try:
             bm_df = None
             for candidate in benchmark_candidates(benchmark):
-                bm_df = D.features([candidate], ["$close"], start_time=start_date, end_time=end_date)
+                bm_df = D.features(
+                    [candidate], ["$close"], start_time=start_date, end_time=end_date
+                )
                 if bm_df is not None and not bm_df.empty:
                     break
             if bm_df is None or bm_df.empty:
@@ -366,21 +404,37 @@ class RiskAnalyzer:
                 if periods > 0 and port_compounded > 0
                 else annual_return
             )
-            bm_annual = float(bm_compounded ** (252 / periods) - 1) if periods > 0 and bm_compounded > 0 else None
+            bm_annual = (
+                float(bm_compounded ** (252 / periods) - 1)
+                if periods > 0 and bm_compounded > 0
+                else None
+            )
             alpha = (
                 (port_annual - (risk_free_rate + beta * (bm_annual - risk_free_rate)))
-                if port_annual is not None and bm_annual is not None and beta is not None
+                if port_annual is not None
+                and bm_annual is not None
+                and beta is not None
                 else None
             )
 
             # Information Ratio
             excess = port_r - bm_r
             excess_std = float(excess.std())
-            ir = float(excess.mean() / excess_std * np.sqrt(252)) if excess_std > 0 else None
+            ir = (
+                float(excess.mean() / excess_std * np.sqrt(252))
+                if excess_std > 0
+                else None
+            )
 
-            beta = cls._clamp_unreasonable_metric(beta, abs_limit=10.0, metric_name="beta")
-            alpha = cls._clamp_unreasonable_metric(alpha, abs_limit=10.0, metric_name="alpha")
-            ir = cls._clamp_unreasonable_metric(ir, abs_limit=20.0, metric_name="information_ratio")
+            beta = cls._clamp_unreasonable_metric(
+                beta, abs_limit=10.0, metric_name="beta"
+            )
+            alpha = cls._clamp_unreasonable_metric(
+                alpha, abs_limit=10.0, metric_name="alpha"
+            )
+            ir = cls._clamp_unreasonable_metric(
+                ir, abs_limit=20.0, metric_name="information_ratio"
+            )
 
             return {
                 "alpha": cls._clean_nan(alpha),
@@ -388,11 +442,17 @@ class RiskAnalyzer:
                 "information_ratio": cls._clean_nan(ir),
             }
         except Exception as exc:
-            task_logger.warning("compute_risk_metrics_failed", "Risk metrics calculation failed", error=str(exc))
+            task_logger.warning(
+                "compute_risk_metrics_failed",
+                "Risk metrics calculation failed",
+                error=str(exc),
+            )
             return {"alpha": None, "beta": None, "information_ratio": None}
 
     @staticmethod
-    def _extract_report_from_portfolio(portfolio_dict: dict[str, Any]) -> pd.DataFrame | None:
+    def _extract_report_from_portfolio(
+        portfolio_dict: dict[str, Any],
+    ) -> pd.DataFrame | None:
         if not portfolio_dict:
             return None
         report = None
@@ -432,7 +492,11 @@ class RiskAnalyzer:
         avg_win = 0.0
         avg_loss = 0.0
         if not closed_trades.empty and "pnl" in closed_trades.columns:
-            pnl = pd.to_numeric(closed_trades["pnl"], errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
+            pnl = (
+                pd.to_numeric(closed_trades["pnl"], errors="coerce")
+                .replace([np.inf, -np.inf], np.nan)
+                .dropna()
+            )
             pnl_wins = pnl[pnl > 0]
             pnl_losses = pnl[pnl < 0]
             avg_win = float(pnl_wins.mean()) if not pnl_wins.empty else 0.0
@@ -456,7 +520,14 @@ class RiskAnalyzer:
 
         try:
             df_trades = pd.DataFrame(trades)
-            date_col = next((c for c in ["date", "datetime", "trade_date"] if c in df_trades.columns), None)
+            date_col = next(
+                (
+                    c
+                    for c in ["date", "datetime", "trade_date"]
+                    if c in df_trades.columns
+                ),
+                None,
+            )
             if date_col:
                 df_trades["_dt"] = pd.to_datetime(df_trades[date_col])
 
@@ -471,21 +542,33 @@ class RiskAnalyzer:
 
             # 1. 单笔收益率分布
             pnl_series = (
-                pd.to_numeric(closed_trades["return_pct"], errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
+                pd.to_numeric(closed_trades["return_pct"], errors="coerce")
+                .replace([np.inf, -np.inf], np.nan)
+                .dropna()
                 if not closed_trades.empty and "return_pct" in closed_trades.columns
                 else pd.Series([0.0], dtype=float)
             )
             pnl_counts, pnl_bins = np.histogram(pnl_series.dropna(), bins=20)
-            pnl_distribution = {"bins": pnl_bins.tolist(), "counts": pnl_counts.tolist()}
+            pnl_distribution = {
+                "bins": pnl_bins.tolist(),
+                "counts": pnl_counts.tolist(),
+            }
 
             # 2. 持仓天数分布
-            holding_days = cls._resolve_holding_days_series_for_advanced_stats(closed_trades, df_trades)
+            holding_days = cls._resolve_holding_days_series_for_advanced_stats(
+                closed_trades, df_trades
+            )
             if holding_days.empty:
                 holding_days = pd.Series([1.0], dtype=float)
 
             holding_bins = [1.0, 7.0, 30.0, 90.0, 180.0, 365.0]
-            holding_counts, _ = np.histogram(holding_days.clip(1, 365), bins=holding_bins)
-            holding_distribution = {"bins": holding_bins, "counts": holding_counts.tolist()}
+            holding_counts, _ = np.histogram(
+                holding_days.clip(1, 365), bins=holding_bins
+            )
+            holding_distribution = {
+                "bins": holding_bins,
+                "counts": holding_counts.tolist(),
+            }
 
             # 3. 交易频率 (按月)
             freq_series = build_trade_frequency_series_from_closed_trades(closed_trades)
@@ -494,8 +577,12 @@ class RiskAnalyzer:
                 "pnl_distribution": pnl_distribution,
                 "holding_days_distribution": holding_distribution,
                 "trade_frequency_series": freq_series,
-                "profit_loss_days_ratio": float(trade_metrics["profit_loss_days_ratio"]),
-                "avg_holding_days": float(holding_days.mean()) if not holding_days.empty else 1.0,
+                "profit_loss_days_ratio": float(
+                    trade_metrics["profit_loss_days_ratio"]
+                ),
+                "avg_holding_days": float(holding_days.mean())
+                if not holding_days.empty
+                else 1.0,
                 "trade_frequency": float(trade_metrics["trade_frequency"]),
                 "real_win_rate": float(trade_metrics["real_win_rate"]),
                 "avg_win_return": float(trade_metrics["avg_win_return"]),
@@ -512,11 +599,17 @@ class RiskAnalyzer:
                 "metric_basis": str(trade_metrics["metric_basis"]),
             }
         except Exception as e:
-            task_logger.warning("calculate_advanced_trade_stats_failed", "Failed to calculate advanced trade stats", error=str(e))
+            task_logger.warning(
+                "calculate_advanced_trade_stats_failed",
+                "Failed to calculate advanced trade stats",
+                error=str(e),
+            )
             return {}
 
     @classmethod
-    def _resolve_holding_days_series_for_advanced_stats(cls, closed_trades: pd.DataFrame, raw_trades: pd.DataFrame) -> pd.Series:
+    def _resolve_holding_days_series_for_advanced_stats(
+        cls, closed_trades: pd.DataFrame, raw_trades: pd.DataFrame
+    ) -> pd.Series:
         if not closed_trades.empty and "holding_days" in closed_trades.columns:
             holding = pd.to_numeric(closed_trades["holding_days"], errors="coerce")
             holding = holding.replace([np.inf, -np.inf], np.nan).dropna()
@@ -536,7 +629,11 @@ class RiskAnalyzer:
         cls, df_trades: pd.DataFrame, date_col: str | None
     ) -> pd.Series:
         """从买卖配对推导持仓天数（用于高级统计预计算）。"""
-        if date_col is None or "symbol" not in df_trades.columns or "action" not in df_trades.columns:
+        if (
+            date_col is None
+            or "symbol" not in df_trades.columns
+            or "action" not in df_trades.columns
+        ):
             return pd.Series(dtype=float)
 
         working = df_trades.copy()
@@ -553,13 +650,17 @@ class RiskAnalyzer:
         # 抽样避免超大规模计算
         if len(working) > 5000:
             symbols = working["symbol"].unique()
-            sample_symbols = np.random.choice(symbols, size=min(len(symbols), 200), replace=False)
+            sample_symbols = np.random.choice(
+                symbols, size=min(len(symbols), 200), replace=False
+            )
             working = working[working["symbol"].isin(sample_symbols)]
 
         qty_col = "quantity" if "quantity" in working.columns else None
         if qty_col is not None:
             working["qty"] = pd.to_numeric(working[qty_col], errors="coerce").abs()
-            working["qty"] = working["qty"].replace([np.inf, -np.inf], np.nan).fillna(1.0)
+            working["qty"] = (
+                working["qty"].replace([np.inf, -np.inf], np.nan).fillna(1.0)
+            )
             working.loc[working["qty"] <= 0, "qty"] = 1.0
         else:
             working["qty"] = 1.0
@@ -636,14 +737,20 @@ class RiskAnalyzer:
                 return [
                     {
                         "date": idx.strftime("%Y-%m-%d"),
-                        "value": (float(val) if not pd.isna(val) and not np.isnan(val) else 0.0),
+                        "value": (
+                            float(val)
+                            if not pd.isna(val) and not np.isnan(val)
+                            else 0.0
+                        ),
                     }
                     for idx, val in report[value_col].items()
                 ]
         return cls._build_minimal_equity_curve(request, total_return)
 
     @staticmethod
-    def _build_minimal_equity_curve(request: QlibBacktestRequest, total_return: float) -> list[dict[str, Any]]:
+    def _build_minimal_equity_curve(
+        request: QlibBacktestRequest, total_return: float
+    ) -> list[dict[str, Any]]:
         initial = float(request.initial_capital)
         final_value = initial * (1 + float(total_return)) if total_return else initial
         return [
@@ -652,7 +759,9 @@ class RiskAnalyzer:
         ]
 
     @staticmethod
-    def _build_drawdown_curve(equity_curve: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _build_drawdown_curve(
+        equity_curve: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
         if not equity_curve:
             return []
         values = [point["value"] for point in equity_curve]
@@ -662,13 +771,16 @@ class RiskAnalyzer:
         for value in values:
             current_max = max(current_max, value)
             running_max.append(current_max)
-        drawdowns = [(value - peak) / peak if peak else 0 for value, peak in zip(values, running_max)]
+        drawdowns = [
+            (value - peak) / peak if peak else 0
+            for value, peak in zip(values, running_max, strict=False)
+        ]
         return [
             {
                 "date": date,
                 "drawdown": float(dd) if not (np.isnan(dd) or np.isinf(dd)) else 0.0,
             }
-            for date, dd in zip(dates, drawdowns)
+            for date, dd in zip(dates, drawdowns, strict=False)
         ]
 
     @classmethod
@@ -682,14 +794,22 @@ class RiskAnalyzer:
                 key = f"qlib:backtest:trades:{backtest_id}"
                 raw_trades = r.lrange(key, 0, -1)
                 if raw_trades:
-                    task_logger.info("read_trades_from_redis", "Read trades from Redis", count=len(raw_trades))
+                    task_logger.info(
+                        "read_trades_from_redis",
+                        "Read trades from Redis",
+                        count=len(raw_trades),
+                    )
                     for item in raw_trades:
                         if isinstance(item, bytes):
                             item = item.decode("utf-8")
                         trades.append(json.loads(item))
                     return cls.normalize_trades_for_display(trades)
             except Exception as e:
-                task_logger.warning("read_trades_from_redis_failed", "Failed to read trades from Redis", error=str(e))
+                task_logger.warning(
+                    "read_trades_from_redis_failed",
+                    "Failed to read trades from Redis",
+                    error=str(e),
+                )
 
         sys_analyser = portfolio_dict.get("sys_analyser")
         if isinstance(sys_analyser, dict):
@@ -738,7 +858,11 @@ class RiskAnalyzer:
                         }
                     )
         except Exception as e:
-            task_logger.warning("infer_trades_from_report_failed", "Failed to infer trades from report", error=str(e))
+            task_logger.warning(
+                "infer_trades_from_report_failed",
+                "Failed to infer trades from report",
+                error=str(e),
+            )
         return trades
 
     @classmethod
@@ -752,7 +876,11 @@ class RiskAnalyzer:
 
             for index, row in df.iterrows():
                 date, symbol = index if isinstance(index, tuple) else (index, "UNKNOWN")
-                date_str = date.strftime("%Y-%m-%d") if hasattr(date, "strftime") else str(date)[:10]
+                date_str = (
+                    date.strftime("%Y-%m-%d")
+                    if hasattr(date, "strftime")
+                    else str(date)[:10]
+                )
                 symbol_str = str(symbol)
                 amount_raw = cls._to_finite_float(row.get("amount", 0)) or 0.0
                 adj_price = cls._to_finite_float(row.get("price", 0)) or 0.0
@@ -805,7 +933,10 @@ class RiskAnalyzer:
                 display_quantity = adj_quantity
                 if factor_val is not None and factor_val > 0:
                     # adj_quantity 若非整数，说明可能是旧数据存的复权单位，需要还原
-                    if not np.isfinite(adj_quantity) or abs(adj_quantity - round(adj_quantity)) > 1e-6:
+                    if (
+                        not np.isfinite(adj_quantity)
+                        or abs(adj_quantity - round(adj_quantity)) > 1e-6
+                    ):
                         display_price = adj_price / factor_val
                         display_quantity = adj_quantity * factor_val
 
@@ -819,7 +950,11 @@ class RiskAnalyzer:
                         "symbol": row["symbol"],
                         "action": row["action"],
                         "price": float(display_price),
-                        "quantity": int(cls._normalize_display_quantity(row["symbol"], display_quantity)),
+                        "quantity": int(
+                            cls._normalize_display_quantity(
+                                row["symbol"], display_quantity
+                            )
+                        ),
                         "totalAmount": float(total_amount),
                         "commission": float(row["commission"]),
                         "adj_price": float(adj_price),
@@ -828,11 +963,17 @@ class RiskAnalyzer:
                     }
                 )
         except Exception as e:
-            task_logger.warning("parse_trades_dataframe_failed", "Failed to parse trades dataframe", error=str(e))
+            task_logger.warning(
+                "parse_trades_dataframe_failed",
+                "Failed to parse trades dataframe",
+                error=str(e),
+            )
         return trades
 
     @classmethod
-    def _build_positions_list(cls, portfolio_dict: dict[str, Any]) -> list[dict[str, Any]]:
+    def _build_positions_list(
+        cls, portfolio_dict: dict[str, Any]
+    ) -> list[dict[str, Any]]:
         positions = []
         try:
             if "1day" in portfolio_dict:
@@ -841,14 +982,22 @@ class RiskAnalyzer:
                     pos_history = freq_data[1]
                     if isinstance(pos_history, dict):
                         for date, pos_obj in pos_history.items():
-                            date_str = date.strftime("%Y-%m-%d") if hasattr(date, "strftime") else str(date)
+                            date_str = (
+                                date.strftime("%Y-%m-%d")
+                                if hasattr(date, "strftime")
+                                else str(date)
+                            )
                             if hasattr(pos_obj, "get_stock_list"):
                                 # 计算组合总净值用于权重归一化
                                 total_val = 0.0
                                 try:
-                                    total_val = float(pos_obj.calculate_value()) if hasattr(pos_obj, "calculate_value") else 0.0
+                                    total_val = (
+                                        float(pos_obj.calculate_value())
+                                        if hasattr(pos_obj, "calculate_value")
+                                        else 0.0
+                                    )
                                 except Exception:
-                                    pass
+                                    logger.debug("ignored exception", exc_info=True)
 
                                 for symbol in pos_obj.get_stock_list():
                                     amount = pos_obj.get_stock_amount(symbol)
@@ -861,7 +1010,7 @@ class RiskAnalyzer:
                                             price = pos_obj.get_stock_price(symbol)
                                             weight = float(amount * price) / total_val
                                         except Exception:
-                                            pass
+                                            logger.debug("ignored exception", exc_info=True)
                                     positions.append(
                                         {
                                             "date": date_str,
@@ -878,7 +1027,9 @@ class RiskAnalyzer:
                                             "date": date_str,
                                             "symbol": symbol,
                                             "weight": float(weight),
-                                            "side": "short" if float(weight) < 0 else "long",
+                                            "side": "short"
+                                            if float(weight) < 0
+                                            else "long",
                                         }
                                     )
 
@@ -889,13 +1040,17 @@ class RiskAnalyzer:
                 elif isinstance(raw, dict):
                     for symbol, weight in raw.items():
                         w = float(weight)
-                        positions.append({
-                            "symbol": symbol,
-                            "weight": w,
-                            "side": "short" if w < 0 else "long",
-                        })
+                        positions.append(
+                            {
+                                "symbol": symbol,
+                                "weight": w,
+                                "side": "short" if w < 0 else "long",
+                            }
+                        )
         except Exception as e:
-            task_logger.warning("extract_positions_failed", "Failed to extract positions", error=str(e))
+            task_logger.warning(
+                "extract_positions_failed", "Failed to extract positions", error=str(e)
+            )
         return positions
 
     @classmethod
@@ -911,7 +1066,9 @@ class RiskAnalyzer:
             "tenant_id": request.tenant_id,
             "history_source": request.history_source,
             "qlib_strategy_type": request.strategy_type,
-            "qlib_strategy_params": request.strategy_params.model_dump() if hasattr(request.strategy_params, "model_dump") else dict(request.strategy_params),
+            "qlib_strategy_params": request.strategy_params.model_dump()
+            if hasattr(request.strategy_params, "model_dump")
+            else dict(request.strategy_params),
             "benchmark_symbol": request.benchmark,
             "deal_price": request.deal_price,
             "seed": request.seed,
@@ -930,13 +1087,18 @@ class RiskAnalyzer:
 
             payload["signal_meta"] = signal_meta
 
-        if not payload.get("model_id") and hasattr(request, "model_id") and request.model_id:
+        if (
+            not payload.get("model_id")
+            and hasattr(request, "model_id")
+            and request.model_id
+        ):
             payload["model_id"] = request.model_id
 
         if hasattr(request, "strategy_content") and request.strategy_content:
             payload["strategy_content"] = request.strategy_content
             # 从策略代码中解析 STRATEGY_CONFIG['strategy_name']
             import re
+
             match = re.search(
                 r"STRATEGY_CONFIG\s*\[\s*['\"]strategy_name['\"]\s*\]\s*=\s*['\"]([^'\"]+)['\"]",
                 request.strategy_content,
@@ -966,7 +1128,7 @@ class RiskAnalyzer:
                 try:
                     await on_progress(val, msg)
                 except Exception:
-                    pass
+                    logger.debug("ignored exception", exc_info=True)
 
         await report_progress(0.85, "正在提取回测原始报告...")
         report = cls._extract_report_from_portfolio(portfolio_dict)
@@ -984,7 +1146,11 @@ class RiskAnalyzer:
                 if "return" in report.columns:
                     daily_returns = report["return"]
                     value_col = next(
-                        (col for col in ["account", "value", "total_value"] if col in report.columns),
+                        (
+                            col
+                            for col in ["account", "value", "total_value"]
+                            if col in report.columns
+                        ),
                         None,
                     )
                     if value_col:
@@ -999,7 +1165,9 @@ class RiskAnalyzer:
                     if total_return is not None:
                         trading_days = len(daily_returns)
                         if trading_days > 0:
-                            annual_return = cls._clean_nan((1 + total_return) ** (252 / trading_days) - 1)
+                            annual_return = cls._clean_nan(
+                                (1 + total_return) ** (252 / trading_days) - 1
+                            )
 
                     # Build equity curve for net-of-fees metrics
                     if value_col:
@@ -1016,7 +1184,9 @@ class RiskAnalyzer:
 
                     if volatility and volatility > 0:
                         risk_free_rate = float(getattr(request, "risk_free_rate", 0.02))
-                        sharpe_ratio = cls._clean_nan((annual_return - risk_free_rate) / volatility)
+                        sharpe_ratio = cls._clean_nan(
+                            (annual_return - risk_free_rate) / volatility
+                        )
 
                     cummax = equity.cummax()
                     drawdown = (equity - cummax) / cummax
@@ -1028,12 +1198,16 @@ class RiskAnalyzer:
                         available_columns=list(report.columns),
                     )
             except Exception as e:
-                task_logger.exception("metric_extraction_failed", "Metric extraction failed", error=str(e))
+                task_logger.exception(
+                    "metric_extraction_failed", "Metric extraction failed", error=str(e)
+                )
         else:
             task_logger.warning("empty_or_invalid_report", "Empty or invalid report")
 
         await report_progress(0.89, "正在对比基准指数收益...")
-        benchmark_return = cls._compute_benchmark_return(request.benchmark, request.start_date, request.end_date)
+        benchmark_return = cls._compute_benchmark_return(
+            request.benchmark, request.start_date, request.end_date
+        )
         benchmark_return = cls._clean_nan(benchmark_return)
 
         risk_metrics = {"alpha": None, "beta": None, "information_ratio": None}
@@ -1061,7 +1235,9 @@ class RiskAnalyzer:
 
         await report_progress(0.91, "正在生成净值与回撤曲线...")
         equity_curve = cls._build_equity_curve(
-            portfolio_dict, request, float(total_return) if total_return is not None else 0.0
+            portfolio_dict,
+            request,
+            float(total_return) if total_return is not None else 0.0,
         )
         drawdown_curve = cls._build_drawdown_curve(equity_curve)
 
@@ -1070,7 +1246,9 @@ class RiskAnalyzer:
         trades = cls.normalize_trades_for_display(trades)
         positions = cls._build_positions_list(portfolio_dict)
         trade_stats = cls._calculate_trade_stats(trades, daily_returns=daily_returns)
-        advanced_stats = cls._calculate_advanced_trade_stats(trades, daily_returns=daily_returns)
+        advanced_stats = cls._calculate_advanced_trade_stats(
+            trades, daily_returns=daily_returns
+        )
 
         factor_metrics = None
         stratified_returns = None
@@ -1095,7 +1273,9 @@ class RiskAnalyzer:
 
             if pred_df is not None and not pred_df.empty:
                 await report_progress(0.95, "正在执行因子有效性分析...")
-                instruments = pred_df.index.get_level_values("instrument").unique().tolist()
+                instruments = (
+                    pred_df.index.get_level_values("instrument").unique().tolist()
+                )
                 label_df = D.features(
                     instruments,
                     ["Ref($close, -1)/$close - 1"],
@@ -1103,49 +1283,68 @@ class RiskAnalyzer:
                     end_time=request.end_date,
                 )
                 if label_df is not None and not label_df.empty:
-                    factor_metrics = FactorAnalysisService.calculate_ic_metrics(pred_df, label_df)
-                    stratified_returns = FactorAnalysisService.calculate_stratified_returns(pred_df, label_df)
+                    factor_metrics = FactorAnalysisService.calculate_ic_metrics(
+                        pred_df, label_df
+                    )
+                    stratified_returns = (
+                        FactorAnalysisService.calculate_stratified_returns(
+                            pred_df, label_df
+                        )
+                    )
 
             # 2. Style Attribution
             if positions:
                 await report_progress(0.97, "正在分析持仓风格归因...")
-                style_attribution = await StyleAttributionService.analyze_portfolio_exposure(
-                    positions=positions,
-                    benchmark=request.benchmark,
-                    start_date=request.start_date,
-                    end_date=request.end_date,
+                style_attribution = (
+                    await StyleAttributionService.analyze_portfolio_exposure(
+                        positions=positions,
+                        benchmark=request.benchmark,
+                        start_date=request.start_date,
+                        end_date=request.end_date,
+                    )
                 )
 
             # 3. Rebalance Instructions
             target_pos = []
             if positions:
-                all_dates = sorted(list(set([p["date"] for p in positions if "date" in p])))
+                all_dates = sorted({p["date"] for p in positions if "date" in p})
                 if all_dates:
                     last_pos_date = all_dates[-1]
-                    target_pos = [p for p in positions if p.get("date") == last_pos_date]
+                    target_pos = [
+                        p for p in positions if p.get("date") == last_pos_date
+                    ]
 
             if not target_pos and pred_df is not None:
                 try:
                     last_pred_date = pred_df.index.get_level_values("datetime").max()
                     latest_scores = pred_df.xs(last_pred_date, level="datetime")
-                    top_stocks = latest_scores.nlargest(request.strategy_params.topk, latest_scores.columns[0])
-                    target_pos = [{"symbol": s, "weight": 1.0 / len(top_stocks)} for s in top_stocks.index]
+                    top_stocks = latest_scores.nlargest(
+                        request.strategy_params.topk, latest_scores.columns[0]
+                    )
+                    target_pos = [
+                        {"symbol": s, "weight": 1.0 / len(top_stocks)}
+                        for s in top_stocks.index
+                    ]
                     task_logger.info(
                         "generated_fallback_target_positions",
                         "Generated fallback target positions",
                         count=len(target_pos),
                     )
                 except Exception:
-                    pass
+                    logger.debug("ignored exception", exc_info=True)
 
             if target_pos:
-                rebalance_suggestions = OrderGenerationService.generate_rebalance_instructions(
-                    target_positions=target_pos,
-                    total_assets=float(final_total_assets),
+                rebalance_suggestions = (
+                    OrderGenerationService.generate_rebalance_instructions(
+                        target_positions=target_pos,
+                        total_assets=float(final_total_assets),
+                    )
                 )
 
         except Exception as fe:
-            task_logger.exception("advanced_analysis_skipped", "Advanced analysis skipped", error=str(fe))
+            task_logger.exception(
+                "advanced_analysis_skipped", "Advanced analysis skipped", error=str(fe)
+            )
 
         await report_progress(0.99, "正在汇总回测报告结果...")
         return QlibBacktestResult(
@@ -1158,14 +1357,22 @@ class RiskAnalyzer:
             annual_return=float(annual_return) if annual_return is not None else 0.0,
             sharpe_ratio=float(sharpe_ratio) if sharpe_ratio is not None else 0.0,
             max_drawdown=float(max_drawdown) if max_drawdown is not None else 0.0,
-            alpha=float(risk_metrics["alpha"]) if risk_metrics["alpha"] is not None else None,
+            alpha=float(risk_metrics["alpha"])
+            if risk_metrics["alpha"] is not None
+            else None,
             total_return=float(total_return) if total_return is not None else None,
             volatility=float(volatility) if volatility is not None else None,
             information_ratio=(
-                float(risk_metrics["information_ratio"]) if risk_metrics["information_ratio"] is not None else None
+                float(risk_metrics["information_ratio"])
+                if risk_metrics["information_ratio"] is not None
+                else None
             ),
-            beta=float(risk_metrics["beta"]) if risk_metrics["beta"] is not None else None,
-            benchmark_return=(float(benchmark_return) if benchmark_return is not None else None),
+            beta=float(risk_metrics["beta"])
+            if risk_metrics["beta"] is not None
+            else None,
+            benchmark_return=(
+                float(benchmark_return) if benchmark_return is not None else None
+            ),
             benchmark_symbol=request.benchmark,
             portfolio_metrics=portfolio_metrics,
             equity_curve=equity_curve,

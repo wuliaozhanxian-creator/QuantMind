@@ -1,17 +1,19 @@
 """Qlib AI 修复路由"""
 
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from backend.services.engine.qlib_app import get_qlib_service
 from backend.services.engine.qlib_app.api.identity import _identity_from_request
-from backend.services.engine.qlib_app.schemas.backtest import QlibAIFixRequest, QlibAIFixResponse
+from backend.services.engine.qlib_app.schemas.backtest import (
+    QlibAIFixRequest,
+    QlibAIFixResponse,
+)
 from backend.shared.utils import normalize_user_id
 
 router = APIRouter(tags=["qlib"])
-
 
 @router.post("/ai-fix", response_model=QlibAIFixResponse)
 async def ai_fix_strategy(
@@ -29,11 +31,17 @@ async def ai_fix_strategy(
             raise HTTPException(status_code=422, detail="invalid request payload")
 
         if request_ctx is None:
-            from backend.services.engine.qlib_app.services.backtest_persistence import BacktestPersistence
-            from backend.services.engine.qlib_app.services.user_strategy_loader import UserStrategyLoader
+            from backend.services.engine.qlib_app.services.backtest_persistence import (
+                BacktestPersistence,
+            )
+            from backend.services.engine.qlib_app.services.user_strategy_loader import (
+                UserStrategyLoader,
+            )
 
             try:
-                from backend.services.engine.ai_strategy.services.strategy_service import StrategyService
+                from backend.services.engine.ai_strategy.services.strategy_service import (
+                    StrategyService,
+                )
             except ImportError:
                 from ai_strategy.services.strategy_service import StrategyService
 
@@ -49,14 +57,18 @@ async def ai_fix_strategy(
 
             original_code = config.get("strategy_content")
             if not original_code:
-                return QlibAIFixResponse(success=False, message="该回测不包含自定义策略代码，无法修复")
+                return QlibAIFixResponse(
+                    success=False, message="该回测不包含自定义策略代码，无法修复"
+                )
 
             ai_service = StrategyService()
             repaired_code = await ai_service.generate_strategy_direct(
                 f"错误信息: {request.error_message or ''}\n堆栈: {request.full_error or ''}\n\n原始代码:\n{original_code}"
             )
             if not repaired_code:
-                return QlibAIFixResponse(success=False, message="AI 未能生成有效的修复方案")
+                return QlibAIFixResponse(
+                    success=False, message="AI 未能生成有效的修复方案"
+                )
             if repaired_code.startswith("```"):
                 repaired_code = repaired_code.split("\n", 1)[-1]
                 repaired_code = repaired_code.rsplit("```", 1)[0].strip()
@@ -93,11 +105,17 @@ async def ai_fix_strategy(
 
         auth_user_id, auth_tenant_id = _identity_from_request(request_ctx)
 
-        from backend.services.engine.qlib_app.services.backtest_persistence import BacktestPersistence
-        from backend.services.engine.qlib_app.services.user_strategy_loader import UserStrategyLoader
+        from backend.services.engine.qlib_app.services.backtest_persistence import (
+            BacktestPersistence,
+        )
+        from backend.services.engine.qlib_app.services.user_strategy_loader import (
+            UserStrategyLoader,
+        )
 
         try:
-            from backend.services.engine.ai_strategy.services.strategy_service import StrategyService
+            from backend.services.engine.ai_strategy.services.strategy_service import (
+                StrategyService,
+            )
         except ImportError:
             from ai_strategy.services.strategy_service import StrategyService
 
@@ -127,7 +145,9 @@ async def ai_fix_strategy(
                 )
                 row = row.fetchone()
                 if not row:
-                    return QlibAIFixResponse(success=False, message="找不到对应的回测记录")
+                    return QlibAIFixResponse(
+                        success=False, message="找不到对应的回测记录"
+                    )
                 config = row[0]
                 user_id = row[1]
                 tenant_id = row[2]
@@ -141,14 +161,20 @@ async def ai_fix_strategy(
                 user_id = getattr(run_data, "user_id", "default") or "default"
                 tenant_id = getattr(run_data, "tenant_id", "default") or "default"
 
-        if normalize_user_id(str(user_id)) != normalize_user_id(auth_user_id) or str(tenant_id) != str(auth_tenant_id):
+        if normalize_user_id(str(user_id)) != normalize_user_id(auth_user_id) or str(
+            tenant_id
+        ) != str(auth_tenant_id):
             raise HTTPException(status_code=403, detail="未授权访问该回测记录")
 
         original_code = config.get("strategy_content")
         if not original_code:
-            return QlibAIFixResponse(success=False, message="该回测不包含自定义策略代码，无法修复")
+            return QlibAIFixResponse(
+                success=False, message="该回测不包含自定义策略代码，无法修复"
+            )
 
-        from backend.services.engine.ai_strategy.services.strategy_service import get_strategy_service
+        from backend.services.engine.ai_strategy.services.strategy_service import (
+            get_strategy_service,
+        )
 
         ai_service = get_strategy_service()
         diagnostic_prompt = f"""
@@ -214,7 +240,9 @@ STRATEGY_CONFIG = get_strategy_config()
             import re as _re
 
             cls_match = _re.search(r"^class\s+(\w+)", original_code, _re.MULTILINE)
-            fn_match = _re.search(r"^def\s+(get_strategy_config)\s*\(", original_code, _re.MULTILINE)
+            fn_match = _re.search(
+                r"^def\s+(get_strategy_config)\s*\(", original_code, _re.MULTILINE
+            )
             if cls_match:
                 strategy_name = cls_match.group(1)
             elif fn_match:
@@ -245,7 +273,7 @@ STRATEGY_CONFIG = get_strategy_config()
                             user_id = str(s.get("user_id", user_id))
                             break
             except Exception:
-                pass
+                pass  # noqa: BLE001 - None
 
         if not strategy_id:
             try:
@@ -258,7 +286,9 @@ STRATEGY_CONFIG = get_strategy_config()
                         from backend.shared.database_pool import get_db
                     except ImportError:
                         try:
-                            from backend.shared.database_manager_v2 import sync_session_maker as get_db
+                            from backend.shared.database_manager_v2 import (
+                                sync_session_maker as get_db,
+                            )
                         except ImportError:
                             get_db = None
 
@@ -282,15 +312,17 @@ STRATEGY_CONFIG = get_strategy_config()
                                 original_name = strategy_name
                                 user_id = str(res["user_id"])
             except Exception:
-                pass
+                pass  # noqa: BLE001 - None
 
         try:
             try:
-                from backend.services.engine.qlib_app.services.user_strategy_loader import _validate_code
+                from backend.services.engine.qlib_app.services.user_strategy_loader import (
+                    _validate_code,
+                )
 
                 _validate_code(repaired_code)
             except Exception as e:
-                raise ValueError(f"AI 生成代码未通过安全校验: {e}")
+                raise ValueError(f"AI 生成代码未通过安全校验: {e}") from e
 
             from backend.shared.strategy_storage import get_strategy_storage_service
 
@@ -298,15 +330,19 @@ STRATEGY_CONFIG = get_strategy_config()
             existing_config: dict[str, Any] = {}
             if strategy_id and strategy_id.isdigit():
                 try:
-                    existing = await svc.get(strategy_id=int(strategy_id), user_id=user_id)
+                    existing = await svc.get(
+                        strategy_id=int(strategy_id), user_id=user_id
+                    )
                     if existing:
                         existing_config = existing.get("config") or {}
                         if isinstance(existing_config, str):
                             import json as _json
 
-                            existing_config = _json.loads(existing_config) if existing_config else {}
+                            existing_config = (
+                                _json.loads(existing_config) if existing_config else {}
+                            )
                 except Exception:
-                    pass
+                    pass  # noqa: BLE001 - None
 
             fix_history: list = existing_config.get("ai_fix_history", [])
             fix_history.append(
@@ -330,7 +366,11 @@ STRATEGY_CONFIG = get_strategy_config()
             }
 
             result = await svc.save(
-                user_id=user_id, name=original_name, code=repaired_code, metadata=save_metadata, strategy_id=strategy_id
+                user_id=user_id,
+                name=original_name,
+                code=repaired_code,
+                metadata=save_metadata,
+                strategy_id=strategy_id,
             )
             new_id = result["id"]
 
@@ -342,7 +382,9 @@ STRATEGY_CONFIG = get_strategy_config()
             )
         except Exception as save_err:
             return QlibAIFixResponse(
-                success=False, repaired_code=repaired_code, message=f"AI 已生成修复方案，但保存失败: {str(save_err)}"
+                success=False,
+                repaired_code=repaired_code,
+                message=f"AI 已生成修复方案，但保存失败: {str(save_err)}",
             )
 
     except Exception as e:

@@ -18,7 +18,6 @@ try:
 except Exception:  # pragma: no cover
     _OTEL_AVAILABLE = False
 
-
 def init_tracing(app: FastAPI, sqlalchemy_engine: object | None = None) -> bool:
     """Initialize OpenTelemetry tracing if dependencies & env enabled.
 
@@ -37,7 +36,9 @@ def init_tracing(app: FastAPI, sqlalchemy_engine: object | None = None) -> bool:
     ):  # feature flag
         return False
 
-    service_name = os.getenv("OTEL_SERVICE_NAME") or os.getenv("SERVICE_NAME", "quantmind-api")
+    service_name = os.getenv("OTEL_SERVICE_NAME") or os.getenv(
+        "SERVICE_NAME", "quantmind-api"
+    )
     endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4318")
 
     resource = Resource.create(
@@ -49,7 +50,9 @@ def init_tracing(app: FastAPI, sqlalchemy_engine: object | None = None) -> bool:
     )
 
     provider = TracerProvider(resource=resource)
-    span_processor = BatchSpanProcessor(OTLPSpanExporter(endpoint=f"{endpoint}/v1/traces"))
+    span_processor = BatchSpanProcessor(
+        OTLPSpanExporter(endpoint=f"{endpoint}/v1/traces")
+    )
     provider.add_span_processor(span_processor)
     trace.set_tracer_provider(provider)
 
@@ -61,8 +64,7 @@ def init_tracing(app: FastAPI, sqlalchemy_engine: object | None = None) -> bool:
         try:
             SQLAlchemyInstrumentor().instrument(engine=sqlalchemy_engine)  # type: ignore
         except Exception:  # pragma: no cover
-            pass
+            pass  # noqa: BLE001 - None
     return True
-
 
 __all__ = ["init_tracing"]

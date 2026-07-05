@@ -6,14 +6,13 @@
 import os
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any
 
 from fastapi import UploadFile
 
 from .cos_service import get_cos_service
 from .errors import ErrorCode
 from .response import error, success
-
 
 class FileUploadService:
     """文件上传服务类"""
@@ -33,7 +32,11 @@ class FileUploadService:
         "gif": [b"GIF87a", b"GIF89a"],
         "bmp": [b"BM"],
         "webp": [b"RIFF"],
-        "mp4": [b"\x00\x00\x00\x1cftyp", b"\x00\x00\x00\x18ftyp", b"\x00\x00\x00\x20ftyp"],
+        "mp4": [
+            b"\x00\x00\x00\x1cftyp",
+            b"\x00\x00\x00\x18ftyp",
+            b"\x00\x00\x00\x20ftyp",
+        ],
         "webm": [b"\x1aE\xdf\xa3"],
         "ogg": [b"OggS"],
         "mov": [b"\x00\x00\x00\x14ftypqt", b"\x00\x00\x00\x1cftypqt"],
@@ -58,7 +61,9 @@ class FileUploadService:
         """初始化文件上传服务"""
         self.cos_service = get_cos_service()
 
-    def _validate_file(self, file: UploadFile, file_category: str = "auto") -> dict[str, Any]:
+    def _validate_file(
+        self, file: UploadFile, file_category: str = "auto"
+    ) -> dict[str, Any]:
         """
         验证上传的文件
 
@@ -67,7 +72,7 @@ class FileUploadService:
             file_category: 文件类别 (auto/image/document/archive)
 
         Returns:
-            Dict: 验证结果
+            dict: 验证结果
         """
         try:
             # 检查文件名
@@ -95,9 +100,15 @@ class FileUploadService:
                 return {"valid": False, "error": f"不支持的图片类型: {file_ext}"}
             elif file_category == "video" and file_ext not in self.ALLOWED_VIDEO_TYPES:
                 return {"valid": False, "error": f"不支持的视频类型: {file_ext}"}
-            elif file_category == "document" and file_ext not in self.ALLOWED_DOCUMENT_TYPES:
+            elif (
+                file_category == "document"
+                and file_ext not in self.ALLOWED_DOCUMENT_TYPES
+            ):
                 return {"valid": False, "error": f"不支持的文档类型: {file_ext}"}
-            elif file_category == "archive" and file_ext not in self.ALLOWED_ARCHIVE_TYPES:
+            elif (
+                file_category == "archive"
+                and file_ext not in self.ALLOWED_ARCHIVE_TYPES
+            ):
                 return {"valid": False, "error": f"不支持的压缩包类型: {file_ext}"}
 
             # 获取文件大小
@@ -126,7 +137,9 @@ class FileUploadService:
             magic_signatures = self.MAGIC_BYTES.get(file_ext)
             if magic_signatures and file_size > 0:
                 try:
-                    header = file.file.read(max(16, len(max(magic_signatures, key=len))))
+                    header = file.file.read(
+                        max(16, len(max(magic_signatures, key=len)))
+                    )
                     file.file.seek(0)
                 except Exception as exc:
                     return {"valid": False, "error": f"文件头读取失败: {exc}"}
@@ -149,7 +162,9 @@ class FileUploadService:
         except Exception as e:
             return {"valid": False, "error": f"文件验证失败: {str(e)}"}
 
-    def _extract_image_metadata(self, file_data: bytes, file_ext: str) -> dict[str, Any]:
+    def _extract_image_metadata(
+        self, file_data: bytes, file_ext: str
+    ) -> dict[str, Any]:
         """提取图片元数据"""
         try:
             import io
@@ -164,7 +179,8 @@ class FileUploadService:
                 "height": image.height,
                 "format": image.format,
                 "mode": image.mode,
-                "has_transparency": image.mode in ("RGBA", "LA") or "transparency" in image.info,
+                "has_transparency": image.mode in ("RGBA", "LA")
+                or "transparency" in image.info,
             }
 
             # 提取EXIF数据
@@ -184,7 +200,9 @@ class FileUploadService:
         except Exception as e:
             return {"error": f"图片元数据提取失败: {str(e)}"}
 
-    def _extract_document_metadata(self, file_data: bytes, file_ext: str) -> dict[str, Any]:
+    def _extract_document_metadata(
+        self, file_data: bytes, file_ext: str
+    ) -> dict[str, Any]:
         """提取文档元数据"""
         try:
             metadata = {}
@@ -264,7 +282,7 @@ class FileUploadService:
             tags: 标签列表
 
         Returns:
-            Dict: 上传结果
+            dict: 上传结果
         """
         try:
             # 验证文件
@@ -315,7 +333,9 @@ class FileUploadService:
             )
 
             if not upload_result.get("success", False):
-                return error(ErrorCode.UPLOAD_FAILED, upload_result.get("error", "上传失败"))
+                return error(
+                    ErrorCode.UPLOAD_FAILED, upload_result.get("error", "上传失败")
+                )
 
             file_key = upload_result.get("file_key") or upload_result.get("key") or ""
             file_url = upload_result.get("file_url") or upload_result.get("url") or ""
@@ -323,7 +343,9 @@ class FileUploadService:
                 os.path.basename(file_key) if file_key else unique_filename
             )
             file_size_saved = int(upload_result.get("file_size") or len(file_data))
-            upload_time_saved = upload_result.get("upload_time") or datetime.utcnow().isoformat()
+            upload_time_saved = (
+                upload_result.get("upload_time") or datetime.utcnow().isoformat()
+            )
             file_md5_saved = upload_result.get("file_md5") or ""
 
             # 构建返回结果
@@ -359,7 +381,7 @@ class FileUploadService:
             user_id: 用户ID (用于权限验证)
 
         Returns:
-            Dict: 删除结果
+            dict: 删除结果
         """
         try:
             # 这里可以添加权限验证逻辑
@@ -373,7 +395,9 @@ class FileUploadService:
                 delete_err = "删除失败"
             else:
                 delete_ok = bool(delete_result.get("success"))
-                delete_time = delete_result.get("delete_time", datetime.utcnow().isoformat())
+                delete_time = delete_result.get(
+                    "delete_time", datetime.utcnow().isoformat()
+                )
                 delete_err = delete_result.get("error", "删除失败")
 
             if delete_ok:
@@ -392,7 +416,7 @@ class FileUploadService:
             file_key: 文件在COS中的key
 
         Returns:
-            Dict: 文件信息
+            dict: 文件信息
         """
         try:
             file_info = self.cos_service.get_file_info(file_key)
@@ -405,7 +429,9 @@ class FileUploadService:
         except Exception as e:
             return error(ErrorCode.FILE_NOT_FOUND, f"文件信息获取失败: {str(e)}")
 
-    def list_user_files(self, user_id: str, category: str = None, limit: int = 20, offset: int = 0) -> dict[str, Any]:
+    def list_user_files(
+        self, user_id: str, category: str = None, limit: int = 20, offset: int = 0
+    ) -> dict[str, Any]:
         """
         列出用户的文件
 
@@ -416,7 +442,7 @@ class FileUploadService:
             offset: 偏移量
 
         Returns:
-            Dict: 文件列表
+            dict: 文件列表
         """
         try:
             # 构建文件夹前缀
@@ -425,7 +451,9 @@ class FileUploadService:
             else:
                 folder = "uploads"
 
-            list_result = self.cos_service.list_files(folder=folder, max_keys=limit + offset, prefix=f"{folder}/")
+            list_result = self.cos_service.list_files(
+                folder=folder, max_keys=limit + offset, prefix=f"{folder}/"
+            )
 
             if not list_result["success"]:
                 return error(ErrorCode.LIST_FAILED, list_result["error"])
@@ -452,10 +480,8 @@ class FileUploadService:
         except Exception as e:
             return error(ErrorCode.LIST_FAILED, f"文件列表获取失败: {str(e)}")
 
-
 # 创建全局文件上传服务实例
 file_upload_service = FileUploadService()
-
 
 def get_file_upload_service() -> FileUploadService:
     """获取文件上传服务实例"""

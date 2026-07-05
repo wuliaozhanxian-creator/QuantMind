@@ -3,7 +3,7 @@
 import logging
 import os
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 
@@ -13,13 +13,14 @@ from backend.services.engine.qlib_app.api.task_info import _sanitize_task_info
 from backend.services.engine.qlib_app.schemas.backtest import HealthCheckResponse
 from backend.services.engine.qlib_app.websocket.connection_manager import ws_manager
 from backend.shared.utils import normalize_user_id
-from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
+from backend.services.engine.qlib_app.utils.structured_logger import (
+    StructuredTaskLogger,
+)
 
 router = APIRouter(tags=["qlib"])
 
 logger = logging.getLogger(__name__)
 task_logger = StructuredTaskLogger(logger, "OpsAPI")
-
 
 @router.get("/health", response_model=HealthCheckResponse)
 async def health_check(
@@ -60,8 +61,7 @@ async def health_check(
             redis_ok=redis_ok,
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @router.get("/task/{task_id}/status")
 async def get_task_status(task_id: str) -> dict[str, Any]:
@@ -85,9 +85,12 @@ async def get_task_status(task_id: str) -> dict[str, Any]:
         status["info"] = info
         return status
     except Exception as e:
-        task_logger.exception("get_task_status_failed", "获取任务状态失败", task_id=task_id, error=str(e))
-        raise HTTPException(status_code=500, detail=f"获取任务状态失败: {str(e)}")
-
+        task_logger.exception(
+            "get_task_status_failed", "获取任务状态失败", task_id=task_id, error=str(e)
+        )
+        raise HTTPException(
+            status_code=500, detail=f"获取任务状态失败: {str(e)}"
+        ) from e
 
 @router.post("/task/{task_id}/stop")
 async def stop_task(request: Request, task_id: str) -> dict[str, Any]:
@@ -104,14 +107,23 @@ async def stop_task(request: Request, task_id: str) -> dict[str, Any]:
         celery_app.control.revoke(task_id, terminate=True)
         cancelled = True
     except Exception as exc:
-        task_logger.warning("revoke_celery_task_failed", "Failed to revoke celery task", task_id=task_id, error=str(exc))
+        task_logger.warning(
+            "revoke_celery_task_failed",
+            "Failed to revoke celery task",
+            task_id=task_id,
+            error=str(exc),
+        )
 
     # 优化任务：通过 task_id 反查 optimization_id，再更新状态
     try:
-        from backend.services.engine.qlib_app.services.optimization_persistence import OptimizationPersistence
+        from backend.services.engine.qlib_app.services.optimization_persistence import (
+            OptimizationPersistence,
+        )
 
         optimization_persistence = OptimizationPersistence()
-        optimization_id = await optimization_persistence.get_optimization_id_by_task_id(task_id)
+        optimization_id = await optimization_persistence.get_optimization_id_by_task_id(
+            task_id
+        )
         if optimization_id:
             detail = await optimization_persistence.get_detail(
                 optimization_id,
@@ -129,7 +141,12 @@ async def stop_task(request: Request, task_id: str) -> dict[str, Any]:
     except HTTPException:
         raise
     except Exception as exc:
-        task_logger.warning("mark_optimization_cancelled_failed", "Failed to mark optimization task cancelled", task_id=task_id, error=str(exc))
+        task_logger.warning(
+            "mark_optimization_cancelled_failed",
+            "Failed to mark optimization task cancelled",
+            task_id=task_id,
+            error=str(exc),
+        )
 
     # 回测任务：直接按 task_id 更新 qlib_backtest_runs
     try:
@@ -147,9 +164,9 @@ async def stop_task(request: Request, task_id: str) -> dict[str, Any]:
             )
             data = row.mappings().first()
             if data:
-                if normalize_user_id(str(data["user_id"])) != normalize_user_id(auth_user_id) or str(
-                    data["tenant_id"]
-                ) != str(auth_tenant_id):
+                if normalize_user_id(str(data["user_id"])) != normalize_user_id(
+                    auth_user_id
+                ) or str(data["tenant_id"]) != str(auth_tenant_id):
                     raise HTTPException(status_code=403, detail="未授权访问该任务")
                 await session.execute(
                     text(
@@ -167,26 +184,34 @@ async def stop_task(request: Request, task_id: str) -> dict[str, Any]:
     except HTTPException:
         raise
     except Exception as exc:
-        task_logger.warning("mark_backtest_cancelled_failed", "Failed to mark backtest task cancelled", task_id=task_id, error=str(exc))
+        task_logger.warning(
+            "mark_backtest_cancelled_failed",
+            "Failed to mark backtest task cancelled",
+            task_id=task_id,
+            error=str(exc),
+        )
 
     if not cancelled:
         raise HTTPException(status_code=404, detail="Task not found")
 
     return {"message": "Task cancelled successfully", "task_id": task_id}
 
-
 @router.get("/logs/{backtest_id}")
 async def get_backtest_logs(
     request: Request,
     backtest_id: str,
     start_index: int = Query(0, ge=0, description="日志起始索引"),
-    tenant_id: str | None = Query(None, description="租户ID（已废弃，自动使用认证身份）"),
+    tenant_id: str | None = Query(
+        None, description="租户ID（已废弃，自动使用认证身份）"
+    ),
 ) -> dict[str, Any]:
     """
     获取回测任务日志 (从 Redis 读取)
     """
     try:
-        _auth_user_id, auth_tenant_id = _identity_from_request(request, provided_tenant_id=tenant_id)
+        _auth_user_id, auth_tenant_id = _identity_from_request(
+            request, provided_tenant_id=tenant_id
+        )
         import redis
 
         redis_host = os.getenv("REDIS_HOST", "host.docker.internal")
@@ -217,8 +242,7 @@ async def get_backtest_logs(
         raise
     except Exception as e:
         task_logger.exception("fetch_logs_failed", "Fetch logs failed", error=str(e))
-        raise HTTPException(status_code=503, detail=f"日志服务不可用: {e}")
-
+        raise HTTPException(status_code=503, detail=f"日志服务不可用: {e}") from e
 
 @router.post("/progress")
 async def receive_progress(data: dict[str, Any] = Body(...)):
@@ -237,7 +261,6 @@ async def receive_progress(data: dict[str, Any] = Body(...)):
 
     await ws_manager.broadcast_to_room(data, backtest_id)
     return {"status": "ok"}
-
 
 @router.post("/log_error")
 async def log_frontend_error_endpoint(
@@ -261,5 +284,7 @@ async def log_frontend_error_endpoint(
         log_frontend_error.apply_async(args=[error_data])
         return {"status": "ok"}
     except Exception as e:
-        task_logger.exception("forward_frontend_error_failed", "转发前端错误日志失败", error=str(e))
+        task_logger.exception(
+            "forward_frontend_error_failed", "转发前端错误日志失败", error=str(e)
+        )
         return {"status": "error", "message": str(e)}

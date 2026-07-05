@@ -19,7 +19,6 @@ from backend.services.trade.models.qmt_agent_session import QMTAgentSession
 SESSION_TTL_SECONDS = 3600
 SESSION_REFRESH_THRESHOLD_SECONDS = 300
 
-
 @dataclass
 class BridgeSessionContext:
     session_id: str
@@ -31,18 +30,14 @@ class BridgeSessionContext:
     hostname: str | None
     client_version: str | None
 
-
 def hash_bridge_token(token: str) -> str:
     return hashlib.sha256(str(token).encode("utf-8")).hexdigest()
-
 
 def generate_bridge_token() -> str:
     return f"qms_{secrets.token_urlsafe(32)}"
 
-
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
-
 
 async def create_bridge_session(
     session: AsyncSession,
@@ -63,11 +58,9 @@ async def create_bridge_session(
     await session.flush()
     return model, raw_token
 
-
 async def revoke_session(session: AsyncSession, session_model: QMTAgentSession) -> None:
     session_model.revoked_at = utcnow()
     await session.flush()
-
 
 async def verify_bridge_session_token(
     session: AsyncSession,
@@ -105,7 +98,6 @@ async def verify_bridge_session_token(
         client_version=binding.client_version,
     )
 
-
 async def refresh_bridge_session(
     session: AsyncSession,
     raw_token: str,
@@ -139,4 +131,3 @@ async def refresh_bridge_session(
         client_version=binding.client_version,
     )
     return context, new_token
-

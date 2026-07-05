@@ -37,7 +37,6 @@ _ALLOWED_TYPES = {"system", "trading", "market", "strategy"}
 _ALLOWED_LEVELS = {"info", "warning", "error", "success"}
 NOTIFICATION_EVENTS_STREAM = "notification_events"
 
-
 def _build_sync_redis_client():
     if redis is None:
         return None
@@ -88,7 +87,6 @@ def _build_sync_redis_client():
         logger.warning("notification event redis client init failed: %s", exc)
         return None
 
-
 def _push_notification_event(payload: dict) -> bool:
     client = _build_sync_redis_client()
     if client is None:
@@ -96,8 +94,12 @@ def _push_notification_event(payload: dict) -> bool:
         return False
 
     try:
-        normalized = {key: "" if value is None else str(value) for key, value in payload.items()}
-        client.xadd(NOTIFICATION_EVENTS_STREAM, normalized, maxlen=10000, approximate=True)
+        normalized = {
+            key: "" if value is None else str(value) for key, value in payload.items()
+        }
+        client.xadd(
+            NOTIFICATION_EVENTS_STREAM, normalized, maxlen=10000, approximate=True
+        )
         inc_counter(notification_event_push_total, "success")
         return True
     except Exception as exc:
@@ -115,28 +117,27 @@ def _push_notification_event(payload: dict) -> bool:
         try:
             client.close()
         except Exception:
-            pass
-
+            logger.debug("ignored exception", exc_info=True)
 
 def _safe_type(value: str) -> str:
     text_value = str(value or "").strip().lower()
     return text_value if text_value in _ALLOWED_TYPES else "system"
 
-
 def _safe_level(value: str) -> str:
     text_value = str(value or "").strip().lower()
     return text_value if text_value in _ALLOWED_LEVELS else "info"
 
-
 def _looks_like_missing_table_error(error: ProgrammingError) -> bool:
     msg = str(error).lower()
-    return "notifications" in msg and ("undefinedtable" in msg or "does not exist" in msg or "relation" in msg)
-
+    return "notifications" in msg and (
+        "undefinedtable" in msg or "does not exist" in msg or "relation" in msg
+    )
 
 def _looks_like_user_fk_violation(error: IntegrityError) -> bool:
     msg = str(error).lower()
-    return "notifications_user_id_fkey" in msg or ("foreign key" in msg and "notifications" in msg and "user_id" in msg)
-
+    return "notifications_user_id_fkey" in msg or (
+        "foreign key" in msg and "notifications" in msg and "user_id" in msg
+    )
 
 def publish_notification(
     *,
@@ -215,7 +216,9 @@ def publish_notification(
                 "level": params["level"],
                 "action_url": params["action_url"],
                 "created_at": (
-                    created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at or now.isoformat())
+                    created_at.isoformat()
+                    if hasattr(created_at, "isoformat")
+                    else str(created_at or now.isoformat())
                 ),
             }
         )
@@ -266,7 +269,6 @@ def publish_notification(
             exc,
         )
         return False
-
 
 async def publish_notification_async(**kwargs) -> bool:
     """

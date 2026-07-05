@@ -23,10 +23,14 @@ class SimulationPositionLot(Base, TimestampMixin):
     position_side: Mapped[str] = mapped_column(
         String(16), nullable=False, default="long", index=True
     )
-    open_fill_id: Mapped[str | None] = mapped_column(String(96), nullable=True, index=True)
+    open_fill_id: Mapped[str | None] = mapped_column(
+        String(96), nullable=True, index=True
+    )
     open_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     quantity_open: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-    quantity_remaining: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    quantity_remaining: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0.0
+    )
     cost_price: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     cost_amount: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="open")

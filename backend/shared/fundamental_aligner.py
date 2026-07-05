@@ -7,7 +7,6 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-
 class FundamentalAligner:
     """
     统一基本面对齐器 (Unified Fundamental Aligner)
@@ -58,7 +57,9 @@ class FundamentalAligner:
 
             if os.getenv("MODE") == "production":
                 last_date = df["trade_date"].max()
-                days_diff = (pd.Timestamp.now().normalize() - last_date.normalize()).days
+                days_diff = (
+                    pd.Timestamp.now().normalize() - last_date.normalize()
+                ).days
                 if days_diff > 2:
                     logger.error(
                         "CRITICAL: 基本面对齐数据已过期，最后日期=%s，滞后=%s天",
@@ -86,7 +87,9 @@ class FundamentalAligner:
         # 使用上一个交易日的数据，因为调仓时刻当天的基本面数据还未计算
         dt = pd.to_datetime(current_date).normalize()
         # 从缓存数据中找上一个交易日
-        available_dates = data.index.get_level_values("trade_date").unique().sort_values()
+        available_dates = (
+            data.index.get_level_values("trade_date").unique().sort_values()
+        )
         # 找到小于当前日期的最后一个交易日
         prev_dates = available_dates[available_dates < dt]
         if len(prev_dates) == 0:
@@ -130,8 +133,11 @@ class FundamentalAligner:
                 continue
 
             import pandas.api.types as ptypes
+
             if ptypes.is_numeric_dtype(col_data) and (col_data == 0).all():
-                logger.warning(f"FundamentalAligner: 字段 {col} 全为 0 (未对齐/未初始化)，跳过过滤。")
+                logger.warning(
+                    f"FundamentalAligner: 字段 {col} 全为 0 (未对齐/未初始化)，跳过过滤。"
+                )
                 continue
             if op == "le":
                 mask &= col_data <= float(target_val)
@@ -150,7 +156,9 @@ class FundamentalAligner:
         valid_symbols = set(snapshot[mask].index)
         # 统一大小写：将 valid_symbols 转为大写格式，与信号股票代码格式一致
         valid_symbols_upper = {s.upper() for s in valid_symbols}
-        return [symbol for symbol in instruments if symbol.upper() in valid_symbols_upper]
+        return [
+            symbol for symbol in instruments if symbol.upper() in valid_symbols_upper
+        ]
 
     def get_snapshot(self, current_date: Any) -> pd.DataFrame:
         """
@@ -165,7 +173,9 @@ class FundamentalAligner:
 
         # 使用上一个交易日的数据
         dt = pd.to_datetime(current_date).normalize()
-        available_dates = data.index.get_level_values("trade_date").unique().sort_values()
+        available_dates = (
+            data.index.get_level_values("trade_date").unique().sort_values()
+        )
         prev_dates = available_dates[available_dates < dt]
         if len(prev_dates) == 0:
             return pd.DataFrame()
@@ -180,7 +190,4 @@ class FundamentalAligner:
             snapshot = snapshot.to_frame().T
         return snapshot.copy()
 
-
 fundamental_aligner = FundamentalAligner()
-
-

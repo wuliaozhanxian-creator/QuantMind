@@ -6,10 +6,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
-
 def _ts_ms() -> int:
     return int(time.time() * 1000)
-
 
 class SignalCreatedEvent(BaseModel):
     event_type: Literal["signal_created"] = "signal_created"
@@ -34,7 +32,6 @@ class SignalCreatedEvent(BaseModel):
     price: float
     score: float
     signal_source: Literal["fusion_report", "inference_fallback"] = "fusion_report"
-
 
 class ExecutionEvent(BaseModel):
     event_type: Literal[

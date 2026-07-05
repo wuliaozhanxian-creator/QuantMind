@@ -15,7 +15,7 @@ import json
 import logging
 import os
 from dataclasses import asdict, dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 try:
     import openai
@@ -23,7 +23,6 @@ except ImportError:
     openai = None
 
 logger = logging.getLogger(__name__)
-
 
 @dataclass
 class ScreenCondition:
@@ -46,7 +45,6 @@ class ScreenCondition:
         """转换为字典,排除None值"""
         return {k: v for k, v in asdict(self).items() if v is not None}
 
-
 @dataclass
 class ParsedQuery:
     """解析后的查询"""
@@ -66,7 +64,6 @@ class ParsedQuery:
             "sort_order": self.sort_order,
             "explanation": self.explanation,
         }
-
 
 class LLMQueryParser:
     """LLM查询解析器
@@ -248,7 +245,7 @@ class LLMQueryParser:
                 json_str = content[start_idx:end_idx]
                 return json.loads(json_str)
             else:
-                raise ValueError("无法从响应中提取JSON")
+                raise ValueError("无法从响应中提取JSON") from None
 
     def _convert_to_parsed_query(self, data: dict, original_query: str) -> ParsedQuery:
         """将字典转换为ParsedQuery对象
@@ -359,10 +356,8 @@ class LLMQueryParser:
             # 降级到普通解析
             return self.parse(user_query)
 
-
 # 单例实例
 _llm_parser = None
-
 
 def get_llm_parser(api_key: str = None, model: str = "gpt-3.5-turbo") -> LLMQueryParser:
     """获取LLM解析器单例

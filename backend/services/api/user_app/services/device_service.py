@@ -5,7 +5,7 @@
 import hashlib
 import logging
 from datetime import datetime
-from typing import List, Optional
+from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,14 +15,15 @@ from backend.services.api.user_app.models.oauth import LoginDevice
 
 logger = logging.getLogger(__name__)
 
-
 class DeviceService:
     """设备管理服务"""
 
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    def _generate_device_id(self, user_id: str, user_agent: str, ip_address: str) -> str:
+    def _generate_device_id(
+        self, user_id: str, user_agent: str, ip_address: str
+    ) -> str:
         """
         生成设备唯一ID (User + UA + IP)
         """
@@ -35,10 +36,16 @@ class DeviceService:
         """
         ua = parse(user_agent)
         return {
-            "device_type": ("mobile" if ua.is_mobile else ("tablet" if ua.is_tablet else "desktop")),
+            "device_type": (
+                "mobile" if ua.is_mobile else ("tablet" if ua.is_tablet else "desktop")
+            ),
             "os": f"{ua.os.family} {ua.os.version_string}",
             "browser": f"{ua.browser.family} {ua.browser.version_string}",
-            "device_name": (f"{ua.device.brand} {ua.device.model}" if ua.device.brand else ua.os.family),
+            "device_name": (
+                f"{ua.device.brand} {ua.device.model}"
+                if ua.device.brand
+                else ua.os.family
+            ),
         }
 
     async def record_device_login(
@@ -98,7 +105,9 @@ class DeviceService:
 
         return device
 
-    async def get_user_devices(self, user_id: str, tenant_id: str, active_only: bool = False) -> list[LoginDevice]:
+    async def get_user_devices(
+        self, user_id: str, tenant_id: str, active_only: bool = False
+    ) -> list[LoginDevice]:
         """
         获取用户的所有设备
 
@@ -139,7 +148,9 @@ class DeviceService:
 
         return True
 
-    async def untrust_device(self, user_id: str, tenant_id: str, device_id: str) -> bool:
+    async def untrust_device(
+        self, user_id: str, tenant_id: str, device_id: str
+    ) -> bool:
         """
         取消信任设备
         """
@@ -208,7 +219,9 @@ class DeviceService:
             # 新IP地址
             if location:
                 # 检查地理位置变化
-                recent_locations = {device.location for device in devices[-5:] if device.location}
+                recent_locations = {
+                    device.location for device in devices[-5:] if device.location
+                }
                 if recent_locations and location not in recent_locations:
                     return {
                         "is_suspicious": True,

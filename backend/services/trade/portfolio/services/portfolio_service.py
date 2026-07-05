@@ -5,7 +5,7 @@ Portfolio Service - 投资组合业务逻辑
 import logging
 from datetime import datetime
 from decimal import Decimal
-from typing import List, Optional
+from typing import Optional
 
 from fastapi import HTTPException
 from sqlalchemy import and_, func, select
@@ -24,7 +24,6 @@ from backend.services.trade.portfolio.utils import cache, get_cache_key
 
 logger = logging.getLogger(__name__)
 
-
 class PortfolioService:
     """投资组合服务"""
 
@@ -36,14 +35,16 @@ class PortfolioService:
             and_(
                 Portfolio.tenant_id == data.tenant_id,
                 Portfolio.user_id == data.user_id,
-                Portfolio.is_deleted == False,
+                not Portfolio.is_deleted,
             )
         )
         result = await db.execute(stmt)
         count = result.scalar()
 
         if count >= settings.MAX_PORTFOLIOS_PER_USER:
-            raise ValueError(f"超过最大组合数量限制: {settings.MAX_PORTFOLIOS_PER_USER}")
+            raise ValueError(
+                f"超过最大组合数量限制: {settings.MAX_PORTFOLIOS_PER_USER}"
+            )
 
             # 创建组合
         portfolio = Portfolio(
@@ -61,7 +62,9 @@ class PortfolioService:
         await db.flush()
         await db.refresh(portfolio)
 
-        logger.info(f"Created portfolio {portfolio.id} for tenant={data.tenant_id}, user={data.user_id}")
+        logger.info(
+            f"Created portfolio {portfolio.id} for tenant={data.tenant_id}, user={data.user_id}"
+        )
         return portfolio
 
     @staticmethod
@@ -72,18 +75,24 @@ class PortfolioService:
         tenant_id: str | None = None,
     ) -> Portfolio | None:
         """查询投资组合"""
-        tenant_scope = (tenant_id or "").strip() or "default" if tenant_id is not None else None
+        tenant_scope = (
+            (tenant_id or "").strip() or "default" if tenant_id is not None else None
+        )
         use_cache = tenant_scope is None and user_id is None
         # 先尝试从缓存获取
         cache_key = get_cache_key("portfolio", "default", portfolio_id)
         if use_cache:
             cached = await cache.get(cache_key)
             if cached:
-                p = Portfolio(**{k: v for k, v in cached.items() if k != "_sa_instance_state"})
+                p = Portfolio(
+                    **{k: v for k, v in cached.items() if k != "_sa_instance_state"}
+                )
                 return p
 
         # 从数据库查询
-        stmt = select(Portfolio).where(and_(Portfolio.id == portfolio_id, Portfolio.is_deleted == False))
+        stmt = select(Portfolio).where(
+            and_(Portfolio.id == portfolio_id, not Portfolio.is_deleted)
+        )
 
         if tenant_scope is not None:
             stmt = stmt.where(Portfolio.tenant_id == tenant_scope)
@@ -96,7 +105,9 @@ class PortfolioService:
         # 缓存结果
         if portfolio and use_cache:
             # 移除 SQLAlchemy 内部状态，并将 Decimal 转换为 string 以便 JSON 序列化
-            p_dict = {k: v for k, v in portfolio.__dict__.items() if k != "_sa_instance_state"}
+            p_dict = {
+                k: v for k, v in portfolio.__dict__.items() if k != "_sa_instance_state"
+            }
             await cache.set(cache_key, p_dict, settings.CACHE_TTL_PORTFOLIO)
 
         return portfolio
@@ -115,7 +126,7 @@ class PortfolioService:
             and_(
                 Portfolio.tenant_id == tenant_id,
                 Portfolio.user_id == user_id,
-                Portfolio.is_deleted == False,
+                not Portfolio.is_deleted,
             )
         )
 
@@ -136,7 +147,9 @@ class PortfolioService:
         data: PortfolioUpdate,
     ) -> Portfolio:
         """更新投资组合"""
-        portfolio = await PortfolioService.get_portfolio(db, portfolio_id, user_id, tenant_id=tenant_id)
+        portfolio = await PortfolioService.get_portfolio(
+            db, portfolio_id, user_id, tenant_id=tenant_id
+        )
         if not portfolio:
             raise ValueError("投资组合不存在")
 
@@ -161,9 +174,13 @@ class PortfolioService:
         return portfolio
 
     @staticmethod
-    async def delete_portfolio(db: AsyncSession, portfolio_id: int, tenant_id: str, user_id: int) -> bool:
+    async def delete_portfolio(
+        db: AsyncSession, portfolio_id: int, tenant_id: str, user_id: int
+    ) -> bool:
         """删除投资组合（软删除）"""
-        portfolio = await PortfolioService.get_portfolio(db, portfolio_id, user_id, tenant_id=tenant_id)
+        portfolio = await PortfolioService.get_portfolio(
+            db, portfolio_id, user_id, tenant_id=tenant_id
+        )
         if not portfolio:
             raise ValueError("投资组合不存在")
 
@@ -192,20 +209,28 @@ class PortfolioService:
         return True
 
     @staticmethod
-    async def calculate_portfolio_metrics(db: AsyncSession, portfolio: Portfolio) -> Portfolio:
+    async def calculate_portfolio_metrics(
+        db: AsyncSession, portfolio: Portfolio
+    ) -> Portfolio:
         """计算投资组合指标（含夏普比率、波动率、最大回撤）"""
         from backend.services.trade.portfolio.utils.risk_metrics import (
             compute_risk_metrics,
         )
 
         # 查询所有持仓
-        stmt = select(Position).where(and_(Position.portfolio_id == portfolio.id, Position.status == "holding"))
+        stmt = select(Position).where(
+            and_(Position.portfolio_id == portfolio.id, Position.status == "holding")
+        )
         result = await db.execute(stmt)
         positions = result.scalars().all()
 
         # 计算持仓总市值
         total_market_value = sum(
-            (Decimal(str(pos.market_value)) if pos.side == PositionSide.LONG else -Decimal(str(pos.market_value)))
+            (
+                Decimal(str(pos.market_value))
+                if pos.side == PositionSide.LONG
+                else -Decimal(str(pos.market_value))
+            )
             for pos in positions
         )
 
@@ -213,7 +238,9 @@ class PortfolioService:
         portfolio.total_value = portfolio.available_cash + total_market_value
 
         # 计算总盈亏
-        total_unrealized_pnl = sum(Decimal(str(pos.unrealized_pnl)) for pos in positions)
+        total_unrealized_pnl = sum(
+            Decimal(str(pos.unrealized_pnl)) for pos in positions
+        )
         total_realized_pnl = sum(Decimal(str(pos.realized_pnl)) for pos in positions)
         portfolio.total_pnl = total_unrealized_pnl + total_realized_pnl
 
@@ -229,7 +256,9 @@ class PortfolioService:
 
         # === 基于快照历史或昨日基准计算当日盈亏与收益率 ===
         if portfolio.yesterday_total_value > 0:
-            portfolio.daily_pnl = portfolio.total_value - portfolio.yesterday_total_value
+            portfolio.daily_pnl = (
+                portfolio.total_value - portfolio.yesterday_total_value
+            )
         else:
             # 兼容旧数据逻辑或初次初始化：倒序查找第一个非今日的快照
             today_date = datetime.now().date()
@@ -240,7 +269,9 @@ class PortfolioService:
                     break
 
             if last_day_snapshot:
-                portfolio.daily_pnl = portfolio.total_value - last_day_snapshot.total_value
+                portfolio.daily_pnl = (
+                    portfolio.total_value - last_day_snapshot.total_value
+                )
                 # 顺便补齐基准值，优化后续计算性能
                 portfolio.yesterday_total_value = last_day_snapshot.total_value
             else:
@@ -248,7 +279,11 @@ class PortfolioService:
                 portfolio.daily_pnl = portfolio.total_pnl
 
         # 计算当日收益率：优先以昨日收盘值为分母
-        denominator = portfolio.yesterday_total_value if portfolio.yesterday_total_value > 0 else portfolio.initial_capital
+        denominator = (
+            portfolio.yesterday_total_value
+            if portfolio.yesterday_total_value > 0
+            else portfolio.initial_capital
+        )
         if denominator > 0:
             portfolio.daily_return = portfolio.daily_pnl / denominator
         else:
@@ -261,7 +296,11 @@ class PortfolioService:
         # 更新持仓权重
         for pos in positions:
             if portfolio.total_value > 0:
-                signed_market_value = pos.market_value if pos.side == PositionSide.LONG else -pos.market_value
+                signed_market_value = (
+                    pos.market_value
+                    if pos.side == PositionSide.LONG
+                    else -pos.market_value
+                )
                 pos.weight = signed_market_value / portfolio.total_value
             else:
                 pos.weight = Decimal("0")
@@ -360,11 +399,15 @@ class PortfolioService:
         # 如果是结算快照，更新组合的昨日基准值
         if is_settlement:
             portfolio.yesterday_total_value = portfolio.total_value
-            logger.info(f"Settlement: Updated yesterday_total_value for portfolio {portfolio.id} to {portfolio.total_value}")
+            logger.info(
+                f"Settlement: Updated yesterday_total_value for portfolio {portfolio.id} to {portfolio.total_value}"
+            )
 
         await db.flush()
 
-        logger.info(f"Created snapshot for portfolio {portfolio.id} (is_settlement={is_settlement})")
+        logger.info(
+            f"Created snapshot for portfolio {portfolio.id} (is_settlement={is_settlement})"
+        )
         return snapshot
 
     @staticmethod
@@ -377,7 +420,9 @@ class PortfolioService:
         token: str,
     ) -> Portfolio:
         """绑定策略到组合"""
-        portfolio = await PortfolioService.get_portfolio(db, portfolio_id, user_id, tenant_id=tenant_id)
+        portfolio = await PortfolioService.get_portfolio(
+            db, portfolio_id, user_id, tenant_id=tenant_id
+        )
         if not portfolio:
             raise HTTPException(status_code=404, detail="Portfolio not found")
 
@@ -397,22 +442,32 @@ class PortfolioService:
         db: AsyncSession, portfolio_id: int, tenant_id: str, user_id: int, token: str
     ) -> Portfolio:
         """启动实盘交易"""
-        portfolio = await PortfolioService.get_portfolio(db, portfolio_id, user_id, tenant_id=tenant_id)
+        portfolio = await PortfolioService.get_portfolio(
+            db, portfolio_id, user_id, tenant_id=tenant_id
+        )
         if not portfolio:
             raise HTTPException(status_code=404, detail="Portfolio not found")
 
         if not portfolio.strategy_id:
-            raise HTTPException(status_code=400, detail="No strategy bound to this portfolio")
+            raise HTTPException(
+                status_code=400, detail="No strategy bound to this portfolio"
+            )
 
         if portfolio.run_status == "running":
-            raise HTTPException(status_code=400, detail="Real trading is already running")
+            raise HTTPException(
+                status_code=400, detail="Real trading is already running"
+            )
 
         # 获取策略代码
-        strategy_data = await remote_service.get_strategy_code(portfolio.strategy_id, user_id, token)
+        strategy_data = await remote_service.get_strategy_code(
+            portfolio.strategy_id, user_id, token
+        )
         strategy_config = strategy_data.get("config", {})
         code = strategy_config.get("code")
         if not code:
-            raise HTTPException(status_code=400, detail="Strategy code not found in strategy config")
+            raise HTTPException(
+                status_code=400, detail="Strategy code not found in strategy config"
+            )
 
         # 调用 Real Trading Service 启动 K8s 部署
         deployment_id = f"user_{user_id}_port_{portfolio_id}"
@@ -428,13 +483,19 @@ class PortfolioService:
         await db.flush()
         await db.refresh(portfolio)
 
-        logger.info(f"Started real trading for portfolio {portfolio_id}, deployment={deployment_id}")
+        logger.info(
+            f"Started real trading for portfolio {portfolio_id}, deployment={deployment_id}"
+        )
         return portfolio
 
     @staticmethod
-    async def stop_real_trading(db: AsyncSession, portfolio_id: int, tenant_id: str, user_id: int) -> Portfolio:
+    async def stop_real_trading(
+        db: AsyncSession, portfolio_id: int, tenant_id: str, user_id: int
+    ) -> Portfolio:
         """停止实盘交易"""
-        portfolio = await PortfolioService.get_portfolio(db, portfolio_id, user_id, tenant_id=tenant_id)
+        portfolio = await PortfolioService.get_portfolio(
+            db, portfolio_id, user_id, tenant_id=tenant_id
+        )
         if not portfolio:
             raise HTTPException(status_code=404, detail="Portfolio not found")
 
@@ -452,13 +513,19 @@ class PortfolioService:
         return portfolio
 
     @staticmethod
-    async def sync_status(db: AsyncSession, portfolio_id: int, tenant_id: str, user_id: int) -> Portfolio:
+    async def sync_status(
+        db: AsyncSession, portfolio_id: int, tenant_id: str, user_id: int
+    ) -> Portfolio:
         """同步实盘运行状态"""
-        portfolio = await PortfolioService.get_portfolio(db, portfolio_id, user_id, tenant_id=tenant_id)
+        portfolio = await PortfolioService.get_portfolio(
+            db, portfolio_id, user_id, tenant_id=tenant_id
+        )
         if not portfolio or not portfolio.real_trading_id:
             return portfolio
 
-        status_data = await remote_service.get_real_trading_status(portfolio.real_trading_id)
+        status_data = await remote_service.get_real_trading_status(
+            portfolio.real_trading_id
+        )
         k8s_status = status_data.get("status", "unknown")
 
         if k8s_status == "running":

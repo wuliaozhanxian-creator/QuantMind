@@ -6,7 +6,7 @@
 import re
 import time
 from collections import Counter
-from typing import Any, Dict, List
+from typing import Any
 
 from ..models import (
     BUILTIN_TEMPLATES,
@@ -33,7 +33,6 @@ except ImportError:
 
     def is_valid_timeframe(x):
         return x in ["1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w", "1M"]
-
 
 class TemplateMatcher:
     """模板匹配器"""
@@ -69,7 +68,9 @@ class TemplateMatcher:
 
         # 遍历所有模板进行匹配
         for template in BUILTIN_TEMPLATES:
-            match_result = self._calculate_template_match(template, user_params, user_keywords)
+            match_result = self._calculate_template_match(
+                template, user_params, user_keywords
+            )
 
             # 只返回满足最小置信度的匹配
             if match_result.confidence >= request.min_confidence:
@@ -163,7 +164,9 @@ class TemplateMatcher:
             },
         )
 
-    def _calculate_category_score(self, user_params: dict[str, Any], template: StrategyTemplate) -> float:
+    def _calculate_category_score(
+        self, user_params: dict[str, Any], template: StrategyTemplate
+    ) -> float:
         """计算类别得分"""
         user_style = user_params.get("style", "")
 
@@ -206,20 +209,24 @@ class TemplateMatcher:
         # 综合得分
         return jaccard_similarity * 0.7 + keyword_match * 0.3
 
-    def _calculate_keyword_match(self, user_keywords: list[str], template_tags: list[str]) -> float:
+    def _calculate_keyword_match(
+        self, user_keywords: list[str], template_tags: list[str]
+    ) -> float:
         """计算关键词匹配度"""
         if not user_keywords or not template_tags:
             return 0.0
 
-        user_tag_set = set([kw.lower() for kw in user_keywords])
-        template_tag_set = set([tag.lower() for tag in template_tags])
+        user_tag_set = {kw.lower() for kw in user_keywords}
+        template_tag_set = {tag.lower() for tag in template_tags}
 
         intersection = user_tag_set.intersection(template_tag_set)
         union = user_tag_set.union(template_tag_set)
 
         return len(intersection) / len(union) if union else 0.0
 
-    def _calculate_parameter_match(self, user_params: dict[str, Any], template: StrategyTemplate) -> float:
+    def _calculate_parameter_match(
+        self, user_params: dict[str, Any], template: StrategyTemplate
+    ) -> float:
         """计算参数匹配度"""
         if not template.default_parameters:
             return 0.5
@@ -256,7 +263,7 @@ class TemplateMatcher:
                             if abs(user_index - template_index) == 1:
                                 matches += 0.5
                         except ValueError:
-                            pass
+                            pass  # noqa: BLE001 - 已知数值解析失败，预期静默
 
         # 数值型参数的相似度计算
         numeric_fields = [
@@ -275,14 +282,18 @@ class TemplateMatcher:
                 try:
                     user_num = float(user_value)
                     template_num = float(template_value)
-                    similarity = 1 - abs(user_num - template_num) / max(user_num, template_num)
+                    similarity = 1 - abs(user_num - template_num) / max(
+                        user_num, template_num
+                    )
                     matches += max(0, similarity)
                 except (ValueError, ZeroDivisionError):
-                    pass
+                    pass  # noqa: BLE001 - 已知数值解析失败，预期静默
 
         return matches / total if total > 0 else 0.5
 
-    def _calculate_parameter_fitness(self, user_params: dict[str, Any], template: StrategyTemplate) -> float:
+    def _calculate_parameter_fitness(
+        self, user_params: dict[str, Any], template: StrategyTemplate
+    ) -> float:
         """计算数值参数的适配性"""
         fitness = 1.0
 
@@ -303,7 +314,7 @@ class TemplateMatcher:
                 if user_max_dd < template_max_dd * 0.5:
                     fitness *= 0.7  # 用户风险承受能力过低
             except (ValueError, AttributeError):
-                pass
+                pass  # noqa: BLE001 - 已知数值解析失败，预期静默
 
         # 市场适配性
         user_market = user_params.get("market")
@@ -322,7 +333,9 @@ class TemplateMatcher:
 
         return fitness
 
-    def _calculate_risk_level_score(self, user_params: dict[str, Any], template: StrategyTemplate) -> float:
+    def _calculate_risk_level_score(
+        self, user_params: dict[str, Any], template: StrategyTemplate
+    ) -> float:
         """计算风险等级得分"""
         user_risk = user_params.get("risk_level")
         if not user_risk:
@@ -340,11 +353,13 @@ class TemplateMatcher:
                 if abs(user_index - template_index) == 1:
                     return 0.6
         except ValueError:
-            pass
+            pass  # noqa: BLE001 - 已知数值解析失败，预期静默
 
         return 0.2
 
-    def _calculate_market_score(self, user_params: dict[str, Any], template: StrategyTemplate) -> float:
+    def _calculate_market_score(
+        self, user_params: dict[str, Any], template: StrategyTemplate
+    ) -> float:
         """计算市场适配得分"""
         user_market = user_params.get("market")
         if not user_market:
@@ -352,7 +367,9 @@ class TemplateMatcher:
 
         return 1.0 if user_market in template.suitable_markets else 0.3
 
-    def _calculate_timeframe_score(self, user_params: dict[str, Any], template: StrategyTemplate) -> float:
+    def _calculate_timeframe_score(
+        self, user_params: dict[str, Any], template: StrategyTemplate
+    ) -> float:
         """计算时间框架适配得分"""
         user_timeframe = user_params.get("timeframe")
         if not user_timeframe:
@@ -360,13 +377,15 @@ class TemplateMatcher:
 
         return 1.0 if user_timeframe in template.suitable_timeframes else 0.4
 
-    def _calculate_tag_match(self, user_keywords: list[str], template_tags: list[str]) -> float:
+    def _calculate_tag_match(
+        self, user_keywords: list[str], template_tags: list[str]
+    ) -> float:
         """计算标签匹配度"""
         if not user_keywords or not template_tags:
             return 0.0
 
-        user_tag_set = set([kw.lower() for kw in user_keywords])
-        template_tag_set = set([tag.lower() for tag in template_tags])
+        user_tag_set = {kw.lower() for kw in user_keywords}
+        template_tag_set = {tag.lower() for tag in template_tags}
 
         intersection = user_tag_set.intersection(template_tag_set)
         union = user_tag_set.union(template_tag_set)
@@ -413,7 +432,9 @@ class TemplateMatcher:
 
         return reasons
 
-    def _generate_adaptations(self, template: StrategyTemplate, user_params: dict[str, Any]) -> list[str]:
+    def _generate_adaptations(
+        self, template: StrategyTemplate, user_params: dict[str, Any]
+    ) -> list[str]:
         """生成适配建议"""
         adaptations = []
 
@@ -432,12 +453,16 @@ class TemplateMatcher:
         # 市场调整建议
         user_market = user_params.get("market")
         if user_market and user_market not in template.suitable_markets:
-            adaptations.append(f"建议切换到适合的市场：{', '.join(template.suitable_markets)}")
+            adaptations.append(
+                f"建议切换到适合的市场：{', '.join(template.suitable_markets)}"
+            )
 
         # 时间框架调整建议
         user_timeframe = user_params.get("timeframe")
         if user_timeframe and user_timeframe not in template.suitable_timeframes:
-            adaptations.append(f"建议调整时间框架为：{', '.join(template.suitable_timeframes)}")
+            adaptations.append(
+                f"建议调整时间框架为：{', '.join(template.suitable_timeframes)}"
+            )
 
         return adaptations
 
@@ -478,12 +503,15 @@ class TemplateMatcher:
             "for",
         }
 
-        words = [word for word in clean_text.split() if len(word) > 1 and word not in stop_words]
+        words = [
+            word
+            for word in clean_text.split()
+            if len(word) > 1 and word not in stop_words
+        ]
 
         # 统计词频并返回前10个关键词
         word_count = Counter(words)
         return [word for word, _ in word_count.most_common(10)]
-
 
 # 全局模板匹配器实例
 template_matcher = TemplateMatcher()

@@ -14,9 +14,11 @@ DEFAULT_STOCKS_INDEX_PATH = Path("/app/data/stocks/stocks_index.json")
 _FALLBACK_PATHS = [
     Path("/app/data/stocks/stocks_index.json"),
     Path("/workspace/data/stocks/stocks_index.json"),
-    Path(__file__).parent.parent.parent.parent / "data" / "stocks" / "stocks_index.json",
+    Path(__file__).parent.parent.parent.parent
+    / "data"
+    / "stocks"
+    / "stocks_index.json",
 ]
-
 
 class StockNameMapper:
     """股票代码到名称的映射器"""
@@ -41,7 +43,7 @@ class StockNameMapper:
         for path in _FALLBACK_PATHS:
             if path.exists():
                 try:
-                    with open(path, "r", encoding="utf-8") as f:
+                    with open(path, encoding="utf-8") as f:
                         data = json.load(f)
                     items = data.get("items", [])
                     for item in items:
@@ -71,7 +73,9 @@ class StockNameMapper:
             return symbol
         return self._mapping.get(symbol, symbol)
 
-    def enrich_with_name(self, data: dict | list, symbol_key: str = "symbol") -> dict | list:
+    def enrich_with_name(
+        self, data: dict | list, symbol_key: str = "symbol"
+    ) -> dict | list:
         """
         为数据添加 name 字段
 
@@ -97,10 +101,8 @@ class StockNameMapper:
         self._mapping.clear()
         self._load_mapping()
 
-
 # 全局单例
-_mapper: Optional[StockNameMapper] = None
-
+_mapper: StockNameMapper | None = None
 
 def get_stock_name_mapper() -> StockNameMapper:
     """获取股票名称映射器单例"""
@@ -108,7 +110,6 @@ def get_stock_name_mapper() -> StockNameMapper:
     if _mapper is None:
         _mapper = StockNameMapper()
     return _mapper
-
 
 def get_stock_name(symbol: str) -> str:
     """便捷函数：获取股票名称"""

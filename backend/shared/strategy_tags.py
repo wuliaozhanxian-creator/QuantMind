@@ -8,8 +8,6 @@ Author: QuantMind Team
 Date: 2025-12-02
 """
 
-from typing import Dict, List
-
 # 策略标签定义（与前端保持一致）
 STRATEGY_TAGS = {
     "type": [
@@ -77,7 +75,11 @@ def validate_tags(tags: list[str]) -> dict[str, any]:
         "valid": len(invalid_tags) == 0,
         "valid_tags": valid_tags,
         "invalid_tags": invalid_tags,
-        "message": ("验证通过" if len(invalid_tags) == 0 else f"发现{len(invalid_tags)}个无效标签"),
+        "message": (
+            "验证通过"
+            if len(invalid_tags) == 0
+            else f"发现{len(invalid_tags)}个无效标签"
+        ),
     }
 
 

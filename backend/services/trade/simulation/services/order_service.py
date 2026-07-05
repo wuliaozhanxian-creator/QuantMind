@@ -5,7 +5,7 @@ Simulation order service.
 from collections import defaultdict
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
-from typing import Any, List, Optional
+from typing import Any, Optional
 from uuid import UUID
 
 from sqlalchemy import and_, select
@@ -28,7 +28,6 @@ from backend.services.trade.simulation.services.projection_service import (
     SimulationProjectionService,
 )
 from backend.shared.stock_utils import StockCodeUtil
-
 
 class SimOrderService:
     def __init__(self, db: AsyncSession):
@@ -81,7 +80,9 @@ class SimOrderService:
         await self.db.flush()
         await self.db.commit()
         await self.db.refresh(order_v2)
-        return self._build_runtime_order(order_v2, remarks=data.remarks, is_margin_trade=data.is_margin_trade)
+        return self._build_runtime_order(
+            order_v2, remarks=data.remarks, is_margin_trade=data.is_margin_trade
+        )
 
     async def sync_order_projection(
         self,
@@ -90,7 +91,9 @@ class SimOrderService:
         rejected_reason: str | None = None,
     ) -> None:
         result = await self.db.execute(
-            select(SimulationOrderV2).where(SimulationOrderV2.order_id == order.order_id)
+            select(SimulationOrderV2).where(
+                SimulationOrderV2.order_id == order.order_id
+            )
         )
         order_v2 = result.scalar_one_or_none()
         if order_v2 is None:
@@ -102,9 +105,7 @@ class SimOrderService:
         if getattr(order, "cancelled_at", None) is not None:
             order_v2.updated_at = order.cancelled_at
 
-    async def get_order(
-        self, tenant_id: str, user_id: int, order_id: UUID
-    ):
+    async def get_order(self, tenant_id: str, user_id: int, order_id: UUID):
         order_v2 = (
             await self.db.execute(
                 select(SimulationOrderV2).where(
@@ -134,9 +135,13 @@ class SimOrderService:
                     await self.db.execute(
                         select(SimulationFill)
                         .where(SimulationFill.order_id == order_v2.order_id)
-                        .order_by(SimulationFill.executed_at.asc(), SimulationFill.id.asc())
+                        .order_by(
+                            SimulationFill.executed_at.asc(), SimulationFill.id.asc()
+                        )
                     )
-                ).scalars().all()
+                )
+                .scalars()
+                .all()
             )
             return self._to_order_response(order_v2, fills)
         return None
@@ -211,15 +216,20 @@ class SimOrderService:
                 [order.order_id for order in v2_orders]
             )
             return [
-                self._to_order_response(order, fills_by_order_id.get(order.order_id, []))
+                self._to_order_response(
+                    order, fills_by_order_id.get(order.order_id, [])
+                )
                 for order in v2_orders
             ]
         return []
 
-    async def cancel_order(
-        self, order: Any, reason: str | None = None
-    ):
-        current_status = str(getattr(getattr(order, "status", None), "value", getattr(order, "status", "")) or "").lower()
+    async def cancel_order(self, order: Any, reason: str | None = None):
+        current_status = str(
+            getattr(
+                getattr(order, "status", None), "value", getattr(order, "status", "")
+            )
+            or ""
+        ).lower()
         if current_status in {
             OrderStatus.FILLED.value,
             OrderStatus.CANCELLED.value,
@@ -227,7 +237,9 @@ class SimOrderService:
         }:
             raise ValueError(f"Cannot cancel order in status: {current_status}")
         result = await self.db.execute(
-            select(SimulationOrderV2).where(SimulationOrderV2.order_id == order.order_id)
+            select(SimulationOrderV2).where(
+                SimulationOrderV2.order_id == order.order_id
+            )
         )
         order_v2 = result.scalar_one_or_none()
         if order_v2 is None:
@@ -243,7 +255,9 @@ class SimOrderService:
                     .where(SimulationFill.order_id == order_v2.order_id)
                     .order_by(SimulationFill.executed_at.asc(), SimulationFill.id.asc())
                 )
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
         return self._to_order_response(order_v2, fills)
 
@@ -255,7 +269,9 @@ class SimOrderService:
         trading_session_date: date | None = None,
     ):
         result = await self.db.execute(
-            select(SimulationOrderV2).where(SimulationOrderV2.order_id == order.order_id)
+            select(SimulationOrderV2).where(
+                SimulationOrderV2.order_id == order.order_id
+            )
         )
         order_v2 = result.scalar_one_or_none()
         if order_v2 is None:
@@ -282,7 +298,9 @@ class SimOrderService:
                     .where(SimulationFill.order_id == order_v2.order_id)
                     .order_by(SimulationFill.executed_at.asc(), SimulationFill.id.asc())
                 )
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
         return self._to_order_response(order_v2, fills)
 
@@ -299,7 +317,9 @@ class SimOrderService:
                     .where(SimulationFill.order_id.in_(order_ids))
                     .order_by(SimulationFill.executed_at.asc(), SimulationFill.id.asc())
                 )
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
         grouped: dict[UUID, list[SimulationFill]] = defaultdict(list)
         for row in rows:
@@ -323,7 +343,9 @@ class SimOrderService:
             sum(float(fill.commission or 0.0) for fill in fills),
             2,
         )
-        average_price = round((filled_value / filled_quantity), 4) if filled_quantity > 0 else None
+        average_price = (
+            round((filled_value / filled_quantity), 4) if filled_quantity > 0 else None
+        )
         filled_at = fills[-1].executed_at if fills else None
         price_source = fills[-1].price_source if fills else None
         strategy_id = (
@@ -354,7 +376,9 @@ class SimOrderService:
             trading_session_date=order.trading_session_date,
             filled_quantity=filled_quantity,
             average_price=average_price,
-            order_value=round(float(order.quantity or 0.0) * float(order.price or 0.0), 2),
+            order_value=round(
+                float(order.quantity or 0.0) * float(order.price or 0.0), 2
+            ),
             filled_value=filled_value,
             commission=total_commission,
             submitted_at=order.submitted_at,
@@ -377,7 +401,9 @@ class SimOrderService:
             tenant_id=order_v2.tenant_id,
             user_id=int(order_v2.user_id),
             portfolio_id=int(order_v2.portfolio_id or 0),
-            strategy_id=int(order_v2.strategy_id) if str(order_v2.strategy_id or "").isdigit() else None,
+            strategy_id=int(order_v2.strategy_id)
+            if str(order_v2.strategy_id or "").isdigit()
+            else None,
             symbol=order_v2.symbol,
             side=OrderSide(str(order_v2.side or "").lower()),
             order_type=OrderType(str(order_v2.order_type or "").lower()),
@@ -402,7 +428,9 @@ class SimOrderService:
         runtime.filled_quantity = 0.0
         runtime.average_price = None
         runtime.filled_value = 0.0
-        runtime.order_value = round(float(order_v2.quantity or 0.0) * float(order_v2.price or 0.0), 2)
+        runtime.order_value = round(
+            float(order_v2.quantity or 0.0) * float(order_v2.price or 0.0), 2
+        )
         runtime.commission = 0.0
         runtime.total_fee = 0.0
         runtime.execution_model = "synthetic_price"

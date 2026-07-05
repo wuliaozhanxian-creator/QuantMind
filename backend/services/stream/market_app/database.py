@@ -22,7 +22,6 @@ _ASYNC_DRIVER_MAP = {
     "postgresql+asyncpg": "postgresql+asyncpg",
 }
 
-
 def _build_async_database_url(raw_url: str) -> str:
     url = make_url(raw_url)
     drivername = _ASYNC_DRIVER_MAP.get(url.drivername, url.drivername)
@@ -30,7 +29,6 @@ def _build_async_database_url(raw_url: str) -> str:
         drivername = "postgresql+asyncpg"
     # `str(URL)` 会隐藏密码为 `***`，这里必须保留真实凭据用于实际建连。
     return url.set(drivername=drivername).render_as_string(hide_password=False)
-
 
 def _create_engine():
     return create_async_engine(
@@ -40,7 +38,6 @@ def _create_engine():
         echo=settings.DB_ECHO,
         future=True,
     )
-
 
 engine = _create_engine()
 AsyncSessionLocal = async_sessionmaker(
@@ -58,7 +55,6 @@ redis_sentinel = Sentinel(
     password=settings.REDIS_PASSWORD if settings.REDIS_PASSWORD else None,
 )
 
-
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Get database session"""
     async with AsyncSessionLocal() as session:
@@ -70,7 +66,6 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             raise
         finally:
             await session.close()
-
 
 async def get_redis() -> Redis:
     """Get Redis connection"""
@@ -87,14 +82,15 @@ async def get_redis() -> Redis:
             return Redis(
                 host=settings.REDIS_HOST,
                 port=settings.REDIS_PORT,
-                username=settings.REDIS_USER if hasattr(settings, 'REDIS_USER') else None,
+                username=settings.REDIS_USER
+                if hasattr(settings, "REDIS_USER")
+                else None,
                 password=settings.REDIS_PASSWORD if settings.REDIS_PASSWORD else None,
                 db=settings.REDIS_DB,
             )
     except Exception as e:
         logger.warning(f"Redis connection failed: {e}, returning None")
         return None
-
 
 async def init_db():
     """Initialize database connectivity only.
@@ -115,7 +111,6 @@ async def init_db():
     except Exception:
         logger.exception("Database initialization failed")
         raise
-
 
 async def close_db():
     """Close database connection"""

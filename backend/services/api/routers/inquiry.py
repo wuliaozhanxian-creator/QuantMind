@@ -19,7 +19,6 @@ _INQUIRY_STORAGE_PATH = Path(
 )
 _INQUIRY_LOCK = threading.Lock()
 
-
 class InquiryRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -31,7 +30,9 @@ class InquiryRequest(BaseModel):
     interests: list[str] = Field(default_factory=list)
     message: str = Field(min_length=1, max_length=8000)
 
-    @field_validator("name", "email", "company", "phone", "title", "message", mode="before")
+    @field_validator(
+        "name", "email", "company", "phone", "title", "message", mode="before"
+    )
     @classmethod
     def _strip_strings(cls, value):
         if value is None:
@@ -44,7 +45,11 @@ class InquiryRequest(BaseModel):
     @classmethod
     def _validate_email(cls, value: str) -> str:
         normalized = value.strip().lower()
-        if "@" not in normalized or normalized.startswith("@") or normalized.endswith("@"):
+        if (
+            "@" not in normalized
+            or normalized.startswith("@")
+            or normalized.endswith("@")
+        ):
             raise ValueError("邮箱格式不正确")
         local_part, domain_part = normalized.rsplit("@", 1)
         if not local_part or "." not in domain_part:
@@ -67,10 +72,8 @@ class InquiryRequest(BaseModel):
                 normalized.append(text[:120])
         return normalized
 
-
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
-
 
 def _load_inquiries() -> list[dict]:
     if not _INQUIRY_STORAGE_PATH.exists():
@@ -83,16 +86,16 @@ def _load_inquiries() -> list[dict]:
         return payload
     return []
 
-
 def _persist_inquiry(record: dict) -> None:
     _INQUIRY_STORAGE_PATH.parent.mkdir(parents=True, exist_ok=True)
     with _INQUIRY_LOCK:
         inquiries = _load_inquiries()
         inquiries.append(record)
         tmp_path = _INQUIRY_STORAGE_PATH.with_suffix(".json.tmp")
-        tmp_path.write_text(json.dumps(inquiries, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp_path.write_text(
+            json.dumps(inquiries, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         tmp_path.replace(_INQUIRY_STORAGE_PATH)
-
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def submit_inquiry(payload: InquiryRequest, request: Request):

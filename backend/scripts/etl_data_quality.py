@@ -60,7 +60,6 @@ DEFAULT_MIN_STOCKS_PER_DAY = int(os.getenv("ETL_GAP_MIN_STOCKS", "3000"))
 # 最大允许缺失股票比例（相对基准日）
 DEFAULT_MAX_MISSING_RATIO = float(os.getenv("ETL_GAP_MAX_MISSING_RATIO", "0.05"))
 
-
 # ============================================================
 # 缺口检测结果数据结构
 # ============================================================
@@ -69,7 +68,6 @@ class MissingTradingDay:
     trade_date: str
     reason: str = "no_data"
 
-
 @dataclass
 class MissingStockGap:
     trade_date: str
@@ -77,14 +75,12 @@ class MissingStockGap:
     missing_ratio: float
     sample_symbols: list[str] = field(default_factory=list)
 
-
 @dataclass
 class NullFieldGap:
     trade_date: str
     field: str
     null_count: int
     total_count: int
-
 
 @dataclass
 class DataGapReport:
@@ -98,7 +94,6 @@ class DataGapReport:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
-
 
 # ============================================================
 # 交易日历辅助
@@ -136,7 +131,6 @@ async def _get_trading_days(start: date, end: date) -> list[date]:
             days.append(cur)
         cur += timedelta(days=1)
     return days
-
 
 # ============================================================
 # 缺口检测核心
@@ -306,7 +300,6 @@ async def detect_data_gaps(
 
     return report
 
-
 def _classify_status(report: DataGapReport) -> str:
     """根据缺口数量判定整体状态"""
     if report.missing_trading_days:
@@ -320,7 +313,6 @@ def _classify_status(report: DataGapReport) -> str:
     if report.null_field_gaps:
         return "warning"
     return "ok"
-
 
 # ============================================================
 # 补数任务触发
@@ -353,7 +345,6 @@ def trigger_backfill(missing_dates: list[str]) -> dict[str, Any]:
         "action": "manual_required",
         "alert_id": alert.get("timestamp"),
     }
-
 
 async def detect_and_backfill(
     lookback_days: int = DEFAULT_LOOKBACK_DAYS,
@@ -397,7 +388,6 @@ async def detect_and_backfill(
 
     return {"report": report.to_dict(), "backfill": backfill_result}
 
-
 # ============================================================
 # CLI 入口
 # ============================================================
@@ -423,7 +413,6 @@ def _cli() -> int:
         print(f"整体状态: {rep['summary']['status']}")
         print(f"补数动作: {result['backfill']['action']}")
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(_cli())

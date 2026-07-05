@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from sqlalchemy import text
 
 from backend.shared.database_manager_v2 import get_session
-
 
 class StrategyLoopPersistence:
     """strategy-backtest-loop 任务持久化。"""
@@ -102,12 +101,16 @@ class StrategyLoopPersistence:
                     "error_message": error_message,
                     "updated_at": updated_at,
                     "result_json": (
-                        json.dumps(result_payload, ensure_ascii=False) if result_payload is not None else None
+                        json.dumps(result_payload, ensure_ascii=False)
+                        if result_payload is not None
+                        else None
                     ),
                 },
             )
 
-    async def get_task(self, task_id: str, *, user_id: str, tenant_id: str) -> dict[str, Any] | None:
+    async def get_task(
+        self, task_id: str, *, user_id: str, tenant_id: str
+    ) -> dict[str, Any] | None:
         async with get_session(read_only=True) as session:
             row = await session.execute(
                 text("""
@@ -130,7 +133,9 @@ class StrategyLoopPersistence:
             result["result_json"] = json.loads(result["result_json"])
         return result
 
-    async def list_tasks(self, *, user_id: str, tenant_id: str, limit: int = 100) -> list[dict[str, Any]]:
+    async def list_tasks(
+        self, *, user_id: str, tenant_id: str, limit: int = 100
+    ) -> list[dict[str, Any]]:
         async with get_session(read_only=True) as session:
             rows = await session.execute(
                 text("""

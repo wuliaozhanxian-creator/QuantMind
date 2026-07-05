@@ -27,7 +27,9 @@ sys.path.append(str(PROJECT_ROOT))
 from backend.services.engine.inference.model_loader import ModelLoader
 
 # 日志配置
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger("BatchPredict")
 
 
@@ -72,10 +74,14 @@ def run_batch_inference(model_id="model_qlib", target_date=None):
 
     # 构建特征获取表达式
     # 假设 CSV 里的列名可以直接映射为 $col
-    expressions = [f"${col}" if not col.startswith("$") else col for col in feature_cols]
+    expressions = [
+        f"${col}" if not col.startswith("$") else col for col in feature_cols
+    ]
 
     logger.info(f"正在从二进制文件读取 {len(instruments)} 只股票的特征...")
-    df = D.features(instruments, expressions, start_time=target_date, end_date=target_date)
+    df = D.features(
+        instruments, expressions, start_time=target_date, end_date=target_date
+    )
 
     if df.empty:
         logger.error(f"在 {target_date} 未找到任何特征数据，请检查入库是否成功")

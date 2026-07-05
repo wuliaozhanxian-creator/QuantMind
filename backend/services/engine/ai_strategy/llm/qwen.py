@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 import time
-from typing import TYPE_CHECKING, Any, Dict, Tuple
+from typing import TYPE_CHECKING, Any
 
 import requests
 
@@ -23,7 +23,6 @@ from .base import BaseLLMProvider, normalize_name
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 
-
 class QwenLLM:
     """Qwen LLM - 使用 OpenAI 兼容模式"""
 
@@ -34,14 +33,17 @@ class QwenLLM:
 
         self._config = ai_strategy_config
         # 优先使用传入的 api_key，否则从环境变量读取
-        self.api_key = api_key or os.getenv("DASHSCOPE_API_KEY") or os.getenv("QWEN_API_KEY")
+        self.api_key = (
+            api_key or os.getenv("DASHSCOPE_API_KEY") or os.getenv("QWEN_API_KEY")
+        )
         if not self.api_key:
-            raise RuntimeError("DASHSCOPE_API_KEY or QWEN_API_KEY not set in environment")
+            raise RuntimeError(
+                "DASHSCOPE_API_KEY or QWEN_API_KEY not set in environment"
+            )
 
         # 使用官方 OpenAI 兼容模式 base_url
         base_url = os.getenv(
-            "DASHSCOPE_BASE_URL",
-            "https://dashscope.aliyuncs.com/compatible-mode/v1"
+            "DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"
         )
         self.base_url = str(base_url).rstrip("/")
         self.endpoint = f"{self.base_url}/chat/completions"
@@ -53,7 +55,9 @@ class QwenLLM:
         self.max_tokens = self._config.LLM_MAX_TOKENS
         self.temperature = self._config.LLM_TEMPERATURE
 
-    def generate_code(self, prompt: str, mode: str = "simple") -> tuple[str, dict[str, Any]]:
+    def generate_code(
+        self, prompt: str, mode: str = "simple"
+    ) -> tuple[str, dict[str, Any]]:
         """使用 OpenAI 兼容模式生成代码"""
         payload = {
             "model": self.model,
@@ -75,12 +79,16 @@ class QwenLLM:
         last_exc = None
         for attempt in range(3):
             try:
-                r = requests.post(self.endpoint, json=payload, headers=headers, timeout=180)
+                r = requests.post(
+                    self.endpoint, json=payload, headers=headers, timeout=180
+                )
                 r.raise_for_status()
                 data = r.json()
 
                 # OpenAI 兼容模式返回格式
-                content = (((data.get("choices") or [{}])[0]).get("message") or {}).get("content") or ""
+                content = (((data.get("choices") or [{}])[0]).get("message") or {}).get(
+                    "content"
+                ) or ""
 
                 meta = {
                     "model_used": data.get("model", self.model),
@@ -95,11 +103,9 @@ class QwenLLM:
 
         raise RuntimeError(f"QWEN request failed after retries: {last_exc}")
 
-
 # ---------------------------------------------------------------------------
 # 异步 Provider (使用 OpenAI 兼容模式)
 # ---------------------------------------------------------------------------
-
 
 class QwenProvider(BaseLLMProvider):
     """千问 LLM Provider - 使用 OpenAI 兼容模式"""
@@ -113,17 +119,21 @@ class QwenProvider(BaseLLMProvider):
 
         if not self.api_key:
             import logging
-            logging.getLogger(__name__).warning("DASHSCOPE_API_KEY or QWEN_API_KEY not set in environment")
+
+            logging.getLogger(__name__).warning(
+                "DASHSCOPE_API_KEY or QWEN_API_KEY not set in environment"
+            )
             return
 
         # 使用官方 OpenAI 兼容模式 base_url
         self.base_url = os.getenv(
-            "DASHSCOPE_BASE_URL",
-            "https://dashscope.aliyuncs.com/compatible-mode/v1"
+            "DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"
         )
         self.endpoint = f"{self.base_url.rstrip('/')}/chat/completions"
 
-    async def generate(self, req: StrategyGenerationRequest) -> StrategyGenerationResult:
+    async def generate(
+        self, req: StrategyGenerationRequest
+    ) -> StrategyGenerationResult:
         """使用千问生成策略代码"""
 
         strategy_name = normalize_name(req.description)
@@ -151,15 +161,20 @@ class QwenProvider(BaseLLMProvider):
             }
 
             import asyncio
+
             def _call_api():
-                r = requests.post(self.endpoint, json=payload, headers=headers, timeout=180)
+                r = requests.post(
+                    self.endpoint, json=payload, headers=headers, timeout=180
+                )
                 r.raise_for_status()
                 return r.json()
 
             data = await asyncio.to_thread(_call_api)
 
             # OpenAI 兼容模式返回格式
-            content = (((data.get("choices") or [{}])[0]).get("message") or {}).get("content") or ""
+            content = (((data.get("choices") or [{}])[0]).get("message") or {}).get(
+                "content"
+            ) or ""
 
             # 解析代码
             code = self._extract_code(content)
@@ -184,7 +199,7 @@ class QwenProvider(BaseLLMProvider):
             )
 
         except Exception as e:
-            raise RuntimeError(f"千问API调用失败: {str(e)}")
+            raise RuntimeError(f"千问API调用失败: {str(e)}") from e
 
     async def chat(self, messages: list, **kwargs) -> Any:
         """通用聊天接口"""
@@ -201,17 +216,22 @@ class QwenProvider(BaseLLMProvider):
             }
 
             import asyncio
+
             def _call_api():
-                r = requests.post(self.endpoint, json=payload, headers=headers, timeout=180)
+                r = requests.post(
+                    self.endpoint, json=payload, headers=headers, timeout=180
+                )
                 r.raise_for_status()
                 return r.json()
 
             data = await asyncio.to_thread(_call_api)
-            return (((data.get("choices") or [{}])[0]).get("message") or {})
+            return ((data.get("choices") or [{}])[0]).get("message") or {}
         except Exception as e:
-            raise RuntimeError(f"Qwen聊天失败: {str(e)}")
+            raise RuntimeError(f"Qwen聊天失败: {str(e)}") from e
 
-    async def convert(self, req: StrategyConversionRequest) -> StrategyConversionResponse:
+    async def convert(
+        self, req: StrategyConversionRequest
+    ) -> StrategyConversionResponse:
         """转换第三方策略到Qlib格式"""
         from ..generators.qlib_strategy_generator import QlibStrategyCodeGenerator
 

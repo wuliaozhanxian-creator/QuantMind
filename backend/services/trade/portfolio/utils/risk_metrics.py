@@ -11,14 +11,13 @@
 import logging
 import math
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 # 无风险利率（年化，默认使用中国十年期国债收益率约 2.5%）
 DEFAULT_RISK_FREE_RATE = 0.025
 TRADING_DAYS_PER_YEAR = 252
-
 
 @dataclass
 class RiskMetrics:
@@ -33,7 +32,6 @@ class RiskMetrics:
     annualized_return: float | None = None
     calmar_ratio: float | None = None
     sortino_ratio: float | None = None
-
 
 def calculate_daily_returns(values: list[float]) -> list[float]:
     """
@@ -55,7 +53,6 @@ def calculate_daily_returns(values: list[float]) -> list[float]:
         else:
             returns.append(0.0)
     return returns
-
 
 def calculate_sharpe_ratio(
     daily_returns: list[float],
@@ -83,7 +80,6 @@ def calculate_sharpe_ratio(
     sharpe = (annualized_return - risk_free_rate) / annualized_vol
     return round(sharpe, 4)
 
-
 def calculate_volatility(daily_returns: list[float]) -> float | None:
     """
     计算年化波动率
@@ -95,7 +91,6 @@ def calculate_volatility(daily_returns: list[float]) -> float | None:
     vol = _std(daily_returns)
     annualized_vol = vol * math.sqrt(TRADING_DAYS_PER_YEAR)
     return round(annualized_vol, 4)
-
 
 def calculate_max_drawdown(values: list[float]) -> float | None:
     """
@@ -119,7 +114,6 @@ def calculate_max_drawdown(values: list[float]) -> float | None:
 
     return round(max_dd, 4)
 
-
 def calculate_sortino_ratio(
     daily_returns: list[float],
     risk_free_rate: float = DEFAULT_RISK_FREE_RATE,
@@ -137,7 +131,9 @@ def calculate_sortino_ratio(
 
     daily_rf = risk_free_rate / TRADING_DAYS_PER_YEAR
     downside_returns = [min(r - daily_rf, 0) for r in daily_returns]
-    downside_dev = math.sqrt(sum(r**2 for r in downside_returns) / len(downside_returns))
+    downside_dev = math.sqrt(
+        sum(r**2 for r in downside_returns) / len(downside_returns)
+    )
 
     if downside_dev == 0:
         return None
@@ -146,8 +142,9 @@ def calculate_sortino_ratio(
     sortino = (annualized_return - risk_free_rate) / annualized_downside
     return round(sortino, 4)
 
-
-def calculate_calmar_ratio(daily_returns: list[float], values: list[float]) -> float | None:
+def calculate_calmar_ratio(
+    daily_returns: list[float], values: list[float]
+) -> float | None:
     """
     计算卡玛比率
 
@@ -164,7 +161,6 @@ def calculate_calmar_ratio(daily_returns: list[float], values: list[float]) -> f
         return None
 
     return round(annualized_return / max_dd, 4)
-
 
 def compute_risk_metrics(
     total_values: list[float],
@@ -197,7 +193,6 @@ def compute_risk_metrics(
         calmar_ratio=calculate_calmar_ratio(daily_returns, total_values),
         sortino_ratio=calculate_sortino_ratio(daily_returns, risk_free_rate),
     )
-
 
 def _std(data: list[float]) -> float:
     """计算标准差（样本标准差）"""

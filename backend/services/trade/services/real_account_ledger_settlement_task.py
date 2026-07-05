@@ -46,7 +46,9 @@ async def run_real_account_ledger_settlement_task(
                 finalized_rows,
             )
         except Exception as exc:
-            logger.error("Initial real-account ledger settlement failed: %s", exc, exc_info=True)
+            logger.error(
+                "Initial real-account ledger settlement failed: %s", exc, exc_info=True
+            )
 
     while True:
         try:
@@ -65,5 +67,7 @@ async def run_real_account_ledger_settlement_task(
             logger.info("Real-account ledger settlement task cancelled")
             break
         except Exception as exc:
-            logger.error("Real-account ledger settlement task failed: %s", exc, exc_info=True)
+            logger.error(
+                "Real-account ledger settlement task failed: %s", exc, exc_info=True
+            )
             await asyncio.sleep(60)

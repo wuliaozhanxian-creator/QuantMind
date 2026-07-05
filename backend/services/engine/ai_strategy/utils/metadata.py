@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from typing import List, Union
+from typing import Union
 from collections.abc import Iterable, Sequence
 
 _METADATA_SEPARATORS = ("\r\n", "\n", "；", ";", "、", "，", ",", "|", "/")
 _BULLET_PREFIXES = ("-", "•", "*", "·")
-
 
 def _split_candidate(value: str) -> list[str]:
     """Split a raw string into candidate metadata entries."""
@@ -16,7 +15,6 @@ def _split_candidate(value: str) -> list[str]:
         cleaned = cleaned.replace(sep, "|")
     candidates = [candidate.strip() for candidate in cleaned.split("|")]
     return [candidate for candidate in candidates if candidate]
-
 
 def _strip_bullet(candidate: str) -> str:
     """Remove common bullet prefixes and leading numbering."""
@@ -39,12 +37,10 @@ def _strip_bullet(candidate: str) -> str:
 
     return stripped.strip()
 
-
 def _normalize_entry(entry: str) -> str:
     """Normalize whitespace within a single metadata entry."""
     normalized = " ".join(entry.split())
     return normalized
-
 
 def normalize_text_list(value: str | Sequence[str] | None) -> list[str]:
     """Convert an arbitrary metadata field into a sanitized list of strings.
@@ -74,7 +70,11 @@ def normalize_text_list(value: str | Sequence[str] | None) -> list[str]:
         if not text:
             continue
 
-        for split_entry in (_split_candidate(text) if not isinstance(candidate, (list, tuple, set)) else [text]):
+        for split_entry in (
+            _split_candidate(text)
+            if not isinstance(candidate, (list, tuple, set))
+            else [text]
+        ):
             entry = _strip_bullet(split_entry)
             if not entry:
                 continue
@@ -90,7 +90,6 @@ def normalize_text_list(value: str | Sequence[str] | None) -> list[str]:
         deduped.append(item)
 
     return deduped
-
 
 def sanitize_note(value: str | Sequence[str] | None) -> str | None:
     """Normalize note fields into a single plain string."""

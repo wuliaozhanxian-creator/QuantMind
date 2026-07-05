@@ -23,7 +23,10 @@ from backend.services.trade.simulation.services.projection_service import (
     SimulationProjectionService,
 )
 from backend.shared.database_manager_v2 import get_session
-from backend.shared.trade_account_cache import write_json_cache, write_trade_account_cache
+from backend.shared.trade_account_cache import (
+    write_json_cache,
+    write_trade_account_cache,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +53,9 @@ async def _scan_and_monitor() -> tuple[int, int]:
                         SimulationAccount.liabilities > 0,
                     )
                 )
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
 
         manager = SimulationAccountManager(redis_client)
@@ -99,10 +104,13 @@ async def _write_warning(
 ) -> None:
     now = datetime.utcnow()
     existing = await session.execute(
-        select(SimulationCashLedger).where(
+        select(SimulationCashLedger)
+        .where(
             SimulationCashLedger.account_id == account.account_id,
             SimulationCashLedger.event_type == "MARGIN_WARNING",
-        ).order_by(SimulationCashLedger.occurred_at.desc()).limit(1)
+        )
+        .order_by(SimulationCashLedger.occurred_at.desc())
+        .limit(1)
     )
     last_warning = existing.scalar_one_or_none()
     if last_warning is not None:
@@ -149,17 +157,21 @@ async def _force_liquidate(
     lots = list(
         (
             await session.execute(
-                select(SimulationPositionLot).where(
+                select(SimulationPositionLot)
+                .where(
                     SimulationPositionLot.account_id == account_id,
                     SimulationPositionLot.position_side == "short",
                     SimulationPositionLot.status == "open",
                     SimulationPositionLot.quantity_remaining > 0,
-                ).order_by(
+                )
+                .order_by(
                     SimulationPositionLot.open_date.asc().nullsfirst(),
                     SimulationPositionLot.id.asc(),
                 )
             )
-        ).scalars().all()
+        )
+        .scalars()
+        .all()
     )
 
     for lot in lots:
@@ -249,7 +261,9 @@ async def _rebuild_redis_cache(account: SimulationAccount) -> None:
             positions=projection.positions or {},
             source="margin_monitor_projection",
         )
-        sim_key = f"simulation:account:{account.tenant_id}:{str(account.user_id).strip()}"
+        sim_key = (
+            f"simulation:account:{account.tenant_id}:{str(account.user_id).strip()}"
+        )
         write_json_cache(redis_client, sim_key, payload)
         write_trade_account_cache(
             redis_client, account.tenant_id, account.user_id, payload

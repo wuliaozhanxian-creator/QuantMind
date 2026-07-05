@@ -146,7 +146,9 @@ def test_pipeline_cleanup_success(monkeypatch):
         assert keep_days == 30
         return 7
 
-    monkeypatch.setattr(pipeline_router.pipeline_service, "cleanup_old_runs", fake_cleanup)
+    monkeypatch.setattr(
+        pipeline_router.pipeline_service, "cleanup_old_runs", fake_cleanup
+    )
 
     with _client(monkeypatch) as client:
         resp = client.delete(

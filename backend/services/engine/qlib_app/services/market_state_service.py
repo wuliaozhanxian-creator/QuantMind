@@ -2,10 +2,12 @@
 
 import logging
 import os
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Optional
 
 import pandas as pd
-from backend.services.engine.qlib_app.utils.structured_logger import StructuredTaskLogger
+from backend.services.engine.qlib_app.utils.structured_logger import (
+    StructuredTaskLogger,
+)
 from backend.services.engine.qlib_app.utils.benchmark_symbol import (
     benchmark_candidates,
     normalize_benchmark_symbol,
@@ -56,12 +58,13 @@ DEFAULT_POSITION_BY_STATE = {
 
 DEFAULT_WINDOW = 20
 
-
 class MarketStateService:
     """计算市场状态与动态风险仓位"""
 
     def __init__(self) -> None:
-        self._config_url = os.getenv("MARKET_CONFIG_URL") or os.getenv("MARKET_STATE_CONFIG_URL")
+        self._config_url = os.getenv("MARKET_CONFIG_URL") or os.getenv(
+            "MARKET_STATE_CONFIG_URL"
+        )
 
     def _fetch_remote_config(self, style: str | None) -> dict[str, Any]:
         if not self._config_url:
@@ -84,7 +87,9 @@ class MarketStateService:
             if isinstance(data, dict):
                 return data
         except Exception as exc:
-            task_logger.warning("fetch_remote_config_failed", "拉取市场配置失败", error=str(exc))
+            task_logger.warning(
+                "fetch_remote_config_failed", "拉取市场配置失败", error=str(exc)
+            )
 
         return {}
 
@@ -92,14 +97,18 @@ class MarketStateService:
         thresholds = dict(DEFAULT_THRESHOLDS)
         remote_thresholds = remote.get("thresholds")
         if isinstance(remote_thresholds, dict):
-            thresholds.update({k: float(v) for k, v in remote_thresholds.items() if v is not None})
+            thresholds.update(
+                {k: float(v) for k, v in remote_thresholds.items() if v is not None}
+            )
         return thresholds
 
     def _merge_position_map(self, remote: dict[str, Any]) -> dict[str, float]:
         position_by_state = dict(DEFAULT_POSITION_BY_STATE)
         remote_map = remote.get("position_by_state")
         if isinstance(remote_map, dict):
-            position_by_state.update({k: float(v) for k, v in remote_map.items() if v is not None})
+            position_by_state.update(
+                {k: float(v) for k, v in remote_map.items() if v is not None}
+            )
         return position_by_state
 
     def resolve_config(
@@ -143,7 +152,9 @@ class MarketStateService:
 
         remote_state = config.get("market_state_series")
         if isinstance(remote_state, dict) and remote_state:
-            risk_series = self._risk_from_state_series(remote_state, position_by_state, strategy_total_position)
+            risk_series = self._risk_from_state_series(
+                remote_state, position_by_state, strategy_total_position
+            )
             return risk_series, position_by_state
 
         series = self.build_market_state_series(
@@ -153,7 +164,9 @@ class MarketStateService:
             config["window"],
             config["thresholds"],
         )
-        risk_series = self._risk_from_state_series(series, position_by_state, strategy_total_position)
+        risk_series = self._risk_from_state_series(
+            series, position_by_state, strategy_total_position
+        )
         return risk_series, position_by_state
 
     def build_market_state_series(
@@ -177,7 +190,12 @@ class MarketStateService:
                 )
             except Exception as exc:
                 last_error = exc
-                task_logger.warning("fetch_market_data_failed", "拉取市场数据失败", symbol=candidate, error=str(exc))
+                task_logger.warning(
+                    "fetch_market_data_failed",
+                    "拉取市场数据失败",
+                    symbol=candidate,
+                    error=str(exc),
+                )
                 continue
 
             if df is not None and not df.empty:
@@ -278,11 +296,15 @@ class MarketStateService:
             if isinstance(state, (int, float)):
                 risk_series[date] = self._clamp(float(state) * strategy_total_position)
                 continue
-            mapped = position_by_state.get(str(state), position_by_state.get("neutral", 1.0))
+            mapped = position_by_state.get(
+                str(state), position_by_state.get("neutral", 1.0)
+            )
             risk_series[date] = self._clamp(mapped * strategy_total_position)
         return risk_series
 
-    def _normalize_risk_series(self, series: dict[str, Any], strategy_total_position: float) -> dict[str, float]:
+    def _normalize_risk_series(
+        self, series: dict[str, Any], strategy_total_position: float
+    ) -> dict[str, float]:
         risk_series: dict[str, float] = {}
         for date, val in series.items():
             if val is None:

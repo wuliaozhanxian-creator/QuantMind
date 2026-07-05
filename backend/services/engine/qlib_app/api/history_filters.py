@@ -8,7 +8,6 @@ from sqlalchemy import text
 from backend.shared.database_manager_v2 import get_session
 from backend.shared.utils import normalize_user_id
 
-
 async def _filter_optimization_sub_backtests(
     results: list[Any],
     *,
@@ -45,7 +44,11 @@ async def _filter_optimization_sub_backtests(
                     "candidate_ids": candidate_ids,
                 },
             )
-            excluded_ids = {str(row["backtest_id"]) for row in rows.mappings().all() if row.get("backtest_id")}
+            excluded_ids = {
+                str(row["backtest_id"])
+                for row in rows.mappings().all()
+                if row.get("backtest_id")
+            }
     except Exception:
         return results
 
@@ -62,7 +65,6 @@ async def _filter_optimization_sub_backtests(
             continue
         filtered.append(item)
     return filtered
-
 
 def _filter_legacy_optimization_clusters(results: list[Any]) -> list[Any]:
     def _field(item: Any, key: str, default: Any = None) -> Any:

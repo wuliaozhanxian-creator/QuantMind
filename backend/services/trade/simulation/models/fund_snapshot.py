@@ -11,7 +11,9 @@ class SimulationFundSnapshot(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     tenant_id: Mapped[str] = mapped_column(String(50), index=True, default="default")
     user_id: Mapped[str] = mapped_column(String(50), index=True)
-    account_id: Mapped[str | None] = mapped_column(String(50), index=True, nullable=True)
+    account_id: Mapped[str | None] = mapped_column(
+        String(50), index=True, nullable=True
+    )
     snapshot_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     total_asset: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     available_balance: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)

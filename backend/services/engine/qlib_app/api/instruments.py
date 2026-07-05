@@ -5,7 +5,7 @@
 
 import os
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
@@ -15,7 +15,6 @@ router = APIRouter(tags=["instruments"])  # 不要添加prefix，让main.py统�
 # 股票数据缓存
 _stock_cache: list[dict[str, str]] | None = None
 
-
 class StockInfo(BaseModel):
     """股票信息"""
 
@@ -23,9 +22,7 @@ class StockInfo(BaseModel):
     start_date: str
     end_date: str
 
-
 # ... (rest of imports)
-
 
 def _load_qlib_instruments() -> list[dict[str, str]]:
     """
@@ -52,7 +49,9 @@ def _load_qlib_instruments() -> list[dict[str, str]]:
         if docker_path.exists():
             qlib_data_path = docker_path
         else:
-            raise FileNotFoundError(f"Qlib instruments file not found: {qlib_data_path}")
+            raise FileNotFoundError(
+                f"Qlib instruments file not found: {qlib_data_path}"
+            )
 
     stocks = []
     with open(qlib_data_path, encoding="utf-8") as f:
@@ -94,7 +93,6 @@ def _load_qlib_instruments() -> list[dict[str, str]]:
     _stock_cache = stocks
     return stocks
 
-
 @router.get("/instruments/all", response_model=list[StockInfo])
 async def get_all_instruments() -> list[StockInfo]:
     """
@@ -111,8 +109,9 @@ async def get_all_instruments() -> list[StockInfo]:
             for s in stocks
         ]
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to load instruments: {str(e)}")
-
+        raise HTTPException(
+            status_code=500, detail=f"Failed to load instruments: {str(e)}"
+        ) from e
 
 @router.get("/instruments/search")
 async def search_instruments(
@@ -150,8 +149,7 @@ async def search_instruments(
 
         return results
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
-
+        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}") from e
 
 @router.get("/instruments/count")
 async def get_instruments_count() -> dict[str, int]:
@@ -169,4 +167,6 @@ async def get_instruments_count() -> dict[str, int]:
 
         return {"total": len(stocks), "by_market": market_count}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get count: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to get count: {str(e)}"
+        ) from e

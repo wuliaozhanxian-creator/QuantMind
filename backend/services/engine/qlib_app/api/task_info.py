@@ -2,7 +2,6 @@
 
 from typing import Any
 
-
 def _sanitize_task_info(value: Any, depth: int = 0) -> Any:
     """将 Celery task info 转为可 JSON 序列化结构。"""
     if depth > 4:

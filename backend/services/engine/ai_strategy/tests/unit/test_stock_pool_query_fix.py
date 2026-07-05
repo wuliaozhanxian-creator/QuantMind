@@ -20,7 +20,9 @@ def test_parse_dsl_supports_single_equals() -> None:
     conditions, combiners = _parse_dsl("SELECT symbol WHERE idx_hs300 = 1")
 
     assert combiners == []
-    assert conditions == [{"type": "simple", "factor": "idx_hs300", "op": "=", "value": 1.0}]
+    assert conditions == [
+        {"type": "simple", "factor": "idx_hs300", "op": "=", "value": 1.0}
+    ]
 
 
 def test_tag_factor_aliases_resolve_to_tag_codes() -> None:
@@ -97,7 +99,9 @@ def test_pool_summary_uses_yi_buckets() -> None:
         def __init__(self, market_cap: float) -> None:
             self.metrics = {"market_cap": market_cap}
 
-    summary, charts = _build_pool_summary([_Item(80), _Item(150), _Item(300)], None, universe_total=10)
+    summary, charts = _build_pool_summary(
+        [_Item(80), _Item(150), _Item(300)], None, universe_total=10
+    )
 
     assert summary["matchRate"] == 30.0
     assert charts["marketCap"] == [

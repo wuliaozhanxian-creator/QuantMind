@@ -8,11 +8,10 @@ import json
 import logging
 import time
 from functools import wraps
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
-
 
 class LocalMemoryCache:
     """L1: 本地内存缓存 - 热点数据"""
@@ -60,7 +59,6 @@ class LocalMemoryCache:
             "misses": self._misses,
             "hit_rate": f"{hit_rate:.2f}%",
         }
-
 
 class MultiLevelCache:
     """多级缓存管理器 L1 (内存) -> L2 (Redis) -> L3 (数据源)"""
@@ -155,7 +153,9 @@ class MultiLevelCache:
                 async def loader():
                     return await func(*args, **kwargs)
 
-                return await self.get(cache_key, loader=loader, ttl_l1=ttl_l1, ttl_l2=ttl_l2)
+                return await self.get(
+                    cache_key, loader=loader, ttl_l1=ttl_l1, ttl_l2=ttl_l2
+                )
 
             return wrapper
 

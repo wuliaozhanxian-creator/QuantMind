@@ -1,4 +1,5 @@
 """Audit Log Model."""
+
 from sqlalchemy import JSON, BigInteger, Column, DateTime, String
 from sqlalchemy.sql import func
 

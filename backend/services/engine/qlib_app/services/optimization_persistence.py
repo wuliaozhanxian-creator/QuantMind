@@ -6,7 +6,7 @@ import os
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from sqlalchemy import text
 
@@ -14,7 +14,6 @@ from backend.shared.database_manager_v2 import get_session
 from backend.shared.utils import normalize_user_id
 
 logger = logging.getLogger(__name__)
-
 
 class OptimizationPersistence:
     """参数优化历史持久化"""
@@ -140,23 +139,39 @@ class OptimizationPersistence:
                     "status": status,
                     "created_at": now,
                     "updated_at": now,
-                    "completed_at": now if status in ("completed", "failed", "cancelled") else None,
-                    "base_request_json": json.dumps(base_request or {}, ensure_ascii=False),
-                    "config_snapshot_json": json.dumps(config_snapshot or {}, ensure_ascii=False),
+                    "completed_at": now
+                    if status in ("completed", "failed", "cancelled")
+                    else None,
+                    "base_request_json": json.dumps(
+                        base_request or {}, ensure_ascii=False
+                    ),
+                    "config_snapshot_json": json.dumps(
+                        config_snapshot or {}, ensure_ascii=False
+                    ),
                     "optimization_target": optimization_target,
-                    "param_ranges_json": json.dumps(param_ranges or [], ensure_ascii=False),
+                    "param_ranges_json": json.dumps(
+                        param_ranges or [], ensure_ascii=False
+                    ),
                     "total_tasks": total_tasks,
                     "completed_count": completed_count,
                     "failed_count": failed_count,
                     "current_params_json": (
-                        json.dumps(current_params, ensure_ascii=False) if current_params is not None else None
+                        json.dumps(current_params, ensure_ascii=False)
+                        if current_params is not None
+                        else None
                     ),
                     "best_params_json": (
-                        json.dumps(best_params, ensure_ascii=False) if best_params is not None else None
+                        json.dumps(best_params, ensure_ascii=False)
+                        if best_params is not None
+                        else None
                     ),
                     "best_metric_value": best_metric_value,
-                    "result_summary_json": json.dumps(result_summary or {}, ensure_ascii=False),
-                    "all_results_json": json.dumps(all_results or [], ensure_ascii=False),
+                    "result_summary_json": json.dumps(
+                        result_summary or {}, ensure_ascii=False
+                    ),
+                    "all_results_json": json.dumps(
+                        all_results or [], ensure_ascii=False
+                    ),
                     "error_message": error_message,
                 },
             )
@@ -195,7 +210,9 @@ class OptimizationPersistence:
             params["failed_count"] = failed_count
         if current_params is not None:
             fields.append("current_params_json = CAST(:current_params_json AS jsonb)")
-            params["current_params_json"] = json.dumps(current_params, ensure_ascii=False)
+            params["current_params_json"] = json.dumps(
+                current_params, ensure_ascii=False
+            )
         if best_params is not None:
             fields.append("best_params_json = CAST(:best_params_json AS jsonb)")
             params["best_params_json"] = json.dumps(best_params, ensure_ascii=False)
@@ -204,7 +221,9 @@ class OptimizationPersistence:
             params["best_metric_value"] = best_metric_value
         if result_summary is not None:
             fields.append("result_summary_json = CAST(:result_summary_json AS jsonb)")
-            params["result_summary_json"] = json.dumps(result_summary, ensure_ascii=False)
+            params["result_summary_json"] = json.dumps(
+                result_summary, ensure_ascii=False
+            )
         if all_results is not None:
             fields.append("all_results_json = CAST(:all_results_json AS jsonb)")
             params["all_results_json"] = json.dumps(all_results, ensure_ascii=False)
@@ -238,7 +257,8 @@ class OptimizationPersistence:
 
         async with get_session(read_only=True) as session:
             rows = await session.execute(
-                text("""
+                text(
+                    """
                     SELECT optimization_id, task_id, mode, user_id, tenant_id, status,
                            created_at, updated_at, completed_at, optimization_target,
                            total_tasks, completed_count, failed_count,
@@ -246,14 +266,19 @@ class OptimizationPersistence:
                            config_snapshot_json, error_message
                     FROM qlib_optimization_runs
                     WHERE user_id = :user_id
-                    """ + tenant_sql + " ORDER BY created_at DESC LIMIT :limit"),
+                    """
+                    + tenant_sql
+                    + " ORDER BY created_at DESC LIMIT :limit"
+                ),
                 params,
             )
             data = rows.mappings().all()
         return [self._map_row(row, include_all_results=False) for row in data]
 
     async def count_by_statuses(self, statuses: list[str]) -> int:
-        normalized = [str(status).strip().lower() for status in statuses if str(status).strip()]
+        normalized = [
+            str(status).strip().lower() for status in statuses if str(status).strip()
+        ]
         if not normalized:
             return 0
         async with get_session(read_only=True) as session:
@@ -287,12 +312,15 @@ class OptimizationPersistence:
 
         async with get_session(read_only=True) as session:
             row = await session.execute(
-                text("""
+                text(
+                    """
                     SELECT *
                     FROM qlib_optimization_runs
                     WHERE optimization_id = :optimization_id
                       AND user_id = :user_id
-                    """ + tenant_sql),
+                    """
+                    + tenant_sql
+                ),
                 params,
             )
             data = row.mappings().first()
@@ -334,7 +362,9 @@ class OptimizationPersistence:
         optimization_id = data.get("optimization_id")
         return str(optimization_id) if optimization_id else None
 
-    def _map_row(self, row: dict[str, Any], *, include_all_results: bool) -> dict[str, Any]:
+    def _map_row(
+        self, row: dict[str, Any], *, include_all_results: bool
+    ) -> dict[str, Any]:
         payload = {
             "optimization_id": row["optimization_id"],
             "task_id": row.get("task_id"),
@@ -386,7 +416,9 @@ class OptimizationPersistence:
         if not expired_ids:
             return
         await session.execute(
-            text("DELETE FROM qlib_optimization_runs WHERE optimization_id = ANY(:ids)"),
+            text(
+                "DELETE FROM qlib_optimization_runs WHERE optimization_id = ANY(:ids)"
+            ),
             {"ids": expired_ids},
         )
 
@@ -413,7 +445,11 @@ class OptimizationPersistence:
 
                 bp = BacktestPersistence()
                 # 构造路径: data/backtest_results/[tenant]/[user]
-                user_root = bp._local_result_root / bp._sanitize_segment(tenant_id) / bp._sanitize_segment(user_id)
+                user_root = (
+                    bp._local_result_root
+                    / bp._sanitize_segment(tenant_id)
+                    / bp._sanitize_segment(user_id)
+                )
                 if user_root.exists() and user_root.is_dir():
                     shutil.rmtree(user_root)
                     logger.info(f"Cleared physical history directory: {user_root}")
