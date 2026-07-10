@@ -20,7 +20,7 @@
 """
 
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import jwt
@@ -67,7 +67,7 @@ class AuthManager:
         """
         self._ensure_secret_configured()
         to_encode = data.copy()
-        expire = datetime.utcnow() + timedelta(minutes=self.expire_minutes)
+        expire = datetime.now(timezone.utc) + timedelta(minutes=self.expire_minutes)
         to_encode.update({"exp": expire})
 
         encoded_jwt = jwt.encode(to_encode, self.secret_key, algorithm=self.algorithm)
@@ -98,7 +98,7 @@ class AuthManager:
                 detail="Token has expired",
                 headers={"WWW-Authenticate": "Bearer"},
             ) from None
-        except jwt.JWTError as e:
+        except jwt.PyJWTError as e:
             logger.warning(f"Invalid token: {e}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -166,7 +166,7 @@ def create_service_token(service_name: str, expire_seconds: int = 300) -> str:
         raise RuntimeError(
             "python-jose 未安装，请执行: pip install python-jose[cryptography]"
         ) from None
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     payload = {
         "service": service_name,
         "iat": now,

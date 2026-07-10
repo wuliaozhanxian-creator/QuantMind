@@ -394,7 +394,7 @@ class AuthService:
     ) -> tuple[str, str]:
         """创建访问Token"""
         jti = str(uuid.uuid4())
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         expires = now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
 
         payload = {
@@ -415,7 +415,7 @@ class AuthService:
 
     def _create_refresh_token(self, user_id: str, tenant_id: str) -> str:
         """创建刷新Token"""
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         expires = now + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
 
         payload = {
@@ -438,8 +438,8 @@ class AuthService:
             "email": data.get("email"),
             "roles": data.get("roles", []),
             "jti": str(uuid.uuid4()),
-            "iat": datetime.now(),
-            "exp": datetime.now()
+            "iat": datetime.now(timezone.utc),
+            "exp": datetime.now(timezone.utc)
             + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
             "type": "access",
         }
