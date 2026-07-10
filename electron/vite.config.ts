@@ -37,10 +37,9 @@ export default defineConfig(({ mode }) => {
         'dayjs/plugin/utc',
         'dayjs/plugin/timezone',
       ],
-      // file-saver 的 FileSaver.min.js 内部调用匿名 AMD define()，
-      // 与 Monaco Editor 的 AMD loader 冲突（"Can only have one anonymous define call per script file"），
-      // 导致 ProtectedRoute 等依赖组件崩溃。排除预构建以规避该冲突。
-      exclude: ['file-saver'],
+      // file-saver 通过 excelExport.ts 中的动态 import() 按需加载，
+      // 避免模块加载阶段执行 UMD 内部匿名 AMD define() 而与 Monaco Editor 冲突。
+      // 因此恢复 Vite 对 file-saver 的 CJS→ESM 预构建转换，无需 exclude。
     },
     test: {
       globals: true,

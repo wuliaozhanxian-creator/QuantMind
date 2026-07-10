@@ -1,5 +1,16 @@
 import ExcelJS from 'exceljs';
-import { saveAs } from 'file-saver';
+
+// file-saver 的 FileSaver.min.js 为 UMD/CJS 格式（无 ESM module 入口），
+// 其内部调用匿名 AMD define()，与 Monaco Editor 的 AMD loader 冲突。
+// 采用动态 import() 在运行时按需加载，避免模块加载阶段执行 UMD 代码触发冲突。
+let _saveAs: typeof import('file-saver').saveAs | null = null;
+async function getSaveAs(): Promise<typeof import('file-saver').saveAs> {
+  if (!_saveAs) {
+    const fileSaver = await import('file-saver');
+    _saveAs = fileSaver.saveAs;
+  }
+  return _saveAs;
+}
 
 export interface ExcelExportData {
   strategy_name: string;
@@ -195,6 +206,7 @@ export class ExcelExporter {
    */
   async download(filename: string = 'backtest-export.xlsx'): Promise<void> {
     const blob = await this.toBlob();
+    const saveAs = await getSaveAs();
     saveAs(blob, filename);
   }
 
@@ -238,6 +250,7 @@ export const exportTradeRecordsToExcel = async (
   const blob = new Blob([buffer], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   });
+  const saveAs = await getSaveAs();
   saveAs(blob, filename);
 };
 
@@ -304,5 +317,6 @@ export const exportBatchBacktestComparison = async (
   const blob = new Blob([buffer], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   });
+  const saveAs = await getSaveAs();
   saveAs(blob, filename);
 };
