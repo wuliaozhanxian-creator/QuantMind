@@ -60,6 +60,8 @@ export class WebSocketClient {
   private eventHandlers = new Map<string, Set<EventCallback>>();
   private stateHandlers = new Set<StateCallback>();
   private errorHandlers = new Set<ErrorCallback>();
+  /** 全量消息回调（T2.2 additive）：接收完整解析后的消息对象 */
+  private messageHandlers = new Set<(message: any) => void>();
   /** channel -> 回调集合；同一 channel 只发送一次 subscribe */
   private subscriptions = new Map<string, Set<EventCallback>>();
   /** 已发送 subscribe 的 channel 集合，避免重复发送 */
@@ -215,6 +217,30 @@ export class WebSocketClient {
   }
 
   /**
+   * 发送原始消息（不经过 {type, data, timestamp} 包装）
+   *
+   * 用于兼容需要额外顶层字段（如 action / symbols / topic）的历史协议。
+   * 与 send() 不同，本方法不将消息放入队列——未连接时直接返回 false。
+   */
+  sendRaw(message: unknown): boolean {
+    if (this.state === ConnectionState.CONNECTED && this.ws?.readyState === WebSocket.OPEN) {
+      try {
+        const payload = typeof message === 'string' ? message : JSON.stringify(message);
+        this.ws.send(payload);
+        this.log('Sent raw message');
+        return true;
+      } catch (error) {
+        this.log('Failed to send raw message:', error);
+        const err = error instanceof Error ? error : new Error(String(error));
+        this.emitError(err, 'send-raw');
+        return false;
+      }
+    }
+    this.log('Raw message not sent (not connected)');
+    return false;
+  }
+
+  /**
    * 订阅事件
    */
   on(event: string, callback: EventCallback): void {
@@ -297,6 +323,20 @@ export class WebSocketClient {
     this.errorHandlers.delete(callback);
   }
 
+  /**
+   * 注册全量消息回调（T2.2 additive）
+   *
+   * 与 on() 不同，回调接收 **完整解析后的消息对象**（而非仅 data 字段），
+   * 用于兼容后端推送 {type, status, progress, ...} 等顶层字段消息的场景。
+   */
+  onMessage(callback: (message: any) => void): void {
+    this.messageHandlers.add(callback);
+  }
+
+  offMessage(callback: (message: any) => void): void {
+    this.messageHandlers.delete(callback);
+  }
+
   private emitError(error: Error, context?: string): void {
     this.log('Emit error:', context, error.message);
     this.errorHandlers.forEach(handler => {
@@ -375,6 +415,17 @@ export class WebSocketClient {
           }
         });
       }
+
+      // 触发全量消息回调（T2.2 additive）：传递完整消息对象
+      this.messageHandlers.forEach(handler => {
+        try {
+          handler(message);
+        } catch (error) {
+          this.log('Error in message handler:', error);
+          const err = error instanceof Error ? error : new Error(String(error));
+          this.emitError(err, 'message-handler');
+        }
+      });
 
     } catch (error) {
       this.log('Failed to parse message:', error);

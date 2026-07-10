@@ -15,6 +15,10 @@
 import axios, { AxiosInstance } from 'axios';
 import { SERVICE_URLS } from '../config/services';
 import { authService } from '../features/auth/services/authService';
+import {
+  WebSocketClient,
+  ConnectionState
+} from './websocket/WebSocketClient';
 
 // ============================================================================
 // 类型定义
@@ -1342,12 +1346,12 @@ class BacktestService {
    * 连接 WebSocket 监听回测进度
    * @param backtestId 回测ID
    * @param callbacks 回调函数
-   * @returns WebSocket 连接
+   * @returns WebSocketClient 连接
    */
   connectProgress(
     backtestId: string,
     callbacks: ProgressCallbacks
-  ): WebSocket {
+  ): WebSocketClient {
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const token = authService.getAccessToken();
     const tenantId = authService.getTenantId() || 'default';
@@ -1359,18 +1363,21 @@ class BacktestService {
     if (userId) query.set('user_id', userId);
     const wsUrl = `${wsProtocol}//${this.wsUrl}/ws/backtest/${backtestId}?${query.toString()}`;
 
-    console.log('🔗 连接 WebSocket:', wsUrl);
+    console.log('连接 WebSocket:', wsUrl);
 
-    const ws = new WebSocket(wsUrl);
+    const client = new WebSocketClient({
+      url: wsUrl,
+      // 回测进度流为短生命周期，无需自动重连
+      reconnect: false,
+      // 禁用心跳：后端 backtest WS 使用原始 "ping" 字符串协议，
+      // 与 WebSocketClient 的 JSON 心跳不兼容
+      heartbeatInterval: Number.MAX_SAFE_INTEGER,
+      heartbeatTimeout: Number.MAX_SAFE_INTEGER,
+    });
 
-    ws.onopen = () => {
-      console.log('✅ WebSocket 已连接');
-    };
-
-    ws.onmessage = (event) => {
+    // 全量消息回调：接收完整消息对象（包含 type/status/progress 等顶层字段）
+    client.onMessage((data) => {
       try {
-        const data = JSON.parse(event.data);
-
         // 处理日志消息
         if (data.type === 'log') {
           if (callbacks.onLog) callbacks.onLog(data.message);
@@ -1393,20 +1400,31 @@ class BacktestService {
       } catch (error) {
         console.error('解析 WebSocket 消息失败:', error);
       }
-    };
+    });
 
-    ws.onerror = (error) => {
-      console.error('WebSocket 错误:', error);
+    client.onStateChange((state) => {
+      if (state === ConnectionState.CONNECTED) {
+        console.log('WebSocket 已连接');
+      } else if (state === ConnectionState.DISCONNECTED) {
+        console.log('WebSocket 已断开');
+      }
+    });
+
+    client.onError((error) => {
+      console.error('WebSocket 错误:', error.message);
       if (callbacks.onError) {
         callbacks.onError(new Error('WebSocket 连接错误'));
       }
-    };
+    });
 
-    ws.onclose = () => {
-      console.log('🔌 WebSocket 已断开');
-    };
+    client.connect().catch((error) => {
+      console.error('WebSocket 连接失败:', error);
+      if (callbacks.onError) {
+        callbacks.onError(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
 
-    return ws;
+    return client;
   }
 
   /**

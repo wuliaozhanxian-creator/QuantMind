@@ -11,6 +11,10 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { SERVICE_URLS } from '../config/services';
+import {
+  WebSocketClient,
+  ConnectionState
+} from '../services/websocket/WebSocketClient';
 
 export interface BacktestProgressData {
   type: 'connected' | 'progress' | 'result' | 'error';
@@ -59,18 +63,8 @@ export function useBacktestProgress(
   const [error, setError] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
 
-  const wsRef = useRef<WebSocket | null>(null);
-  const reconnectCountRef = useRef(0);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const wsRef = useRef<WebSocketClient | null>(null);
   const isManualDisconnectRef = useRef(false);
-
-  // 清理重连定时器
-  const clearReconnectTimeout = useCallback(() => {
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-      reconnectTimeoutRef.current = null;
-    }
-  }, []);
 
   // 连接 WebSocket
   const connect = useCallback(() => {
@@ -80,7 +74,7 @@ export function useBacktestProgress(
 
     // 如果已连接，先断开
     if (wsRef.current) {
-      wsRef.current.close();
+      wsRef.current.disconnect();
       wsRef.current = null;
     }
 
@@ -90,25 +84,29 @@ export function useBacktestProgress(
       const wsHost = SERVICE_URLS.ENGINE_SERVICE.replace(/^http(s)?:\/\//, '');
       const wsUrl = `${wsProtocol}//${wsHost}/ws/backtest/${backtestId}`;
 
-      console.log(`🔗 连接 WebSocket: ${wsUrl}`);
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
+      console.log(`连接 WebSocket: ${wsUrl}`);
 
-      ws.onopen = () => {
-        console.log('✅ WebSocket 已连接');
-        setIsConnected(true);
-        setError(null);
-        reconnectCountRef.current = 0; // 重置重连计数
-      };
+      const client = new WebSocketClient({
+        url: wsUrl,
+        // 自动重连由 WebSocketClient 内部驱动（指数退避 1s/2s/4s/8s/16s，最大 10s）
+        reconnect: autoReconnect,
+        reconnectDelay: 1000,
+        maxReconnectDelay: 10000,
+        maxReconnectAttempts: autoReconnect ? maxReconnectAttempts : 0,
+        // 禁用心跳：后端 backtest WS 使用原始 "ping" 字符串协议，
+        // 与 WebSocketClient 的 JSON 心跳不兼容
+        heartbeatInterval: Number.MAX_SAFE_INTEGER,
+        heartbeatTimeout: Number.MAX_SAFE_INTEGER,
+      });
+      wsRef.current = client;
 
-      ws.onmessage = (event) => {
+      // 全量消息回调：接收完整消息对象（包含 type/status/progress 等顶层字段）
+      client.onMessage((data) => {
+        // 忽略旧 client 的回调
+        if (wsRef.current !== client) return;
+
         try {
-          const data = JSON.parse(event.data) as Partial<BacktestProgressData> & {
-            status?: string;
-            progress?: number;
-            error_message?: string;
-          };
-          console.log('📨 收到进度更新:', data);
+          console.log('收到进度更新:', data);
 
           const status = data.status;
           const pct = typeof data.progress === 'number' ? data.progress : data.progress === 0 ? 0 : undefined;
@@ -117,12 +115,15 @@ export function useBacktestProgress(
             setProgress(1.0);
             setMessage('回测完成');
             setResult(data.data || data);
-            ws.close();
+            // 标记为完成，避免 onStateChange(DISCONNECTED) 误报重连失败
+            isManualDisconnectRef.current = true;
+            client.disconnect();
           } else if (status === 'failed') {
             const msg = data.message || data.error_message || '回测失败';
             setError(msg);
             setMessage(`错误: ${msg}`);
-            ws.close();
+            isManualDisconnectRef.current = true;
+            client.disconnect();
           } else if (pct !== undefined) {
             // 后端 progress 为 0-1
             setProgress(pct);
@@ -133,72 +134,71 @@ export function useBacktestProgress(
         } catch (err) {
           console.error('解析 WebSocket 消息失败:', err);
         }
-      };
+      });
 
-      ws.onerror = (event) => {
-        console.error('❌ WebSocket 错误:', event);
+      client.onStateChange((state) => {
+        if (wsRef.current !== client) return;
+
+        if (state === ConnectionState.CONNECTED) {
+          console.log('WebSocket 已连接');
+          setIsConnected(true);
+          setError(null);
+        } else if (state === ConnectionState.RECONNECTING) {
+          setIsConnected(false);
+          setMessage('连接断开，正在重连...');
+        } else if (state === ConnectionState.DISCONNECTED) {
+          setIsConnected(false);
+          // 仅在非手动断开 + 开启了自动重连时，视为重连耗尽
+          if (!isManualDisconnectRef.current && autoReconnect) {
+            setError(`重连失败，已达最大尝试次数 (${maxReconnectAttempts})`);
+            setMessage('连接失败');
+          }
+        }
+      });
+
+      client.onError((err) => {
+        if (wsRef.current !== client) return;
+        console.error('WebSocket 错误:', err.message);
         setError('WebSocket 连接错误');
         setIsConnected(false);
-      };
+      });
 
-      ws.onclose = (event) => {
-        console.log(`🔌 WebSocket 已断开 (code: ${event.code})`);
+      client.connect().catch((err) => {
+        console.error('WebSocket 连接失败:', err);
+        setError('无法建立 WebSocket 连接');
         setIsConnected(false);
-        wsRef.current = null;
-
-        // 自动重连逻辑
-        if (
-          !isManualDisconnectRef.current &&
-          autoReconnect &&
-          reconnectCountRef.current < maxReconnectAttempts &&
-          event.code !== 1000 // 1000 = 正常关闭
-        ) {
-          reconnectCountRef.current++;
-          const delay = Math.min(1000 * Math.pow(2, reconnectCountRef.current - 1), 10000);
-
-          console.log(`🔄 将在 ${delay}ms 后重连 (${reconnectCountRef.current}/${maxReconnectAttempts})`);
-          setMessage(`连接断开，${delay / 1000}秒后重连...`);
-
-          clearReconnectTimeout();
-          reconnectTimeoutRef.current = setTimeout(() => {
-            connect();
-          }, delay);
-        } else if (reconnectCountRef.current >= maxReconnectAttempts) {
-          setError(`重连失败，已达最大尝试次数 (${maxReconnectAttempts})`);
-          setMessage('连接失败');
-        }
-      };
+      });
     } catch (err) {
       console.error('创建 WebSocket 连接失败:', err);
       setError('无法建立 WebSocket 连接');
       setIsConnected(false);
     }
-  }, [backtestId, enabled, autoReconnect, maxReconnectAttempts, clearReconnectTimeout]);
+  }, [backtestId, enabled, autoReconnect, maxReconnectAttempts]);
 
   // 手动断开
   const disconnect = useCallback(() => {
     isManualDisconnectRef.current = true;
-    clearReconnectTimeout();
-
     if (wsRef.current) {
-      wsRef.current.close(1000, 'Manual disconnect'); // 1000 = 正常关闭
+      wsRef.current.disconnect();
       wsRef.current = null;
     }
-
     setIsConnected(false);
-  }, [clearReconnectTimeout]);
+  }, []);
 
   // 手动重连
   const reconnect = useCallback(() => {
+    // 先断开当前连接（不依赖 disconnect() 以避免 isManualDisconnectRef 被设为 true 后阻断 connect）
+    if (wsRef.current) {
+      wsRef.current.disconnect();
+      wsRef.current = null;
+    }
     isManualDisconnectRef.current = false;
-    reconnectCountRef.current = 0;
-    disconnect();
 
     // 延迟一下再连接，确保断开完成
     setTimeout(() => {
       connect();
     }, 100);
-  }, [connect, disconnect]);
+  }, [connect]);
 
   // 初始连接和清理
   useEffect(() => {
@@ -208,13 +208,12 @@ export function useBacktestProgress(
     }
 
     return () => {
-      clearReconnectTimeout();
       if (wsRef.current) {
-        wsRef.current.close(1000, 'Component unmounted');
+        wsRef.current.disconnect();
         wsRef.current = null;
       }
     };
-  }, [backtestId, enabled, connect, clearReconnectTimeout]);
+  }, [backtestId, enabled, connect]);
 
   return {
     progress,

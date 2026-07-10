@@ -7,6 +7,10 @@
 import axios, { AxiosInstance } from 'axios';
 import { SERVICE_URLS } from '../config/services';
 import { authService } from '../features/auth/services/authService';
+import {
+  WebSocketClient,
+  ConnectionState
+} from './websocket/WebSocketClient';
 
 // API基础配置
 const resolveApiBaseURL = () => `${String(SERVICE_URLS.ENGINE_SERVICE || '').replace(/\/+$/, '')}/api/v1/qlib`;
@@ -312,17 +316,23 @@ class BacktestCenterService {
 
   // ========== WebSocket连接 ==========
 
-  connectBacktestProgress(backtestId: string, onProgress: ProgressCallback): WebSocket {
+  connectBacktestProgress(backtestId: string, onProgress: ProgressCallback): WebSocketClient {
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${wsProtocol}//${WS_BASE_URL}/api/v1/ws/backtest/${backtestId}`);
+    const wsUrl = `${wsProtocol}//${WS_BASE_URL}/api/v1/ws/backtest/${backtestId}`;
 
-    ws.onopen = () => {
-      console.log(`WebSocket connected for backtest ${backtestId}`);
-    };
+    const client = new WebSocketClient({
+      url: wsUrl,
+      // 回测进度流为短生命周期，无需自动重连
+      reconnect: false,
+      // 禁用心跳：后端 backtest WS 使用原始 "ping" 字符串协议，
+      // 与 WebSocketClient 的 JSON 心跳不兼容
+      heartbeatInterval: Number.MAX_SAFE_INTEGER,
+      heartbeatTimeout: Number.MAX_SAFE_INTEGER,
+    });
 
-    ws.onmessage = (event) => {
+    // 全量消息回调：接收完整消息对象（包含 type/status/progress 等顶层字段）
+    client.onMessage((data) => {
       try {
-        const data = JSON.parse(event.data);
         // 后端推送 {backtest_id, status, progress, ...}
         onProgress({
           backtest_id: data.backtest_id || backtestId,
@@ -333,22 +343,30 @@ class BacktestCenterService {
       } catch (error) {
         console.error('Failed to parse WebSocket message:', error);
       }
-    };
+    });
 
-    ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
-    };
+    client.onStateChange((state) => {
+      if (state === ConnectionState.CONNECTED) {
+        console.log(`WebSocket connected for backtest ${backtestId}`);
+      } else if (state === ConnectionState.DISCONNECTED) {
+        console.log(`WebSocket closed for backtest ${backtestId}`);
+      }
+    });
 
-    ws.onclose = () => {
-      console.log(`WebSocket closed for backtest ${backtestId}`);
-    };
+    client.onError((error) => {
+      console.error('WebSocket error:', error.message);
+    });
 
-    return ws;
+    client.connect().catch((error) => {
+      console.error('WebSocket connect failed:', error);
+    });
+
+    return client;
   }
 
-  disconnectBacktestProgress(ws: WebSocket): void {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.close();
+  disconnectBacktestProgress(ws: WebSocketClient): void {
+    if (ws) {
+      ws.disconnect();
     }
   }
 

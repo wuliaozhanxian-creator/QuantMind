@@ -1,16 +1,21 @@
 /**
  * 业务层 WebSocket 单例 (T2.2 统一后)
  *
- * 此单例在 `WebSocketClient`（services/websocket/WebSocketClient.ts）之上封装：
- * - JWT/tenant/user_id 鉴权 URL 拼装
- * - 与后端 stream service 的消息协议（subscribe / unsubscribe / heartbeat / ping-pong）
- * - 业务消息类型分发（MessageType）
+ * @deprecated 此类为历史业务封装，内部已迁移至 `WebSocketClient`
+ * （services/websocket/WebSocketClient.ts）作为底层传输层。
+ * 新代码请直接使用 `WebSocketClient`。
  *
  * T2.2 已统一并补齐以下能力（与底层 WebSocketClient 对齐）：
  * - 指数退避重连（1s/2s/4s/8s/16s/32s，最大 60s，无最大次数上限）
  * - 心跳超时检测（30s 未收到 pong → 主动断开并重连）
  * - 订阅去重（同一 channel/symbol 仅发送一次 subscribe）
  * - 统一错误回调（addErrorCallback / removeErrorCallback）
+ *
+ * 迁移说明（M4-P1-2 T2.2）：
+ *   原生 WebSocket 构造已替换为 `WebSocketClient`。
+ *   - 心跳/重连由 WebSocketClient 内部驱动（reconnect=false 时由本类 attemptReconnect 接管，
+ *     以便在重连时刷新鉴权 URL 中的 token）。
+ *   - 消息收发通过 `onMessage` / `sendRaw` 适配，保留原有 subscribe/unsubscribe 协议格式。
  */
 
 // WebSocket连接状态
@@ -25,6 +30,10 @@ export enum WebSocketStatus {
 // 导入服务配置
 import { SERVICE_URLS } from '../config/services';
 import { authService } from '../features/auth/services/authService';
+import {
+  WebSocketClient,
+  ConnectionState
+} from './websocket/WebSocketClient';
 
 // WebSocket消息类型
 export enum MessageType {
@@ -60,12 +69,13 @@ export type WebSocketErrorCallback = (error: Error, context?: string) => void;
 // 指数退避参数（T2.2）
 const BASE_RECONNECT_DELAY = 1000; // 1s
 const MAX_RECONNECT_DELAY = 60000; // 60s
-// 心跳超时（T2.2）
-const HEARTBEAT_INTERVAL = 30000; // 30s 发送间隔
-const HEARTBEAT_TIMEOUT = 30000; // 30s 无响应判定超时
 
+/**
+ * @deprecated 请直接使用 `WebSocketClient`（services/websocket/WebSocketClient.ts）
+ */
 class WebSocketService {
-  private ws: WebSocket | null = null;
+  /** 底层统一 WebSocket 客户端（替代原生 WebSocket 构造） */
+  private client: WebSocketClient | null = null;
   private connectPromise: Promise<void> | null = null;
   private status: WebSocketStatus = WebSocketStatus.DISCONNECTED;
   private reconnectAttempts = 0;
@@ -73,9 +83,6 @@ class WebSocketService {
   private authReconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private authReconnectAttempts = 0;
   private manualDisconnect = false;
-  private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
-  private heartbeatTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
-  private lastHeartbeatAck = 0;
 
   /** 已发送 subscribe 的 symbol 集合（去重） */
   private symbolSubscriptions = new Set<string>();
@@ -139,7 +146,7 @@ class WebSocketService {
     this.clearAuthReconnectTimer();
 
     let shouldClearConnectPromise = false;
-    const connectPromise = new Promise<void>((resolve, reject) => {
+    const connectPromise = new Promise<void>((resolve, _reject) => {
       const disableWebSocket =
         String((import.meta as ImportMeta).env?.VITE_DISABLE_WEBSOCKET || '').toLowerCase() === 'true';
       if (disableWebSocket) {
@@ -149,12 +156,10 @@ class WebSocketService {
         resolve();
         return;
       }
-      if (this.ws?.readyState === WebSocket.OPEN) {
-        shouldClearConnectPromise = true;
-        resolve();
-        return;
-      }
-      if (this.ws?.readyState === WebSocket.CONNECTING) {
+
+      // 已连接或正在连接则直接返回
+      const curState = this.client?.getState();
+      if (curState === ConnectionState.CONNECTED || curState === ConnectionState.CONNECTING) {
         shouldClearConnectPromise = true;
         resolve();
         return;
@@ -195,54 +200,73 @@ class WebSocketService {
 
       console.log('正在连接WebSocket:', wsUrl.replace(/token=[^&]+/, 'token=***'));
 
-      try {
-        this.ws = new WebSocket(wsUrl);
+      // 断开旧 client（如有），避免遗留连接
+      if (this.client) {
+        try { this.client.disconnect(); } catch (e) { /* ignore */ }
+        this.client = null;
+      }
 
-        this.ws.onopen = () => {
-          console.log('WebSocket连接成功');
+      const client = new WebSocketClient({
+        url: wsUrl,
+        // reconnect=false：由 WebSocketService 自行管理重连，
+        // 以便在每次重连时重新解析鉴权 URL（刷新 token）。
+        reconnect: false,
+        reconnectDelay: BASE_RECONNECT_DELAY,
+        maxReconnectDelay: MAX_RECONNECT_DELAY,
+        heartbeatInterval: 30000,
+        heartbeatTimeout: 30000,
+      });
+      this.client = client;
+
+      // 全量消息回调：接收完整消息对象并分发
+      client.onMessage((message) => {
+        this.handleMessage(message);
+      });
+
+      // 状态变化：映射到 WebSocketStatus + 触发重连/补订阅
+      client.onStateChange((state) => {
+        // 忽略来自旧 client 的回调
+        if (this.client !== client) return;
+
+        if (state === ConnectionState.CONNECTED) {
           this.setStatus(WebSocketStatus.CONNECTED);
           this.reconnectAttempts = 0;
           this.authReconnectAttempts = 0;
           this.clearAuthReconnectTimer();
-          this.lastHeartbeatAck = Date.now();
-          this.startHeartbeat();
+          this.connectPromise = null;
           this.resubscribeAll();
+        } else if (state === ConnectionState.CONNECTING) {
+          this.setStatus(WebSocketStatus.CONNECTING);
+        } else if (state === ConnectionState.DISCONNECTED) {
           this.connectPromise = null;
-          resolve();
-        };
-
-        this.ws.onmessage = (event) => {
-          this.handleMessage(event.data);
-        };
-
-        this.ws.onclose = (event) => {
-          console.log('WebSocket连接关闭:', event.code, event.reason);
-          this.ws = null;
-          this.connectPromise = null;
-          this.stopHeartbeat();
           if (!this.manualDisconnect) {
             this.attemptReconnect();
           } else {
             this.setStatus(WebSocketStatus.DISCONNECTED);
           }
-        };
+        }
+      });
 
-        this.ws.onerror = () => {
-          console.error('WebSocket错误');
+      // 错误回调
+      client.onError((error, context) => {
+        this.emitError(error, context);
+      });
+
+      client.connect()
+        .then(() => {
+          resolve();
+        })
+        .catch((error) => {
+          console.error('WebSocket连接失败:', error);
           this.setStatus(WebSocketStatus.ERROR);
-          this.emitError(new Error('WebSocket connection error'), 'ws-onerror');
+          this.emitError(
+            error instanceof Error ? error : new Error(String(error)),
+            'connect'
+          );
           this.connectPromise = null;
-          // 不主动 reject：交给 onclose 触发重连，避免上层未捕获异常
-        };
-
-      } catch (error) {
-        console.error('创建WebSocket连接失败:', error);
-        this.setStatus(WebSocketStatus.ERROR);
-        const err = error instanceof Error ? error : new Error(String(error));
-        this.emitError(err, 'connect-create');
-        this.connectPromise = null;
-        reject(err);
-      }
+          // 不主动 reject：交给 onclose → onStateChange(DISCONNECTED) → attemptReconnect
+          resolve();
+        });
     });
     this.connectPromise = shouldClearConnectPromise ? null : connectPromise;
     return connectPromise;
@@ -254,12 +278,11 @@ class WebSocketService {
     this.clearReconnectTimer();
     this.clearAuthReconnectTimer();
     this.authReconnectAttempts = 0;
-    if (this.ws) {
-      this.ws.close(1000, '主动断开连接');
-      this.ws = null;
+    if (this.client) {
+      this.client.disconnect();
+      this.client = null;
     }
     this.connectPromise = null;
-    this.stopHeartbeat();
     this.setStatus(WebSocketStatus.DISCONNECTED);
   }
 
@@ -268,18 +291,9 @@ class WebSocketService {
     const disableWebSocket =
       String((import.meta as ImportMeta).env?.VITE_DISABLE_WEBSOCKET || '').toLowerCase() === 'true';
     if (disableWebSocket) return false;
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      try {
-        this.ws.send(JSON.stringify(message));
-        return true;
-      } catch (error) {
-        console.error('发送WebSocket消息失败:', error);
-        const err = error instanceof Error ? error : new Error(String(error));
-        this.emitError(err, 'send');
-        return false;
-      }
-    }
-    return false;
+    if (!this.client) return false;
+    // 使用 sendRaw 以保留 subscribe/unsubscribe 消息中的顶层字段（action/symbols/topic）
+    return this.client.sendRaw(message);
   }
 
   /**
@@ -413,42 +427,35 @@ class WebSocketService {
     }
   }
 
-  // 私有方法：处理消息
-  private handleMessage(data: string): void {
-    try {
-      const raw = JSON.parse(data) as { type: string; data?: unknown; [key: string]: unknown };
-      const messageType = raw.type;
+  // 私有方法：处理消息（接收 WebSocketClient.onMessage 传入的完整解析对象）
+  private handleMessage(message: { type: string; data?: unknown; [key: string]: unknown }): void {
+    const messageType = message.type;
 
-      // 处理心跳消息（heartbeat / pong 均视为 ack）
-      if (messageType === MessageType.HEARTBEAT || messageType === 'pong' || messageType === 'ping') {
-        this.lastHeartbeatAck = Date.now();
-        this.clearHeartbeatTimeout();
-        return;
-      }
+    // 心跳消息由 WebSocketClient 自动处理，此处忽略
+    if (messageType === MessageType.HEARTBEAT || messageType === 'pong' || messageType === 'ping') {
+      return;
+    }
 
-      // 分发消息给对应的处理器
-      const handlers = this.messageHandlers.get(messageType as MessageType);
-      if (handlers) {
-        handlers.forEach(handler => {
-          try {
-            handler(raw.data);
-          } catch (error) {
-            console.error('消息处理器执行失败:', error);
-            const err = error instanceof Error ? error : new Error(String(error));
-            this.emitError(err, 'message-handler');
-          }
-        });
-      }
-
-    } catch (error) {
-      console.error('解析WebSocket消息失败:', error);
-      const err = error instanceof Error ? error : new Error(String(error));
-      this.emitError(err, 'message-parse');
+    // 分发消息给对应的处理器
+    const handlers = this.messageHandlers.get(messageType as MessageType);
+    if (handlers) {
+      handlers.forEach(handler => {
+        try {
+          handler(message.data);
+        } catch (error) {
+          console.error('消息处理器执行失败:', error);
+          const err = error instanceof Error ? error : new Error(String(error));
+          this.emitError(err, 'message-handler');
+        }
+      });
     }
   }
 
   /**
    * 指数退避重连（1s/2s/4s/8s/16s/32s，最大 60s）
+   *
+   * reconnect=false 时由 WebSocketService 自行管理重连，
+   * 每次重连会重新解析鉴权 URL 以刷新 token。
    */
   private attemptReconnect(): void {
     const disableWebSocket =
@@ -475,57 +482,6 @@ class WebSocketService {
         this.emitError(err, 'reconnect');
       });
     }, delay);
-  }
-
-  /**
-   * 心跳：30s 发送 ping，30s 未收到 pong 判定超时并重连
-   */
-  private startHeartbeat(): void {
-    this.stopHeartbeat();
-    this.lastHeartbeatAck = Date.now();
-
-    this.heartbeatInterval = setInterval(() => {
-      if (this.status !== WebSocketStatus.CONNECTED) return;
-
-      const heartbeatMessage: WebSocketMessage = {
-        // 后端 ws_core 协议使用 ping/pong
-        type: 'ping' as MessageType,
-        timestamp: new Date().toISOString(),
-        data: { ping: true }
-      };
-      this.send(heartbeatMessage);
-
-      // 设置本次心跳超时检测
-      this.clearHeartbeatTimeout();
-      this.heartbeatTimeoutTimer = setTimeout(() => {
-        const elapsed = Date.now() - this.lastHeartbeatAck;
-        if (elapsed > HEARTBEAT_TIMEOUT) {
-          console.warn(`WebSocket心跳超时(${elapsed}ms)，主动断开重连`);
-          this.emitError(new Error(`Heartbeat timeout after ${elapsed}ms`), 'heartbeat-timeout');
-          try {
-            this.ws?.close();
-          } catch (e) {
-            // ignore
-          }
-        }
-      }, HEARTBEAT_TIMEOUT);
-    }, HEARTBEAT_INTERVAL);
-  }
-
-  private clearHeartbeatTimeout(): void {
-    if (this.heartbeatTimeoutTimer) {
-      clearTimeout(this.heartbeatTimeoutTimer);
-      this.heartbeatTimeoutTimer = null;
-    }
-  }
-
-  // 私有方法：停止心跳
-  private stopHeartbeat(): void {
-    if (this.heartbeatInterval) {
-      clearInterval(this.heartbeatInterval);
-      this.heartbeatInterval = null;
-    }
-    this.clearHeartbeatTimeout();
   }
 
   private clearReconnectTimer(): void {

@@ -12,6 +12,7 @@ import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
 import type { BacktestConfig, BacktestResult, HistoryFilter } from '../services/backtestService';
 import { Strategy } from '../state/atoms';
+import type { WebSocketClient } from '../services/websocket/WebSocketClient';
 
 // ============================================================================
 // 类型定义
@@ -43,7 +44,7 @@ interface BacktestState {
   progressMessage: string;
 
   // WebSocket 连接
-  wsConnection: WebSocket | null;
+  wsConnection: WebSocketClient | null;
   wsConnected: boolean;
 
   // 错误信息
@@ -414,8 +415,8 @@ export const useBacktestStore = create<BacktestState>()(
         disconnectProgress: () => {
           const { wsConnection } = get();
           if (wsConnection) {
-            console.log('🔌 断开 WebSocket 连接');
-            wsConnection.close();
+            console.log('断开 WebSocket 连接');
+            wsConnection.disconnect();
             set({ wsConnection: null, wsConnected: false });
           }
         },

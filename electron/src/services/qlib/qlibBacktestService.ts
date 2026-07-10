@@ -9,6 +9,10 @@ import {
   QlibBacktestConfig,
   QlibBacktestResult
 } from '../../types/backtest/qlib';
+import {
+  WebSocketClient,
+  ConnectionState
+} from '../websocket/WebSocketClient';
 
 /**
  * 错误码到中文提示的映射
@@ -89,29 +93,14 @@ export class QlibBacktestError extends Error {
 }
 
 /**
- * WebSocket连接管理器（T2.2 已对齐统一策略：指数退避 + 心跳超时）
+ * WebSocket连接管理器（T2.2 已迁移至 WebSocketClient）
  *
  * 注意：本类为回测进度流专用，保持回调式 API 不变。
  * 新场景请直接使用 services/websocket/WebSocketClient.ts 统一客户端。
  */
 class WebSocketManager {
-  private ws: WebSocket | null = null;
-  private reconnectAttempts = 0;
-  private maxReconnectAttempts = Number.POSITIVE_INFINITY; // T2.2: 无最大次数上限
-  private baseReconnectDelay = 1000; // 基础延迟1秒
-  private maxReconnectDelay = 60000; // T2.2: 最大延迟60s（与统一客户端对齐）
-  private heartbeatInterval: NodeJS.Timeout | null = null;
-  private heartbeatTimeoutTimer: NodeJS.Timeout | null = null; // T2.2: 心跳超时检测
-  private lastHeartbeatAck = 0; // T2.2: 上次收到 pong 的时间
-  private reconnectTimeout: NodeJS.Timeout | null = null;
-  private manualClose = false; // 标记是否手动关闭
-  private currentUrl = ''; // T2.2: 记录当前 url 以便重连
-  private currentCallbacks: {
-    onOpen?: () => void;
-    onMessage?: (data: any) => void;
-    onError?: (error: Error) => void;
-    onClose?: () => void;
-  } = {}; // T2.2: 记录回调以便重连
+  private client: WebSocketClient | null = null;
+  private manualClose = false;
 
   connect(
     url: string,
@@ -121,151 +110,68 @@ class WebSocketManager {
       onError?: (error: Error) => void;
       onClose?: () => void;
     }
-  ): WebSocket {
-    if (this.ws) {
+  ): WebSocketClient {
+    if (this.client) {
       this.cleanup();
     }
 
     this.manualClose = false;
-    this.currentUrl = url; // T2.2: 记录以便重连
-    this.currentCallbacks = callbacks; // T2.2: 记录以便重连
-    this.ws = new WebSocket(url);
 
-    this.ws.onopen = () => {
-      console.log('[WS] ✅ Connected:', url);
-      this.reconnectAttempts = 0; // 重置重连计数
-      this.lastHeartbeatAck = Date.now(); // T2.2: 心跳基准时间
-      callbacks.onOpen?.();
-      this.startHeartbeat();
-    };
+    const client = new WebSocketClient({
+      url,
+      // 回测进度流为短生命周期，服务端在回测完成后主动关闭连接，
+      // 无需客户端自动重连（与原实现行为一致）。
+      reconnect: false,
+      // 禁用心跳：后端 backtest WS 使用原始 "ping" 字符串协议，
+      // 与 WebSocketClient 的 JSON 心跳不兼容；回测连接为短生命周期，无需心跳保活。
+      heartbeatInterval: Number.MAX_SAFE_INTEGER,
+      heartbeatTimeout: Number.MAX_SAFE_INTEGER,
+    });
+    this.client = client;
 
-    this.ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        // 心跳响应（pong）视为 ack，并清除超时检测
-        if (data.type === 'pong') {
-          this.lastHeartbeatAck = Date.now();
-          if (this.heartbeatTimeoutTimer) {
-            clearTimeout(this.heartbeatTimeoutTimer);
-            this.heartbeatTimeoutTimer = null;
-          }
-          return;
-        }
-        callbacks.onMessage?.(data);
-      } catch (error) {
-        console.error('[WS] ❌ Parse error:', error);
-        callbacks.onError?.(new Error('WebSocket消息解析失败'));
+    // 全量消息回调：接收完整消息对象（包含 type/status/progress 等顶层字段）
+    client.onMessage((data) => {
+      callbacks.onMessage?.(data);
+    });
+
+    client.onStateChange((state) => {
+      if (this.client !== client) return; // 忽略旧 client 回调
+      if (state === ConnectionState.CONNECTED) {
+        console.log('[WS] Connected:', url);
+        callbacks.onOpen?.();
+      } else if (state === ConnectionState.DISCONNECTED && !this.manualClose) {
+        callbacks.onClose?.();
       }
-    };
+    });
 
-    this.ws.onerror = (event) => {
-      console.error('[WS] ❌ Connection error:', event);
-      callbacks.onError?.(new Error('WebSocket连接错误'));
-    };
+    client.onError((error, context) => {
+      console.error('[WS] Error:', context, error.message);
+      callbacks.onError?.(error);
+    });
 
-    this.ws.onclose = (event) => {
-      const isNormalClose = event.code === 1000 || event.code === 1005;
-      console.log(`[WS] 🔌 Closed: code=${event.code}, reason=${event.reason || 'none'}, normal=${isNormalClose}`);
+    client.connect().catch((error) => {
+      console.error('[WS] Connect failed:', error);
+      callbacks.onError?.(error instanceof Error ? error : new Error(String(error)));
+    });
 
-      this.stopHeartbeat();
-      callbacks.onClose?.();
-
-      // 自动重连（非正常关闭 + 非手动关闭 + 未超过最大重试次数）
-      if (!isNormalClose && !this.manualClose && this.reconnectAttempts < this.maxReconnectAttempts) {
-        this.reconnectAttempts++;
-
-        // 指数退避：delay = min(baseDelay * 2^(attempts-1), maxDelay)
-        const delay = Math.min(
-          this.baseReconnectDelay * Math.pow(2, this.reconnectAttempts - 1),
-          this.maxReconnectDelay
-        );
-
-        console.log(
-          `[WS] 🔄 Reconnecting in ${delay}ms... (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`
-        );
-
-        this.reconnectTimeout = setTimeout(() => {
-          console.log(`[WS] 🔄 Attempting reconnect #${this.reconnectAttempts}...`);
-          // T2.2: 复用记录的 url 与 callbacks 进行重连
-          this.connect(this.currentUrl, this.currentCallbacks);
-        }, delay);
-      } else if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-        console.error('[WS] ❌ Max reconnection attempts reached. Please refresh the page.');
-        callbacks.onError?.(new Error('WebSocket重连失败，已达到最大重试次数'));
-      }
-    };
-
-    return this.ws;
-  }
-
-  private startHeartbeat() {
-    this.heartbeatInterval = setInterval(() => {
-      if (this.ws?.readyState === WebSocket.OPEN) {
-        try {
-          this.ws.send(JSON.stringify({ type: 'ping' }));
-          // T2.2: 心跳超时检测（30s 未收到 pong → 主动断开触发重连）
-          if (this.heartbeatTimeoutTimer) {
-            clearTimeout(this.heartbeatTimeoutTimer);
-          }
-          this.heartbeatTimeoutTimer = setTimeout(() => {
-            const elapsed = Date.now() - this.lastHeartbeatAck;
-            if (elapsed > 30000) {
-              console.warn(`[WS] ⚠️ Heartbeat timeout (${elapsed}ms), forcing reconnect...`);
-              this.currentCallbacks.onError?.(new Error(`Heartbeat timeout after ${elapsed}ms`));
-              try {
-                this.ws?.close();
-              } catch (e) {
-                // ignore
-              }
-            }
-          }, 30000);
-        } catch (error) {
-          console.error('[WS] ❌ Heartbeat send failed:', error);
-        }
-      }
-    }, 30000); // 每30秒发送心跳
-  }
-
-  private stopHeartbeat() {
-    if (this.heartbeatInterval) {
-      clearInterval(this.heartbeatInterval);
-      this.heartbeatInterval = null;
-    }
-    if (this.heartbeatTimeoutTimer) {
-      clearTimeout(this.heartbeatTimeoutTimer);
-      this.heartbeatTimeoutTimer = null;
-    }
+    return client;
   }
 
   cleanup() {
-    this.manualClose = true; // 标记为手动关闭
-    this.stopHeartbeat();
-
-    // 清理重连定时器
-    if (this.reconnectTimeout) {
-      clearTimeout(this.reconnectTimeout);
-      this.reconnectTimeout = null;
+    this.manualClose = true;
+    if (this.client) {
+      this.client.disconnect();
+      this.client = null;
     }
-
-    if (this.ws) {
-      try {
-        this.ws.close(1000, 'Client cleanup');
-      } catch (error) {
-        console.error('[WS] ❌ Close error:', error);
-      }
-      this.ws = null;
-    }
-
-    // 重置重连计数
-    this.reconnectAttempts = 0;
   }
 
   isConnected(): boolean {
-    return this.ws?.readyState === WebSocket.OPEN;
+    return this.client?.getState() === ConnectionState.CONNECTED;
   }
 
   getReconnectAttempts(): number {
-    return this.reconnectAttempts;
+    // WebSocketClient 内部管理重连计数，外部不再直接追踪
+    return 0;
   }
 }
 
@@ -613,7 +519,7 @@ class QlibBacktestService {
    * 创建WebSocket连接监听回测进度
    * @param backtestId 回测ID
    * @param callbacks 回调函数
-   * @returns WebSocket实例
+   * @returns WebSocketClient实例
    */
   connectProgress(
     backtestId: string,
@@ -623,7 +529,7 @@ class QlibBacktestService {
       onError?: (error: Error) => void;
       onOpen?: () => void;
     }
-  ): WebSocket {
+  ): WebSocketClient {
     if (!backtestId?.trim()) {
       throw new QlibBacktestError('回测ID不能为空', 'VALIDATION_ERROR');
     }
