@@ -70,6 +70,12 @@ class AdminService {
         this.axiosInstance.interceptors.response.use(
             (response) => response,
             async (error) => {
+                // 403 表示令牌可能已失效（如 datetime bug 前签发的旧令牌，
+                // 后端校验通过签名但管理员权限声明不匹配），强制登出并跳转登录
+                if (error.response?.status === 403) {
+                    authService.forceLogout();
+                    return Promise.reject(error);
+                }
                 return authService.handle401Error(error, this.axiosInstance);
             }
         );

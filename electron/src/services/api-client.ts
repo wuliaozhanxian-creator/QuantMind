@@ -208,6 +208,14 @@ export class APIClient {
     // 清除重试计数
     this.retryCount.delete(requestId);
 
+    // 处理403禁止访问：令牌可能已失效（如 datetime bug 前签发的旧令牌，
+    // 后端校验通过签名但权限声明不匹配），强制清除并跳转登录页
+    if (error.response?.status === 403) {
+      this.config.onUnauthorized();
+      authService.forceLogout();
+      return Promise.reject(this.normalizeError(error));
+    }
+
     // 处理401未授权：交由 authService 统一处理 Token 刷新与重试
     if (error.response?.status === 401) {
       this.config.onUnauthorized();

@@ -266,18 +266,22 @@ class AuthService {
         } catch (refreshError) {
           console.error('[Auth] 自动重试过程中令牌刷新失败:', refreshError);
           this.recordRefreshFailure();
-          this.clearTokens();
+          // 刷新失败说明令牌已彻底失效（含 datetime bug 前签发的旧令牌），强制登出
+          this.forceLogout();
           // 返回原始错误
           return Promise.reject(this.handleError(error));
         }
       } else {
+        // 无刷新令牌，说明登录态已丢失，强制登出引导重新登录
         this.recordRefreshFailure();
+        this.forceLogout();
       }
     }
 
     if (isRefreshRequest && error.response?.status === 401) {
       this.recordRefreshFailure();
-      this.clearTokens();
+      // 刷新令牌本身被拒，说明令牌链已失效，强制登出
+      this.forceLogout();
     }
 
     return Promise.reject(this.handleError(error));
@@ -452,6 +456,10 @@ class AuthService {
         this.unwrapResponse<TokenResponse | any>(response.data, '注册失败')
       );
 
+      // 强制清除旧令牌（避免 datetime bug 前签发的无效令牌残留）
+      localStorage.removeItem('access_token');
+      localStorage.removeItem('refresh_token');
+      localStorage.removeItem('user');
       // 存储令牌
       localStorage.setItem('access_token', tokenData.access_token);
       localStorage.setItem('refresh_token', tokenData.refresh_token);
@@ -556,6 +564,10 @@ class AuthService {
         this.unwrapResponse<TokenResponse | any>(response.data, '登录失败')
       );
       if (tokenData) {
+        // 强制清除旧令牌（避免 datetime bug 前签发的无效令牌残留）
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('refresh_token');
+        localStorage.removeItem('user');
         localStorage.setItem('access_token', tokenData.access_token);
         localStorage.setItem('refresh_token', tokenData.refresh_token);
         localStorage.setItem('user', JSON.stringify(tokenData.user));
@@ -667,6 +679,10 @@ class AuthService {
       const tokenData = this.normalizeTokenResponse(
         this.unwrapResponse<TokenResponse | any>(response.data, '登录失败')
       );
+      // 强制清除旧令牌（避免 datetime bug 前签发的无效令牌残留）
+      localStorage.removeItem('access_token');
+      localStorage.removeItem('refresh_token');
+      localStorage.removeItem('user');
       localStorage.setItem('access_token', tokenData.access_token);
       localStorage.setItem('refresh_token', tokenData.refresh_token);
       localStorage.setItem('user', JSON.stringify(tokenData.user));
@@ -824,6 +840,32 @@ class AuthService {
   }
 
   /**
+   * 强制登出：清除令牌并跳转登录页
+   *
+   * 用于 401/403 响应时自动清除失效令牌（如 datetime bug 前签发的旧令牌），
+   * 引导用户重新登录获取有效令牌。内置防重入守卫，避免并发请求触发多次跳转。
+   */
+  private logoutRedirectGuard = false;
+  forceLogout(): void {
+    this.clearTokens();
+    this.refreshRetryCount = 0;
+    if (this.refreshRetryResetTimer) {
+      clearTimeout(this.refreshRetryResetTimer);
+      this.refreshRetryResetTimer = null;
+    }
+    if (typeof window === 'undefined') return;
+    const path = window.location.pathname || '';
+    // 已在登录页则不再跳转
+    if (path.startsWith('/auth/login')) return;
+    // 防重入：避免并发 401/403 触发多次跳转
+    if (this.logoutRedirectGuard) return;
+    this.logoutRedirectGuard = true;
+    console.warn('[Auth] 检测到认证失效（401/403），跳转登录页');
+    // 使用 replace 避免在浏览器历史中留下失效页面
+    window.location.replace('/auth/login');
+  }
+
+  /**
    * 检查是否已登录
    */
   isAuthenticated(): boolean {
@@ -869,6 +911,9 @@ class AuthService {
 
   /**
    * 获取访问令牌
+   *
+   * 仅校验令牌格式，不校验过期时间——过期校验由 initializeAuth 和
+   * 401 拦截器负责（后者会尝试刷新），避免在此处清除令牌破坏刷新流程。
    */
   getAccessToken(): string | null {
     const token = localStorage.getItem('access_token');

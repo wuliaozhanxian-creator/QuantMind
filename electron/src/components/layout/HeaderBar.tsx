@@ -9,7 +9,6 @@ import { useAppDispatch, useAppSelector } from '../../store';
 import { setTradingMode } from '../../store/slices/uiSlice';
 
 const TRADING_MODE_PREF_KEY = 'qm:trading_mode_pref';
-import { SERVICE_URLS } from '../../config/services';
 
 export const HeaderBar: React.FC = () => {
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -33,9 +32,11 @@ export const HeaderBar: React.FC = () => {
     const checkLatency = async () => {
       const start = Date.now();
       try {
-        const healthUrl = `${SERVICE_URLS.API_GATEWAY}/health`;
-
-        await fetch(healthUrl, { mode: 'no-cors', cache: 'no-cache' });
+        // 使用相对路径，通过 Vite proxy / Nginx 转发到后端 /health，避免跨域
+        const response = await fetch('/health', { cache: 'no-cache' });
+        if (!response.ok) {
+          throw new Error(`health check failed: ${response.status}`);
+        }
         const end = Date.now();
         setNetworkLatency(end - start);
         setApiStatus('connected');

@@ -30,7 +30,9 @@ class Portfolio(Base):
     tenant_id = Column(
         String(64), nullable=False, default="default", index=True, comment="租户ID"
     )
-    user_id = Column(Integer, nullable=False, index=True, comment="用户ID")
+    user_id = Column(
+        String(64), nullable=False, index=True, comment="用户ID"
+    )
     name = Column(String(100), nullable=False, comment="组合名称")
     description = Column(Text, nullable=True, comment="组合描述")
 

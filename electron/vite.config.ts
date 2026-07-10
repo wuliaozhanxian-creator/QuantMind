@@ -37,6 +37,10 @@ export default defineConfig(({ mode }) => {
         'dayjs/plugin/utc',
         'dayjs/plugin/timezone',
       ],
+      // file-saver 的 FileSaver.min.js 内部调用匿名 AMD define()，
+      // 与 Monaco Editor 的 AMD loader 冲突（"Can only have one anonymous define call per script file"），
+      // 导致 ProtectedRoute 等依赖组件崩溃。排除预构建以规避该冲突。
+      exclude: ['file-saver'],
     },
     test: {
       globals: true,
@@ -106,6 +110,11 @@ export default defineConfig(({ mode }) => {
       host: '0.0.0.0', // 允许外部访问
       proxy: {
         '/api': {
+          target: process.env.VITE_API_URL || 'http://localhost:8000',
+          changeOrigin: true,
+        },
+        // /health 健康检查走相对路径，避免前端 localhost:3000 -> 后端 localhost:8000 跨域
+        '/health': {
           target: process.env.VITE_API_URL || 'http://localhost:8000',
           changeOrigin: true,
         },
