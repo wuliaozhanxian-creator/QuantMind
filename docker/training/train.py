@@ -41,6 +41,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("quantmind.train")
 
+
 # ── Service JWT 签发（训练容器回调认证，M4-P1-1 迁移） ──────────────────────
 def _create_service_token(
     secret_key: str, service_name: str = "engine", expire_seconds: int = 300
@@ -73,17 +74,17 @@ def _create_service_token(
 
 # ── LightGBM 默认参数 ────────────────────────────────────────────────────────
 DEFAULT_LGB_PARAMS: dict[str, Any] = {
-    "objective":         "regression",
-    "metric":            "l2",
-    "boosting":          "gbdt",
-    "num_leaves":        127,
-    "learning_rate":     0.05,
-    "feature_fraction":  0.8,
-    "bagging_fraction":  0.8,
-    "bagging_freq":      5,
+    "objective": "regression",
+    "metric": "l2",
+    "boosting": "gbdt",
+    "num_leaves": 127,
+    "learning_rate": 0.05,
+    "feature_fraction": 0.8,
+    "bagging_fraction": 0.8,
+    "bagging_freq": 5,
     "min_child_samples": 50,
-    "n_jobs":            -1,
-    "verbosity":         -1,
+    "n_jobs": -1,
+    "verbosity": -1,
 }
 
 _ALLOWED_SHAP_SPLIT = {"valid", "test", "train"}
@@ -101,16 +102,22 @@ _SHAP_SAMPLE_RANDOM_STATE = 42
 try:
     import sys
     from pathlib import Path
+
     _workspace = Path("/workspace")
     if _workspace.is_dir() and str(_workspace) not in sys.path:
         sys.path.insert(0, str(_workspace))
-    
+
     # 解决镜像中全局安装的旧 backend 包遮蔽挂载 workspace 代码的问题
     import backend
+
     if hasattr(backend, "__path__") and "/workspace/backend" not in backend.__path__:
         backend.__path__.append("/workspace/backend")
     import backend.shared
-    if hasattr(backend.shared, "__path__") and "/workspace/backend/shared" not in backend.shared.__path__:
+
+    if (
+        hasattr(backend.shared, "__path__")
+        and "/workspace/backend/shared" not in backend.shared.__path__
+    ):
         backend.shared.__path__.append("/workspace/backend/shared")
 except Exception:
     pass
@@ -147,7 +154,9 @@ def _load_local_parquet(
         df = pd.read_parquet(file_path, columns=selected_cols, engine="pyarrow")
 
         # 先按日期裁剪每年数据，避免把无关年份全量堆进内存
-        if "trade_date" in df.columns and (clip_start is not None or clip_end is not None):
+        if "trade_date" in df.columns and (
+            clip_start is not None or clip_end is not None
+        ):
             df["trade_date"] = pd.to_datetime(df["trade_date"], errors="coerce")
             mask = pd.Series(True, index=df.index)
             if clip_start is not None:
@@ -192,11 +201,17 @@ def _rank_ic_series(df: pd.DataFrame, pred_col: str, label_col: str) -> list[flo
 
 
 def _compute_metrics(df: pd.DataFrame, y_true: np.ndarray, y_pred: np.ndarray) -> dict:
-    ic     = _ic(y_pred, y_true)
+    ic = _ic(y_pred, y_true)
     series = _rank_ic_series(df.assign(_pred=y_pred, _label=y_true), "_pred", "_label")
-    rank_ic   = float(np.nanmean(series)) if series else float("nan")
-    rank_icir = float(np.mean(series) / (np.std(series) + 1e-9)) if series else float("nan")
-    rmse = float(np.sqrt(np.mean(np.square(y_pred - y_true)))) if len(y_true) else float("nan")
+    rank_ic = float(np.nanmean(series)) if series else float("nan")
+    rank_icir = (
+        float(np.mean(series) / (np.std(series) + 1e-9)) if series else float("nan")
+    )
+    rmse = (
+        float(np.sqrt(np.mean(np.square(y_pred - y_true))))
+        if len(y_true)
+        else float("nan")
+    )
     labels = (y_true > 0).astype(int)
     pos = int(labels.sum())
     neg = int(len(labels) - pos)
@@ -204,23 +219,39 @@ def _compute_metrics(df: pd.DataFrame, y_true: np.ndarray, y_pred: np.ndarray) -
     if pos > 0 and neg > 0:
         ranks = pd.Series(y_pred).rank(method="average").to_numpy()
         auc = float((ranks[labels == 1].sum() - pos * (pos + 1) / 2.0) / (pos * neg))
-    return {"ic": ic, "rank_ic": rank_ic, "rank_icir": rank_icir, "rmse": rmse, "auc": auc}
+    return {
+        "ic": ic,
+        "rank_ic": rank_ic,
+        "rank_icir": rank_icir,
+        "rmse": rmse,
+        "auc": auc,
+    }
 
 
 def _normalize_explain_cfg(raw: Any) -> dict[str, Any]:
     explain = raw if isinstance(raw, dict) else {}
     enable_shap = bool(explain.get("enable_shap", _DEFAULT_EXPLAIN_CFG["enable_shap"]))
 
-    shap_split = str(explain.get("shap_split", _DEFAULT_EXPLAIN_CFG["shap_split"])).strip().lower()
+    shap_split = (
+        str(explain.get("shap_split", _DEFAULT_EXPLAIN_CFG["shap_split"]))
+        .strip()
+        .lower()
+    )
     if shap_split not in _ALLOWED_SHAP_SPLIT:
         logger.warning("Invalid explain.shap_split=%s, fallback to 'valid'", shap_split)
         shap_split = "valid"
 
-    sample_rows_raw = explain.get("shap_sample_rows", _DEFAULT_EXPLAIN_CFG["shap_sample_rows"])
+    sample_rows_raw = explain.get(
+        "shap_sample_rows", _DEFAULT_EXPLAIN_CFG["shap_sample_rows"]
+    )
     try:
         sample_rows = int(sample_rows_raw)
     except Exception:
-        logger.warning("Invalid explain.shap_sample_rows=%s, fallback to %d", sample_rows_raw, _DEFAULT_SHAP_SAMPLE_ROWS)
+        logger.warning(
+            "Invalid explain.shap_sample_rows=%s, fallback to %d",
+            sample_rows_raw,
+            _DEFAULT_SHAP_SAMPLE_ROWS,
+        )
         sample_rows = _DEFAULT_SHAP_SAMPLE_ROWS
     sample_rows = max(_MIN_SHAP_SAMPLE_ROWS, min(_MAX_SHAP_SAMPLE_ROWS, sample_rows))
 
@@ -235,7 +266,9 @@ def _resolve_shap_source_frame(
     split_frames: dict[str, pd.DataFrame],
     preferred_split: str,
 ) -> tuple[str, pd.DataFrame]:
-    ordered = [preferred_split] + [s for s in ("valid", "test", "train") if s != preferred_split]
+    ordered = [preferred_split] + [
+        s for s in ("valid", "test", "train") if s != preferred_split
+    ]
     for split in ordered:
         frame = split_frames.get(split)
         if isinstance(frame, pd.DataFrame) and not frame.empty:
@@ -256,7 +289,9 @@ def _compute_shap_summary(
         "enabled": bool(explain_cfg.get("enable_shap", True)),
         "status": "disabled",
         "split": str(explain_cfg.get("shap_split", "valid")),
-        "rows_requested": int(explain_cfg.get("shap_sample_rows", _DEFAULT_SHAP_SAMPLE_ROWS)),
+        "rows_requested": int(
+            explain_cfg.get("shap_sample_rows", _DEFAULT_SHAP_SAMPLE_ROWS)
+        ),
         "rows_used": 0,
         "file": "",
         "error": "",
@@ -273,16 +308,22 @@ def _compute_shap_summary(
     start_ts = time.time()
     try:
         preferred_split = str(explain_cfg.get("shap_split", "valid")).strip().lower()
-        selected_split, split_df = _resolve_shap_source_frame(split_frames, preferred_split)
+        selected_split, split_df = _resolve_shap_source_frame(
+            split_frames, preferred_split
+        )
         if split_df.empty:
             shap_info["status"] = "skipped"
             shap_info["error"] = "no_rows_for_shap"
             return shap_info
 
-        rows_requested = int(explain_cfg.get("shap_sample_rows", _DEFAULT_SHAP_SAMPLE_ROWS))
+        rows_requested = int(
+            explain_cfg.get("shap_sample_rows", _DEFAULT_SHAP_SAMPLE_ROWS)
+        )
         sample_df = split_df
         if len(sample_df) > rows_requested:
-            sample_df = sample_df.sample(rows_requested, random_state=_SHAP_SAMPLE_RANDOM_STATE)
+            sample_df = sample_df.sample(
+                rows_requested, random_state=_SHAP_SAMPLE_RANDOM_STATE
+            )
 
         x_df = sample_df[features].copy()
         for c in features:
@@ -298,11 +339,15 @@ def _compute_shap_summary(
             pred_contrib=True,
         )
         if not isinstance(contrib, np.ndarray) or contrib.ndim != 2:
-            raise RuntimeError(f"unexpected SHAP contribution shape: {getattr(contrib, 'shape', None)}")
+            raise RuntimeError(
+                f"unexpected SHAP contribution shape: {getattr(contrib, 'shape', None)}"
+            )
         if contrib.shape[1] < len(features):
-            raise RuntimeError(f"contrib columns mismatch: got {contrib.shape[1]}, expect >= {len(features)}")
+            raise RuntimeError(
+                f"contrib columns mismatch: got {contrib.shape[1]}, expect >= {len(features)}"
+            )
 
-        shap_values = contrib[:, :len(features)]
+        shap_values = contrib[:, : len(features)]
         summary_df = pd.DataFrame(
             {
                 "feature": features,
@@ -346,26 +391,32 @@ def load_data(
     source_mode: str = "LOCAL",
     local_dir: str | None = None,
     limit_up_weight: float = 0.5,
-) -> tuple[pd.DataFrame, list[str]]:
+) -> tuple[pd.DataFrame, list[str], list[dict[str, Any]], str]:
     start_year = pd.Timestamp(train_start).year
 
     # 获取最晚的年份，确保包含 验证/测试 集所需的数据
     ends = [train_end]
-    if valid_end: ends.append(valid_end)
-    if test_end: ends.append(test_end)
+    if valid_end:
+        ends.append(valid_end)
+    if test_end:
+        ends.append(test_end)
     end_year = max(pd.Timestamp(e).year for e in ends)
 
     # 自动计算必要的核心列
     core_columns = ["trade_date", "symbol", "open", "close", "factor"]
     _horizon = max(1, int(target_horizon_days or 1))
-    
+
     # 最终合并列：核心列 + 用户请求特征（去重）
     load_cols = list(dict.fromkeys(core_columns + features))
-    logger.info(f"Memory optimization: Planning to load {len(load_cols)} columns from {len(range(max(start_year - 1, 2016), end_year + 1))} years")
+    logger.info(
+        f"Memory optimization: Planning to load {len(load_cols)} columns from {len(range(max(start_year - 1, 2016), end_year + 1))} years"
+    )
 
     local_root = Path(local_dir).expanduser() if local_dir else None
     if local_root is None:
-        raise RuntimeError("local_dir must be provided; COS data download has been removed")
+        raise RuntimeError(
+            "local_dir must be provided; COS data download has been removed"
+        )
 
     # 给标签构建预留边界，避免裁剪过早影响 shift/rolling
     range_start = pd.Timestamp(train_start) - pd.Timedelta(days=max(7, _horizon + 3))
@@ -388,7 +439,9 @@ def load_data(
                 df_year = df_year[~df_year["symbol"].str.startswith(("4", "8"))]
                 chunks.append(df_year)
         else:
-            logger.warning(f"No data file found for year {year} in {local_root}, skipping")
+            logger.warning(
+                f"No data file found for year {year} in {local_root}, skipping"
+            )
 
     if not chunks:
         raise RuntimeError("No data loaded from local storage")
@@ -396,7 +449,9 @@ def load_data(
     df = pd.concat(chunks, axis=0, ignore_index=True)
     df["trade_date"] = pd.to_datetime(df["trade_date"], errors="coerce")
     df = df[df["trade_date"].notna()].copy()
-    logger.info(f"Raw concat size: {len(df)} rows. Date range: {df['trade_date'].min()} to {df['trade_date'].max()}")
+    logger.info(
+        f"Raw concat size: {len(df)} rows. Date range: {df['trade_date'].min()} to {df['trade_date'].max()}"
+    )
 
     # 剔除无效价格、零成交量以及 B 股，保证与推理侧一致的纯净可交易横截面股票池
     if "close" in df.columns:
@@ -406,70 +461,117 @@ def load_data(
         valid_volume = pd.to_numeric(df["volume"], errors="coerce") > 0
         df = df[valid_volume].copy()
     if "symbol" in df.columns:
-        is_b_share = df["symbol"].str.match(r"^SH9\d{5}$", na=False) | df["symbol"].str.match(r"^SZ2\d{5}$", na=False)
+        is_b_share = df["symbol"].str.match(r"^SH9\d{5}$", na=False) | df[
+            "symbol"
+        ].str.match(r"^SZ2\d{5}$", na=False)
         df = df[~is_b_share].copy()
-    
-    logger.info(f"After untradable filtering (close>0, volume>0, non-B): {len(df)} rows")
+
+    logger.info(
+        f"After untradable filtering (close>0, volume>0, non-B): {len(df)} rows"
+    )
     logger.info(f"After symbol filter: {len(df)} rows")
 
     # 标签：基于 target_horizon_days 构建 N 日远期收益
     if "open" not in df.columns or "close" not in df.columns:
-        raise RuntimeError("Columns 'open' and 'close' are required for tradable label calculation")
+        raise RuntimeError(
+            "Columns 'open' and 'close' are required for tradable label calculation"
+        )
 
     df = df.sort_values(["symbol", "trade_date"]).reset_index(drop=True)
-    
+
     # 构造实盘可交易收益率：T+1开盘买入，T+H收盘卖出 (Close_{T+H} / Open_{T+1} - 1)
     grouped = df.groupby("symbol")
     future_close = grouped["close"].shift(-_horizon)
     next_open = grouped["open"].shift(-1)
-    
+
     # 将不复权价格转换为复权价格，以修复除权除息导致的收益率计算失真
-    if "factor" in df.columns:
+    if "factor" in df.columns and df["factor"].notna().any():
+        # 仅当 factor 有有效值时才进行复权
         future_factor = grouped["factor"].shift(-_horizon)
         next_factor = grouped["factor"].shift(-1)
-        future_close = future_close * future_factor
-        next_open = next_open * next_factor
-    
+        # 用 mask 保护 NaN：factor 缺失的行保持原价，避免 NaN 污染 label
+        valid_mask = future_factor.notna() & next_factor.notna()
+        future_close = np.where(valid_mask, future_close * future_factor, future_close)
+        next_open = np.where(valid_mask, next_open * next_factor, next_open)
+    else:
+        logger.warning(
+            "factor column missing or all NaN, using raw prices for label "
+            "calculation"
+        )
+
     # 获取 T 日收盘价，用于判断 T+1 开盘是否一字涨停
     current_close = df["close"]
-    if "factor" in df.columns:
-        current_close = current_close * df["factor"]
-    
+    if "factor" in df.columns and df["factor"].notna().any():
+        current_close = current_close * df["factor"].fillna(1.0)
+
     # 智能识别涨跌幅限制 (科创板/创业板 20%, 主板 10%)
     symbols = df["symbol"].astype(str).str.zfill(6)
     is_star_gem = symbols.str.startswith(("688", "300"))
-    
+
     # 设置 T+1 开盘涨停阈值 (留 0.5% 容错余量：20%->19.5%, 10%->9.5%)
     limit_threshold = np.where(is_star_gem, 0.195, 0.095)
-    
+
     # 精细化涨跌停识别
     is_limit_up_open = (next_open / current_close - 1) >= limit_threshold
     is_limit_down_open = (next_open / current_close - 1) <= -limit_threshold
     is_extreme = is_limit_up_open | is_limit_down_open
-    
+
     # 避免除以0的情况
     raw_label = np.where(next_open > 0, (future_close / next_open) - 1, np.nan)
-    
+
     # 【改为软降权】：不再把极端样本的 label 设为 NaN，而是保留真实收益率，让模型能够学习到它们的特征分布
     df["label"] = raw_label
-    
+
     # 新增 weight 列：正常样本权重为 1.0，开盘涨跌停的极端样本权重动态配置 (软降权)
     df["weight"] = np.where(is_extreme, limit_up_weight, 1.0)
-    
-    logger.info(f"Tradable label built with target_horizon_days={_horizon} (Close_T+{_horizon} / Open_T+1 - 1)")
-    logger.info(f"Soft weighted {int(is_limit_up_open.sum())} limit-up and {int(is_limit_down_open.sum())} limit-down samples to {limit_up_weight}.")
+
+    logger.info(
+        f"Tradable label built with target_horizon_days={_horizon} (Close_T+{_horizon} / Open_T+1 - 1)"
+    )
+    logger.info(
+        f"Soft weighted {int(is_limit_up_open.sum())} limit-up and {int(is_limit_down_open.sum())} limit-down samples to {limit_up_weight}."
+    )
+
+    # Label diagnostics: verify labels are non-zero and have variation
+    _valid_labels = df["label"].dropna()
+    _label_count = len(_valid_labels)
+    _label_pos = int((_valid_labels > 0).sum())
+    _label_neg = int((_valid_labels < 0).sum())
+    _label_zero = int((_valid_labels == 0).sum())
+    logger.info(
+        "Label diagnostics (pre-normalization): valid=%d pos=%d neg=%d zero=%d | "
+        "min=%.6f max=%.6f mean=%.6f std=%.6f",
+        _label_count,
+        _label_pos,
+        _label_neg,
+        _label_zero,
+        float(_valid_labels.min()) if _label_count else 0.0,
+        float(_valid_labels.max()) if _label_count else 0.0,
+        float(_valid_labels.mean()) if _label_count else 0.0,
+        float(_valid_labels.std()) if _label_count else 0.0,
+    )
+    if _label_count > 0 and _label_pos == 0 and _label_neg == 0:
+        logger.warning(
+            "All valid labels are zero! Check open/close price data for correctness."
+        )
 
     # 裁剪到请求日期范围
     ts_start = pd.Timestamp(train_start)
     ts_train_end = pd.Timestamp(train_end)
     mask = (df["trade_date"] >= ts_start) & (df["trade_date"] <= ts_train_end)
     if valid_end:
-        mask = (df["trade_date"] >= ts_start) & (df["trade_date"] <= pd.Timestamp(valid_end))
+        mask = (df["trade_date"] >= ts_start) & (
+            df["trade_date"] <= pd.Timestamp(valid_end)
+        )
     if test_end:
-        mask = (df["trade_date"] >= ts_start) & (df["trade_date"] <= pd.Timestamp(test_end))
+        mask = (df["trade_date"] >= ts_start) & (
+            df["trade_date"] <= pd.Timestamp(test_end)
+        )
 
     df = df[mask].copy()
-    logger.info(f"After date range clip ({ts_start.date()} to {pd.Timestamp(test_end or valid_end or train_end).date()}): {len(df)} rows")
+    logger.info(
+        f"After date range clip ({ts_start.date()} to {pd.Timestamp(test_end or valid_end or train_end).date()}): {len(df)} rows"
+    )
 
     # 校验特征列
     missing = [f for f in features if f not in df.columns]
@@ -498,7 +600,9 @@ def load_data(
     keep_cols = ["symbol", "trade_date", "label", "weight"] + features
     df = df[keep_cols].reset_index(drop=True)
 
-    logger.info("Applying cross-sectional MAD + Z-Score normalization to features and labels...")
+    logger.info(
+        "Applying cross-sectional MAD + Z-Score normalization to features and labels..."
+    )
     df = apply_cs_mad_zscore(
         df,
         feature_columns=features,
@@ -507,10 +611,36 @@ def load_data(
         mad_multiplier=5.0,
     )
 
+    # Post-normalization label validation: detect degenerate labels that would
+    # cause Rank IC = 0 (e.g., all-zero labels from MAD=0 cross-sections)
+    _post_labels = df["label"].dropna()
+    _post_zero_ratio = float((_post_labels == 0).mean()) if len(_post_labels) else 1.0
+    _post_std = float(_post_labels.std()) if len(_post_labels) else 0.0
+    logger.info(
+        "Label diagnostics (post-normalization): valid=%d zero_ratio=%.4f std=%.6f | "
+        "min=%.6f max=%.6f mean=%.6f",
+        len(_post_labels),
+        _post_zero_ratio,
+        _post_std,
+        float(_post_labels.min()) if len(_post_labels) else 0.0,
+        float(_post_labels.max()) if len(_post_labels) else 0.0,
+        float(_post_labels.mean()) if len(_post_labels) else 0.0,
+    )
+    if _post_zero_ratio > 0.5:
+        logger.warning(
+            "Over %.0f%% of labels are zero after normalization (std=%.6f). "
+            "This may cause Rank IC = 0. Check if cross-sectional MAD is degenerate "
+            "(all stocks have identical returns on some days).",
+            _post_zero_ratio * 100,
+            _post_std,
+        )
+
     # 2. 接着再过滤掉没有有效标签的样本（用于 LightGBM 训练）
     valid_count_before = len(df)
     df = df[df["label"].notna()].copy()
-    logger.info(f"After label shift & dropna: {len(df)} rows (dropped {valid_count_before - len(df)} rows with missing labels)")
+    logger.info(
+        f"After label shift & dropna: {len(df)} rows (dropped {valid_count_before - len(df)} rows with missing labels)"
+    )
 
     logger.info(
         f"Data ready: {len(df):,} rows, {len(features)} features, "
@@ -521,12 +651,12 @@ def load_data(
 
 # ── 训练 ──────────────────────────────────────────────────────────────────────
 def train_model(df: pd.DataFrame, features: list[str], cfg: dict) -> tuple:
-    model_cfg       = cfg.get("model", {})
+    model_cfg = cfg.get("model", {})
     num_boost_round = int(model_cfg.get("num_boost_round", 1000))
     early_stopping_rounds = int(model_cfg.get("early_stopping_rounds", 100) or 100)
     if early_stopping_rounds < 1:
         early_stopping_rounds = 1
-    params          = {**DEFAULT_LGB_PARAMS, **model_cfg.get("params", {})}
+    params = {**DEFAULT_LGB_PARAMS, **model_cfg.get("params", {})}
 
     def _frame_range_text(frame: pd.DataFrame) -> str:
         if frame.empty:
@@ -540,29 +670,33 @@ def train_model(df: pd.DataFrame, features: list[str], cfg: dict) -> tuple:
         requested_train = f"{split_cfg['train'][0]}~{split_cfg['train'][1]}"
         requested_val = f"{valid_start_str}~{valid_end_str}"
         train_df = df[df["trade_date"] <= pd.Timestamp(split_cfg["train"][1])].copy()
-        val_df   = df[
-            (df["trade_date"] >= pd.Timestamp(valid_start_str)) &
-            (df["trade_date"] <= pd.Timestamp(valid_end_str))
+        val_df = df[
+            (df["trade_date"] >= pd.Timestamp(valid_start_str))
+            & (df["trade_date"] <= pd.Timestamp(valid_end_str))
         ].copy()
         if split_cfg.get("test"):
             test_start_str, test_end_str = split_cfg["test"]
             requested_test = f"{test_start_str}~{test_end_str}"
             test_df = df[
-                (df["trade_date"] >= pd.Timestamp(test_start_str)) &
-                (df["trade_date"] <= pd.Timestamp(test_end_str))
+                (df["trade_date"] >= pd.Timestamp(test_start_str))
+                & (df["trade_date"] <= pd.Timestamp(test_end_str))
             ].copy()
         else:
             requested_test = requested_val
             test_df = val_df.copy()
-        logger.info(f"Split mode: train~{split_cfg['train'][1]}  val {valid_start_str}~{valid_end_str}")
+        logger.info(
+            f"Split mode: train~{split_cfg['train'][1]}  val {valid_start_str}~{valid_end_str}"
+        )
     else:
         val_ratio = float(model_cfg.get("val_ratio") or 0.15)
-        dates     = sorted(df["trade_date"].unique())
+        dates = sorted(df["trade_date"].unique())
         if not dates:
-            raise RuntimeError("No rows available for split after preprocessing. 请检查训练时间窗口与特征快照覆盖范围。")
+            raise RuntimeError(
+                "No rows available for split after preprocessing. 请检查训练时间窗口与特征快照覆盖范围。"
+            )
         val_start = dates[int(len(dates) * (1 - val_ratio))]
-        train_df  = df[df["trade_date"] < val_start].copy()
-        val_df    = df[df["trade_date"] >= val_start].copy()
+        train_df = df[df["trade_date"] < val_start].copy()
+        val_df = df[df["trade_date"] >= val_start].copy()
         test_df = val_df.copy()
         train_start = pd.Timestamp(df["trade_date"].min()).date()
         train_end = (pd.Timestamp(val_start) - pd.Timedelta(days=1)).date()
@@ -577,7 +711,9 @@ def train_model(df: pd.DataFrame, features: list[str], cfg: dict) -> tuple:
     if train_df.empty or val_df.empty or test_df.empty:
         available_range = "EMPTY"
         if not df.empty:
-            available_range = f"{df['trade_date'].min().date()}~{df['trade_date'].max().date()}"
+            available_range = (
+                f"{df['trade_date'].min().date()}~{df['trade_date'].max().date()}"
+            )
         raise RuntimeError(
             "Dataset split contains empty segment. "
             f"available={available_range}; "
@@ -588,7 +724,7 @@ def train_model(df: pd.DataFrame, features: list[str], cfg: dict) -> tuple:
         )
 
     # 因为特征已经过截面 ZScore 标准化（均值为0），缺失值统一填充为 0.0
-    fill_values = {c: 0.0 for c in features}
+    fill_values = dict.fromkeys(features, 0.0)
 
     def _fill(frame: pd.DataFrame) -> np.ndarray:
         x = frame[features].copy()
@@ -597,19 +733,30 @@ def train_model(df: pd.DataFrame, features: list[str], cfg: dict) -> tuple:
         return x.to_numpy(dtype=np.float32)
 
     X_train, y_train = _fill(train_df), train_df["label"].astype("float32").to_numpy()
-    X_val,   y_val   = _fill(val_df),   val_df["label"].astype("float32").to_numpy()
+    X_val, y_val = _fill(val_df), val_df["label"].astype("float32").to_numpy()
 
-    w_train = train_df["weight"].astype("float32").to_numpy() if "weight" in train_df.columns else None
+    w_train = (
+        train_df["weight"].astype("float32").to_numpy()
+        if "weight" in train_df.columns
+        else None
+    )
 
-    ds_train = lgb.Dataset(X_train, label=y_train, weight=w_train, feature_name=features, free_raw_data=True)
-    ds_val   = lgb.Dataset(X_val,   label=y_val,   feature_name=features, free_raw_data=True)
+    ds_train = lgb.Dataset(
+        X_train,
+        label=y_train,
+        weight=w_train,
+        feature_name=features,
+        free_raw_data=True,
+    )
+    ds_val = lgb.Dataset(X_val, label=y_val, feature_name=features, free_raw_data=True)
 
     callbacks = [
         lgb.early_stopping(stopping_rounds=early_stopping_rounds, verbose=True),
         lgb.log_evaluation(100),
     ]
     model = lgb.train(
-        params, ds_train,
+        params,
+        ds_train,
         num_boost_round=num_boost_round,
         valid_sets=[ds_train, ds_val],
         valid_names=["train", "valid"],
@@ -620,24 +767,28 @@ def train_model(df: pd.DataFrame, features: list[str], cfg: dict) -> tuple:
     y_val_pred = model.predict(_fill(val_df))
     y_test_pred = model.predict(_fill(test_df))
     train_m = _compute_metrics(train_df, y_train, y_train_pred)
-    val_m   = _compute_metrics(val_df,   y_val,   y_val_pred)
-    test_m  = _compute_metrics(test_df,  test_df["label"].astype("float32").to_numpy(), y_test_pred)
+    val_m = _compute_metrics(val_df, y_val, y_val_pred)
+    test_m = _compute_metrics(
+        test_df, test_df["label"].astype("float32").to_numpy(), y_test_pred
+    )
 
     logger.info(f"Train IC={train_m['ic']:.4f}  RankIC={train_m['rank_ic']:.4f}")
-    logger.info(f"Val   IC={val_m['ic']:.4f}    RankIC={val_m['rank_ic']:.4f}  ICIR={val_m['rank_icir']:.4f}")
+    logger.info(
+        f"Val   IC={val_m['ic']:.4f}    RankIC={val_m['rank_ic']:.4f}  ICIR={val_m['rank_icir']:.4f}"
+    )
 
     # 生成全窗口预测：覆盖 train/valid/test 三段，供后续完整回测使用
     full_pred_df = df[["symbol", "trade_date", "label"]].copy()
     full_pred_df["pred"] = model.predict(_fill(df))
     full_pred_df["split"] = "train"
     full_pred_df.loc[
-        (full_pred_df["trade_date"] >= val_df["trade_date"].min()) &
-        (full_pred_df["trade_date"] <= val_df["trade_date"].max()),
+        (full_pred_df["trade_date"] >= val_df["trade_date"].min())
+        & (full_pred_df["trade_date"] <= val_df["trade_date"].max()),
         "split",
     ] = "valid"
     full_pred_df.loc[
-        (full_pred_df["trade_date"] >= test_df["trade_date"].min()) &
-        (full_pred_df["trade_date"] <= test_df["trade_date"].max()),
+        (full_pred_df["trade_date"] >= test_df["trade_date"].min())
+        & (full_pred_df["trade_date"] <= test_df["trade_date"].max()),
         "split",
     ] = "test"
     return (
@@ -661,7 +812,9 @@ def main() -> int:
     print(f"[BOOT] python={sys.version}", flush=True)
     print(f"[BOOT] argv={sys.argv}", flush=True)
 
-    parser = argparse.ArgumentParser(description="QuantMind Training — YAML config driven")
+    parser = argparse.ArgumentParser(
+        description="QuantMind Training — YAML config driven"
+    )
     parser.add_argument("--config", required=False, help="Path to config.yaml")
     try:
         args, unknown_args = parser.parse_known_args()
@@ -670,7 +823,9 @@ def main() -> int:
             return 0
         # Batch 运行时偶发注入畸形参数（如缺失值的已知 flag）会触发 argparse 退出码 2。
         # 这里降级为环境变量驱动启动，避免任务在入口阶段直接失败。
-        logger.warning(f"Argparse failed with argv={sys.argv}; fallback to env-driven args")
+        logger.warning(
+            f"Argparse failed with argv={sys.argv}; fallback to env-driven args"
+        )
         args = argparse.Namespace(config=None)
         unknown_args = []
     if unknown_args:
@@ -679,10 +834,9 @@ def main() -> int:
     # 本地挂载 config.yaml，CLI 参数作为可选覆盖
     cfg_path = Path(args.config) if args.config else Path("/tmp/config.yaml")
 
-    run_id     = "unknown"
+    run_id = "unknown"
     result: dict = {}
-    callback_url    = ""
-    callback_secret = ""
+    callback_url = ""
     result_path = Path("/workspace/result.json")
 
     try:
@@ -690,35 +844,63 @@ def main() -> int:
             raise RuntimeError(f"Config file not found: {cfg_path}")
         cfg = yaml.safe_load(cfg_path.read_text())
 
-        run_id          = cfg.get("run_id", "unknown")
-        job_name        = cfg.get("job_name", "unnamed")
-        result_path     = Path(cfg.get("output", {}).get("result_path", "/workspace/result.json"))
-        callback_url    = cfg.get("callback", {}).get("url", "")
+        run_id = cfg.get("run_id", "unknown")
+        job_name = cfg.get("job_name", "unnamed")
+        result_path = Path(
+            cfg.get("output", {}).get("result_path", "/workspace/result.json")
+        )
+        callback_url = cfg.get("callback", {}).get("url", "")
 
         logger.info("=== QuantMind Training Start ===")
         logger.info(f"run_id={run_id}  job={job_name}  config={cfg_path}")
         # 数据加载
-        submitted_features = list(dict.fromkeys([str(item).strip() for item in (cfg["data"].get("features", []) or []) if str(item).strip()]))
+        submitted_features = list(
+            dict.fromkeys(
+                [
+                    str(item).strip()
+                    for item in (cfg["data"].get("features", []) or [])
+                    if str(item).strip()
+                ]
+            )
+        )
         features = submitted_features
-        source_mode = str((cfg.get("data", {}) or {}).get("source_mode") or "LOCAL").strip().upper()
-        local_data_dir = str((cfg.get("data", {}) or {}).get("local_dir") or "").strip() or None
+        source_mode = (
+            str((cfg.get("data", {}) or {}).get("source_mode") or "LOCAL")
+            .strip()
+            .upper()
+        )
+        local_data_dir = (
+            str((cfg.get("data", {}) or {}).get("local_dir") or "").strip() or None
+        )
         explain_cfg = _normalize_explain_cfg(cfg.get("explain") or {})
+        limit_up_weight = float(
+            (cfg.get("context", {}) or {}).get("limit_up_weight", 0.5)
+        )
 
         df, valid_features, contract_daily_manifest, contract_manifest_hash = load_data(
             cfg["data"]["train_start"],
             cfg["data"]["train_end"],
             features,
-            target_horizon_days=int((cfg.get("label", {}) or {}).get("target_horizon_days") or 1),
+            target_horizon_days=int(
+                (cfg.get("label", {}) or {}).get("target_horizon_days") or 1
+            ),
             cache_dir=cfg.get("cache", {}).get("dir"),
             valid_end=cfg.get("split", {}).get("valid", [None, None])[1],
             test_end=cfg.get("split", {}).get("test", [None, None])[1],
             source_mode=source_mode,
             local_dir=local_data_dir,
+            limit_up_weight=limit_up_weight,
         )
         train_t0 = time.time()
-        model, fill_values, train_m, val_m, test_m, pred_df, split_frames = train_model(df, valid_features, cfg)
+        model, fill_values, train_m, val_m, test_m, pred_df, split_frames = train_model(
+            df, valid_features, cfg
+        )
         elapsed = float(time.time() - train_t0)
-        logger.info("Training finished in %.2fs, best_iteration=%s", elapsed, model.best_iteration)
+        logger.info(
+            "Training finished in %.2fs, best_iteration=%s",
+            elapsed,
+            model.best_iteration,
+        )
 
         # 保存模型
         model_path = Path("/workspace/model.lgb")
@@ -728,20 +910,30 @@ def main() -> int:
         # 保存预测结果（parquet 压缩用于存档，比 pickle 小 ~10x）
         pred_path = Path("/workspace/pred.parquet")
         pred_df.to_parquet(pred_path, engine="pyarrow", compression="zstd", index=False)
-        logger.info(f"Predictions saved to {pred_path} ({pred_path.stat().st_size/1024/1024:.1f} MB)")
+        logger.info(
+            f"Predictions saved to {pred_path} ({pred_path.stat().st_size / 1024 / 1024:.1f} MB)"
+        )
 
         # 同时保存回测引擎兼容格式 pred.pkl
         # 回测引擎要求: MultiIndex(datetime, instrument) + 'score' 列
         pred_qlib = (
             pred_df[["trade_date", "symbol", "pred"]]
-            .rename(columns={"trade_date": "datetime", "symbol": "instrument", "pred": "score"})
+            .rename(
+                columns={
+                    "trade_date": "datetime",
+                    "symbol": "instrument",
+                    "pred": "score",
+                }
+            )
             .assign(datetime=lambda d: pd.to_datetime(d["datetime"]))
             .set_index(["datetime", "instrument"])
             .sort_index()
         )
         pred_pkl_path = Path("/workspace/pred.pkl")
         pred_qlib.to_pickle(pred_pkl_path)
-        logger.info(f"Backtest-compatible pred.pkl saved ({pred_pkl_path.stat().st_size/1024/1024:.1f} MB, {len(pred_qlib):,} rows)")
+        logger.info(
+            f"Backtest-compatible pred.pkl saved ({pred_pkl_path.stat().st_size / 1024 / 1024:.1f} MB, {len(pred_qlib):,} rows)"
+        )
 
         shap_summary_path = Path("/workspace/shap_summary.csv")
         shap_info = _compute_shap_summary(
@@ -762,13 +954,18 @@ def main() -> int:
         elif shap_info.get("status") == "disabled":
             logger.info("SHAP summary disabled by config")
         elif shap_info.get("status") == "skipped":
-            logger.warning("SHAP summary skipped: %s", shap_info.get("error") or "unknown")
+            logger.warning(
+                "SHAP summary skipped: %s", shap_info.get("error") or "unknown"
+            )
         else:
-            logger.warning("SHAP summary failed: %s", shap_info.get("error") or "unknown")
+            logger.warning(
+                "SHAP summary failed: %s", shap_info.get("error") or "unknown"
+            )
 
         # 构造 metadata
         metadata = {
-            "run_id": run_id, "job_name": job_name,
+            "run_id": run_id,
+            "job_name": job_name,
             "framework": "lightgbm",
             "model_type": cfg.get("model", {}).get("type", "lightgbm"),
             "model_file": "model.lgb",
@@ -779,25 +976,45 @@ def main() -> int:
             "feature_columns": valid_features,
             "fill_values": fill_values,
             "train_start": cfg["data"]["train_start"],
-            "train_end":   cfg["data"]["train_end"],
-            "val_start":   (cfg.get("split", {}).get("valid") or [None, None])[0] or "",
-            "val_end":     (cfg.get("split", {}).get("valid") or [None, None])[1] or "",
-            "test_start":  (cfg.get("split", {}).get("test")  or [None, None])[0] or "",
-            "test_end":    (cfg.get("split", {}).get("test")  or [None, None])[1] or "",
+            "train_end": cfg["data"]["train_end"],
+            "val_start": (cfg.get("split", {}).get("valid") or [None, None])[0] or "",
+            "val_end": (cfg.get("split", {}).get("valid") or [None, None])[1] or "",
+            "test_start": (cfg.get("split", {}).get("test") or [None, None])[0] or "",
+            "test_end": (cfg.get("split", {}).get("test") or [None, None])[1] or "",
             "data_source": "parquet",
             "best_iteration": model.best_iteration,
-            "target_horizon_days": int((cfg.get("label", {}) or {}).get("target_horizon_days") or 1),
-            "target_mode": str((cfg.get("label", {}) or {}).get("target_mode") or "return"),
-            "label_formula": str((cfg.get("label", {}) or {}).get("label_formula") or ""),
-            "effective_trade_date": str((cfg.get("label", {}) or {}).get("effective_trade_date") or ""),
-            "training_window": str((cfg.get("label", {}) or {}).get("training_window") or ""),
+            "target_horizon_days": int(
+                (cfg.get("label", {}) or {}).get("target_horizon_days") or 1
+            ),
+            "target_mode": str(
+                (cfg.get("label", {}) or {}).get("target_mode") or "return"
+            ),
+            "label_formula": str(
+                (cfg.get("label", {}) or {}).get("label_formula") or ""
+            ),
+            "effective_trade_date": str(
+                (cfg.get("label", {}) or {}).get("effective_trade_date") or ""
+            ),
+            "training_window": str(
+                (cfg.get("label", {}) or {}).get("training_window") or ""
+            ),
             "metrics": {
-                "train_ic": train_m["ic"], "train_rank_ic": train_m["rank_ic"], "train_rank_icir": train_m["rank_icir"],
-                "val_ic": val_m["ic"], "val_rank_ic": val_m["rank_ic"], "val_rank_icir": val_m["rank_icir"],
-                "test_ic": test_m["ic"], "test_rank_ic": test_m["rank_ic"], "test_rank_icir": test_m["rank_icir"],
+                "train_ic": train_m["ic"],
+                "train_rank_ic": train_m["rank_ic"],
+                "train_rank_icir": train_m["rank_icir"],
+                "val_ic": val_m["ic"],
+                "val_rank_ic": val_m["rank_ic"],
+                "val_rank_icir": val_m["rank_icir"],
+                "test_ic": test_m["ic"],
+                "test_rank_ic": test_m["rank_ic"],
+                "test_rank_icir": test_m["rank_icir"],
             },
-            "pred_coverage_start": str(pred_df["trade_date"].min().date()) if not pred_df.empty else "",
-            "pred_coverage_end": str(pred_df["trade_date"].max().date()) if not pred_df.empty else "",
+            "pred_coverage_start": str(pred_df["trade_date"].min().date())
+            if not pred_df.empty
+            else "",
+            "pred_coverage_end": str(pred_df["trade_date"].max().date())
+            if not pred_df.empty
+            else "",
             "pred_rows": int(len(pred_df)),
             "shap": shap_info,
             "generated_at": datetime.utcnow().isoformat(),
@@ -806,7 +1023,7 @@ def main() -> int:
         metadata_bytes = json.dumps(metadata, ensure_ascii=False, indent=2).encode()
         Path("/workspace/metadata.json").write_bytes(metadata_bytes)
         logger.info("metadata.json saved locally")
-        
+
         # 写入 inference_contract.json 确保推理阶段有迹可循
         normalized_fills = normalize_fill_values(fill_values)
         contract = {
@@ -819,7 +1036,9 @@ def main() -> int:
             "fill_values": normalized_fills,
             "daily_manifest": contract_daily_manifest,
         }
-        contract_json = json.dumps(contract, ensure_ascii=False, indent=2, allow_nan=False)
+        contract_json = json.dumps(
+            contract, ensure_ascii=False, indent=2, allow_nan=False
+        )
         contract_hash = canonical_json_hash(contract_json)
         contract["contract_hash"] = contract_hash
         Path("/workspace/inference_contract.json").write_text(
@@ -828,14 +1047,19 @@ def main() -> int:
         )
         logger.info(
             "inference_contract.json generated. contract_hash=%s manifest_hash=%s",
-            contract_hash[:12], contract_manifest_hash[:12],
+            contract_hash[:12],
+            contract_manifest_hash[:12],
         )
 
         # 复制统一推理脚本模板（而非内联生成旧版脚本）
-        template_path = Path("/app/backend/services/engine/inference/templates/inference_parquet.py")
+        template_path = Path(
+            "/app/backend/services/engine/inference/templates/inference_parquet.py"
+        )
         inference_dest = Path("/workspace/inference.py")
         if template_path.is_file():
-            inference_dest.write_text(template_path.read_text(encoding="utf-8"), encoding="utf-8")
+            inference_dest.write_text(
+                template_path.read_text(encoding="utf-8"), encoding="utf-8"
+            )
             logger.info("inference.py copied from unified template: %s", template_path)
         else:
             # 兜底：模板不存在时写入简化版（仅记录警告）
@@ -963,12 +1187,12 @@ if __name__ == "__main__":
                 "test": {"rmse": test_m["rmse"], "auc": test_m["auc"]},
             },
             "artifacts": [
-                {"name": "model.lgb",     "local": "/workspace/model.lgb"},
-                {"name": "pred.parquet",  "local": "/workspace/pred.parquet"},
+                {"name": "model.lgb", "local": "/workspace/model.lgb"},
+                {"name": "pred.parquet", "local": "/workspace/pred.parquet"},
                 {"name": "metadata.json", "local": "/workspace/metadata.json"},
-                {"name": "inference.py",  "local": "/workspace/inference.py"},
-                {"name": "config.yaml",   "local": "/workspace/config.yaml"},
-                {"name": "result.json",   "local": "/workspace/result.json"},
+                {"name": "inference.py", "local": "/workspace/inference.py"},
+                {"name": "config.yaml", "local": "/workspace/config.yaml"},
+                {"name": "result.json", "local": "/workspace/result.json"},
             ],
             "summary": {
                 "status": "训练完成",
@@ -979,16 +1203,20 @@ if __name__ == "__main__":
             "logs": f"val_rmse={val_m['rmse']:.6f}, val_auc={val_m['auc']:.6f}",
         }
         if shap_info.get("status") == "completed" and shap_summary_path.exists():
-            result["artifacts"].append({"name": "shap_summary.csv", "local": "/workspace/shap_summary.csv"})
+            result["artifacts"].append(
+                {"name": "shap_summary.csv", "local": "/workspace/shap_summary.csv"}
+            )
 
     except Exception as e:
         logger.exception(f"Training failed: {e}")
         result = {"status": "failed", "run_id": run_id, "error": str(e)}
 
     finally:
+
         def _sanitize_floats(obj):
             """递归清理 NaN/Infinity 等非法 JSON float 值"""
             import math
+
             if isinstance(obj, dict):
                 return {k: _sanitize_floats(v) for k, v in obj.items()}
             elif isinstance(obj, list):
@@ -1017,7 +1245,8 @@ if __name__ == "__main__":
                     )
                 token = _create_service_token(secret_key, service_name="engine")
                 resp = requests.post(
-                    callback_url, json=result,
+                    callback_url,
+                    json=result,
                     headers={"X-Service-Token": token},
                     timeout=15,
                 )
