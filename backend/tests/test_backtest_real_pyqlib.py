@@ -64,11 +64,9 @@ RNG_SEED = 20260705
 
 # 验收阈值
 THRESH_SPEARMAN = 0.85
-# 年化偏差阈值：topk 修复后（topk=5/10 产生不同结果），均值回归场景中
-# topk=10 策略因选股数增加（10/15）导致收益近零，相对偏差被放大。
-# 原 15% 阈值基于 topk 重复 bug 设定（topk=10 与 topk=5 结果完全相同），
-# 修复后调整为 20%，仍能反映引擎整体一致性。
-THRESH_ANNUAL_DEVIATION = 0.20
+# 年化偏差阈值：委托方 M4 第一波整改裁决（方案C）——主验证仅用 topk=5，
+# 15% 阈值不变。topk=10 偏差根因排查列为 M4-P1-3 独立任务。
+THRESH_ANNUAL_DEVIATION = 0.15
 THRESH_TOPK_OVERLAP = 0.80
 
 # qlib 初始化标志（避免重复初始化）
@@ -619,20 +617,18 @@ def _run_scenario(
 # 7. 参数网格（缩小规模以加速 qlib 回测）
 # --------------------------------------------------------------------------- #
 def _trend_param_grid():
+    # 委托方裁决方案C：主验证仅用 topk=5，topk=10 偏差排查列为 M4-P1-3
     grid = []
     for lb in [5, 10, 15, 20, 30, 40, 60, 90]:
         grid.append({"lookback": lb, "topk": 5})
-    for lb in [5, 10, 15, 20, 30, 40, 60, 90]:
-        grid.append({"lookback": lb, "topk": 10})
     return grid
 
 
 def _reversion_param_grid():
+    # 委托方裁决方案C：主验证仅用 topk=5，topk=10 偏差排查列为 M4-P1-3
     grid = []
     for lb in [3, 5, 7, 10, 15, 20, 25, 30]:
         grid.append({"lookback": lb, "topk": 5})
-    for lb in [3, 5, 7, 10, 15, 20, 25, 30]:
-        grid.append({"lookback": lb, "topk": 10})
     return grid
 
 
