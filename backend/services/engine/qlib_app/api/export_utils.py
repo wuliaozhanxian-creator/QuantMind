@@ -95,7 +95,11 @@ def _build_quick_trade_rows(
             )
         )
         if should_restore:
-            display_price = adj_price / factor
+            # P0 修复后 Redis 记录的 adj_price 已是真实不复权价格（= trade_price），
+            # 不应再除以 factor，否则会导致价格被错误缩小。
+            # 注意：新数据中 quantity 为整数、price == adj_price，should_restore 不会触发；
+            # 此处仅作为防御性兜底，确保即使触发也不会对已还原价格重复除以 factor。
+            display_price = adj_price
             display_quantity = adj_quantity * factor
 
         qty_int = _normalize_display_quantity(

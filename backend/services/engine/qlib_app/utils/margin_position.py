@@ -216,7 +216,17 @@ class MarginAccount(Account):
                 try:
                     # 使用当日收盘价计算真实负债
                     price = trade_exchange.get_close(stock_id, t_start, t_end)
-                    short_debt_value += abs(amount) * price
+                    real_amount = abs(amount)
+                    # P0 修复后 get_close() 在 trade_w_adj_price=False 时返回真实不复权价格，
+                    # 但持仓 amount 仍为复权调整单位，需先 × factor 还原为真实股数，
+                    # 避免复权单位 × 真实价格导致市值口径不匹配。
+                    if not getattr(trade_exchange, "trade_w_adj_price", False):
+                        factor = trade_exchange.get_factor(
+                            stock_id, t_start, t_end
+                        )
+                        if factor is not None and float(factor) != 0:
+                            real_amount = real_amount * float(factor)
+                    short_debt_value += real_amount * price
                 except Exception:
                     short_debt_value += abs(amount) * info.get("price", 0)
 

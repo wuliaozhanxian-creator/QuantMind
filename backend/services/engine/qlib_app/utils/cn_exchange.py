@@ -162,9 +162,13 @@ class CnExchange(Exchange):
             stock_id, start_time, end_time, field="$close", method=method
         )
         if price is not None and not getattr(self, "trade_w_adj_price", False):
+            # P0 修复：双重复权 bug。
+            # Qlib 的 $close 字段已是前复权价（raw_close × factor）。
+            # trade_w_adj_price=False 时交易用真实价格，需除以 factor 还原为真实价格。
+            # 旧代码用 price * factor 造成双重复权（raw_close × factor × factor），已修复为 price / factor。
             factor = self.get_factor(stock_id, start_time, end_time)
-            if factor:
-                price = price * float(factor)
+            if factor and float(factor) != 0:
+                price = price / float(factor)
         return price
 
     def get_factor(
@@ -197,6 +201,9 @@ class CnExchange(Exchange):
         deal_price = self._get_recent_valid_quote(
             stock_id, start_time, end_time, field=pstr, method=method or "ts_data_last"
         )
+        # 标记 deal_price 是否已经过因子调整（来自 get_close() fallback 路径）。
+        # get_close() 内部已执行 / factor 还原为真实价格，此处需跳过后续因子调整，避免双除。
+        already_adjusted = False
         if method is not None and self._is_invalid_quote(deal_price):
             task_logger.warning(
                 "deal_price_fallback_to_close",
@@ -206,12 +213,23 @@ class CnExchange(Exchange):
                 start_time=str(pd.Timestamp(start_time)),
                 end_time=str(pd.Timestamp(end_time)),
             )
+            # get_close() 在 trade_w_adj_price=False 时已执行 / factor，返回真实价格。
             deal_price = self.get_close(stock_id, start_time, end_time, method)
+            already_adjusted = True
 
-        if deal_price is not None and not getattr(self, "trade_w_adj_price", False):
+        if (
+            deal_price is not None
+            and not already_adjusted
+            and not getattr(self, "trade_w_adj_price", False)
+        ):
+            # P0 修复：双重复权 bug。
+            # 成交价字段（$open/$close 等）已是前复权价（raw_price × factor）。
+            # trade_w_adj_price=False 时交易用真实价格，需除以 factor 还原为真实价格。
+            # 旧代码用 deal_price * factor 造成双重复权，已修复为 deal_price / factor。
+            # 注意：fallback 到 get_close() 的价格已含因子调整，通过 already_adjusted 跳过，避免双除。
             factor = self.get_factor(stock_id, start_time, end_time)
-            if factor:
-                deal_price = deal_price * float(factor)
+            if factor and float(factor) != 0:
+                deal_price = deal_price / float(factor)
         return deal_price
 
     def deal_order(

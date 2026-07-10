@@ -704,6 +704,17 @@ class RedisRiskGuardTopkStrategy(
             factor = self.trade_exchange.get_factor(
                 stock_id=code, start_time=trade_start_time, end_time=trade_end_time
             )
+            # P0 修复后 get_deal_price() 在 trade_w_adj_price=False 时返回真实不复权价格，
+            # buy_amount = value / 真实价格 = 真实股数。
+            # 但 round_amount_by_trade_unit() 在 trade_w_adj_price=False 时期望输入为
+            # 复权调整单位（内部会 × factor 转为真实股数取整），需先将真实股数转换为
+            # 复权调整单位（÷ factor），避免内部 × factor 导致取整结果偏大。
+            if (
+                not getattr(self.trade_exchange, "trade_w_adj_price", False)
+                and factor is not None
+                and float(factor) != 0
+            ):
+                buy_amount = buy_amount / float(factor)
             buy_amount = self.trade_exchange.round_amount_by_trade_unit(
                 buy_amount, factor
             )

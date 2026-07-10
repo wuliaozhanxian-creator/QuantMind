@@ -301,7 +301,11 @@ class RiskAnalyzer:
                 )
             )
             if should_restore:
-                display_price = adj_price / factor_val
+                # P0 修复后 Redis 记录的 adj_price 已是真实不复权价格（= trade_price），
+                # 不应再除以 factor，否则会导致价格被错误缩小。
+                # 注意：新数据中 quantity 为整数、price == adj_price，should_restore 不会触发；
+                # 此处仅作为防御性兜底，确保即使触发也不会对已还原价格重复除以 factor。
+                display_price = adj_price
                 display_quantity = adj_quantity * factor_val
 
             # 强制统一成交金额口径，避免旧错误 totalAmount 污染收益统计
@@ -937,7 +941,10 @@ class RiskAnalyzer:
                         not np.isfinite(adj_quantity)
                         or abs(adj_quantity - round(adj_quantity)) > 1e-6
                     ):
-                        display_price = adj_price / factor_val
+                        # P0 修复后 get_deal_price() 返回的已是真实不复权价格，
+                        # adj_price（来自 Qlib 报表 price 列 = trade_price）无需再除以
+                        # factor，否则会导致价格被错误缩小。仅对 quantity 做还原。
+                        display_price = adj_price
                         display_quantity = adj_quantity * factor_val
 
                 total_amount = row["trade_val"]
