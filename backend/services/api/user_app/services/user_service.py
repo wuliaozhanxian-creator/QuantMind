@@ -44,7 +44,7 @@ class UserService:
                 select(User).where(
                     User.user_id == user_id,
                     User.tenant_id == tenant_id,
-                    not User.is_deleted,
+                    ~User.is_deleted,
                 )
             )
             user = result.scalar_one_or_none()
@@ -66,7 +66,7 @@ class UserService:
                 select(User).where(
                     User.username == username,
                     User.tenant_id == tenant_id,
-                    not User.is_deleted,
+                    ~User.is_deleted,
                 )
             )
             return result.scalar_one_or_none()
@@ -78,7 +78,7 @@ class UserService:
                 select(User).where(
                     User.email == email,
                     User.tenant_id == tenant_id,
-                    not User.is_deleted,
+                    ~User.is_deleted,
                 )
             )
             return result.scalar_one_or_none()
@@ -90,7 +90,7 @@ class UserService:
                 select(User).where(
                     User.phone_number == phone,
                     User.tenant_id == tenant_id,
-                    not User.is_deleted,
+                    ~User.is_deleted,
                 )
             )
             return result.scalar_one_or_none()
@@ -107,7 +107,7 @@ class UserService:
         async with get_session(read_only=True) as session:
             # 构建查询
             stmt = select(User).where(
-                not User.is_deleted,
+                ~User.is_deleted,
                 User.tenant_id == tenant_id,
             )
 
@@ -142,7 +142,7 @@ class UserService:
                 select(User).where(
                     User.user_id == user_id,
                     User.tenant_id == tenant_id,
-                    not User.is_deleted,
+                    ~User.is_deleted,
                 )
             )
             user = result.scalar_one_or_none()
@@ -213,7 +213,7 @@ class UserService:
                 select(User).where(
                     User.user_id == user_id,
                     User.tenant_id == tenant_id,
-                    not User.is_deleted,
+                    ~User.is_deleted,
                 )
             )
             user = user_result.scalar_one_or_none()

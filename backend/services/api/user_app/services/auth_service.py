@@ -223,7 +223,7 @@ class AuthService:
                 select(User).where(
                     User.user_id == user_id,
                     User.tenant_id == tenant_id,
-                    not User.is_deleted,
+                    ~User.is_deleted,
                 )
             )
             user = result.scalar_one_or_none()
@@ -548,7 +548,7 @@ class AuthService:
                         | (User.email == credentials.username)
                     )
                     .where(User.tenant_id == tenant_id)
-                    .where(not User.is_deleted)
+                    .where(~User.is_deleted)
                 )
                 user = result.scalar_one_or_none()
 
@@ -635,7 +635,7 @@ class AuthService:
                 select(User)
                 .where(User.username == credentials.username)
                 .where(User.tenant_id == credentials.tenant_id)
-                .where(not User.is_deleted)
+                .where(~User.is_deleted)
             )
             user = result.scalar_one_or_none()
 
