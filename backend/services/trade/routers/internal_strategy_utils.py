@@ -82,12 +82,12 @@ router = APIRouter(
 )
 logger = logging.getLogger(__name__)
 
-async def verify_internal_call(
+async def verify_service_call(
     x_service_token: str | None = Header(default=None, alias="X-Service-Token"),
 ):
-    """验证请求是否来自受信任的内部服务。
+    """验证请求是否来自受信任的内部服务（service JWT）。
 
-    T6.5-P3: 仅接受 X-Service-Token（service JWT），已移除 X-Internal-Call 回退。
+    M4-hotfix: 从 verify_internal_call 重命名，明确使用 service JWT 认证。
     """
     if x_service_token:
         try:
@@ -96,7 +96,11 @@ async def verify_internal_call(
         except Exception:
             logger.debug("ignored exception", exc_info=True)
     logger.warning("Unauthorized internal call attempt")
-    raise HTTPException(status_code=401, detail="Invalid internal secret")
+    raise HTTPException(status_code=401, detail="Invalid service token")
+
+
+# Deprecated alias for backward compatibility
+verify_internal_call = verify_service_call
 
 def _bridge_ws_url() -> str:
     return os.getenv("BRIDGE_SERVER_URL", "wss://api.quantmind.cloud/ws/bridge")

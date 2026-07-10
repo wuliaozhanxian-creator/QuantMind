@@ -93,9 +93,9 @@ def _build_portfolio_sync_payload_from_snapshot(
     }
 
 
-@router.post("/dispatch/item-status", dependencies=[Depends(verify_internal_call)])
+@router.post("/dispatch/item-status", dependencies=[Depends(verify_service_call)])
 async def update_dispatch_item_status(
-    payload: Dict[str, Any],
+    payload: dict[str, Any],
     x_user_id: str = Header(...),
     x_tenant_id: Optional[str] = Header(None),
     db=Depends(get_db),

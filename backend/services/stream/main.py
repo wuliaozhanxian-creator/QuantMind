@@ -4,8 +4,9 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, Optional
 
-from fastapi import FastAPI, Header, HTTPException, JSONResponse, Response, WebSocket
+from fastapi import FastAPI, Header, HTTPException, Response, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 

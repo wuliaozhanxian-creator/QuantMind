@@ -25,7 +25,7 @@ class HostedExecutionCreateRequest(BaseModel):
     parent_runtime_id: str | None = None
     note: str | None = None
 
-@router.post("/heartbeat", dependencies=[Depends(verify_internal_call)])
+@router.post("/heartbeat", dependencies=[Depends(verify_service_call)])
 async def strategy_heartbeat(
     payload: dict[str, Any],
     x_user_id: str = Header(...),
@@ -55,7 +55,7 @@ async def strategy_heartbeat(
 
     return {"status": "ok"}
 
-@router.get("/sync-account", dependencies=[Depends(verify_internal_call)])
+@router.get("/sync-account", dependencies=[Depends(verify_service_call)])
 async def sync_account_state(
     x_user_id: str = Header(...),
     x_tenant_id: str | None = Header(None),
@@ -124,7 +124,7 @@ async def sync_account_state(
         logger.error(f"Failed to sync account: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
-@router.post("/order", dependencies=[Depends(verify_internal_call)])
+@router.post("/order", dependencies=[Depends(verify_service_call)])
 async def strategy_order(
     order_data: dict[str, Any],
     x_user_id: str = Header(...),
@@ -141,7 +141,7 @@ async def strategy_order(
         db=db,
     )
 
-@router.post("/hosted-executions", dependencies=[Depends(verify_internal_call)])
+@router.post("/hosted-executions", dependencies=[Depends(verify_service_call)])
 async def create_hosted_execution(
     payload: HostedExecutionCreateRequest,
     x_user_id: str = Header(...),
