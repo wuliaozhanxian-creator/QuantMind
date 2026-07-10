@@ -16,7 +16,7 @@
 - 删除 optional_auth() 死代码（全量 grep 确认无路由依赖）
 - 服务间认证统一入口：verify_service_token() / require_service_token()
 - 用户认证统一入口：AuthManager.verify_token()（user_app/middleware/auth.py 调用）
-- INTERNAL_CALL_SECRET 环境变量已废弃，仅在 .env.example 中保留 deprecated 标注
+- INTERNAL_CALL_SECRET 环境变量已移除（M4-P1-1 迁移完成），仅在 .env.example 中保留历史标注
 """
 
 import os

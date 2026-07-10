@@ -222,15 +222,14 @@ async def get_training_run(
 ):
     return await get_training_run_for_owner(run_id, current_user)
 
-# T6.5-P3 residual, M4 migration: 训练容器回调接口仍接收 X-Internal-Call-Secret。
-# M4 迁移后将改为 X-Service-Token（service JWT）。
+# M4-P1-1: 训练容器回调接口已迁移至 X-Service-Token（service JWT）。
 @router.post("/training-runs/{run_id}/complete", summary="训练完成回调（内部接口）")
 async def training_complete_callback(
     run_id: str,
     result: dict[str, Any],
-    x_internal_call_secret: str = Header(default="", alias="X-Internal-Call-Secret"),
+    x_service_token: str = Header(default="", alias="X-Service-Token"),
 ):
-    return await complete_training_run(run_id, result, x_internal_call_secret)
+    return await complete_training_run(run_id, result, x_service_token)
 
 @router.get("/training-jobs", summary="管理员查看训练任务列表")
 async def list_training_jobs(

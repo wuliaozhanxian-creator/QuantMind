@@ -63,10 +63,9 @@ class LocalDockerOrchestrator:
         self.api_base = (
             os.getenv("QUANTMIND_API_BASE_URL") or "http://quantmind-api:8000"
         ).strip()
-        # T6.5-P3 residual: INTERNAL_CALL_SECRET 仅用于训练容器回调 (X-Internal-Call-Secret)。
-        # 训练脚本 docker/training/train.py 在 backend/ 之外，暂未迁移至 service JWT。
-        # 待 docker/training/train.py 迁移完成后可彻底移除。
-        self.internal_secret = (os.getenv("INTERNAL_CALL_SECRET") or "").strip()
+        # M4-P1-1: 训练容器回调改用 service JWT（X-Service-Token header）。
+        # 注入 SECRET_KEY 供训练容器自行签发 service JWT，替代旧的 INTERNAL_CALL_SECRET。
+        self.secret_key = (os.getenv("SECRET_KEY") or "").strip()
         self.log_stream = TrainingRunLogStream()
 
     @staticmethod
@@ -162,7 +161,6 @@ class LocalDockerOrchestrator:
             },
             "callback": {
                 "url": f"{self.api_base}/api/v1/models/training-runs/{run_id}/complete",
-                "secret": self.internal_secret,
             },
             "cache": {"dir": "/tmp" if data_source_mode == "LOCAL" else None},
         }
@@ -302,9 +300,9 @@ class LocalDockerOrchestrator:
                 _TRAINING_IMAGE,
                 command="python /app/train.py --config /workspace/config.yaml",
                 environment={
-                    # T6.5-P3 residual, M4 migration: 训练容器回调仍使用 INTERNAL_CALL_SECRET
-                    # 共享密钥。M4 迁移后将改为注入 SECRET_KEY 供训练容器自行签发 service JWT。
-                    "INTERNAL_CALL_SECRET": self.internal_secret,
+                    # M4-P1-1: 注入 SECRET_KEY 供训练容器自行签发 service JWT，
+                    # 回调时携带 X-Service-Token header，替代旧的 INTERNAL_CALL_SECRET。
+                    "SECRET_KEY": self.secret_key,
                     "USE_LOCAL_DATA": "true",
                     "TRAINING_LOCAL_DATA_DIR": _LOCAL_DATA_MOUNT_DIR,
                     "TRAINING_CACHE_DIR": "/tmp",

@@ -19,6 +19,7 @@ from backend.services.engine.training.local_docker_orchestrator import (
     LocalDockerOrchestrator,
 )
 from backend.services.engine.training.training_log_stream import TrainingRunLogStream
+from backend.shared.auth import verify_service_token
 from backend.shared.database_manager_v2 import get_session
 from backend.shared.model_registry import model_registry_service
 
@@ -730,16 +731,14 @@ async def get_training_run_for_owner(
         "isCompleted": effective_status in ["completed", "failed"],
     }
 
-# T6.5-P3 residual, M4 migration: 训练容器回调校验仍使用 INTERNAL_CALL_SECRET
-# 共享密钥机制。M4 迁移后将改为 verify_service_token()（X-Service-Token header）。
+# M4-P1-1: 训练容器回调校验已迁移至 service JWT（X-Service-Token header），
+# 替代旧的 INTERNAL_CALL_SECRET 共享密钥机制。
 async def complete_training_run(
     run_id: str,
     result: dict[str, Any],
-    x_internal_call_secret: str,
+    x_service_token: str,
 ) -> dict[str, Any]:
-    expected = os.getenv("INTERNAL_CALL_SECRET", "")
-    if not expected or x_internal_call_secret != expected:
-        raise HTTPException(status_code=403, detail="Invalid internal call secret")
+    verify_service_token(x_service_token, allowed_services=["engine"])
 
     incoming_status = str(result.get("status", "completed"))
     status = (

@@ -159,8 +159,8 @@ services:
       - QLIB_BACKTEST_RESULT_DIR=/data/backtest_results
 
       # 本地 Docker 训练编排（模型训练）
-      # T6.5-P3 residual, M4 migration: INTERNAL_CALL_SECRET 已废弃，仅训练容器回调用
-      - INTERNAL_CALL_SECRET=${INTERNAL_CALL_SECRET}
+      # M4-P1-1: 训练容器回调改用 SECRET_KEY 签发 service JWT（X-Service-Token header）
+      # SECRET_KEY 已在安全配置区注入（line 78），无需重复
       # T6.3: 管理员安全入口密钥，未配置则 admin 登录 fail-fast（通过 .env 注入）
       - ADMIN_SECURE_ENTRY_KEY=${ADMIN_SECURE_ENTRY_KEY}
       - TRAINING_IMAGE=${TRAINING_IMAGE:-quantmind-oss:latest}
@@ -269,8 +269,8 @@ services:
       - QLIB_BACKTEST_RESULT_DIR=/data/backtest_results
 
       # 本地 Docker 训练编排（模型训练）
-      # T6.5-P3 residual, M4 migration: INTERNAL_CALL_SECRET 已废弃，仅训练容器回调用
-      - INTERNAL_CALL_SECRET=${INTERNAL_CALL_SECRET}
+      # M4-P1-1: 训练容器回调改用 SECRET_KEY 签发 service JWT（X-Service-Token header）
+      - SECRET_KEY=${SECRET_KEY}
       - TRAINING_IMAGE=${TRAINING_IMAGE:-quantmind-oss:latest}
       - TRAINING_DOCKER_NETWORK=${TRAINING_DOCKER_NETWORK:-quantmind_quantmind-net}
       - HOST_PROJECT_PATH=${HOST_PROJECT_PATH:-/opt/quantmind}

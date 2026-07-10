@@ -6,7 +6,7 @@
 
 - 已完成数据库 migration 与必要 bootstrap。
 - 根目录 `.env` 已配置：
-  - `SECRET_KEY`（签发 service JWT + 用户 JWT，T6.5-P3 后 `INTERNAL_CALL_SECRET` 已废弃）
+  - `SECRET_KEY`（签发 service JWT + 用户 JWT，M4-P1-1 后 `INTERNAL_CALL_SECRET` 已移除）
   - `JWT_SECRET_KEY`
   - `DATABASE_URL` 或等效 `DB_*`
   - `REDIS_*`

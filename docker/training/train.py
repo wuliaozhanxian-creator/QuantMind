@@ -12,7 +12,7 @@ config.yaml 结构：
   data.train_start / data.train_end / data.features
   model.type / model.num_boost_round / model.val_ratio / model.params
   output.result_path
-  callback.url / callback.secret
+  callback.url
 """
 
 from __future__ import annotations
@@ -20,9 +20,10 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +40,36 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger("quantmind.train")
+
+# ── Service JWT 签发（训练容器回调认证，M4-P1-1 迁移） ──────────────────────
+def _create_service_token(
+    secret_key: str, service_name: str = "engine", expire_seconds: int = 300
+) -> str:
+    """签发短期 service JWT，用于训练容器回调认证。
+
+    M4-P1-1 迁移：替代旧的 X-Internal-Call-Secret 共享密钥机制。
+    训练容器内可能无法导入 backend/shared/auth.py（依赖 config.settings），
+    因此直接使用 PyJWT 内联签发逻辑，与 create_service_token() 保持兼容。
+
+    Args:
+        secret_key: SECRET_KEY 环境变量值
+        service_name: 调用方服务名（训练容器由 engine 编排，使用 "engine"）
+        expire_seconds: 有效期（秒），默认 5 分钟
+
+    Returns:
+        JWT token 字符串
+    """
+    import jwt
+
+    now = datetime.utcnow()
+    payload = {
+        "service": service_name,
+        "iat": now,
+        "exp": now + timedelta(seconds=expire_seconds),
+    }
+    algorithm = os.getenv("ALGORITHM") or os.getenv("JWT_ALGORITHM") or "HS256"
+    return jwt.encode(payload, secret_key, algorithm=algorithm)
+
 
 # ── LightGBM 默认参数 ────────────────────────────────────────────────────────
 DEFAULT_LGB_PARAMS: dict[str, Any] = {
@@ -663,7 +694,6 @@ def main() -> int:
         job_name        = cfg.get("job_name", "unnamed")
         result_path     = Path(cfg.get("output", {}).get("result_path", "/workspace/result.json"))
         callback_url    = cfg.get("callback", {}).get("url", "")
-        callback_secret = cfg.get("callback", {}).get("secret", "")
 
         logger.info("=== QuantMind Training Start ===")
         logger.info(f"run_id={run_id}  job={job_name}  config={cfg_path}")
@@ -978,11 +1008,17 @@ if __name__ == "__main__":
 
         if callback_url:
             try:
-                # T6.5-P3 residual, M4 migration: 训练容器回调仍使用 X-Internal-Call-Secret
-                # 共享密钥机制。M4 迁移后将改为 service JWT（X-Service-Token header）。
+                # M4-P1-1: 训练容器回调改用 service JWT（X-Service-Token header），
+                # 替代旧的 X-Internal-Call-Secret 共享密钥机制。
+                secret_key = os.getenv("SECRET_KEY", "")
+                if not secret_key:
+                    logger.warning(
+                        "SECRET_KEY not configured, callback authentication will fail"
+                    )
+                token = _create_service_token(secret_key, service_name="engine")
                 resp = requests.post(
                     callback_url, json=result,
-                    headers={"X-Internal-Call-Secret": callback_secret},
+                    headers={"X-Service-Token": token},
                     timeout=15,
                 )
                 logger.info(f"Callback → HTTP {resp.status_code}")

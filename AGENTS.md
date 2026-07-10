@@ -63,7 +63,7 @@ npm run dashboard:build  # Production build
 - **Service JWT**: `backend/shared/auth.py` — `create_service_token` / `verify_service_token` / `require_service_token`，用于服务间内部调用认证，通过专用 `X-Service-Token` header 传递（由 `SECRET_KEY` 签发）
 - **认证流程图**: `T6.5_service_jwt_flow.md` — 含 15 处调用点矩阵 + 迁移路径
 - **Hard constraint**: `SECRET_KEY` 未配置时 fail-fast，不得降级；`X-Internal-Call` header 已从代码中完全移除
-- **迁移状态**: Phase 1-3 已完成（死代码清理 + 17 文件迁移至 X-Service-Token + 33 文件清理删除 get_internal_call_secret/X-Internal-Call deprecated 代码），Phase 4 文档同步已完成。仅训练容器回调路径（`docker/training/train.py` → `admin_training_utils.py`）保留 `INTERNAL_CALL_SECRET`/`X-Internal-Call-Secret`，标注为 T6.5-P3 residual，纳入 M4 迁移。
+- **迁移状态**: Phase 1-4 已完成（死代码清理 + 17 文件迁移至 X-Service-Token + 33 文件清理删除 get_internal_call_secret/X-Internal-Call deprecated 代码 + 文档同步）。M4-P1-1 训练容器回调路径迁移已完成：`docker/training/train.py` 改用 `SECRET_KEY` 签发 service JWT（`X-Service-Token` header），`admin_training_utils.py` 改用 `verify_service_token()` 校验，`local_docker_orchestrator.py` 改为注入 `SECRET_KEY`。`INTERNAL_CALL_SECRET` / `X-Internal-Call-Secret` 已从所有活跃代码路径中移除。
 
 ## Order Chain Architecture (M2 Robustness)
 
@@ -110,7 +110,7 @@ npm run dashboard:build  # Production build
   - `SECRET_KEY` — 应用主密钥，签发 service JWT（服务间认证）+ 用户 JWT（空默认值，未配置时 fail-fast 抛 RuntimeError）
   - `JWT_SECRET_KEY` — 用户 JWT 签名密钥（兼容保留，空默认值，未配置时 fail-fast）
   - `DB_PASSWORD` — 本地数据库密码
-  - `INTERNAL_CALL_SECRET` — 已废弃（DEPRECATED），仅保留用于训练容器回调（T6.5-P3 residual，纳入 M4 迁移）
+  - `INTERNAL_CALL_SECRET` — 已移除（M4-P1-1 迁移完成）。原用于训练容器回调的共享密钥，现已由 `SECRET_KEY` 签发的 service JWT 替代
   - `REMOTE_MARKET_DB_HOST/PORT/USER/PASSWORD` — 远程行情 DB 连接
   - `REMOTE_QUOTE_REDIS_HOST/PORT/USER/PASSWORD` — 远程行情 Redis 连接
 - **Fernet 加密**: `backend/shared/encryption.py` 已标记 deprecated，新代码不得使用
